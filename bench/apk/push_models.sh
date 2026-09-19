@@ -8,7 +8,7 @@
 # в конце печатает, чего не хватает. Приложение без обязательного не стартует.
 R=$(cd "$(dirname "$0")/../.." && pwd)
 ADB=${ADB:-$R/tools/platform-tools/adb}
-PKG=dev.agenttranslator
+PKG=app.falar
 DST=/sdcard/Android/data/$PKG/files/models
 M=$R/models
 MISSING=""
@@ -42,7 +42,7 @@ done
 sort -u "$LIST" -o "$LIST"
 $ADB shell "rm -rf $DST" >/dev/null 2>&1            # старое дерево может быть shell'овым
 $ADB push "$LIST" "$(dirname $DST)/dirs.txt" >/dev/null
-$ADB shell am start -n $PKG/.MainActivity --es mkdirs 1 >/dev/null 2>&1
+$ADB shell am start -n $PKG/dev.agenttranslator.MainActivity --es mkdirs 1 >/dev/null 2>&1
 for _ in $(seq 30); do
   sleep 1
   $ADB shell "grep -c '📁 каталогов готово' $(dirname $DST)/at.log 2>/dev/null || echo 0" | tr -d '\r' | grep -qv '^0$' && break

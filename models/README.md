@@ -16,7 +16,7 @@ bash bench/apk/push_models.sh     # зальёт всё нужное и скаж
 размер, sha256, обязательность (`core`/`optional`), лицензия и источник. Чужие модели
 (parakeet, CAM++, Hy-MT2, silero, GTCRN) берутся из исходных репозиториев Hugging Face и релизов
 sherpa-onnx; наши производные файлы (экспорт OPUS-MT в int8, токенизатор, голоса Piper в zip,
-корпус Tatoeba, затравка) лежат в `youannoingme/agenttranslator-models` на Hugging Face
+корпус Tatoeba, затравка) лежат в `youannoingme/falar-models` на Hugging Face
 (`tools/models_publish.sh` их туда выкладывает). Собрать каталог на ПК:
 
 ```bash

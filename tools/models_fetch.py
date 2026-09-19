@@ -29,7 +29,7 @@ def src_url(s):
 def fetch(u, dst, size):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     tmp = dst + ".part"; have = os.path.getsize(tmp) if os.path.exists(tmp) else 0
-    req = urllib.request.Request(u, headers={"User-Agent": "agenttranslator-models-fetch"})
+    req = urllib.request.Request(u, headers={"User-Agent": "falar-models-fetch"})
     if have: req.add_header("Range", f"bytes={have}-")
     with urllib.request.urlopen(req) as r, open(tmp, "ab" if have and r.status == 206 else "wb") as f:
         if have and r.status != 206: have = 0

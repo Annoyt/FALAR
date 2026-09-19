@@ -1,4 +1,12 @@
-# AgentTranslator 0.20.0 — подсказка для чтения вслух, правка своих реплик, пересмотр разговора в облаке, разговоры по людям, словарь на 190 тыс. фраз
+# Falar 0.21.0 — офлайн-переводчик pt-BR ↔ ru в наушнике
+
+До 0.21 приложение называлось AgentTranslator, пакет `dev.agenttranslator`. Имя «Falar» — «говорить»:
+приглашение собеседнику, которое приложение показывает при прослушивании («Pode falar»), и вторая
+его функция — заговорить самому. Пакет `app.falar`; классы остались в `dev.agenttranslator`.
+Переименование сделано до первого публичного релиза, потому что пакет и ключ подписи после него
+не меняются без переустановки.
+
+## Что было в 0.20: подсказка для чтения вслух, правка своих реплик, пересмотр разговора в облаке, разговоры по людям, словарь на 190 тыс. фраз
 
 **Версионирование.** `MAJOR.MINOR.PATCH`, но «ломающим» считается не изменение кода, а изменение
 **формата данных, накопленных на устройстве**: потребителей API у приложения нет, а вот пины,
@@ -22,7 +30,7 @@ PATCH поднимается, когда сборка кладётся в `apk/`
 ```bash
 bench/apk/build.sh                                   # javac + D8 + aapt2 + zipalign + apksigner (debug-ключ)
 tools/platform-tools/adb install -r -g bench/apk/AgentTranslator.apk
-bench/apk/push_models.sh                             # ~1.4 ГиБ в /sdcard/Android/data/dev.agenttranslator/files/models
+bench/apk/push_models.sh                             # ~1.4 ГиБ в /sdcard/Android/data/app.falar/files/models
 ```
 Загрузка моделей при старте на Dimensity 1100: ASR+VAD 3.3 с, MT 7.2 с, TTS 3.3 с.
 
@@ -91,7 +99,7 @@ bench/apk/push_models.sh                             # ~1.4 ГиБ в /sdcard/An
 - **Сборки**: `apk/AgentTranslator-0.20.0.apk` (83 МБ, с llama.cpp) и `-slim` (21 МБ, без
   локального уточнителя).
 - **Стендовые интенты** (значения с пробелами — внутри одних кавычек внутри других:
-  `adb shell "am start -n dev.agenttranslator/.MainActivity --es feedtext 'Мне нужен счёт'"`, иначе
+  `adb shell "am start -n app.falar/dev.agenttranslator.MainActivity --es feedtext 'Мне нужен счёт'"`, иначе
   удалённая оболочка режет строку по пробелам): `--es edittext '<индекс>|<текст>'`, `--es edittrans '<индекс>|<текст>|pin'`,
   `--es refineevery N`, `--es cloudevery N`, `--es consent 1`, `--es clearterms 1`,
   `--es translit 'Quanto custa'` (подсказка в журнал).
@@ -460,7 +468,7 @@ dinheiro» → выдумало «картой, имеющей бонусы»), 
 снимает время загрузки, PSS и прогоняет тестовые wav). На настольной JVM те же классы гоняет
 `bench/phrasebook/run.sh`.
 
-Тест без рук: `adb shell am start -n dev.agenttranslator/.MainActivity --es testwav <путь.wav> --es dir pt2ru` (любая частота, sherpa ресемплирует; при работающем приложении интент доходит через `onNewIntent`)
+Тест без рук: `adb shell am start -n app.falar/dev.agenttranslator.MainActivity --es testwav <путь.wav> --es dir pt2ru` (любая частота, sherpa ресемплирует; при работающем приложении интент доходит через `onNewIntent`)
 (16 кГц моно), результат в `adb logcat -s AT:*`.
 
 ## Измерено в приложении (Dimensity 1100, тестовый телефон)

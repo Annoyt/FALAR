@@ -13,7 +13,7 @@
 set -e
 R=$(cd "$(dirname "$0")/../.." && pwd)
 ADB=$R/tools/platform-tools/adb
-PKG=dev.agenttranslator
+PKG=app.falar
 LIS=""; PLY=""; LANG_=""; LABEL=""; GAP=3000; VOL=15; NORM=-14; SEC=0
 
 while [ $# -gt 0 ]; do
@@ -38,7 +38,7 @@ offset() { local a=$1 h d; h=$(date +%s%3N); d=$($a shell date +%s%3N | tr -d '\
 lines()  { $1 shell "test -f $EXT/at.tsv && wc -l < $EXT/at.tsv || echo 0" | tr -d '\r '; }
 tailgrep() { $1 shell "tail -n +$(( $3 + 1 )) $2 2>/dev/null | grep -c -- '$4' || echo 0" | tr -d '\r ' | tail -1; }
 mkdirs() { local t; t=$(mktemp); echo "$2" > "$t"; $1 push "$t" "$EXT/dirs.txt" >/dev/null
-           $1 shell am start -n $PKG/.MainActivity --es mkdirs 1 >/dev/null 2>&1; sleep 4; rm -f "$t"; }
+           $1 shell am start -n $PKG/dev.agenttranslator.MainActivity --es mkdirs 1 >/dev/null 2>&1; sleep 4; rm -f "$t"; }
 
 NF=$(ls "$REF"/*.wav | wc -l)
 # Длительность записи с запасом: файлы + паузы + разгон. Мало — хвост корпуса не попадёт.
@@ -63,7 +63,7 @@ N0_LOG=$($L shell "test -f $EXT/at.log && wc -l < $EXT/at.log || echo 0" | tr -d
 $L shell am force-stop $PKG >/dev/null 2>&1 || true
 $P shell am force-stop $PKG >/dev/null 2>&1 || true
 sleep 2
-$L shell am start -n $PKG/.MainActivity --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 >/dev/null
+$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 >/dev/null
 READY=0
 for _ in $(seq 40); do sleep 2; [ "$(tailgrep "$L" "$EXT/at.log" "$N0_LOG" 'микрофон:')" != 0 ] && { READY=1; break; }; done
 [ "$READY" = 1 ] || { echo "слушающий не поднялся"; exit 1; }
@@ -71,9 +71,9 @@ $L shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
 sleep 5
 
 echo "== пишу комнату и играю корпус =="
-$L shell am start -n $PKG/.MainActivity --es rawsec "$SEC" >/dev/null
+$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es rawsec "$SEC" >/dev/null
 sleep 2
-$P shell am start -n $PKG/.MainActivity --es vad 0 --es playdir "$EXT/air/$LANG_" --es gap "$GAP" --es norm "$NORM" >/dev/null
+$P shell am start -n $PKG/dev.agenttranslator.MainActivity --es vad 0 --es playdir "$EXT/air/$LANG_" --es gap "$GAP" --es norm "$NORM" >/dev/null
 sleep 5; $P shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
 
 T=0; WAIT=$(( SEC + 120 ))

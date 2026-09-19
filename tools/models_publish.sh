@@ -23,11 +23,11 @@ cat > $STAGE/README.md <<MD
 ---
 license: cc-by-4.0
 language: [pt, ru]
-tags: [translation, onnx, opus-mt, agenttranslator]
+tags: [translation, onnx, opus-mt, falar]
 ---
-# agenttranslator-models
+# falar-models
 
-Производные файлы офлайн-переводчика pt-BR ↔ ru (AgentTranslator). Не веса, а форматы:
+Производные файлы офлайн-переводчика pt-BR ↔ ru Falar (бывший AgentTranslator). Не веса, а форматы:
 - \`mt/*\`: экспорт Helsinki-NLP opus-mt-tc-big-pt-zle и -zle-pt в ONNX int8 (optimum) и токенизатор — CC-BY-4.0, авторство Helsinki-NLP / OPUS-MT;
 - \`tts_ru.zip\`, \`tts_pt.zip\`: голоса Piper dmitri и faber из тарболов sherpa-onnx, перепакованы в zip — CC0;
 - \`phrasebook_tatoeba.tsv\`, \`common_words.txt\`: корпус фраз и частотный словарь, добытые из Tatoeba — CC-BY 2.0 FR;
@@ -37,5 +37,5 @@ MD
 du -sh $STAGE; find $STAGE -type f | sed "s|$STAGE/||"
 if [ "$1" = "--dry-run" ]; then rm -rf $STAGE; exit 0; fi
 hf repo create "$REPO" --type model 2>/dev/null || true
-hf upload "$REPO" "$STAGE" . --commit-message "models for AgentTranslator $(python3 -c "import json;print(json.load(open('$M/manifest.json'))['app'])")"
+hf upload "$REPO" "$STAGE" . --commit-message "models for Falar $(python3 -c "import json;print(json.load(open('$M/manifest.json'))['app'])")"
 rm -rf $STAGE

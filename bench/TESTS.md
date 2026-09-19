@@ -51,7 +51,7 @@
 
 ### 1.3. Что лежит на устройстве
 
-Всё в `Android/data/dev.agenttranslator/files/`:
+Всё в `Android/data/app.falar/files/`:
 
 | Файл | Что | Кто пишет |
 |---|---|---|
@@ -107,7 +107,7 @@
 
 Стендовые интенты подаются через активность:
 ```bash
-adb shell am start -n dev.agenttranslator/.MainActivity --es <ключ> '<значение>'
+adb shell am start -n app.falar/dev.agenttranslator.MainActivity --es <ключ> '<значение>'
 ```
 С 0.20 добавлены: `edittext '<индекс>|<текст>'` (правка исходника реплики), `edittrans
 '<индекс>|<текст>|pin'` (правка перевода, `pin` — закрепить), `refineevery N`, `cloudevery N`

@@ -14,7 +14,7 @@
 set -e
 R=$(cd "$(dirname "$0")/../.." && pwd)
 ADB=$R/tools/platform-tools/adb
-PKG=dev.agenttranslator
+PKG=app.falar
 LIS=""; PLY=""; LANG_=""; GAP=4000; ROUNDS=1; VOL=""; LABEL=""; NORM=-20; MODE=air; SEG=""
 
 while [ $# -gt 0 ]; do
@@ -56,7 +56,7 @@ lines() { $1 shell "test -f $EXT/at.tsv && wc -l < $EXT/at.tsv || echo 0" | tr -
 mkdirs() {  # $1 = команда adb, $2 = путь относительно files/
   local t; t=$(mktemp); echo "$2" > "$t"
   $1 push "$t" "$EXT/dirs.txt" >/dev/null
-  $1 shell am start -n $PKG/.MainActivity --es mkdirs 1 >/dev/null 2>&1
+  $1 shell am start -n $PKG/dev.agenttranslator.MainActivity --es mkdirs 1 >/dev/null 2>&1
   sleep 4; rm -f "$t"
 }
 
@@ -109,7 +109,7 @@ sleep 2
 # приписываются последнему проигранному файлу — ровно так и получилось в первом прогоне.
 SEGARGS=""
 for kv in $SEG; do SEGARGS="$SEGARGS --es ${kv%%=*} ${kv#*=}"; done
-$L shell am start -n $PKG/.MainActivity \
+$L shell am start -n $PKG/dev.agenttranslator.MainActivity \
    --es vad $([ "$MODE" = file ] && echo 0 || echo 1) --es silent 1 --es fixdir $DIR --es denoise 0 $SEGARGS >/dev/null
 # Ждём настоящей готовности, а не фиксированной паузы: холодная загрузка моделей заняла
 # 3 с на POCO и 13 с на Redmi, и на медленном устройстве первые файлы уезжали бы в тишину.
@@ -126,12 +126,12 @@ sleep 5                       # фон копится в тишине, дади�
 NF=$(ls "$REF"/*.wav | wc -l)
 if [ "$MODE" = file ]; then
   echo "== прогон по файлу: $NF файлов =="
-  $L shell am start -n $PKG/.MainActivity \
+  $L shell am start -n $PKG/dev.agenttranslator.MainActivity \
      --es soak "$EXT/air/$LANG_" --es dir $DIR --es gap 1500 --es rounds "$ROUNDS" >/dev/null
   WAIT=$(( NF * ROUNDS * 8 + 60 ))
 else
   echo "== прогон через воздух: $NF файлов × $ROUNDS, пауза $GAP мс =="
-  $P shell am start -n $PKG/.MainActivity \
+  $P shell am start -n $PKG/dev.agenttranslator.MainActivity \
      --es vad 0 --es playdir "$EXT/air/$LANG_" --es gap "$GAP" --es rounds "$ROUNDS" --es norm "$NORM" >/dev/null
   sleep 5
   $P shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true

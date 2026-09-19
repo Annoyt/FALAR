@@ -107,7 +107,7 @@ public class TranslatorService extends Service {
   Notification notif(String text) {
     PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, TranslatorService.class).setAction(ACT_STOP), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-    return new Notification.Builder(this, CH).setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentTitle("AgentTranslator" + (vadMode ? " · слушаю PT→RU" : "")).setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text))
+    return new Notification.Builder(this, CH).setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentTitle("Falar" + (vadMode ? " · слушаю" : "")).setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text))
       .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open).addAction(new Notification.Action.Builder(Icon.createWithResource(this, android.R.drawable.ic_media_pause), "Стоп", stop).build()).build();
   }
   void notify(String text) { getSystemService(NotificationManager.class).notify(NOTIF, notif(text)); }

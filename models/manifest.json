@@ -1,8 +1,8 @@
 {
  "manifest_version": 1,
- "app": "0.20.0",
- "own_repo": "youannoingme/agenttranslator-models",
- "device_dir": "Android/data/dev.agenttranslator/files/models",
+ "app": "0.21.0",
+ "own_repo": "youannoingme/falar-models",
+ "device_dir": "Android/data/app.falar/files/models",
  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо.",
  "total_core_bytes": 1981012638,
  "total_optional_bytes": 1188932476,
@@ -78,7 +78,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/pt2ru/encoder_model.onnx",
     "revision": "main"
    },
@@ -93,7 +93,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/pt2ru/decoder_model.onnx",
     "revision": "main"
    },
@@ -108,7 +108,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/pt2ru/decoder_with_past_model.onnx",
     "revision": "main"
    },
@@ -123,7 +123,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/pt2ru/pt2ru_source_pieces.tsv",
     "revision": "main"
    },
@@ -138,7 +138,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/pt2ru/pt2ru_vocab.json",
     "revision": "main"
    },
@@ -153,7 +153,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/ru2pt/encoder_model.onnx",
     "revision": "main"
    },
@@ -168,7 +168,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/ru2pt/decoder_model.onnx",
     "revision": "main"
    },
@@ -183,7 +183,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/ru2pt/decoder_with_past_model.onnx",
     "revision": "main"
    },
@@ -198,7 +198,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/ru2pt/ru2pt_source_pieces.tsv",
     "revision": "main"
    },
@@ -213,7 +213,7 @@
    "license": "CC-BY-4.0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "mt/ru2pt/ru2pt_vocab.json",
     "revision": "main"
    },
@@ -268,7 +268,7 @@
    "license": "project",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "phrasebook.json",
     "revision": "main"
    },
@@ -283,7 +283,7 @@
    "license": "CC-BY-2.0-FR",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "phrasebook_tatoeba.tsv",
     "revision": "main"
    },
@@ -299,7 +299,7 @@
    "license": "CC-BY-2.0-FR",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "common_words.txt",
     "revision": "main"
    },
@@ -318,7 +318,7 @@
    "license": "CC0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "tts_ru.zip",
     "revision": "main"
    },
@@ -348,7 +348,7 @@
    "license": "CC0",
    "source": {
     "type": "hf",
-    "repo": "youannoingme/agenttranslator-models",
+    "repo": "youannoingme/falar-models",
     "file": "tts_pt.zip",
     "revision": "main"
    },

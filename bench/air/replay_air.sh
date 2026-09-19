@@ -9,7 +9,7 @@
 set -e
 R=$(cd "$(dirname "$0")/../.." && pwd)
 ADB=$R/tools/platform-tools/adb
-PKG=dev.agenttranslator
+PKG=app.falar
 LIS=""; REC=""; SEG=""; LABEL=""; SPEED=4
 
 while [ $# -gt 0 ]; do
@@ -45,7 +45,7 @@ $L push "$REC/room.wav" "$EXT/replay.wav" >/dev/null
 N0_L=$(lines); N0_LOG=$($L shell "test -f $EXT/at.log && wc -l < $EXT/at.log || echo 0" | tr -d '\r ')
 
 $L shell am force-stop $PKG >/dev/null 2>&1 || true; sleep 2
-$L shell am start -n $PKG/.MainActivity --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 $SEGARGS >/dev/null
+$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 $SEGARGS >/dev/null
 READY=0
 for _ in $(seq 40); do sleep 2; [ "$(tailgrep "$N0_LOG" 'микрофон:')" != 0 ] && { READY=1; break; }; done
 [ "$READY" = 1 ] || { echo "слушающий не поднялся"; exit 1; }
@@ -53,7 +53,7 @@ $L shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
 
 SEC=$(python3 -c "import wave; w=wave.open('$REC/room.wav'); print(int(w.getnframes()/w.getframerate()))")
 echo "== подаю $SEC с записи =="
-$L shell am start -n $PKG/.MainActivity --es feedwav "$EXT/replay.wav" --es speed "$SPEED" >/dev/null
+$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es feedwav "$EXT/replay.wav" --es speed "$SPEED" >/dev/null
 T=0; WAIT=$(( SEC / SPEED + 180 ))
 while [ $T -lt $WAIT ]; do
   sleep 10; T=$(( T + 10 ))

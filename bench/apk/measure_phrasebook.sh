@@ -4,7 +4,7 @@
 set -e
 A=$(cd "$(dirname "$0")" && pwd); R=$(cd "$A/../.." && pwd)
 ADB=${ADB:-$R/tools/platform-tools/adb}
-PKG=dev.agenttranslator
+PKG=app.falar
 DST=/sdcard/Android/data/$PKG/files/models
 WAV=${WAV:-/data/local/tmp/sh/audio}
 
@@ -19,7 +19,7 @@ $ADB shell "ls -la $DST/phrasebook*"
 echo "== запуск =="
 $ADB shell am force-stop $PKG
 $ADB logcat -c
-$ADB shell am start -n $PKG/.MainActivity >/dev/null
+$ADB shell am start -n $PKG/dev.agenttranslator.MainActivity >/dev/null
 sleep 25
 echo "--- загрузка словаря ---"
 $ADB logcat -d | grep -E "корпус:|словарь [0-9]+" | tail -5
@@ -28,11 +28,11 @@ $ADB shell dumpsys meminfo $PKG 2>/dev/null | grep -E "TOTAL PSS|Java Heap|Nativ
 
 echo "== прогон тестовых фраз =="
 for f in $($ADB shell "ls $WAV/pt/*.wav 2>/dev/null | head -8"); do
-  $ADB shell am start -n $PKG/.MainActivity --es testwav "$f" --es dir pt2ru >/dev/null
+  $ADB shell am start -n $PKG/dev.agenttranslator.MainActivity --es testwav "$f" --es dir pt2ru >/dev/null
   sleep 6
 done
 for f in $($ADB shell "ls $WAV/ru/*.wav 2>/dev/null | head -8"); do
-  $ADB shell am start -n $PKG/.MainActivity --es testwav "$f" --es dir ru2pt >/dev/null
+  $ADB shell am start -n $PKG/dev.agenttranslator.MainActivity --es testwav "$f" --es dir ru2pt >/dev/null
   sleep 6
 done
 echo "--- результаты ---"

@@ -110,8 +110,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (svc == null) return;
       svc.setListen(tListenPt.isChecked(), tListenRu.isChecked());
       setHint(!tListenPt.isChecked() && !tListenRu.isChecked() ? "Микрофон выключен"
-          : tListenPt.isChecked() && tListenRu.isChecked() ? "Слушаю оба языка, направление по реплике"
-          : tListenPt.isChecked() ? "Слушаю португальский" : "Слушаю русский");
+          : tListenPt.isChecked() && tListenRu.isChecked() ? "Pode falar · слушаю оба языка, направление по реплике"
+          : tListenPt.isChecked() ? "Pode falar · слушаю португальский" : "Говорите · слушаю русский");
       markListen();
     };
     tListenPt.setOnCheckedChangeListener(lis); tListenRu.setOnCheckedChangeListener(lis);
@@ -1209,7 +1209,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // разговор продолжается — выглядело так, будто вся история пропала.
     if (svc != null && svc.chats != null) showChat(svc.chats.current, svc.chats.load(svc.chats.current));
     if (bigText.length() < 2)
-      setHint(svc != null && (svc.listenPt || svc.listenRu) ? "Говорите по-португальски — здесь появится текст"
+      setHint(svc != null && (svc.listenPt || svc.listenRu) ? "Pode falar · здесь появится перевод"
                                                             : "Микрофон выключен — включите «Слушать» или удержание");
     refreshChats(); refreshKey(null); refreshVoice(); markListen(); refreshBetter(); refreshIntervals();
   }
