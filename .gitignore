@@ -2,15 +2,15 @@
 models/*
 !models/README.md
 !models/manifest.json
-voices/
+/voices/
 data/tatoeba/*
 !data/tatoeba/phrasebook_tatoeba.tsv
 
 # Сборки и распаковки
-apk/
-apk_unpacked/
-compiled_classes/
-dex_output/
+/apk/
+/apk_unpacked/
+/compiled_classes/
+/dex_output/
 bench/apk/out/
 bench/apk/*.apk
 bench/apk/*.idsig
@@ -24,7 +24,7 @@ tools/android.jar
 tools/debug.keystore
 
 # Чужой проект, лежал рядом для изучения
-RTranslator/
+/RTranslator/
 
 # Записи комнаты и голоса: личное
 bench/air/rec/

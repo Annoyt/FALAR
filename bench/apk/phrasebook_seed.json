@@ -1,0 +1,714 @@
+{
+ "pt2ru": {
+  "olá": {
+   "src": "olá",
+   "dst": "Привет"
+  },
+  "oi": {
+   "src": "oi",
+   "dst": "Привет"
+  },
+  "bom dia": {
+   "src": "bom dia",
+   "dst": "Доброе утро"
+  },
+  "boa tarde": {
+   "src": "boa tarde",
+   "dst": "Добрый день"
+  },
+  "boa noite": {
+   "src": "boa noite",
+   "dst": "Добрый вечер"
+  },
+  "tudo bem": {
+   "src": "tudo bem",
+   "dst": "Всё хорошо"
+  },
+  "como vai": {
+   "src": "como vai?",
+   "dst": "Как дела?"
+  },
+  "como você está": {
+   "src": "como você está?",
+   "dst": "Как вы?"
+  },
+  "obrigado": {
+   "src": "obrigado",
+   "dst": "Спасибо"
+  },
+  "obrigada": {
+   "src": "obrigada",
+   "dst": "Спасибо"
+  },
+  "muito obrigado": {
+   "src": "muito obrigado",
+   "dst": "Большое спасибо"
+  },
+  "de nada": {
+   "src": "de nada",
+   "dst": "Не за что"
+  },
+  "por favor": {
+   "src": "por favor",
+   "dst": "Пожалуйста"
+  },
+  "com licença": {
+   "src": "com licença",
+   "dst": "Извините"
+  },
+  "desculpa": {
+   "src": "desculpa",
+   "dst": "Простите"
+  },
+  "desculpe": {
+   "src": "desculpe",
+   "dst": "Простите"
+  },
+  "sim": {
+   "src": "sim",
+   "dst": "Да"
+  },
+  "não": {
+   "src": "não",
+   "dst": "Нет"
+  },
+  "talvez": {
+   "src": "talvez",
+   "dst": "Может быть"
+  },
+  "claro": {
+   "src": "claro",
+   "dst": "Конечно"
+  },
+  "entendi": {
+   "src": "entendi",
+   "dst": "Понял"
+  },
+  "não entendi": {
+   "src": "não entendi",
+   "dst": "Не понял"
+  },
+  "pode repetir": {
+   "src": "pode repetir?",
+   "dst": "Можете повторить?"
+  },
+  "fala mais devagar por favor": {
+   "src": "fala mais devagar, por favor",
+   "dst": "Говорите медленнее, пожалуйста"
+  },
+  "eu não falo português": {
+   "src": "eu não falo português",
+   "dst": "Я не говорю по-португальски"
+  },
+  "eu falo um pouco de português": {
+   "src": "eu falo um pouco de português",
+   "dst": "Я немного говорю по-португальски"
+  },
+  "você fala russo": {
+   "src": "você fala russo?",
+   "dst": "Вы говорите по-русски?"
+  },
+  "você fala inglês": {
+   "src": "você fala inglês?",
+   "dst": "Вы говорите по-английски?"
+  },
+  "quanto custa": {
+   "src": "quanto custa?",
+   "dst": "Сколько стоит?"
+  },
+  "quanto custa isso": {
+   "src": "quanto custa isso?",
+   "dst": "Сколько это стоит?"
+  },
+  "muito caro": {
+   "src": "muito caro",
+   "dst": "Очень дорого"
+  },
+  "barato": {
+   "src": "barato",
+   "dst": "Дёшево"
+  },
+  "pode fazer desconto": {
+   "src": "pode fazer desconto?",
+   "dst": "Можно скидку?"
+  },
+  "eu quero comprar": {
+   "src": "eu quero comprar",
+   "dst": "Я хочу купить"
+  },
+  "onde eu pago": {
+   "src": "onde eu pago?",
+   "dst": "Где платить?"
+  },
+  "aceita cartão": {
+   "src": "aceita cartão?",
+   "dst": "Принимаете карту?"
+  },
+  "dinheiro": {
+   "src": "dinheiro",
+   "dst": "Наличные"
+  },
+  "troco": {
+   "src": "troco",
+   "dst": "Сдача"
+  },
+  "onde fica": {
+   "src": "onde fica?",
+   "dst": "Где находится?"
+  },
+  "onde fica o banheiro": {
+   "src": "onde fica o banheiro?",
+   "dst": "Где туалет?"
+  },
+  "onde fica o metrô": {
+   "src": "onde fica o metrô?",
+   "dst": "Где метро?"
+  },
+  "onde fica o hospital": {
+   "src": "onde fica o hospital?",
+   "dst": "Где больница?"
+  },
+  "onde fica a farmácia": {
+   "src": "onde fica a farmácia?",
+   "dst": "Где аптека?"
+  },
+  "como chegar": {
+   "src": "como chegar?",
+   "dst": "Как добраться?"
+  },
+  "é longe": {
+   "src": "é longe?",
+   "dst": "Далеко?"
+  },
+  "é perto": {
+   "src": "é perto?",
+   "dst": "Близко?"
+  },
+  "à esquerda": {
+   "src": "à esquerda",
+   "dst": "Налево"
+  },
+  "à direita": {
+   "src": "à direita",
+   "dst": "Направо"
+  },
+  "em frente": {
+   "src": "em frente",
+   "dst": "Прямо"
+  },
+  "vire à esquerda": {
+   "src": "vire à esquerda",
+   "dst": "Поверните налево"
+  },
+  "vire à direita": {
+   "src": "vire à direita",
+   "dst": "Поверните направо"
+  },
+  "eu preciso de ajuda": {
+   "src": "eu preciso de ajuda",
+   "dst": "Мне нужна помощь"
+  },
+  "pode me ajudar": {
+   "src": "pode me ajudar?",
+   "dst": "Можете мне помочь?"
+  },
+  "estou perdido": {
+   "src": "estou perdido",
+   "dst": "Я заблудился"
+  },
+  "estou perdida": {
+   "src": "estou perdida",
+   "dst": "Я заблудилась"
+  },
+  "chame a polícia": {
+   "src": "chame a polícia",
+   "dst": "Вызовите полицию"
+  },
+  "chame uma ambulância": {
+   "src": "chame uma ambulância",
+   "dst": "Вызовите скорую"
+  },
+  "eu estou doente": {
+   "src": "eu estou doente",
+   "dst": "Я болен"
+  },
+  "preciso de um médico": {
+   "src": "preciso de um médico",
+   "dst": "Мне нужен врач"
+  },
+  "dói aqui": {
+   "src": "dói aqui",
+   "dst": "Здесь болит"
+  },
+  "eu quero": {
+   "src": "eu quero",
+   "dst": "Я хочу"
+  },
+  "eu não quero": {
+   "src": "eu não quero",
+   "dst": "Я не хочу"
+  },
+  "eu gosto": {
+   "src": "eu gosto",
+   "dst": "Мне нравится"
+  },
+  "eu não gosto": {
+   "src": "eu não gosto",
+   "dst": "Мне не нравится"
+  },
+  "está bom": {
+   "src": "está bom",
+   "dst": "Хорошо"
+  },
+  "está ótimo": {
+   "src": "está ótimo",
+   "dst": "Отлично"
+  },
+  "que horas são": {
+   "src": "que horas são?",
+   "dst": "Который час?"
+  },
+  "tchau": {
+   "src": "tchau",
+   "dst": "Пока"
+  },
+  "até logo": {
+   "src": "até logo",
+   "dst": "До встречи"
+  },
+  "até amanhã": {
+   "src": "até amanhã",
+   "dst": "До завтра"
+  },
+  "prazer em conhecer": {
+   "src": "prazer em conhecer",
+   "dst": "Приятно познакомиться"
+  },
+  "meu nome é": {
+   "src": "meu nome é",
+   "dst": "Меня зовут"
+  },
+  "qual é o seu nome": {
+   "src": "qual é o seu nome?",
+   "dst": "Как вас зовут?"
+  },
+  "de onde você é": {
+   "src": "de onde você é?",
+   "dst": "Откуда вы?"
+  },
+  "eu sou da rússia": {
+   "src": "eu sou da rússia",
+   "dst": "Я из России"
+  },
+  "eu sou russo": {
+   "src": "eu sou russo",
+   "dst": "Я русский"
+  },
+  "eu sou russa": {
+   "src": "eu sou russa",
+   "dst": "Я русская"
+  },
+  "água": {
+   "src": "água",
+   "dst": "Вода"
+  },
+  "comida": {
+   "src": "comida",
+   "dst": "Еда"
+  },
+  "café": {
+   "src": "café",
+   "dst": "Кофе"
+  },
+  "cerveja": {
+   "src": "cerveja",
+   "dst": "Пиво"
+  },
+  "a conta por favor": {
+   "src": "a conta, por favor",
+   "dst": "Счёт, пожалуйста"
+  },
+  "cardápio": {
+   "src": "cardápio",
+   "dst": "Меню"
+  },
+  "garçom": {
+   "src": "garçom",
+   "dst": "Официант"
+  },
+  "está delicioso": {
+   "src": "está delicioso",
+   "dst": "Очень вкусно"
+  },
+  "wifi": {
+   "src": "wifi",
+   "dst": "Вай-фай"
+  },
+  "qual a senha do wifi": {
+   "src": "qual a senha do wifi?",
+   "dst": "Какой пароль от вай-фая?"
+  },
+  "tem wifi": {
+   "src": "tem wifi?",
+   "dst": "Есть вай-фай?"
+  },
+  "posso usar seu telefone": {
+   "src": "posso usar seu telefone?",
+   "dst": "Можно воспользоваться вашим телефоном?"
+  },
+  "táxi": {
+   "src": "táxi",
+   "dst": "Такси"
+  },
+  "ônibus": {
+   "src": "ônibus",
+   "dst": "Автобус"
+  },
+  "aeroporto": {
+   "src": "aeroporto",
+   "dst": "Аэропорт"
+  },
+  "hotel": {
+   "src": "hotel",
+   "dst": "Отель"
+  },
+  "praia": {
+   "src": "praia",
+   "dst": "Пляж"
+  },
+  "supermercado": {
+   "src": "supermercado",
+   "dst": "Супермаркет"
+  }
+ },
+ "ru2pt": {
+  "привет": {
+   "src": "привет",
+   "dst": "Olá"
+  },
+  "здравствуйте": {
+   "src": "здравствуйте",
+   "dst": "Olá"
+  },
+  "доброе утро": {
+   "src": "доброе утро",
+   "dst": "Bom dia"
+  },
+  "добрый день": {
+   "src": "добрый день",
+   "dst": "Boa tarde"
+  },
+  "добрый вечер": {
+   "src": "добрый вечер",
+   "dst": "Boa noite"
+  },
+  "как дела": {
+   "src": "как дела?",
+   "dst": "Tudo bem?"
+  },
+  "хорошо": {
+   "src": "хорошо",
+   "dst": "Bem"
+  },
+  "все хорошо": {
+   "src": "всё хорошо",
+   "dst": "Tudo bem"
+  },
+  "спасибо": {
+   "src": "спасибо",
+   "dst": "Obrigado"
+  },
+  "большое спасибо": {
+   "src": "большое спасибо",
+   "dst": "Muito obrigado"
+  },
+  "не за что": {
+   "src": "не за что",
+   "dst": "De nada"
+  },
+  "пожалуйста": {
+   "src": "пожалуйста",
+   "dst": "Por favor"
+  },
+  "извините": {
+   "src": "извините",
+   "dst": "Com licença"
+  },
+  "простите": {
+   "src": "простите",
+   "dst": "Desculpe"
+  },
+  "да": {
+   "src": "да",
+   "dst": "Sim"
+  },
+  "нет": {
+   "src": "нет",
+   "dst": "Não"
+  },
+  "может быть": {
+   "src": "может быть",
+   "dst": "Talvez"
+  },
+  "конечно": {
+   "src": "конечно",
+   "dst": "Claro"
+  },
+  "понял": {
+   "src": "понял",
+   "dst": "Entendi"
+  },
+  "не понял": {
+   "src": "не понял",
+   "dst": "Não entendi"
+  },
+  "повторите пожалуйста": {
+   "src": "повторите пожалуйста",
+   "dst": "Pode repetir, por favor?"
+  },
+  "говорите медленнее": {
+   "src": "говорите медленнее",
+   "dst": "Fale mais devagar, por favor"
+  },
+  "я не говорю по-португальски": {
+   "src": "я не говорю по-португальски",
+   "dst": "Eu não falo português"
+  },
+  "вы говорите по-русски": {
+   "src": "вы говорите по-русски?",
+   "dst": "Você fala russo?"
+  },
+  "вы говорите по-английски": {
+   "src": "вы говорите по-английски?",
+   "dst": "Você fala inglês?"
+  },
+  "сколько стоит": {
+   "src": "сколько стоит?",
+   "dst": "Quanto custa?"
+  },
+  "очень дорого": {
+   "src": "очень дорого",
+   "dst": "Muito caro"
+  },
+  "можно скидку": {
+   "src": "можно скидку?",
+   "dst": "Pode fazer desconto?"
+  },
+  "я хочу купить": {
+   "src": "я хочу купить",
+   "dst": "Eu quero comprar"
+  },
+  "где платить": {
+   "src": "где платить?",
+   "dst": "Onde eu pago?"
+  },
+  "принимаете карту": {
+   "src": "принимаете карту?",
+   "dst": "Aceita cartão?"
+  },
+  "наличные": {
+   "src": "наличные",
+   "dst": "Dinheiro"
+  },
+  "где находится": {
+   "src": "где находится?",
+   "dst": "Onde fica?"
+  },
+  "где туалет": {
+   "src": "где туалет?",
+   "dst": "Onde fica o banheiro?"
+  },
+  "где метро": {
+   "src": "где метро?",
+   "dst": "Onde fica o metrô?"
+  },
+  "где больница": {
+   "src": "где больница?",
+   "dst": "Onde fica o hospital?"
+  },
+  "где аптека": {
+   "src": "где аптека?",
+   "dst": "Onde fica a farmácia?"
+  },
+  "как добраться": {
+   "src": "как добраться?",
+   "dst": "Como chegar?"
+  },
+  "далеко": {
+   "src": "далеко?",
+   "dst": "É longe?"
+  },
+  "близко": {
+   "src": "близко?",
+   "dst": "É perto?"
+  },
+  "налево": {
+   "src": "налево",
+   "dst": "À esquerda"
+  },
+  "направо": {
+   "src": "направо",
+   "dst": "À direita"
+  },
+  "прямо": {
+   "src": "прямо",
+   "dst": "Em frente"
+  },
+  "мне нужна помощь": {
+   "src": "мне нужна помощь",
+   "dst": "Eu preciso de ajuda"
+  },
+  "помогите": {
+   "src": "помогите",
+   "dst": "Me ajude"
+  },
+  "можете мне помочь": {
+   "src": "можете мне помочь?",
+   "dst": "Pode me ajudar?"
+  },
+  "я заблудился": {
+   "src": "я заблудился",
+   "dst": "Estou perdido"
+  },
+  "вызовите полицию": {
+   "src": "вызовите полицию",
+   "dst": "Chame a polícia"
+  },
+  "вызовите скорую": {
+   "src": "вызовите скорую",
+   "dst": "Chame uma ambulância"
+  },
+  "я болен": {
+   "src": "я болен",
+   "dst": "Estou doente"
+  },
+  "мне нужен врач": {
+   "src": "мне нужен врач",
+   "dst": "Preciso de um médico"
+  },
+  "здесь болит": {
+   "src": "здесь болит",
+   "dst": "Dói aqui"
+  },
+  "я хочу": {
+   "src": "я хочу",
+   "dst": "Eu quero"
+  },
+  "я не хочу": {
+   "src": "я не хочу",
+   "dst": "Eu não quero"
+  },
+  "мне нравится": {
+   "src": "мне нравится",
+   "dst": "Eu gosto"
+  },
+  "мне не нравится": {
+   "src": "мне не нравится",
+   "dst": "Eu não gosto"
+  },
+  "отлично": {
+   "src": "отлично",
+   "dst": "Ótimo"
+  },
+  "который час": {
+   "src": "который час?",
+   "dst": "Que horas são?"
+  },
+  "пока": {
+   "src": "пока",
+   "dst": "Tchau"
+  },
+  "до свидания": {
+   "src": "до свидания",
+   "dst": "Até logo"
+  },
+  "до завтра": {
+   "src": "до завтра",
+   "dst": "Até amanhã"
+  },
+  "приятно познакомиться": {
+   "src": "приятно познакомиться",
+   "dst": "Prazer em conhecer"
+  },
+  "меня зовут": {
+   "src": "меня зовут",
+   "dst": "Meu nome é"
+  },
+  "как вас зовут": {
+   "src": "как вас зовут?",
+   "dst": "Qual é o seu nome?"
+  },
+  "откуда вы": {
+   "src": "откуда вы?",
+   "dst": "De onde você é?"
+  },
+  "я из россии": {
+   "src": "я из россии",
+   "dst": "Eu sou da Rússia"
+  },
+  "вода": {
+   "src": "вода",
+   "dst": "Água"
+  },
+  "еда": {
+   "src": "еда",
+   "dst": "Comida"
+  },
+  "кофе": {
+   "src": "кофе",
+   "dst": "Café"
+  },
+  "пиво": {
+   "src": "пиво",
+   "dst": "Cerveja"
+  },
+  "счет пожалуйста": {
+   "src": "счёт пожалуйста",
+   "dst": "A conta, por favor"
+  },
+  "меню": {
+   "src": "меню",
+   "dst": "Cardápio"
+  },
+  "официант": {
+   "src": "официант",
+   "dst": "Garçom"
+  },
+  "очень вкусно": {
+   "src": "очень вкусно",
+   "dst": "Está delicioso"
+  },
+  "какой пароль от вай-фая": {
+   "src": "какой пароль от вай-фая?",
+   "dst": "Qual a senha do wifi?"
+  },
+  "есть вай-фай": {
+   "src": "есть вай-фай?",
+   "dst": "Tem wifi?"
+  },
+  "такси": {
+   "src": "такси",
+   "dst": "Táxi"
+  },
+  "автобус": {
+   "src": "автобус",
+   "dst": "Ônibus"
+  },
+  "аэропорт": {
+   "src": "аэропорт",
+   "dst": "Aeroporto"
+  },
+  "отель": {
+   "src": "отель",
+   "dst": "Hotel"
+  },
+  "пляж": {
+   "src": "пляж",
+   "dst": "Praia"
+  },
+  "супермаркет": {
+   "src": "супермаркет",
+   "dst": "Supermercado"
+  }
+ }
+}
