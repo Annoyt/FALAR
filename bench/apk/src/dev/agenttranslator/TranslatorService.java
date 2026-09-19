@@ -26,7 +26,9 @@ public class TranslatorService extends Service {
     /** Список реплик изменился не через новую реплику: правка, пересмотр, удаление. */
     void onHistory();
     /** Имена собственные из облачного ответа — кандидаты в свои слова, добавляет человек. */
-    void onNames(java.util.List<String[]> names, boolean manual); }
+    void onNames(java.util.List<String[]> names, boolean manual);
+    /** Модели по манифесту: чего не хватает, ход загрузки. Первый вызов — итог проверки при старте. */
+    void onModels(ModelStore.State s); }
   public class LocalBinder extends Binder { public TranslatorService get() { return TranslatorService.this; } }
   final IBinder binder = new LocalBinder(); final Handler main = new Handler(Looper.getMainLooper());
   final ExecutorService worker = Executors.newSingleThreadExecutor(); volatile Listener listener;
@@ -69,6 +71,8 @@ public class TranslatorService extends Service {
   volatile long lastLocalAt = 0;
   /** Имена из облачных ответов, ещё не разобранные человеком. */
   public final List<String[]> pendingNames = Collections.synchronizedList(new ArrayList<>());
+  /** Модели по манифесту, вшитому в APK: проверка при старте, загрузка с Hugging Face, необязательное по кнопке. */
+  public ModelStore store; File modelsDir; volatile long lastModelNotif; volatile String lastModelPhase = "";
 
   @Override public void onCreate() {
     super.onCreate();
@@ -77,32 +81,64 @@ public class TranslatorService extends Service {
     Notification n = notif("Загрузка моделей…");
     if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE); else startForeground(NOTIF, n);
     wl = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AT:pipeline"); wl.acquire();
-    final File models = new File(getExternalFilesDir(null), "models");
-    worker.submit(() -> {
-      try {
-        if (!new File(models, "silero_vad.onnx").exists()) { status("Нет моделей. Залейте их в\n" + models.getAbsolutePath());
-          log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
-        eng = new Engine(models, this::log); pb = new Phrasebook(models);
-        spk = new Speaker(models); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
-        chats = new Chats(getExternalFilesDir(null)); learn = new Learn(chats, models, getExternalFilesDir(null));
-        log("📝 " + words.stats());
-        if (pb.pinsWithDigits > 0) log("📌 пинов с числом без маски: " + pb.pinsWithDigits + " — они не срабатывают, перезакрепите их кнопкой «запомнить»");
-        log(cloud.ready ? "☁ «получше» доступно: " + cloud.models.length + " бесплатных моделей"
-                        : "☁ «получше» выключено (нет models/openrouter.json)");
-        log(spk.ready ? "🎤 отпечаток голоса готов за " + spk.loadMs + " мс, профили: " + spk.describe()
-                      : "🎤 модели отпечатка голоса нет (models/speaker/*.onnx) — разделение говорящих выключено");
-        status("Готово. ASR " + eng.loadAsrMs + " · MT " + eng.loadMtMs + " · TTS " + eng.loadTtsMs + " мс · " + pb.stats());
-        android.content.SharedPreferences pr = getSharedPreferences("at", MODE_PRIVATE);
-        micGainDb = pr.getFloat("micgain", 0); outGainDb = pr.getFloat("gain", 0);
-        micSource = pr.getString("micsrc", "builtin");
-        holdMs = pr.getInt("hold", 1500);
-        refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
-        heartbeat(); startWarm(); startSay(); watchNetwork();
-        boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
-        if (lp || lr) setListen(lp, lr); else { log("🎚 микрофон выключен: включите «Слушать PT» или «Слушать RU»"); status("Микрофон выключен"); }
-        notify("Готов. " + pb.stats()); Listener l = listener; if (l != null) main.post(l::onReady);
-      } catch (Throwable t) { Log.e(TAG, "init", t); status("Ошибка: " + t); }
-    });
+    modelsDir = new File(getExternalFilesDir(null), "models");
+    // Хранилище создаём здесь, а не в фоне: стендовые интенты (models/modelsbase) приходят сразу за onCreate.
+    try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
+    catch (Throwable t) { Log.e(TAG, "manifest", t); status("Ошибка манифеста моделей: " + t); return; }
+    worker.submit(this::boot);
+  }
+  String readAsset(String name) throws java.io.IOException {
+    try (java.io.InputStream in = getAssets().open(name)) {
+      java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(); byte[] b = new byte[1 << 14]; int n;
+      while ((n = in.read(b)) > 0) bo.write(b, 0, n);
+      return new String(bo.toByteArray(), "UTF-8");
+    }
+  }
+  /** Старт: сверка того, что лежит, с манифестом. Всё обязательное на месте — грузим движки;
+   *  нет — экран первого запуска, загрузка по кнопке, и loadAll() придёт из onStoreState. */
+  void boot() {
+    try {
+      long t = System.nanoTime();
+      ModelStore.Plan p = store.check("core");
+      long ms = (System.nanoTime() - t) / 1000000;
+      log("📦 модели " + store.app + ": обязательных на месте " + p.have + "/" + (p.have + p.need.size())
+          + (p.need.isEmpty() ? "" : ", не хватает " + ModelStore.mb(p.bytes) + " МБ") + " · проверка " + ms + " мс"
+          + (store.hashedBytes > 0 ? ", прохэшировано " + ModelStore.mb(store.hashedBytes) + " МБ" : ", по кэшу"));
+      tsv("models_check", "" + p.have, "" + p.need.size(), "" + p.bytes, "" + ms, "" + store.hashedBytes);
+      ModelStore.State st = store.state(); Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
+      if (!p.need.isEmpty()) {
+        status("Нужно скачать модели: " + p.need.size() + " файлов, " + ModelStore.mb(p.bytes) + " МБ");
+        notify("Нужно скачать модели (" + ModelStore.mb(p.bytes) + " МБ)"); return;
+      }
+      loadAll();
+    } catch (Throwable t) { Log.e(TAG, "boot", t); status("Ошибка: " + t); }
+  }
+  void loadAll() {
+    final File models = modelsDir;
+    if (eng != null) return;
+    try {
+      if (!new File(models, "silero_vad.onnx").exists()) { status("Нет моделей. Залейте их в\n" + models.getAbsolutePath());
+        log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
+      eng = new Engine(models, this::log); pb = new Phrasebook(models);
+      spk = new Speaker(models); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
+      chats = new Chats(getExternalFilesDir(null)); learn = new Learn(chats, models, getExternalFilesDir(null));
+      log("📝 " + words.stats());
+      if (pb.pinsWithDigits > 0) log("📌 пинов с числом без маски: " + pb.pinsWithDigits + " — они не срабатывают, перезакрепите их кнопкой «запомнить»");
+      log(cloud.ready ? "☁ «получше» доступно: " + cloud.models.length + " бесплатных моделей"
+                      : "☁ «получше» выключено (нет models/openrouter.json)");
+      log(spk.ready ? "🎤 отпечаток голоса готов за " + spk.loadMs + " мс, профили: " + spk.describe()
+                    : "🎤 модели отпечатка голоса нет (models/speaker/*.onnx) — разделение говорящих выключено");
+      status("Готово. ASR " + eng.loadAsrMs + " · MT " + eng.loadMtMs + " · TTS " + eng.loadTtsMs + " мс · " + pb.stats());
+      android.content.SharedPreferences pr = getSharedPreferences("at", MODE_PRIVATE);
+      micGainDb = pr.getFloat("micgain", 0); outGainDb = pr.getFloat("gain", 0);
+      micSource = pr.getString("micsrc", "builtin");
+      holdMs = pr.getInt("hold", 1500);
+      refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
+      heartbeat(); startWarm(); startSay(); watchNetwork();
+      boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
+      if (lp || lr) setListen(lp, lr); else { log("🎚 микрофон выключен: включите «Слушать PT» или «Слушать RU»"); status("Микрофон выключен"); }
+      notify("Готов. " + pb.stats()); Listener l = listener; if (l != null) main.post(l::onReady);
+    } catch (Throwable t) { Log.e(TAG, "init", t); status("Ошибка: " + t); }
   }
   Notification notif(String text) {
     PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -135,6 +171,20 @@ public class TranslatorService extends Service {
       getSharedPreferences("at", MODE_PRIVATE).edit().putInt("hold", holdMs).apply();
       log(holdMs == 0 ? "🔊 озвучка сразу, без ожидания паузы"
                       : "🔊 озвучка ждёт " + String.format(Locale.ROOT, "%.1f", holdMs / 1000.0) + " с тишины");
+    }
+    // Стенд: модели по манифесту. modelsbase — локальный сервер вместо Hugging Face (adb reverse), не сохраняется.
+    if (i != null && i.hasExtra("modelsbase") && store != null) { String b = i.getStringExtra("modelsbase"); store.baseOverride = b == null || b.isEmpty() || "off".equals(b) ? null : b; log("⬇ стенд: источник моделей " + (store.baseOverride == null ? "Hugging Face" : store.baseOverride)); }
+    if (i != null && i.hasExtra("anynet")) setAnyNet("1".equals(i.getStringExtra("anynet")));
+    if (i != null && i.hasExtra("models") && store != null) {
+      String m = i.getStringExtra("models");
+      if ("check".equals(m)) worker.submit(() -> { long t = System.nanoTime(); ModelStore.Plan p = store.check("all"); ModelStore.State st = store.state();
+        log("📦 проверка: на месте " + p.have + ", нет " + p.need.size() + (p.need.isEmpty() ? "" : " " + p.need) + " · обязательных нет " + st.coreMissing + " (" + ModelStore.mb(st.coreBytes) + " МБ), необязательных нет " + st.optMissing + " (" + ModelStore.mb(st.optBytes) + " МБ) · " + (System.nanoTime() - t) / 1000000 + " мс");
+        tsv("models_check", "" + p.have, "" + p.need.size(), "" + p.bytes, "" + (System.nanoTime() - t) / 1000000, "" + store.hashedBytes);
+        Listener l = listener; if (l != null) main.post(() -> l.onModels(st)); });
+      else if ("verify".equals(m)) verifyModels();
+      else if ("stop".equals(m)) cancelModels();
+      else if ("core".equals(m) || "optional".equals(m) || "all".equals(m)) downloadModels(m);
+      else { ModelStore.Item it = store.byPath(m); if (it != null) downloadModels(Collections.singletonList(it)); else log("⬇ нет такого элемента в манифесте: " + m); }
     }
     if (i != null && i.hasExtra("auto")) setAutoDir("1".equals(i.getStringExtra("auto")));
     if (i != null && i.hasExtra("denoise")) setDenoise("1".equals(i.getStringExtra("denoise")));
@@ -453,7 +503,11 @@ public class TranslatorService extends Service {
     return START_STICKY;
   }
   @Override public IBinder onBind(Intent i) { return binder; }
-  public void setListener(Listener l) { listener = l; if (l != null && eng != null) main.post(l::onReady); }
+  public void setListener(Listener l) {
+    listener = l; if (l != null && eng != null) main.post(l::onReady);
+    // Экран мог подключиться после проверки моделей при старте — отдаём ему итог сразу.
+    if (l != null && store != null) { ModelStore.State st = store.state(); main.post(() -> l.onModels(st)); }
+  }
   /** Что слушаем. Ни одна кнопка не нажата — микрофон отпускается совсем: приложение не должно
    *  держать вход и гореть точкой записи, когда его не просили слушать.
    *  Обе нажаты — направление выбирается по языку каждой реплики. Одна — только её язык,
@@ -891,6 +945,77 @@ public class TranslatorService extends Service {
     } catch (Throwable e) { return true; }
   }
   void hint(String s) { Listener l = listener; if (l != null) main.post(() -> l.onHint(s)); }
+
+  // ---- модели по манифесту ----------------------------------------------------------------
+  /** Сеть годится для загрузки: есть интернет и либо она без учёта трафика (Wi-Fi), либо
+   *  человек разрешил «и по мобильной сети». Учёт трафика берём у системы: платный Wi-Fi
+   *  или раздача с телефона тоже считаются лимитными. */
+  boolean netAllowed() {
+    try {
+      ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+      Network n = cm.getActiveNetwork(); if (n == null) return false;
+      NetworkCapabilities c = cm.getNetworkCapabilities(n);
+      if (c == null || !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) || !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return false;
+      return anyNet() || c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
+    } catch (Throwable e) { return false; }
+  }
+  public boolean anyNet() { return getSharedPreferences("at", MODE_PRIVATE).getBoolean("models_any_net", false); }
+  public void setAnyNet(boolean on) {
+    getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("models_any_net", on).apply();
+    log(on ? "⬇ загрузка моделей разрешена и по мобильной сети" : "⬇ загрузка моделей только по Wi-Fi");
+  }
+  /** Ход загрузки из потока хранилища: экрану, в уведомление (не чаще раза в секунду), и по
+   *  завершении — движки, если теперь есть всё обязательное, или подключение необязательного. */
+  void onStoreState(ModelStore.State st) {
+    Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
+    long now = System.currentTimeMillis();
+    boolean phaseChanged = !st.phase.equals(lastModelPhase);
+    if (st.busy() && (phaseChanged || now - lastModelNotif >= 1000)) { lastModelNotif = now; notify(ModelStore.describe(st)); }
+    if (phaseChanged && (ModelStore.DONE.equals(st.phase) || ModelStore.ERROR.equals(st.phase) || ModelStore.PAUSED.equals(st.phase))) {
+      notify(ModelStore.describe(st));
+      if (eng == null) worker.submit(() -> { if (store.check("core").complete()) { status("Модели скачаны, загружаю движки…"); loadAll(); } else status(st.message); });
+      else if (ModelStore.DONE.equals(st.phase)) worker.submit(this::reloadOptional);
+    }
+    lastModelPhase = st.phase;
+  }
+  public boolean downloadModels(String tier) {
+    if (store == null) return false;
+    boolean ok = store.start(tier);
+    log(ok ? "⬇ загрузка моделей: " + tier + (store.baseOverride != null ? " (стенд: " + store.baseOverride + ")" : "") : "⬇ загрузка уже идёт");
+    return ok;
+  }
+  public boolean downloadModels(List<ModelStore.Item> items) {
+    if (store == null || items.isEmpty()) return false;
+    boolean ok = store.start(items, "optional");
+    log(ok ? "⬇ загрузка: " + items : "⬇ загрузка уже идёт");
+    return ok;
+  }
+  public void cancelModels() { if (store != null && store.running()) { store.cancel(); log("⬇ остановка загрузки"); } }
+  /** Кнопка «проверить файлы моделей»: всё хэшируется заново, итог в журнал и на экран. */
+  public void verifyModels() {
+    if (store == null || store.running()) return;
+    new Thread(() -> {
+      long t = System.nanoTime();
+      ModelStore.Plan p = store.verify("all");
+      long ms = (System.nanoTime() - t) / 1000000;
+      log("📦 проверка файлов: на месте " + p.have + ", не сошлось или нет " + p.need.size() + (p.need.isEmpty() ? "" : " " + p.need) + " · " + ms + " мс, " + ModelStore.mb(store.hashedBytes) + " МБ прочитано");
+      tsv("models_verify", "" + p.have, "" + p.need.size(), "" + ms);
+      ModelStore.State st = store.state(); Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
+    }, "models-verify").start();
+  }
+  /** Необязательное докачано при работающих движках: подключаем то, что грузится из файлов при
+   *  старте. Уточнитель (LLM) поднимается сам по тумблеру, шумоподавитель — только с перезапуском. */
+  void reloadOptional() {
+    if (eng == null) return;
+    try {
+      if (spk == null || !spk.ready) { spk = new Speaker(modelsDir); if (spk.ready) log("🎤 отпечаток голоса подключён: " + spk.describe()); }
+      if (pb != null && new File(modelsDir, "phrasebook_tatoeba.tsv").exists()) pb.loadMined(new File(modelsDir, "phrasebook_tatoeba.tsv"));
+      if (words != null && new File(modelsDir, "common_words.txt").exists()) { words.loadCommon(); log("📝 " + words.stats()); }
+      if (chats != null) learn = new Learn(chats, modelsDir, getExternalFilesDir(null));
+      if (new File(modelsDir, "denoiser").isDirectory() && eng.denoiser == null) log("🔇 шумоподавитель скачан — подключится после перезапуска приложения");
+      status("Готово. " + pb.stats());
+    } catch (Throwable t) { log("подключение скачанного: " + t); }
+  }
   /** Сеть пришла или ушла — кнопка «получше» и причина в подсказке обновляются сразу, а не со следующей
    *  реплики: на устройстве после выхода из режима полёта кнопка оставалась серой до нового события. */
   void watchNetwork() {
@@ -1781,5 +1906,5 @@ public class TranslatorService extends Service {
     }, "heartbeat").start();
   }
   volatile boolean micSilenced = false;
-  @Override public void onDestroy() { running = false; if (spkTrack != null) spkTrack.release(); worker.shutdownNow(); llmWorker.shutdownNow(); cloudWorker.shutdownNow(); fileLog.shutdownNow(); if (llm != null) llm.stop(); if (wl != null && wl.isHeld()) wl.release(); if (track != null) track.release(); super.onDestroy(); }
+  @Override public void onDestroy() { running = false; if (store != null) store.cancel(); if (spkTrack != null) spkTrack.release(); worker.shutdownNow(); llmWorker.shutdownNow(); cloudWorker.shutdownNow(); fileLog.shutdownNow(); if (llm != null) llm.stop(); if (wl != null && wl.isHeld()) wl.release(); if (track != null) track.release(); super.onDestroy(); }
 }

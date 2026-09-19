@@ -34,6 +34,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   TextView sizeLbl, hintSide;
   SharedPreferences prefs;
   float szPt = 34, szRu = 17;
+  /** Экран первого запуска: разрешения и загрузка моделей по манифесту; блок моделей в «Системе». */
+  View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
+  Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify; ToggleButton tSetupAny, tAnyNet;
+  ModelStore.State mst; boolean micForever, svcStarted;
 
   final ServiceConnection conn = new ServiceConnection() {
     public void onServiceConnected(ComponentName n, IBinder b) { svc = ((TranslatorService.LocalBinder) b).get(); svc.setListener(MainActivity.this); }
@@ -56,7 +60,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     tabs.addView(bTalk, new LinearLayout.LayoutParams(0, -2, 1f));
     tabs.addView(bLearn, new LinearLayout.LayoutParams(0, -2, 1f));
     tabs.addView(bSys, new LinearLayout.LayoutParams(0, -2, 1f));
-    root.addView(tabs);
+    root.addView(tabs); tabsRow = tabs;
 
     // Список разговоров слева: без AndroidX выдвижной панели нет, поэтому просто колонка,
     // которая появляется по ☰ и делит ширину с содержимым.
@@ -69,6 +73,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     box.addView(learnView = buildLearn());
     box.addView(sysView = buildSys());
     box.addView(voiceView = buildVoice());
+    box.addView(setupView = buildSetup());
     mid.addView(box, new LinearLayout.LayoutParams(0, -1, 1f));
     root.addView(mid, new LinearLayout.LayoutParams(-1, 0, 1f));
     for (Button btn : new Button[]{bMenu, bTalk, bLearn, bSys, bAnswer, bEnd, bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bRefineEvery, bCloudEvery}) style(btn);
@@ -99,10 +104,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       refreshChats();
     });
 
-    java.util.List<String> perms = new java.util.ArrayList<>();
-    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) perms.add(Manifest.permission.RECORD_AUDIO);
-    if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) perms.add("android.permission.POST_NOTIFICATIONS");
-    if (!perms.isEmpty()) requestPermissions(perms.toArray(new String[0]), 1); else startSvc();
+    // Первый запуск: без микрофона или без обязательных моделей — экран с объяснением и кнопками,
+    // а не системный диалог с порога. Всё на месте — как раньше: сервис сразу.
+    boolean mic = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    if (!mic || !quickModelsOk()) { show(4); refreshSetup(); }
+    if (mic) {
+      if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
+      else startSvc();
+    }
 
     // «Говорить» принимает любой язык: направление определяется по сказанному.
     bAnswer.setOnTouchListener((v, e) -> { pressed(v, e); return ptt(e, "ru2pt"); });
@@ -470,6 +479,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     learnView.setVisibility(tab == 1 ? View.VISIBLE : View.GONE);
     sysView.setVisibility(tab == 2 ? View.VISIBLE : View.GONE);
     voiceView.setVisibility(tab == 3 ? View.VISIBLE : View.GONE);
+    if (setupView != null) setupView.setVisibility(tab == 4 ? View.VISIBLE : View.GONE);
+    if (tabsRow != null) tabsRow.setVisibility(tab == 4 ? View.GONE : View.VISIBLE);
     Button[] bs = {bTalk, bLearn, bSys};
     for (int k = 0; k < bs.length; k++) {
       boolean on = k == tab || (k == 2 && tab == 3);
@@ -1030,6 +1041,21 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     keyState = new TextView(this); keyState.setTextSize(13); keyState.setTextColor(0xFF33507A); v.addView(keyState);
     bModels = new Button(this); bModels.setText("☁ модели и маршрут"); bModels.setTextSize(13); bModels.setEnabled(false);
     v.addView(bModels);
+    // Файлы моделей на телефоне: что есть по манифесту, докачка необязательного, полная проверка.
+    modelsLbl = new TextView(this); modelsLbl.setTextSize(13); modelsLbl.setTextColor(0xFF33507A); modelsLbl.setPadding(0, 16, 0, 0); modelsLbl.setText("Файлы моделей: проверяю…"); v.addView(modelsLbl);
+    LinearLayout rowM = new LinearLayout(this); rowM.setOrientation(LinearLayout.HORIZONTAL);
+    bModelsDl = new Button(this); bModelsDl.setText("⬇ скачать необязательное…"); bModelsDl.setTextSize(13); bModelsDl.setEnabled(false); rowM.addView(bModelsDl, new LinearLayout.LayoutParams(0, -2, 1f));
+    bModelsStop = new Button(this); bModelsStop.setText("стоп"); bModelsStop.setTextSize(13); bModelsStop.setVisibility(View.GONE); rowM.addView(bModelsStop, new LinearLayout.LayoutParams(-2, -2));
+    v.addView(rowM);
+    tAnyNet = new ToggleButton(this); tAnyNet.setTextOn("качать и по мобильной сети: ВКЛ"); tAnyNet.setTextOff("качать и по мобильной сети: выкл");
+    tAnyNet.setChecked(prefs.getBoolean("models_any_net", false)); v.addView(tAnyNet);
+    tAnyNet.setOnCheckedChangeListener((vv, on) -> setAnyNet(on));
+    bModelsVerify = new Button(this); bModelsVerify.setText("проверить файлы моделей"); bModelsVerify.setTextSize(13); bModelsVerify.setEnabled(false); v.addView(bModelsVerify);
+    for (Button b : new Button[]{bModelsDl, bModelsStop, bModelsVerify}) style(b);
+    style(tAnyNet);
+    bModelsDl.setOnClickListener(vv -> optionalDialog());
+    bModelsStop.setOnClickListener(vv -> { if (svc != null) svc.cancelModels(); });
+    bModelsVerify.setOnClickListener(vv -> { if (svc != null) { svc.verifyModels(); onLog("📦 проверяю файлы моделей — это чтение всех моделей с диска, несколько секунд"); } });
     tCtx = new ToggleButton(this); tCtx.setTextOn("🧠 контекст (LLM в фоне): ВКЛ"); tCtx.setTextOff("🧠 контекст (LLM в фоне): выкл"); tCtx.setChecked(false); tCtx.setEnabled(false); v.addView(tCtx);
     // Как часто разбирать контекст: локально (уточнитель 🧠) и в облаке (пересмотр всего разговора).
     // 0 — только по кнопке «получше». Кнопки перебирают значения по кругу: без AndroidX это проще
@@ -1169,6 +1195,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
 
   void startSvc() {
+    if (svcStarted) return; svcStarted = true;
     Intent i = new Intent(this, TranslatorService.class);
     // Переносим все добавки без разбора: список имён молча терял новые флаги, и снаружи это
     // выглядело как «интент не работает».
@@ -1180,7 +1207,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  одни уведомления, отказ от них не должен мешать приложению запуститься. */
   @Override public void onRequestPermissionsResult(int rc, String[] p, int[] r) {
     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startSvc();
-    else status.setText("Нужен доступ к микрофону");
+    else {
+      status.setText("Нужен доступ к микрофону");
+      // Ответ пришёл без диалога — «больше не спрашивать»: дальше только настройки приложения.
+      micForever = !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO);
+    }
+    refreshSetup();
+  }
+  @Override protected void onResume() {
+    super.onResume();
+    if (setupView != null && setupView.getVisibility() == View.VISIBLE) {   // вернулись из настроек приложения
+      if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { micForever = false; startSvc(); }
+      refreshSetup();
+    }
   }
   boolean enroll(MotionEvent e, String who, String lang) {
     if (svc == null) return false;
@@ -1231,6 +1270,125 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (isFinishing() || isDestroyed()) return;
     if (manual) namesDialog(names);
     else onLog("📝 имена от модели: " + names.size() + " — долгое нажатие на подсказку, чтобы добавить в свои слова");
+  }
+  @Override public void onModels(ModelStore.State s) {
+    mst = s; refreshSetup(); refreshModels();
+    // Обязательное на месте и микрофон разрешён — первый экран больше не нужен; движки грузит сервис.
+    if (setupView.getVisibility() == View.VISIBLE && s.checked && s.coreMissing == 0 && !s.busy()
+        && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { show(0); setHint("Загружаю движки…"); }
+  }
+
+  // ---- первый запуск и файлы моделей ------------------------------------------------------
+  /** Быстрая проверка по манифесту из APK: наличие и размер, без хэшей — решить, показывать ли первый экран. */
+  boolean quickModelsOk() {
+    try (java.io.InputStream in = getAssets().open("models_manifest.json")) {
+      java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(); byte[] b = new byte[1 << 14]; int n;
+      while ((n = in.read(b)) > 0) bo.write(b, 0, n);
+      ModelStore ms = new ModelStore(new java.io.File(getExternalFilesDir(null), "models"), new String(bo.toByteArray(), "UTF-8"), () -> false, null, x -> {});
+      return ms.quick("core").complete();
+    } catch (Throwable t) { return true; }
+  }
+  View buildSetup() {
+    ScrollView sv = new ScrollView(this);
+    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(40, 40, 40, 40); sv.addView(v);
+    TextView t = new TextView(this); t.setText("Falar"); t.setTextSize(34); t.setTypeface(null, Typeface.BOLD); v.addView(t);
+    TextView sub = new TextView(this); sub.setTextSize(16); sub.setText("Переводчик разговора: бразильский португальский ↔ русский, без интернета."); v.addView(sub);
+    TextView warn = new TextView(this); warn.setTextSize(15); warn.setPadding(0, 24, 0, 24);
+    warn.setText("Приложение слушает микрофон и распознаёт речь всех, кто рядом, — предупредите собеседника. "
+               + "Распознавание, перевод и голос работают на телефоне: в интернет ничего не уходит, кроме загрузки моделей сейчас "
+               + "и облачного пересмотра, который включается отдельно и с вашего согласия.");
+    v.addView(warn);
+    TextView h1 = new TextView(this); h1.setTextSize(17); h1.setTypeface(null, Typeface.BOLD); h1.setText("1. Микрофон"); v.addView(h1);
+    setupMic = new TextView(this); setupMic.setTextSize(15); v.addView(setupMic);
+    bSetupMic = new Button(this); bSetupMic.setText("разрешить микрофон"); v.addView(bSetupMic);
+    TextView h2 = new TextView(this); h2.setTextSize(17); h2.setTypeface(null, Typeface.BOLD); h2.setPadding(0, 24, 0, 0); h2.setText("2. Модели"); v.addView(h2);
+    setupText = new TextView(this); setupText.setTextSize(15); v.addView(setupText);
+    tSetupAny = new ToggleButton(this); tSetupAny.setTextOn("качать и по мобильной сети: ВКЛ"); tSetupAny.setTextOff("качать и по мобильной сети: выкл");
+    tSetupAny.setChecked(prefs.getBoolean("models_any_net", false)); v.addView(tSetupAny);
+    tSetupAny.setOnCheckedChangeListener((vv, on) -> setAnyNet(on));
+    LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
+    bSetupDl = new Button(this); bSetupDl.setText("скачать"); bSetupDl.setEnabled(false); row.addView(bSetupDl, new LinearLayout.LayoutParams(0, -2, 1f));
+    bSetupStop = new Button(this); bSetupStop.setText("стоп"); bSetupStop.setVisibility(View.GONE); row.addView(bSetupStop, new LinearLayout.LayoutParams(-2, -2));
+    v.addView(row);
+    setupBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); setupBar.setMax(1000); setupBar.setVisibility(View.GONE); v.addView(setupBar);
+    setupProg = new TextView(this); setupProg.setTextSize(14); setupProg.setTextColor(Color.DKGRAY); v.addView(setupProg);
+    for (Button b : new Button[]{bSetupMic, bSetupDl, bSetupStop}) style(b);
+    bSetupMic.setOnClickListener(vv -> askMic());
+    bSetupDl.setOnClickListener(vv -> { if (svc != null) svc.downloadModels("core"); });
+    bSetupStop.setOnClickListener(vv -> { if (svc != null) svc.cancelModels(); });
+    return sv;
+  }
+  void askMic() {
+    if (micForever) {   // отказано с «больше не спрашивать» — система диалог не покажет
+      startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + getPackageName())));
+      return;
+    }
+    java.util.List<String> perms = new java.util.ArrayList<>();
+    perms.add(Manifest.permission.RECORD_AUDIO);
+    if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) perms.add("android.permission.POST_NOTIFICATIONS");
+    requestPermissions(perms.toArray(new String[0]), 1);
+  }
+  void setAnyNet(boolean on) {
+    prefs.edit().putBoolean("models_any_net", on).apply();
+    if (svc != null) svc.setAnyNet(on);
+    if (tAnyNet != null && tAnyNet.isChecked() != on) tAnyNet.setChecked(on);
+    if (tSetupAny != null && tSetupAny.isChecked() != on) tSetupAny.setChecked(on);
+  }
+  String progressLine(ModelStore.State s) {
+    String d = ModelStore.describe(s);
+    if (ModelStore.WAIT.equals(s.phase)) d += "\nНужен Wi-Fi без учёта трафика — или включите «качать и по мобильной сети»";
+    if (!s.errors.isEmpty() && !s.busy()) d += "\n" + String.join("\n", s.errors);
+    return d;
+  }
+  void refreshSetup() {
+    if (setupView == null) return;
+    boolean mic = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    setupMic.setText(mic ? "✓ разрешён" : micForever ? "Доступ запрещён — включите микрофон в настройках приложения." : "Без микрофона слушать нечем. Разрешение спросит система.");
+    bSetupMic.setText(micForever && !mic ? "открыть настройки приложения" : "разрешить микрофон"); bSetupMic.setVisibility(mic ? View.GONE : View.VISIBLE);
+    ModelStore.State s = mst; boolean busy = s != null && s.busy();
+    if (!mic) setupText.setText("Обязательные модели (около 2 ГБ, с Hugging Face) — после разрешения микрофона.");
+    else if (svc == null || s == null || !s.checked) setupText.setText("Проверяю, что уже лежит на телефоне…");
+    else if (s.coreMissing == 0 && !busy) setupText.setText("✓ модели на месте");
+    else setupText.setText("Не хватает " + s.coreMissing + " файлов, " + ModelStore.mb(s.coreBytes) + " МБ. Качается с Hugging Face один раз; "
+                         + "по умолчанию только по Wi-Fi. Можно остановить и продолжить позже с того же места.");
+    bSetupDl.setEnabled(mic && svc != null && s != null && s.checked && !busy && s.coreMissing > 0);
+    bSetupDl.setText(s != null && ModelStore.PAUSED.equals(s.phase) ? "продолжить" : "скачать" + (s != null && s.coreBytes > 0 ? " " + ModelStore.mb(s.coreBytes) + " МБ" : ""));
+    bSetupStop.setVisibility(busy ? View.VISIBLE : View.GONE);
+    setupBar.setVisibility(s != null && (busy || ModelStore.PAUSED.equals(s.phase)) ? View.VISIBLE : View.GONE);
+    if (s != null && s.total > 0) setupBar.setProgress((int) (s.done * 1000 / s.total));
+    setupProg.setText(s == null ? "" : progressLine(s));
+  }
+  void refreshModels() {
+    if (modelsLbl == null) return;
+    ModelStore.State s = mst;
+    if (s == null || !s.checked) { modelsLbl.setText("Файлы моделей: проверяю…"); bModelsDl.setEnabled(false); bModelsVerify.setEnabled(false); bModelsStop.setVisibility(View.GONE); return; }
+    StringBuilder sb = new StringBuilder("Файлы моделей " + (svc != null && svc.store != null ? svc.store.app : "") + ": обязательные "
+      + (s.coreMissing == 0 ? "все на месте" : "нет " + s.coreMissing + " (" + ModelStore.mb(s.coreBytes) + " МБ)") + " · необязательные "
+      + (s.optMissing == 0 ? "все на месте" : "нет " + s.optMissing + " (" + ModelStore.mb(s.optBytes) + " МБ)"));
+    if (s.busy() || !s.message.isEmpty()) sb.append("\n").append(progressLine(s));
+    modelsLbl.setText(sb);
+    bModelsDl.setEnabled(!s.busy() && s.optMissing > 0); bModelsStop.setVisibility(s.busy() ? View.VISIBLE : View.GONE); bModelsVerify.setEnabled(!s.busy());
+  }
+  static String modelTitle(ModelStore.Item it) {
+    String p = it.path;
+    String t = p.startsWith("llm/") ? "🧠 контекстный уточнитель (LLM, нужен сильный телефон)" : p.startsWith("speaker/") ? "🎤 отпечаток голоса: авто-направление, разделение говорящих"
+      : p.startsWith("denoiser/") ? "🔇 шумоподавитель" : p.equals("phrasebook_tatoeba.tsv") ? "📚 корпус фраз Tatoeba (190 тыс. пар)"
+      : p.equals("common_words.txt") ? "📝 частотные слова: поиск имён в речи" : p;
+    return t + " · " + ModelStore.mb(it.size) + " МБ";
+  }
+  /** Необязательное — по выбору: LLM на 1,1 ГБ слабому телефону ни к чему. */
+  void optionalDialog() {
+    if (svc == null || svc.store == null) return;
+    new Thread(() -> { final java.util.List<ModelStore.Item> need = svc.store.check("optional").need; runOnUiThread(() -> {
+      if (isFinishing() || isDestroyed()) return;
+      if (need.isEmpty()) { onLog("⬇ необязательное всё на месте"); return; }
+      final String[] names = new String[need.size()]; final boolean[] on = new boolean[need.size()];
+      for (int k = 0; k < need.size(); k++) { names[k] = modelTitle(need.get(k)); on[k] = true; }
+      new android.app.AlertDialog.Builder(this).setTitle("Скачать необязательное")
+        .setMultiChoiceItems(names, on, (d, w, c) -> on[w] = c)
+        .setPositiveButton("скачать", (d, w) -> { java.util.List<ModelStore.Item> sel = new java.util.ArrayList<>(); for (int k = 0; k < need.size(); k++) if (on[k]) sel.add(need.get(k)); if (!sel.isEmpty() && svc != null) svc.downloadModels(sel); })
+        .setNegativeButton("отмена", null).show();
+    }); }, "opt-list").start();
   }
 
   /** Португальская сторона всегда крупно, русская мелко — независимо от направления перевода. */

@@ -20,5 +20,8 @@
 Требования: телефон на arm64 с Android 9 и новее; для полной сборки с локальным уточнителем —
 от 6 ГБ памяти. Модели занимают около 1,9 ГиБ обязательных и 1,1 ГиБ необязательных.
 
-Сборка без Gradle: `bench/apk/build.sh` (javac + D8 + aapt2 + zipalign + apksigner), модели —
-`python3 tools/models_fetch.py`, заливка на телефон — `bench/apk/push_models.sh`.
+Сборка без Gradle: `bench/apk/build.sh` (javac + D8 + aapt2 + zipalign + apksigner). Модели
+приложение качает само при первом запуске по манифесту, вшитому в APK (`models/manifest.json`):
+обязательное с экрана первого запуска, необязательное — из «Системы». Для стенда зеркало собирает
+`python3 tools/models_fetch.py`, на телефон его заливает `bench/apk/push_models.sh`.
+Тесты загрузчика: `bash bench/apk/test.sh` (стол), `bash bench/apk/test_models_device.sh` (телефон).
