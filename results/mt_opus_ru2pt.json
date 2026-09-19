@@ -1,0 +1,254 @@
+{
+  "summary": {
+    "engine": "opus-mt-tc-big-zle-pt-int8+split",
+    "direction": "ru2pt",
+    "profile": "poco-cpu",
+    "chrf": 65.25,
+    "lat_avg": 0.14,
+    "lat_p50": 0.14,
+    "lat_p95": 0.21,
+    "n": 40
+  },
+  "results": [
+    {
+      "src": "Здравствуйте! Сколько стоит билет на автобус?",
+      "ref": "Olá! Quanto custa a passagem de ônibus?",
+      "hyp": "Bom dia! Quanto custa um bilhete de ônibus?",
+      "sec": 0.15
+    },
+    {
+      "src": "Я не говорю по-португальски, извините.",
+      "ref": "Eu não falo português, desculpe.",
+      "hyp": "Não falo português, desculpe.",
+      "sec": 0.13
+    },
+    {
+      "src": "Можно мне меню, пожалуйста?",
+      "ref": "Posso ver o cardápio, por favor?",
+      "hyp": "Pode dar-me o menu, por favor?",
+      "sec": 0.18
+    },
+    {
+      "src": "Где ближайшая аптека?",
+      "ref": "Onde fica a farmácia mais próxima?",
+      "hyp": "Onde é a farmácia mais próxima?",
+      "sec": 0.13
+    },
+    {
+      "src": "Мне нужно снять деньги в банкомате.",
+      "ref": "Preciso sacar dinheiro no caixa eletrônico.",
+      "hyp": "Tenho de ir buscar o dinheiro ao multibanco.",
+      "sec": 0.22
+    },
+    {
+      "src": "Вы можете показать это на карте?",
+      "ref": "Você pode me mostrar isso no mapa?",
+      "hyp": "Você pode mostrar isso no mapa?",
+      "sec": 0.15
+    },
+    {
+      "src": "Я живу в отеле рядом с пляжем.",
+      "ref": "Estou hospedado em um hotel perto da praia.",
+      "hyp": "Moro num hotel perto da praia.",
+      "sec": 0.15
+    },
+    {
+      "src": "Во сколько начинается экскурсия?",
+      "ref": "A que horas começa o passeio?",
+      "hyp": "A que horas começa o passeio?",
+      "sec": 0.13
+    },
+    {
+      "src": "Это далеко отсюда? Можно дойти пешком?",
+      "ref": "É longe daqui? Dá para ir a pé?",
+      "hyp": "É muito longe daqui? Posso ir a pé?",
+      "sec": 0.12
+    },
+    {
+      "src": "Спасибо большое за помощь!",
+      "ref": "Muito obrigado pela ajuda!",
+      "hyp": "Muito obrigado pela ajuda!",
+      "sec": 0.12
+    },
+    {
+      "src": "Я бы хотел заказать ужин на двоих.",
+      "ref": "Gostaria de pedir um jantar para dois.",
+      "hyp": "Gostaria de pedir um jantar para dois.",
+      "sec": 0.16
+    },
+    {
+      "src": "Без лука и без острого, пожалуйста.",
+      "ref": "Sem cebola e sem pimenta, por favor.",
+      "hyp": "Sem cebolas e sem picante, por favor.",
+      "sec": 0.18
+    },
+    {
+      "src": "Можно ещё один стакан воды?",
+      "ref": "Pode trazer mais um copo de água?",
+      "hyp": "Pode trazer-me outro copo de água?",
+      "sec": 0.16
+    },
+    {
+      "src": "Как пройти к автовокзалу?",
+      "ref": "Como chego à rodoviária?",
+      "hyp": "Como chegar à estação de ônibus?",
+      "sec": 0.14
+    },
+    {
+      "src": "Я опаздываю на самолёт, пожалуйста, быстрее.",
+      "ref": "Estou atrasado para o voo, por favor, mais rápido.",
+      "hyp": "Estou atrasado para o avião, por favor, depressa.",
+      "sec": 0.21
+    },
+    {
+      "src": "У вас есть свободные номера на сегодня?",
+      "ref": "Vocês têm quartos disponíveis para hoje?",
+      "hyp": "Você tem quartos disponíveis para hoje?",
+      "sec": 0.15
+    },
+    {
+      "src": "Сколько стоит одна ночь?",
+      "ref": "Quanto custa uma diária?",
+      "hyp": "Quanto custa uma noite?",
+      "sec": 0.11
+    },
+    {
+      "src": "Завтрак включён в стоимость?",
+      "ref": "O café da manhã está incluído no preço?",
+      "hyp": "O café da manhã está incluído?",
+      "sec": 0.14
+    },
+    {
+      "src": "Можно оставить чемодан на ресепшене?",
+      "ref": "Posso deixar a mala na recepção?",
+      "hyp": "Posso deixar a mala na recepção?",
+      "sec": 0.15
+    },
+    {
+      "src": "Я потерял паспорт. Что мне делать?",
+      "ref": "Perdi meu passaporte. O que devo fazer?",
+      "hyp": "Perdi meu passaporte. O que devo fazer?",
+      "sec": 0.13
+    },
+    {
+      "src": "Где находится консульство России?",
+      "ref": "Onde fica o consulado da Rússia?",
+      "hyp": "Onde fica o Consulado da Rússia?",
+      "sec": 0.13
+    },
+    {
+      "src": "Позовите, пожалуйста, полицию.",
+      "ref": "Chame a polícia, por favor.",
+      "hyp": "Chame a polícia, por favor.",
+      "sec": 0.15
+    },
+    {
+      "src": "Мне плохо, вызовите скорую помощь.",
+      "ref": "Estou passando mal, chame uma ambulância.",
+      "hyp": "Não me sinto bem. Chamem uma ambulância.",
+      "sec": 0.18
+    },
+    {
+      "src": "Какой сегодня день недели?",
+      "ref": "Que dia da semana é hoje?",
+      "hyp": "Que dia da semana é hoje?",
+      "sec": 0.13
+    },
+    {
+      "src": "Вы не подскажете, где остановка автобуса?",
+      "ref": "Você sabe onde fica o ponto de ônibus?",
+      "hyp": "Pode dizer-me onde pára o autocarro?",
+      "sec": 0.2
+    },
+    {
+      "src": "Это место занято?",
+      "ref": "Este lugar está ocupado?",
+      "hyp": "Este lugar está ocupado?",
+      "sec": 0.12
+    },
+    {
+      "src": "Приятного аппетита!",
+      "ref": "Bom apetite!",
+      "hyp": "Bom apetite!",
+      "sec": 0.08
+    },
+    {
+      "src": "Как это называется по-португальски?",
+      "ref": "Como se diz isso em português?",
+      "hyp": "Como se chama isto em português?",
+      "sec": 0.15
+    },
+    {
+      "src": "Повторите, пожалуйста, ещё раз.",
+      "ref": "Repita, por favor, mais uma vez.",
+      "hyp": "Pode repetir, por favor?",
+      "sec": 0.12
+    },
+    {
+      "src": "Говорите, пожалуйста, медленнее.",
+      "ref": "Fale mais devagar, por favor.",
+      "hyp": "Por favor, fale mais devagar.",
+      "sec": 0.13
+    },
+    {
+      "src": "Я вас не понимаю.",
+      "ref": "Não estou entendendo você.",
+      "hyp": "Não o compreendo.",
+      "sec": 0.08
+    },
+    {
+      "src": "Напишите, пожалуйста, адрес.",
+      "ref": "Escreva o endereço, por favor.",
+      "hyp": "Por favor, escreva o endereço.",
+      "sec": 0.13
+    },
+    {
+      "src": "Сколько это будет в долларах?",
+      "ref": "Quanto fica isso em dólares?",
+      "hyp": "Quanto é em dólares?",
+      "sec": 0.15
+    },
+    {
+      "src": "Это слишком дорого. Можете сделать скидку?",
+      "ref": "Está muito caro. Pode fazer um desconto?",
+      "hyp": "É muito caro. Pode dar-me um desconto?",
+      "sec": 0.15
+    },
+    {
+      "src": "Я просто смотрю, спасибо.",
+      "ref": "Estou só olhando, obrigado.",
+      "hyp": "Só estou a olhar, obrigado.",
+      "sec": 0.13
+    },
+    {
+      "src": "Увидимся завтра в это же время.",
+      "ref": "Nos vemos amanhã no mesmo horário.",
+      "hyp": "Vejo-te amanhã à mesma hora.",
+      "sec": 0.17
+    },
+    {
+      "src": "Передавайте привет вашей семье.",
+      "ref": "Mande lembranças para a sua família.",
+      "hyp": "Diga olá à sua família.",
+      "sec": 0.13
+    },
+    {
+      "src": "Желаю вам хорошего дня!",
+      "ref": "Tenha um bom dia!",
+      "hyp": "Desejo-lhe um bom dia!",
+      "sec": 0.13
+    },
+    {
+      "src": "До свидания, всего наилучшего.",
+      "ref": "Tchau, tudo de bom.",
+      "hyp": "Adeus, boa sorte.",
+      "sec": 0.1
+    },
+    {
+      "src": "Мне очень понравился ваш город.",
+      "ref": "Gostei muito da sua cidade.",
+      "hyp": "Gostei muito da sua cidade.",
+      "sec": 0.13
+    }
+  ]
+}

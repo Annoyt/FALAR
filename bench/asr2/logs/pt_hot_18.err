@@ -1,0 +1,43 @@
+/k2-fsa/sherpa-onnx/sherpa-onnx/csrc/parse-options.cc:Read:374 ./sherpa-onnx-offline --tokens=/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/tokens.txt --encoder=/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/encoder.int8.onnx --decoder=/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/decoder.int8.onnx --joiner=/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/joiner.int8.onnx --model-type=nemo_transducer --num-threads=4 --decoding-method=modified_beam_search --modeling-unit=bpe --bpe-vocab=/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/bpe.vocab --hotwords-file=/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/hotwords.txt --hotwords-score=18 /data/local/tmp/sh/audio/pt/model_test.wav /data/local/tmp/sh/audio/pt/tat_1112641.wav /data/local/tmp/sh/audio/pt/tat_2457867.wav /data/local/tmp/sh/audio/pt/tat_2652877.wav /data/local/tmp/sh/audio/pt/tat_3489553.wav /data/local/tmp/sh/audio/pt/tat_5080466.wav /data/local/tmp/sh/audio/pt/tat_5150001.wav /data/local/tmp/sh/audio/pt/tat_5218298.wav /data/local/tmp/sh/audio/pt/tat_579858.wav /data/local/tmp/sh/audio/pt/tat_5806748.wav /data/local/tmp/sh/audio/pt/tat_826362.wav /data/local/tmp/sh/audio/pt/tat_933784.wav /data/local/tmp/sh/audio/pt/tat_972432.wav 
+
+OfflineRecognizerConfig(feat_config=FeatureExtractorConfig(sampling_rate=16000, feature_dim=80, low_freq=20, high_freq=-400, dither=0, normalize_samples=True, snip_edges=False), model_config=OfflineModelConfig(transducer=OfflineTransducerModelConfig(encoder_filename="/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/encoder.int8.onnx", decoder_filename="/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/decoder.int8.onnx", joiner_filename="/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/joiner.int8.onnx"), paraformer=OfflineParaformerModelConfig(model=""), nemo_ctc=OfflineNemoEncDecCtcModelConfig(model=""), whisper=OfflineWhisperModelConfig(encoder="", decoder="", language="", task="transcribe", tail_paddings=-1, enable_token_timestamps=False, enable_segment_timestamps=False, ), fire_red_asr=OfflineFireRedAsrModelConfig(encoder="", decoder=""), tdnn=OfflineTdnnModelConfig(model=""), zipformer_ctc=OfflineZipformerCtcModelConfig(model=""), wenet_ctc=OfflineWenetCtcModelConfig(model=""), sense_voice=OfflineSenseVoiceModelConfig(model="", language="auto", use_itn=False), moonshine=OfflineMoonshineModelConfig(preprocessor="", encoder="", uncached_decoder="", cached_decoder="", merged_decoder="", decoder="", ), dolphin=OfflineDolphinModelConfig(model=""), canary=OfflineCanaryModelConfig(encoder="", decoder="", src_lang="", tgt_lang="", use_pnc=True), cohere_transcribe=OfflineCohereTranscribeModelConfig(encoder="", decoder="", language="", use_punct=True, use_itn=True), omnilingual=OfflineOmnilingualAsrCtcModelConfig(model=""), funasr_nano=OfflineFunASRNanoModelConfig(encoder_adaptor="", llm="", embedding="", tokenizer="", system_prompt="You are a helpful assistant.", user_prompt="语音转写：", max_new_tokens=512, temperature=1e-06, top_p=0.8, seed=42, language="", itn=True, hotwords=""), medasr=OfflineMedAsrCtcModelConfig(model=""), fire_red_asr_ctc=OfflineFireRedAsrCtcModelConfig(model=""), qwen3_asr=OfflineQwen3ASRModelConfig(conv_frontend="", encoder="", decoder="", tokenizer="", hotwords="", max_total_len=512, max_new_tokens=128, temperature=1e-06, top_p=0.8, seed=42), telespeech_ctc="", tokens="/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/tokens.txt", num_threads=4, debug=False, provider="cpu", model_type="nemo_transducer", modeling_unit="bpe", bpe_vocab="/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/bpe.vocab"), lm_config=OfflineLMConfig(model="", scale=0.5, lodr_scale=0.01, lodr_fst="", lodr_backoff_id=-1), ctc_fst_decoder_config=OfflineCtcFstDecoderConfig(graph="", max_active=3000), decoding_method="modified_beam_search", max_active_paths=4, hotwords_file="/data/local/tmp/sh/m/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/hotwords.txt", hotwords_score=18, blank_penalty=0, rule_fsts="", rule_fars="", hr=HomophoneReplacerConfig(lexicon="", rule_fsts=""))
+Creating recognizer ...
+recognizer created in 3.759 s
+Started
+/k2-fsa/sherpa-onnx/sherpa-onnx/csrc/offline-stream.cc:AcceptWaveformImpl:146 Creating a resampler:
+   in_sample_rate: 22050
+   output_sample_rate: 16000
+
+Done!
+
+/data/local/tmp/sh/audio/pt/model_test.wav
+----
+/data/local/tmp/sh/audio/pt/tat_1112641.wav
+----
+/data/local/tmp/sh/audio/pt/tat_2457867.wav
+----
+/data/local/tmp/sh/audio/pt/tat_2652877.wav
+----
+/data/local/tmp/sh/audio/pt/tat_3489553.wav
+----
+/data/local/tmp/sh/audio/pt/tat_5080466.wav
+----
+/data/local/tmp/sh/audio/pt/tat_5150001.wav
+----
+/data/local/tmp/sh/audio/pt/tat_5218298.wav
+----
+/data/local/tmp/sh/audio/pt/tat_579858.wav
+----
+/data/local/tmp/sh/audio/pt/tat_5806748.wav
+----
+/data/local/tmp/sh/audio/pt/tat_826362.wav
+----
+/data/local/tmp/sh/audio/pt/tat_933784.wav
+----
+/data/local/tmp/sh/audio/pt/tat_972432.wav
+----
+num threads: 4
+decoding method: modified_beam_search
+max active paths: 4
+Elapsed seconds: 8.324 s
+Real time factor (RTF): 8.324 / 33.886 = 0.246

@@ -1,0 +1,1 @@
+режим=air язык=pt пауза=3000 кругов=1 норма=-20 громкость=volume is 15 in range [0..15] нарезка=gate=3 minspeech=150 preroll=400

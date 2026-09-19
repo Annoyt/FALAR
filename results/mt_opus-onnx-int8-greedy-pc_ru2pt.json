@@ -1,0 +1,712 @@
+{
+ "summary": {
+  "engine": "opus-onnx-int8-greedy-pc",
+  "direction": "ru2pt",
+  "chrf": 62.92,
+  "lat_avg": 0.081,
+  "lat_p50": 0.078,
+  "lat_p95": 0.128,
+  "n": 40
+ },
+ "results": [
+  {
+   "src": "Здравствуйте! Сколько стоит билет на автобус?",
+   "ref": "Olá! Quanto custa a passagem de ônibus?",
+   "hyp": "Olá, olá. Quanto custa um bilhete de ônibus?",
+   "sec": 0.131,
+   "out_ids": [
+    [
+     21873,
+     10,
+     21871,
+     27
+    ],
+    [
+     25249,
+     8880,
+     30742,
+     4797,
+     9017,
+     21983,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Я не говорю по-португальски, извините.",
+   "ref": "Eu não falo português, desculpe.",
+   "hyp": "Não falo português, desculpe.",
+   "sec": 0.073,
+   "out_ids": [
+    [
+     20891,
+     13179,
+     24001,
+     10,
+     9501,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Можно мне меню, пожалуйста?",
+   "ref": "Posso ver o cardápio, por favor?",
+   "hyp": "Pode dar-me o menu, por favor?",
+   "sec": 0.128,
+   "out_ids": [
+    [
+     23742,
+     8979,
+     8,
+     19673,
+     21588,
+     19896,
+     10,
+     23933,
+     13297,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Где ближайшая аптека?",
+   "ref": "Onde fica a farmácia mais próxima?",
+   "hyp": "Onde é a farmácia mais próxima?",
+   "sec": 0.077,
+   "out_ids": [
+    [
+     21969,
+     10767,
+     1386,
+     13255,
+     19221,
+     24993,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Мне нужно снять деньги в банкомате.",
+   "ref": "Preciso sacar dinheiro no caixa eletrônico.",
+   "hyp": "Tenho de ir ao multibanco buscar dinheiro.",
+   "sec": 0.108,
+   "out_ids": [
+    [
+     29457,
+     9017,
+     17316,
+     3095,
+     20743,
+     4419,
+     6841,
+     5329,
+     10107,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Вы можете показать это на карте?",
+   "ref": "Você pode me mostrar isso no mapa?",
+   "hyp": "Pode mostrar isso no mapa?",
+   "sec": 0.072,
+   "out_ids": [
+    [
+     23742,
+     20597,
+     17452,
+     21322,
+     19399,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Я живу в отеле рядом с пляжем.",
+   "ref": "Estou hospedado em um hotel perto da praia.",
+   "hyp": "Moro num hotel perto da praia.",
+   "sec": 0.085,
+   "out_ids": [
+    [
+     20514,
+     21587,
+     21532,
+     15757,
+     23315,
+     8909,
+     24157,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Во сколько начинается экскурсия?",
+   "ref": "A que horas começa o passeio?",
+   "hyp": "A que horas começa a visita?",
+   "sec": 0.074,
+   "out_ids": [
+    [
+     1388,
+     25275,
+     15705,
+     7114,
+     1386,
+     31636,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Это далеко отсюда? Можно дойти пешком?",
+   "ref": "É longe daqui? Dá para ir a pé?",
+   "hyp": "É longe daqui? Posso caminhar?",
+   "sec": 0.087,
+   "out_ids": [
+    [
+     10769,
+     18917,
+     8975,
+     21
+    ],
+    [
+     24054,
+     5570,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Спасибо большое за помощь!",
+   "ref": "Muito obrigado pela ajuda!",
+   "hyp": "Muito obrigado pela ajuda!",
+   "sec": 0.057,
+   "out_ids": [
+    [
+     20729,
+     21638,
+     22964,
+     2300,
+     16
+    ]
+   ]
+  },
+  {
+   "src": "Я бы хотел заказать ужин на двоих.",
+   "ref": "Gostaria de pedir um jantar para dois.",
+   "hyp": "Gostaria de pedir um jantar para dois.",
+   "sec": 0.08,
+   "out_ids": [
+    [
+     14933,
+     9017,
+     22933,
+     30742,
+     17619,
+     22592,
+     10510,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Без лука и без острого, пожалуйста.",
+   "ref": "Sem cebola e sem pimenta, por favor.",
+   "hyp": "Sem cebolas e sem picante, por favor.",
+   "sec": 0.099,
+   "out_ids": [
+    [
+     27645,
+     6082,
+     27128,
+     10763,
+     27643,
+     23457,
+     10,
+     23933,
+     13297,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Можно ещё один стакан воды?",
+   "ref": "Pode trazer mais um copo de água?",
+   "hyp": "Pode trazer-me outro copo de água?",
+   "sec": 0.091,
+   "out_ids": [
+    [
+     23742,
+     30363,
+     8,
+     19673,
+     22328,
+     8271,
+     9017,
+     2247,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Как пройти к автовокзалу?",
+   "ref": "Como chego à rodoviária?",
+   "hyp": "Como chegar à estação de ônibus?",
+   "sec": 0.072,
+   "out_ids": [
+    [
+     7204,
+     6394,
+     1394,
+     12248,
+     9017,
+     21983,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Я опаздываю на самолёт, пожалуйста, быстрее.",
+   "ref": "Estou atrasado para o voo, por favor, mais rápido.",
+   "hyp": "Estou atrasado para o avião, por favor, depressa.",
+   "sec": 0.112,
+   "out_ids": [
+    [
+     12417,
+     4013,
+     22592,
+     21588,
+     4257,
+     10,
+     23933,
+     13297,
+     10,
+     9323,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "У вас есть свободные номера на сегодня?",
+   "ref": "Vocês têm quartos disponíveis para hoje?",
+   "hyp": "Tem quartos disponíveis para hoje?",
+   "sec": 0.066,
+   "out_ids": [
+    [
+     29383,
+     25266,
+     10268,
+     22592,
+     15622,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Сколько стоит одна ночь?",
+   "ref": "Quanto custa uma diária?",
+   "hyp": "Quanto custa uma noite?",
+   "sec": 0.062,
+   "out_ids": [
+    [
+     25249,
+     8880,
+     30748,
+     21343,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Завтрак включён в стоимость?",
+   "ref": "O café da manhã está incluído no preço?",
+   "hyp": "O café da manhã está incluído?",
+   "sec": 0.097,
+   "out_ids": [
+    [
+     21590,
+     5440,
+     8909,
+     19321,
+     12221,
+     16457,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Можно оставить чемодан на ресепшене?",
+   "ref": "Posso deixar a mala na recepção?",
+   "hyp": "Posso deixar a mala na recepção?",
+   "sec": 0.086,
+   "out_ids": [
+    [
+     24054,
+     9177,
+     1386,
+     19239,
+     20844,
+     25744,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Я потерял паспорт. Что мне делать?",
+   "ref": "Perdi meu passaporte. O que devo fazer?",
+   "hyp": "Perdi o passaporte. O que faço?",
+   "sec": 0.106,
+   "out_ids": [
+    [
+     23120,
+     21588,
+     22772,
+     27
+    ],
+    [
+     21590,
+     25275,
+     13116,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Где находится консульство России?",
+   "ref": "Onde fica o consulado da Rússia?",
+   "hyp": "Onde fica o Consulado da Rússia?",
+   "sec": 0.078,
+   "out_ids": [
+    [
+     21969,
+     13542,
+     21588,
+     7943,
+     8909,
+     27116,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Позовите, пожалуйста, полицию.",
+   "ref": "Chame a polícia, por favor.",
+   "hyp": "Chame a polícia, por favor.",
+   "sec": 0.078,
+   "out_ids": [
+    [
+     6309,
+     1386,
+     23830,
+     10,
+     23933,
+     13297,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Мне плохо, вызовите скорую помощь.",
+   "ref": "Estou passando mal, chame uma ambulância.",
+   "hyp": "Não me sinto bem. Chamem uma ambulância.",
+   "sec": 0.1,
+   "out_ids": [
+    [
+     20891,
+     19674,
+     28132,
+     4681,
+     27,
+     6309,
+     19083,
+     30748,
+     2698,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Какой сегодня день недели?",
+   "ref": "Que dia da semana é hoje?",
+   "hyp": "Que dia da semana é hoje?",
+   "sec": 0.071,
+   "out_ids": [
+    [
+     25277,
+     9921,
+     8909,
+     27648,
+     10767,
+     15622,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Вы не подскажете, где остановка автобуса?",
+   "ref": "Você sabe onde fica o ponto de ônibus?",
+   "hyp": "Pode dizer-me onde é a paragem do autocarro?",
+   "sec": 0.096,
+   "out_ids": [
+    [
+     23742,
+     10439,
+     8,
+     19673,
+     21967,
+     10767,
+     1386,
+     22612,
+     10458,
+     4143,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Это место занято?",
+   "ref": "Este lugar está ocupado?",
+   "hyp": "Este lugar está ocupado?",
+   "sec": 0.057,
+   "out_ids": [
+    [
+     12331,
+     19011,
+     12221,
+     21765,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Приятного аппетита!",
+   "ref": "Bom apetite!",
+   "hyp": "Bom apetite!",
+   "sec": 0.038,
+   "out_ids": [
+    [
+     4996,
+     3187,
+     16
+    ]
+   ]
+  },
+  {
+   "src": "Как это называется по-португальски?",
+   "ref": "Como se diz isso em português?",
+   "hyp": "Como se chama em português?",
+   "sec": 0.061,
+   "out_ids": [
+    [
+     7204,
+     27479,
+     6289,
+     11106,
+     24001,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Повторите, пожалуйста, ещё раз.",
+   "ref": "Repita, por favor, mais uma vez.",
+   "hyp": "Por favor, repita.",
+   "sec": 0.056,
+   "out_ids": [
+    [
+     23935,
+     13297,
+     10,
+     26310,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Говорите, пожалуйста, медленнее.",
+   "ref": "Fale mais devagar, por favor.",
+   "hyp": "Por favor, fale mais devagar.",
+   "sec": 0.073,
+   "out_ids": [
+    [
+     23935,
+     13297,
+     10,
+     13158,
+     19221,
+     9838,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Я вас не понимаю.",
+   "ref": "Não estou entendendo você.",
+   "hyp": "Não compreendo.",
+   "sec": 0.042,
+   "out_ids": [
+    [
+     20891,
+     7375,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Напишите, пожалуйста, адрес.",
+   "ref": "Escreva o endereço, por favor.",
+   "hyp": "Por favor, escreva o endereço.",
+   "sec": 0.076,
+   "out_ids": [
+    [
+     23935,
+     13297,
+     10,
+     11886,
+     21588,
+     11359,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Сколько это будет в долларах?",
+   "ref": "Quanto fica isso em dólares?",
+   "hyp": "Quanto isso vai custar em dólares?",
+   "sec": 0.079,
+   "out_ids": [
+    [
+     25249,
+     17452,
+     31029,
+     8881,
+     11106,
+     10516,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Это слишком дорого. Можете сделать скидку?",
+   "ref": "Está muito caro. Pode fazer um desconto?",
+   "hyp": "É muito caro. Pode fazer um desconto?",
+   "sec": 0.113,
+   "out_ids": [
+    [
+     10769,
+     20727,
+     5842,
+     27
+    ],
+    [
+     23742,
+     13325,
+     30742,
+     9475,
+     21
+    ]
+   ]
+  },
+  {
+   "src": "Я просто смотрю, спасибо.",
+   "ref": "Estou só olhando, obrigado.",
+   "hyp": "Só estou a ver, obrigado.",
+   "sec": 0.078,
+   "out_ids": [
+    [
+     28243,
+     12415,
+     1386,
+     31290,
+     10,
+     21638,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Увидимся завтра в это же время.",
+   "ref": "Nos vemos amanhã no mesmo horário.",
+   "hyp": "Vejo-te amanhã à mesma hora.",
+   "sec": 0.087,
+   "out_ids": [
+    [
+     31193,
+     8,
+     29264,
+     2654,
+     1394,
+     19954,
+     15700,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Передавайте привет вашей семье.",
+   "ref": "Mande lembranças para a sua família.",
+   "hyp": "Dê os meus cumprimentos à sua família.",
+   "sec": 0.095,
+   "out_ids": [
+    [
+     9026,
+     22233,
+     20038,
+     8824,
+     27128,
+     1394,
+     28696,
+     13202,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Желаю вам хорошего дня!",
+   "ref": "Tenha um bom dia!",
+   "hyp": "Desejo-lhe um bom dia!",
+   "sec": 0.081,
+   "out_ids": [
+    [
+     9521,
+     8,
+     18505,
+     30742,
+     4994,
+     9921,
+     16
+    ]
+   ]
+  },
+  {
+   "src": "До свидания, всего наилучшего.",
+   "ref": "Tchau, tudo de bom.",
+   "hyp": "Adeus, boa sorte.",
+   "sec": 0.062,
+   "out_ids": [
+    [
+     1902,
+     10,
+     4936,
+     28465,
+     27
+    ]
+   ]
+  },
+  {
+   "src": "Мне очень понравился ваш город.",
+   "ref": "Gostei muito da sua cidade.",
+   "hyp": "Gostei muito da sua cidade.",
+   "sec": 0.07,
+   "out_ids": [
+    [
+     14942,
+     20727,
+     8909,
+     28696,
+     6559,
+     27
+    ]
+   ]
+  }
+ ]
+}

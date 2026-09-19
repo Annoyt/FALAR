@@ -1,0 +1,23 @@
+# AgentTranslator — зависимости
+# Установка: pip install -r requirements.txt
+
+# STT (Speech-to-Text)
+faster-whisper>=1.0.0
+
+# Translation (NMT)
+ctranslate2>=4.0.0
+sentencepiece>=0.2.0
+transformers>=4.40.0  # Для конвертации модели NLLB
+
+# TTS (Text-to-Speech)
+piper-tts>=1.2.0
+
+# Audio
+sounddevice>=0.4.6
+numpy>=1.24.0
+
+# VAD (Voice Activity Detection) - опционально
+# torch>=2.0.0  # Раскомментировать для Silero VAD
+
+# OpenRouter API (гибридный режим)
+requests>=2.31.0

@@ -1,0 +1,61 @@
+{
+  "summary": {
+    "model": "large-v3-turbo",
+    "lang": "pt",
+    "chrf_vs_text": 100.0,
+    "rtf_avg": 2.71,
+    "n": 10
+  },
+  "results": [
+    {
+      "ref": "Oi, tudo bem? Quanto custa isso?",
+      "hyp": "Oi, tudo bem? Quanto custa isso?",
+      "rtf": 3.04
+    },
+    {
+      "ref": "Você pode me ajudar? Estou procurando a estação de metrô.",
+      "hyp": "Você pode me ajudar, estou procurando a estação de metodo.",
+      "rtf": 2.5
+    },
+    {
+      "ref": "Desculpa, não entendi. Pode repetir mais devagar, por favor?",
+      "hyp": "Desculpa, não entendi. Pode repetir mais devagar, por favor.",
+      "rtf": 1.98
+    },
+    {
+      "ref": "Queria uma mesa para duas pessoas, por favor.",
+      "hyp": "Queria uma mesa para duas pessoas, por favor.",
+      "rtf": 3.03
+    },
+    {
+      "ref": "A conta, por favor. Posso pagar com cartão?",
+      "hyp": "A conta é por favor. Posso pagar com cartão?",
+      "rtf": 2.79
+    },
+    {
+      "ref": "Quanto tempo demora para chegar ao centro da cidade?",
+      "hyp": "Quanto tempo demora para chegar ao centro da cidade?",
+      "rtf": 2.53
+    },
+    {
+      "ref": "Você fala inglês ou russo?",
+      "hyp": "Você fala inglês ou russo?",
+      "rtf": 3.64
+    },
+    {
+      "ref": "Estou perdido. Como faço para chegar ao aeroporto?",
+      "hyp": "Diz o pedido, como faço para chegar ao aeroporto?",
+      "rtf": 2.65
+    },
+    {
+      "ref": "Tem algum restaurante bom e barato aqui perto?",
+      "hyp": "Tem algum restaurante bom e barato aqui perto?",
+      "rtf": 2.54
+    },
+    {
+      "ref": "Não como carne. Vocês têm opções vegetarianas?",
+      "hyp": "Não como carne.  Vocês têm opções vegetarianas.",
+      "rtf": 2.43
+    }
+  ]
+}

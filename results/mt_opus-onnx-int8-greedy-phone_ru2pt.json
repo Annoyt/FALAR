@@ -1,0 +1,418 @@
+{
+ "summary": {
+  "engine": "opus-onnx-int8-greedy-phone-D1100",
+  "direction": "ru2pt",
+  "chrf": 62.92,
+  "lat_avg": 0.174,
+  "lat_p50": 0.17,
+  "lat_p95": 0.261,
+  "n": 40,
+  "enc_ms_med": 25.3,
+  "first_ms_med": 33.2,
+  "tok_ms_med": 15.2,
+  "tokens_avg": 7.3,
+  "ids_identical_to_pc": "40/40"
+ },
+ "results": [
+  {
+   "src": "Здравствуйте! Сколько стоит билет на автобус?",
+   "ref": "Olá! Quanto custa a passagem de ônibus?",
+   "hyp": "Olá, olá. Quanto custa um bilhete de ônibus?",
+   "sec": 0.261,
+   "enc_ms": 36.013538,
+   "first_ms": 49.828385,
+   "tokens": 11,
+   "tok_ms": 15.854328818181818
+  },
+  {
+   "src": "Я не говорю по-португальски, извините.",
+   "ref": "Eu não falo português, desculpe.",
+   "hyp": "Não falo português, desculpe.",
+   "sec": 0.153,
+   "enc_ms": 16.876692,
+   "first_ms": 19.324923,
+   "tokens": 6,
+   "tok_ms": 19.5102565
+  },
+  {
+   "src": "Можно мне меню, пожалуйста?",
+   "ref": "Posso ver o cardápio, por favor?",
+   "hyp": "Pode dar-me o menu, por favor?",
+   "sec": 0.19,
+   "enc_ms": 28.045231,
+   "first_ms": 39.099462,
+   "tokens": 10,
+   "tok_ms": 12.2505001
+  },
+  {
+   "src": "Где ближайшая аптека?",
+   "ref": "Onde fica a farmácia mais próxima?",
+   "hyp": "Onde é a farmácia mais próxima?",
+   "sec": 0.181,
+   "enc_ms": 22.512308,
+   "first_ms": 33.96,
+   "tokens": 7,
+   "tok_ms": 17.778187142857142
+  },
+  {
+   "src": "Мне нужно снять деньги в банкомате.",
+   "ref": "Preciso sacar dinheiro no caixa eletrônico.",
+   "hyp": "Tenho de ir ao multibanco buscar dinheiro.",
+   "sec": 0.263,
+   "enc_ms": 19.535077,
+   "first_ms": 38.934769,
+   "tokens": 10,
+   "tok_ms": 20.3878998
+  },
+  {
+   "src": "Вы можете показать это на карте?",
+   "ref": "Você pode me mostrar isso no mapa?",
+   "hyp": "Pode mostrar isso no mapa?",
+   "sec": 0.147,
+   "enc_ms": 18.507692,
+   "first_ms": 34.910846,
+   "tokens": 6,
+   "tok_ms": 15.5314745
+  },
+  {
+   "src": "Я живу в отеле рядом с пляжем.",
+   "ref": "Estou hospedado em um hotel perto da praia.",
+   "hyp": "Moro num hotel perto da praia.",
+   "sec": 0.175,
+   "enc_ms": 15.453769,
+   "first_ms": 36.052,
+   "tokens": 8,
+   "tok_ms": 13.76404825
+  },
+  {
+   "src": "Во сколько начинается экскурсия?",
+   "ref": "A que horas começa o passeio?",
+   "hyp": "A que horas começa a visita?",
+   "sec": 0.155,
+   "enc_ms": 25.268539,
+   "first_ms": 29.431692,
+   "tokens": 7,
+   "tok_ms": 14.255538428571427
+  },
+  {
+   "src": "Это далеко отсюда? Можно дойти пешком?",
+   "ref": "É longe daqui? Dá para ir a pé?",
+   "hyp": "É longe daqui? Posso caminhar?",
+   "sec": 0.235,
+   "enc_ms": 47.877539,
+   "first_ms": 55.383154000000005,
+   "tokens": 7,
+   "tok_ms": 18.77230742857143
+  },
+  {
+   "src": "Спасибо большое за помощь!",
+   "ref": "Muito obrigado pela ajuda!",
+   "hyp": "Muito obrigado pela ajuda!",
+   "sec": 0.113,
+   "enc_ms": 8.668847,
+   "first_ms": 29.421154,
+   "tokens": 5,
+   "tok_ms": 14.8789074
+  },
+  {
+   "src": "Я бы хотел заказать ужин на двоих.",
+   "ref": "Gostaria de pedir um jantar para dois.",
+   "hyp": "Gostaria de pedir um jantar para dois.",
+   "sec": 0.174,
+   "enc_ms": 21.052385,
+   "first_ms": 28.326385,
+   "tokens": 8,
+   "tok_ms": 15.506182749999999
+  },
+  {
+   "src": "Без лука и без острого, пожалуйста.",
+   "ref": "Sem cebola e sem pimenta, por favor.",
+   "hyp": "Sem cebolas e sem picante, por favor.",
+   "sec": 0.199,
+   "enc_ms": 26.93877,
+   "first_ms": 33.027616,
+   "tokens": 10,
+   "tok_ms": 13.8697
+  },
+  {
+   "src": "Можно ещё один стакан воды?",
+   "ref": "Pode trazer mais um copo de água?",
+   "hyp": "Pode trazer-me outro copo de água?",
+   "sec": 0.174,
+   "enc_ms": 17.94523,
+   "first_ms": 28.928077,
+   "tokens": 9,
+   "tok_ms": 14.141649555555553
+  },
+  {
+   "src": "Как пройти к автовокзалу?",
+   "ref": "Como chego à rodoviária?",
+   "hyp": "Como chegar à estação de ônibus?",
+   "sec": 0.15,
+   "enc_ms": 13.915616,
+   "first_ms": 30.78623,
+   "tokens": 7,
+   "tok_ms": 15.018978142857142
+  },
+  {
+   "src": "Я опаздываю на самолёт, пожалуйста, быстрее.",
+   "ref": "Estou atrasado para o voo, por favor, mais rápido.",
+   "hyp": "Estou atrasado para o avião, por favor, depressa.",
+   "sec": 0.225,
+   "enc_ms": 31.532,
+   "first_ms": 24.984923,
+   "tokens": 11,
+   "tok_ms": 15.333160727272725
+  },
+  {
+   "src": "У вас есть свободные номера на сегодня?",
+   "ref": "Vocês têm quartos disponíveis para hoje?",
+   "hyp": "Tem quartos disponíveis para hoje?",
+   "sec": 0.147,
+   "enc_ms": 31.651,
+   "first_ms": 28.623616,
+   "tokens": 6,
+   "tok_ms": 14.367102333333335
+  },
+  {
+   "src": "Сколько стоит одна ночь?",
+   "ref": "Quanto custa uma diária?",
+   "hyp": "Quanto custa uma noite?",
+   "sec": 0.133,
+   "enc_ms": 18.039462,
+   "first_ms": 38.817308,
+   "tokens": 5,
+   "tok_ms": 15.142661200000001
+  },
+  {
+   "src": "Завтрак включён в стоимость?",
+   "ref": "O café da manhã está incluído no preço?",
+   "hyp": "O café da manhã está incluído?",
+   "sec": 0.136,
+   "enc_ms": 20.201769,
+   "first_ms": 23.286384,
+   "tokens": 7,
+   "tok_ms": 13.132604428571428
+  },
+  {
+   "src": "Можно оставить чемодан на ресепшене?",
+   "ref": "Posso deixar a mala na recepção?",
+   "hyp": "Posso deixar a mala na recepção?",
+   "sec": 0.146,
+   "enc_ms": 28.000692,
+   "first_ms": 28.931,
+   "tokens": 7,
+   "tok_ms": 12.675637428571429
+  },
+  {
+   "src": "Я потерял паспорт. Что мне делать?",
+   "ref": "Perdi meu passaporte. O que devo fazer?",
+   "hyp": "Perdi o passaporte. O que faço?",
+   "sec": 0.23,
+   "enc_ms": 41.863846,
+   "first_ms": 45.444846,
+   "tokens": 8,
+   "tok_ms": 17.829817249999998
+  },
+  {
+   "src": "Где находится консульство России?",
+   "ref": "Onde fica o consulado da Rússia?",
+   "hyp": "Onde fica o Consulado da Rússia?",
+   "sec": 0.17,
+   "enc_ms": 25.763923,
+   "first_ms": 25.827308,
+   "tokens": 7,
+   "tok_ms": 14.425538285714284
+  },
+  {
+   "src": "Позовите, пожалуйста, полицию.",
+   "ref": "Chame a polícia, por favor.",
+   "hyp": "Chame a polícia, por favor.",
+   "sec": 0.181,
+   "enc_ms": 36.855923,
+   "first_ms": 30.519077,
+   "tokens": 7,
+   "tok_ms": 16.27009857142857
+  },
+  {
+   "src": "Мне плохо, вызовите скорую помощь.",
+   "ref": "Estou passando mal, chame uma ambulância.",
+   "hyp": "Não me sinto bem. Chamem uma ambulância.",
+   "sec": 0.223,
+   "enc_ms": 32.214769,
+   "first_ms": 33.299077,
+   "tokens": 10,
+   "tok_ms": 15.712146200000001
+  },
+  {
+   "src": "Какой сегодня день недели?",
+   "ref": "Que dia da semana é hoje?",
+   "hyp": "Que dia da semana é hoje?",
+   "sec": 0.17,
+   "enc_ms": 25.259692,
+   "first_ms": 36.527077,
+   "tokens": 7,
+   "tok_ms": 15.364879285714284
+  },
+  {
+   "src": "Вы не подскажете, где остановка автобуса?",
+   "ref": "Você sabe onde fica o ponto de ônibus?",
+   "hyp": "Pode dizer-me onde é a paragem do autocarro?",
+   "sec": 0.214,
+   "enc_ms": 24.165462,
+   "first_ms": 36.102692,
+   "tokens": 11,
+   "tok_ms": 13.916741636363637
+  },
+  {
+   "src": "Это место занято?",
+   "ref": "Este lugar está ocupado?",
+   "hyp": "Este lugar está ocupado?",
+   "sec": 0.129,
+   "enc_ms": 19.701616,
+   "first_ms": 38.772923,
+   "tokens": 5,
+   "tok_ms": 14.014076800000002
+  },
+  {
+   "src": "Приятного аппетита!",
+   "ref": "Bom apetite!",
+   "hyp": "Bom apetite!",
+   "sec": 0.11,
+   "enc_ms": 27.472308,
+   "first_ms": 33.354538,
+   "tokens": 3,
+   "tok_ms": 16.507025666666667
+  },
+  {
+   "src": "Как это называется по-португальски?",
+   "ref": "Como se diz isso em português?",
+   "hyp": "Como se chama em português?",
+   "sec": 0.165,
+   "enc_ms": 11.356,
+   "first_ms": 38.676384,
+   "tokens": 6,
+   "tok_ms": 16.177230666666667
+  },
+  {
+   "src": "Повторите, пожалуйста, ещё раз.",
+   "ref": "Repita, por favor, mais uma vez.",
+   "hyp": "Por favor, repita.",
+   "sec": 0.13,
+   "enc_ms": 27.709846,
+   "first_ms": 29.884077,
+   "tokens": 5,
+   "tok_ms": 14.4957696
+  },
+  {
+   "src": "Говорите, пожалуйста, медленнее.",
+   "ref": "Fale mais devagar, por favor.",
+   "hyp": "Por favor, fale mais devagar.",
+   "sec": 0.168,
+   "enc_ms": 22.701846,
+   "first_ms": 36.479692,
+   "tokens": 7,
+   "tok_ms": 15.453648285714284
+  },
+  {
+   "src": "Я вас не понимаю.",
+   "ref": "Não estou entendendo você.",
+   "hyp": "Não compreendo.",
+   "sec": 0.115,
+   "enc_ms": 29.111,
+   "first_ms": 22.347461,
+   "tokens": 3,
+   "tok_ms": 21.197820666666665
+  },
+  {
+   "src": "Напишите, пожалуйста, адрес.",
+   "ref": "Escreva o endereço, por favor.",
+   "hyp": "Por favor, escreva o endereço.",
+   "sec": 0.148,
+   "enc_ms": 20.541769,
+   "first_ms": 26.900539,
+   "tokens": 7,
+   "tok_ms": 14.392604571428569
+  },
+  {
+   "src": "Сколько это будет в долларах?",
+   "ref": "Quanto fica isso em dólares?",
+   "hyp": "Quanto isso vai custar em dólares?",
+   "sec": 0.196,
+   "enc_ms": 28.606076,
+   "first_ms": 29.875385,
+   "tokens": 7,
+   "tok_ms": 14.230494285714286
+  },
+  {
+   "src": "Это слишком дорого. Можете сделать скидку?",
+   "ref": "Está muito caro. Pode fazer um desconto?",
+   "hyp": "É muito caro. Pode fazer um desconto?",
+   "sec": 0.221,
+   "enc_ms": 36.092616,
+   "first_ms": 54.25984699999999,
+   "tokens": 9,
+   "tok_ms": 14.442572444444446
+  },
+  {
+   "src": "Я просто смотрю, спасибо.",
+   "ref": "Estou só olhando, obrigado.",
+   "hyp": "Só estou a ver, obrigado.",
+   "sec": 0.172,
+   "enc_ms": 30.250769,
+   "first_ms": 23.765538,
+   "tokens": 7,
+   "tok_ms": 16.874945142857143
+  },
+  {
+   "src": "Увидимся завтра в это же время.",
+   "ref": "Nos vemos amanhã no mesmo horário.",
+   "hyp": "Vejo-te amanhã à mesma hora.",
+   "sec": 0.159,
+   "enc_ms": 17.669538,
+   "first_ms": 23.984231,
+   "tokens": 8,
+   "tok_ms": 14.61427875
+  },
+  {
+   "src": "Передавайте привет вашей семье.",
+   "ref": "Mande lembranças para a sua família.",
+   "hyp": "Dê os meus cumprimentos à sua família.",
+   "sec": 0.225,
+   "enc_ms": 33.444385,
+   "first_ms": 36.087384,
+   "tokens": 9,
+   "tok_ms": 14.637538222222222
+  },
+  {
+   "src": "Желаю вам хорошего дня!",
+   "ref": "Tenha um bom dia!",
+   "hyp": "Desejo-lhe um bom dia!",
+   "sec": 0.167,
+   "enc_ms": 23.512616,
+   "first_ms": 36.970154,
+   "tokens": 7,
+   "tok_ms": 15.261681285714284
+  },
+  {
+   "src": "До свидания, всего наилучшего.",
+   "ref": "Tchau, tudo de bom.",
+   "hyp": "Adeus, boa sorte.",
+   "sec": 0.139,
+   "enc_ms": 11.36223,
+   "first_ms": 46.626231,
+   "tokens": 5,
+   "tok_ms": 16.089354
+  },
+  {
+   "src": "Мне очень понравился ваш город.",
+   "ref": "Gostei muito da sua cidade.",
+   "hyp": "Gostei muito da sua cidade.",
+   "sec": 0.173,
+   "enc_ms": 43.756846,
+   "first_ms": 28.806384,
+   "tokens": 6,
+   "tok_ms": 16.629756166666667
+  }
+ ]
+}

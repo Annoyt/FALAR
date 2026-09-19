@@ -1,0 +1,105 @@
+{
+  "summary": {
+    "engine": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+    "direction": "ru2pt",
+    "profile": "poco-cpu",
+    "chrf": 83.42,
+    "lat_avg": 3.92,
+    "lat_p50": 2.68,
+    "lat_p95": 17.48,
+    "n": 15,
+    "chrf_old_buggy": 100.0
+  },
+  "results": [
+    {
+      "src": "Здравствуйте! Сколько стоит билет на автобус?",
+      "ref": "Olá! Quanto custa a passagem de ônibus?",
+      "hyp": "Olá! Quanto custa a passagem de ônibus?",
+      "sec": 2.74
+    },
+    {
+      "src": "Я не говорю по-португальски, извините.",
+      "ref": "Eu não falo português, desculpe.",
+      "hyp": "Eu não falo português, desculpe.",
+      "sec": 5.64
+    },
+    {
+      "src": "Можно мне меню, пожалуйста?",
+      "ref": "Posso ver o cardápio, por favor?",
+      "hyp": "Posso ter o cardápio, por favor?",
+      "sec": 4.13
+    },
+    {
+      "src": "Где ближайшая аптека?",
+      "ref": "Onde fica a farmácia mais próxima?",
+      "hyp": "Onde fica a farmácia mais próxima?",
+      "sec": 1.92
+    },
+    {
+      "src": "Мне нужно снять деньги в банкомате.",
+      "ref": "Preciso sacar dinheiro no caixa eletrônico.",
+      "hyp": "Preciso sacar dinheiro no caixa eletrônico.",
+      "sec": 1.73
+    },
+    {
+      "src": "Вы можете показать это на карте?",
+      "ref": "Você pode me mostrar isso no mapa?",
+      "hyp": "Você pode mostrar isso no mapa?",
+      "sec": 5.88
+    },
+    {
+      "src": "Я живу в отеле рядом с пляжем.",
+      "ref": "Estou hospedado em um hotel perto da praia.",
+      "hyp": "Eu moro em um hotel perto da praia.",
+      "sec": 4.63
+    },
+    {
+      "src": "Во сколько начинается экскурсия?",
+      "ref": "A que horas começa o passeio?",
+      "hyp": "A que horas começa a excursão?",
+      "sec": 2.03
+    },
+    {
+      "src": "Это далеко отсюда? Можно дойти пешком?",
+      "ref": "É longe daqui? Dá para ir a pé?",
+      "hyp": "É longe daqui? Pode ir a pé?",
+      "sec": 1.47
+    },
+    {
+      "src": "Спасибо большое за помощь!",
+      "ref": "Muito obrigado pela ajuda!",
+      "hyp": "Muito obrigado pela ajuda!",
+      "sec": 1.98
+    },
+    {
+      "src": "Я бы хотел заказать ужин на двоих.",
+      "ref": "Gostaria de pedir um jantar para dois.",
+      "hyp": "Eu gostaria de pedir jantar para dois.",
+      "sec": 1.79
+    },
+    {
+      "src": "Без лука и без острого, пожалуйста.",
+      "ref": "Sem cebola e sem pimenta, por favor.",
+      "hyp": "Sem cebola e sem picante, por favor.",
+      "sec": 1.09
+    },
+    {
+      "src": "Можно ещё один стакан воды?",
+      "ref": "Pode trazer mais um copo de água?",
+      "hyp": "Posso tomar mais um copo d'água?",
+      "sec": 17.48
+    },
+    {
+      "src": "Как пройти к автовокзалу?",
+      "ref": "Como chego à rodoviária?",
+      "hyp": "Como chegar à rodoviária?",
+      "sec": 3.62
+    },
+    {
+      "src": "Я опаздываю на самолёт, пожалуйста, быстрее.",
+      "ref": "Estou atrasado para o voo, por favor, mais rápido.",
+      "hyp": "Estou atrasado para o avião, por favor, mais rápido.",
+      "sec": 2.68
+    }
+  ]
+}

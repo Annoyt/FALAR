@@ -1,0 +1,36 @@
+# Модели и всё, что уезжает на телефон: описано в models/manifest.json, скачивается по нему.
+models/*
+!models/README.md
+!models/manifest.json
+voices/
+data/tatoeba/*
+!data/tatoeba/phrasebook_tatoeba.tsv
+
+# Сборки и распаковки
+apk/
+apk_unpacked/
+compiled_classes/
+dex_output/
+bench/apk/out/
+bench/apk/*.apk
+bench/apk/*.idsig
+
+# Бинарники инструментов и движков: откуда взять, написано в bench/apk/README.md
+bench/apk/jni/
+tools/platform-tools/
+tools/platform-tools.zip
+tools/r8.jar
+tools/android.jar
+tools/debug.keystore
+
+# Чужой проект, лежал рядом для изучения
+RTranslator/
+
+# Записи комнаты и голоса: личное
+bench/air/rec/
+
+# Ключи и локальное
+.env
+*.log
+__pycache__/
+*.pyc

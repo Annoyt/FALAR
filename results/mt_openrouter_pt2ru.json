@@ -1,0 +1,105 @@
+{
+  "summary": {
+    "engine": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+    "direction": "pt2ru",
+    "profile": "poco-cpu",
+    "chrf": 83.13,
+    "lat_avg": 3.17,
+    "lat_p50": 2.86,
+    "lat_p95": 6.86,
+    "n": 15,
+    "chrf_old_buggy": 65.27
+  },
+  "results": [
+    {
+      "src": "Oi, tudo bem? Quanto custa isso?",
+      "ref": "Привет, как дела? Сколько это стоит?",
+      "hyp": "Привет, всё хорошо? Сколько это стоит?",
+      "sec": 6.86
+    },
+    {
+      "src": "Você pode me ajudar? Estou procurando a estação de metrô.",
+      "ref": "Вы можете мне помочь? Я ищу станцию метро.",
+      "hyp": "Вы можете мне помочь? Я ищу станцию метро.",
+      "sec": 3.23
+    },
+    {
+      "src": "Desculpa, não entendi. Pode repetir mais devagar, por favor?",
+      "ref": "Извините, я не понял. Можете повторить помедленнее, пожалуйста?",
+      "hyp": "Извини, я не понял. Можешь повторить медленнее, пожалуйста?",
+      "sec": 2.61
+    },
+    {
+      "src": "Queria uma mesa para duas pessoas, por favor.",
+      "ref": "Я бы хотел столик на двоих, пожалуйста.",
+      "hyp": "Я бы хотел столик на двоих, пожалуйста.",
+      "sec": 4.67
+    },
+    {
+      "src": "A conta, por favor. Posso pagar com cartão?",
+      "ref": "Счёт, пожалуйста. Можно заплатить картой?",
+      "hyp": "Счёт, пожалуйста. Можно оплатить картой?",
+      "sec": 2.86
+    },
+    {
+      "src": "Quanto tempo demora para chegar ao centro da cidade?",
+      "ref": "Сколько времени занимает дорога до центра города?",
+      "hyp": "Сколько времени занимает добраться до центра города?",
+      "sec": 1.78
+    },
+    {
+      "src": "Você fala inglês ou russo?",
+      "ref": "Вы говорите по-английски или по-русски?",
+      "hyp": "Вы говорите по‑английски или по‑русски?",
+      "sec": 1.08
+    },
+    {
+      "src": "Estou perdido. Como faço para chegar ao aeroporto?",
+      "ref": "Я заблудился. Как мне добраться до аэропорта?",
+      "hyp": "Я потерялся. Как мне добраться до аэропорта?",
+      "sec": 3.02
+    },
+    {
+      "src": "Tem algum restaurante bom e barato aqui perto?",
+      "ref": "Есть ли поблизости хороший и недорогой ресторан?",
+      "hyp": "Есть здесь неподалёку хороший и недорогой ресторан?",
+      "sec": 4.25
+    },
+    {
+      "src": "Não como carne. Vocês têm opções vegetarianas?",
+      "ref": "Я не ем мясо. У вас есть вегетарианские блюда?",
+      "hyp": "Я не ем мясо. У вас есть вегетарианские варианты?",
+      "sec": 1.75
+    },
+    {
+      "src": "Pode me trazer um café com leite, por favor?",
+      "ref": "Можете принести мне кофе с молоком, пожалуйста?",
+      "hyp": "Можешь принести мне кофе с молоком, пожалуйста?",
+      "sec": 4.84
+    },
+    {
+      "src": "Onde fica o banheiro?",
+      "ref": "Где находится туалет?",
+      "hyp": "Где находится туалет?",
+      "sec": 4.82
+    },
+    {
+      "src": "Que horas são agora?",
+      "ref": "Который сейчас час?",
+      "hyp": "Сколько сейчас времени?",
+      "sec": 1.78
+    },
+    {
+      "src": "A que horas abre o supermercado?",
+      "ref": "Во сколько открывается супермаркет?",
+      "hyp": "Во сколько открывается супермаркет?",
+      "sec": 1.83
+    },
+    {
+      "src": "Muito prazer em conhecer você. Meu nome é Alex.",
+      "ref": "Очень приятно познакомиться. Меня зовут Алекс.",
+      "hyp": "Очень приятно познакомиться. Меня зовут Алекс.",
+      "sec": 2.18
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+ "ru_dmitri_int8": {
+  "rtf_med": 0.38,
+  "rtf_max": 0.413,
+  "synth": 0.83,
+  "audio": 2.33,
+  "wer": 6.2,
+  "n": 12
+ },
+ "pt_faber_int8": {
+  "rtf_med": 0.349,
+  "rtf_max": 0.393,
+  "synth": 0.67,
+  "audio": 1.87,
+  "wer": 2.6,
+  "n": 12
+ },
+ "ru_dmitri_fp32": {
+  "rtf_med": 0.151,
+  "rtf_max": 0.182,
+  "synth": 0.36,
+  "audio": 2.33,
+  "wer": 3.7,
+  "n": 12
+ },
+ "pt_faber_fp32": {
+  "rtf_med": 0.151,
+  "rtf_max": 0.183,
+  "synth": 0.28,
+  "audio": 1.92,
+  "wer": 1.3,
+  "n": 12
+ },
+ "ru_denis_fp32": {
+  "rtf_med": 0.148,
+  "rtf_max": 0.161,
+  "synth": 0.4,
+  "audio": 2.74,
+  "wer": 6.2,
+  "n": 12
+ },
+ "ru_irina_fp32": {
+  "rtf_med": 0.156,
+  "rtf_max": 0.176,
+  "synth": 0.46,
+  "audio": 2.95,
+  "wer": 6.2,
+  "n": 12
+ },
+ "pt_cadu_fp32": {
+  "rtf_med": 0.177,
+  "rtf_max": 0.299,
+  "synth": 0.39,
+  "audio": 2.13,
+  "wer": 1.3,
+  "n": 12
+ },
+ "pt_jeff_fp32": {
+  "rtf_med": 0.185,
+  "rtf_max": 0.288,
+  "synth": 0.36,
+  "audio": 1.99,
+  "wer": 14.3,
+  "n": 12
+ },
+ "pt_edresson_low": {
+  "rtf_med": 0.111,
+  "rtf_max": 0.141,
+  "synth": 0.27,
+  "audio": 2.45,
+  "wer": 15.6,
+  "n": 12
+ },
+ "pt_miro_high": {
+  "rtf_med": 0.141,
+  "rtf_max": 0.147,
+  "synth": 0.33,
+  "audio": 2.3,
+  "wer": 3.9,
+  "n": 12
+ },
+ "ru_supertonic3": {
+  "rtf_med": 0.677,
+  "rtf_max": 1.434,
+  "synth": 2.61,
+  "audio": 3.81,
+  "wer": 7.4,
+  "n": 12
+ },
+ "pt_supertonic3": {
+  "rtf_med": 0.71,
+  "rtf_max": 0.82,
+  "synth": 2.07,
+  "audio": 2.95,
+  "wer": 6.5,
+  "n": 12
+ }
+}

@@ -1,0 +1,255 @@
+{
+  "summary": {
+    "engine": "opus-mt-tc-big-pt-zle-int8",
+    "direction": "pt2ru",
+    "profile": "poco-cpu",
+    "chrf": 60.89,
+    "lat_avg": 0.15,
+    "lat_p50": 0.16,
+    "lat_p95": 0.21,
+    "n": 40,
+    "chrf_old_buggy": 62.65
+  },
+  "results": [
+    {
+      "src": "Oi, tudo bem? Quanto custa isso?",
+      "ref": "Привет, как дела? Сколько это стоит?",
+      "hyp": "Привет, сколько это стоит?",
+      "sec": 0.15
+    },
+    {
+      "src": "Você pode me ajudar? Estou procurando a estação de metrô.",
+      "ref": "Вы можете мне помочь? Я ищу станцию метро.",
+      "hyp": "Я ищу станцию метро.",
+      "sec": 0.12
+    },
+    {
+      "src": "Desculpa, não entendi. Pode repetir mais devagar, por favor?",
+      "ref": "Извините, я не понял. Можете повторить помедленнее, пожалуйста?",
+      "hyp": "Простите, я не понимаю, вы не могли бы повторить помедленнее?",
+      "sec": 0.26
+    },
+    {
+      "src": "Queria uma mesa para duas pessoas, por favor.",
+      "ref": "Я бы хотел столик на двоих, пожалуйста.",
+      "hyp": "Мне нужен столик на двоих, пожалуйста.",
+      "sec": 0.15
+    },
+    {
+      "src": "A conta, por favor. Posso pagar com cartão?",
+      "ref": "Счёт, пожалуйста. Можно заплатить картой?",
+      "hyp": "Могу я расплатиться картой?",
+      "sec": 0.14
+    },
+    {
+      "src": "Quanto tempo demora para chegar ao centro da cidade?",
+      "ref": "Сколько времени занимает дорога до центра города?",
+      "hyp": "Сколько времени займет добраться до центра города?",
+      "sec": 0.17
+    },
+    {
+      "src": "Você fala inglês ou russo?",
+      "ref": "Вы говорите по-английски или по-русски?",
+      "hyp": "Вы говорите по-английски или по-русски?",
+      "sec": 0.21
+    },
+    {
+      "src": "Estou perdido. Como faço para chegar ao aeroporto?",
+      "ref": "Я заблудился. Как мне добраться до аэропорта?",
+      "hyp": "Я заблудился. Как мне добраться до аэропорта?",
+      "sec": 0.17
+    },
+    {
+      "src": "Tem algum restaurante bom e barato aqui perto?",
+      "ref": "Есть ли поблизости хороший и недорогой ресторан?",
+      "hyp": "Здесь поблизости есть хороший дешевый ресторан?",
+      "sec": 0.14
+    },
+    {
+      "src": "Não como carne. Vocês têm opções vegetarianas?",
+      "ref": "Я не ем мясо. У вас есть вегетарианские блюда?",
+      "hyp": "У вас есть вегетарианские блюда?",
+      "sec": 0.16
+    },
+    {
+      "src": "Pode me trazer um café com leite, por favor?",
+      "ref": "Можете принести мне кофе с молоком, пожалуйста?",
+      "hyp": "Можно мне латте, пожалуйста?",
+      "sec": 0.14
+    },
+    {
+      "src": "Onde fica o banheiro?",
+      "ref": "Где находится туалет?",
+      "hyp": "Где туалет?",
+      "sec": 0.08
+    },
+    {
+      "src": "Que horas são agora?",
+      "ref": "Который сейчас час?",
+      "hyp": "Который сейчас час?",
+      "sec": 0.08
+    },
+    {
+      "src": "A que horas abre o supermercado?",
+      "ref": "Во сколько открывается супермаркет?",
+      "hyp": "Во сколько открывается супермаркет?",
+      "sec": 0.11
+    },
+    {
+      "src": "Muito prazer em conhecer você. Meu nome é Alex.",
+      "ref": "Очень приятно познакомиться. Меня зовут Алекс.",
+      "hyp": "Приятно познакомиться, меня зовут Алекс.",
+      "sec": 0.14
+    },
+    {
+      "src": "De onde você é? Há quanto tempo mora aqui?",
+      "ref": "Откуда вы? Давно здесь живёте?",
+      "hyp": "Как давно ты здесь живешь?",
+      "sec": 0.13
+    },
+    {
+      "src": "Estou aqui de férias por duas semanas.",
+      "ref": "Я здесь в отпуске на две недели.",
+      "hyp": "Я здесь в отпуске на две недели.",
+      "sec": 0.16
+    },
+    {
+      "src": "O que você recomenda visitar nesta cidade?",
+      "ref": "Что вы посоветуете посмотреть в этом городе?",
+      "hyp": "Что вы рекомендуете посетить в этом городе?",
+      "sec": 0.19
+    },
+    {
+      "src": "Posso tirar uma foto aqui?",
+      "ref": "Можно здесь сфотографировать?",
+      "hyp": "Могу я сфотографироваться здесь?",
+      "sec": 0.11
+    },
+    {
+      "src": "Você pode me chamar um táxi, por favor?",
+      "ref": "Можете вызвать мне такси, пожалуйста?",
+      "hyp": "Вызовите мне такси, пожалуйста.",
+      "sec": 0.13
+    },
+    {
+      "src": "Quanto fica a corrida até a praia?",
+      "ref": "Сколько будет стоить поездка до пляжа?",
+      "hyp": "Сколько осталось до пляжа?",
+      "sec": 0.1
+    },
+    {
+      "src": "Tem wi-fi grátis aqui? Qual é a senha?",
+      "ref": "Здесь есть бесплатный вай-фай? Какой пароль?",
+      "hyp": "Здесь есть бесплатный Wi-Fi? Какой пароль?",
+      "sec": 0.17
+    },
+    {
+      "src": "Preciso de um médico. Não estou me sentindo bem.",
+      "ref": "Мне нужен врач. Я плохо себя чувствую.",
+      "hyp": "Мне нужен врач, я плохо себя чувствую.",
+      "sec": 0.17
+    },
+    {
+      "src": "Sou alérgico a amendoim e frutos do mar.",
+      "ref": "У меня аллергия на арахис и морепродукты.",
+      "hyp": "У меня аллергия на арахис и морепродукты.",
+      "sec": 0.2
+    },
+    {
+      "src": "Onde posso trocar dólares por reais?",
+      "ref": "Где я могу обменять доллары на реалы?",
+      "hyp": "Где можно обменять доллары на реальные?",
+      "sec": 0.17
+    },
+    {
+      "src": "Este produto tem desconto?",
+      "ref": "На этот товар есть скидка?",
+      "hyp": "Есть ли у этого продукта скидки?",
+      "sec": 0.13
+    },
+    {
+      "src": "Posso experimentar esta roupa?",
+      "ref": "Могу я примерить эту одежду?",
+      "hyp": "Можно примерить этот костюм?",
+      "sec": 0.14
+    },
+    {
+      "src": "Vocês têm um tamanho maior?",
+      "ref": "У вас есть размер побольше?",
+      "hyp": "У вас есть больший размер?",
+      "sec": 0.12
+    },
+    {
+      "src": "Aceita pagamento por Pix?",
+      "ref": "Вы принимаете оплату через Pix?",
+      "hyp": "Принимаете ли вы оплату Pix?",
+      "sec": 0.16
+    },
+    {
+      "src": "O ônibus para o centro passa por aqui?",
+      "ref": "Автобус в центр проходит здесь?",
+      "hyp": "Автобус до центра идет сюда?",
+      "sec": 0.11
+    },
+    {
+      "src": "Desculpe o atraso, o trânsito estava horrível.",
+      "ref": "Извините за опоздание, пробки были ужасные.",
+      "hyp": "Прости, что опоздал, пробки были ужасные.",
+      "sec": 0.2
+    },
+    {
+      "src": "Podemos marcar outro dia? Amanhã estou ocupado.",
+      "ref": "Можем перенести на другой день? Завтра я занят.",
+      "hyp": "Мы можем встретиться в другой день?",
+      "sec": 0.16
+    },
+    {
+      "src": "O que você faz da vida?",
+      "ref": "Чем вы занимаетесь?",
+      "hyp": "Чем вы занимаетесь в жизни?",
+      "sec": 0.11
+    },
+    {
+      "src": "Trabalho com tecnologia, sou programador.",
+      "ref": "Я работаю в IT, я программист.",
+      "hyp": "Я занимаюсь технологиями, я программист.",
+      "sec": 0.15
+    },
+    {
+      "src": "A comida aqui é muito gostosa, parabéns!",
+      "ref": "Еда здесь очень вкусная, мои комплименты!",
+      "hyp": "Еда здесь очень вкусная, поздравляю!",
+      "sec": 0.18
+    },
+    {
+      "src": "Pode embalar para viagem, por favor?",
+      "ref": "Можете упаковать с собой, пожалуйста?",
+      "hyp": "Упакуй это на вынос, пожалуйста.",
+      "sec": 0.19
+    },
+    {
+      "src": "Está muito quente hoje, não acha?",
+      "ref": "Сегодня очень жарко, как вы считаете?",
+      "hyp": "Сегодня очень жарко, тебе не кажется?",
+      "sec": 0.16
+    },
+    {
+      "src": "Vai chover amanhã, segundo a previsão do tempo.",
+      "ref": "Завтра будет дождь, по прогнозу погоды.",
+      "hyp": "Завтра будет дождь, согласно прогнозу погоды.",
+      "sec": 0.18
+    },
+    {
+      "src": "Foi um prazer conversar com você. Até a próxima!",
+      "ref": "Было приятно с вами поговорить. До встречи!",
+      "hyp": "Приятно было поболтать.",
+      "sec": 0.16
+    },
+    {
+      "src": "Boa noite, durma bem. Amanhã a gente se fala.",
+      "ref": "Спокойной ночи, спите хорошо. Поговорим завтра.",
+      "hyp": "Спокойной ночи, спокойной ночи.",
+      "sec": 0.18
+    }
+  ]
+}
