@@ -10,7 +10,7 @@ WAV=${WAV:-/data/local/tmp/sh/audio}
 
 $ADB wait-for-device
 echo "== установка =="
-$ADB install -r "$A/AgentTranslator.apk"
+$ADB install -r "$A/Falar.apk"
 echo "== словарь =="
 $ADB push "$R/data/tatoeba/phrasebook_tatoeba.tsv" $DST/
 $ADB push "$A/phrasebook_seed.json" $DST/phrasebook.json

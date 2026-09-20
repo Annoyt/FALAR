@@ -29,7 +29,7 @@ PATCH поднимается, когда сборка кладётся в `apk/`
 ## Установка
 ```bash
 bench/apk/build.sh                                   # javac + D8 + aapt2 + zipalign + apksigner (debug-ключ)
-tools/platform-tools/adb install -r -g bench/apk/AgentTranslator.apk
+tools/platform-tools/adb install -r -g bench/apk/Falar.apk
 ```
 С 0.21 модели приложение качает само при первом запуске по манифесту, вшитому в APK
 (`assets/models_manifest.json` — копия `models/manifest.json`). Для стенда по-прежнему можно залить

@@ -36,5 +36,22 @@ fi
 # старой нумерации, и сборка расходилась бы с тем, что записано в проекте.
 cp $OUT/base.apk $OUT/unaligned.apk; (cd $OUT/stage && zip -q -r ../unaligned.apk classes.dex lib)
 zipalign -f 4 $OUT/unaligned.apk $OUT/aligned.apk
-apksigner sign --ks $R/tools/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android --out $A/AgentTranslator${SLIM:+-slim}.apk $OUT/aligned.apk
-ls -la $A/AgentTranslator${SLIM:+-slim}.apk | awk '{print "APK:",$5/1048576,"MB",$NF}'
+# Подпись. По умолчанию отладочный ключ из репозитория — для стенда. Для публичной сборки:
+#   FALAR_KEYSTORE=~/falar-release.keystore FALAR_KS_PASS=... bash bench/apk/build.sh
+# Пароли передаются через окружение (apksigner понимает env:ИМЯ), а не аргументом: аргумент виден
+# в списке процессов любому на машине. Ключ и пароль в репозиторий не попадают никогда; сменить
+# ключ после первого публичного релиза нельзя без переустановки у всех, кто поставил.
+OUTAPK=$A/Falar${SLIM:+-slim}.apk
+if [ -n "$FALAR_KEYSTORE" ]; then
+  [ -f "$FALAR_KEYSTORE" ] || { echo "нет файла ключа: $FALAR_KEYSTORE"; exit 1; }
+  [ -n "$FALAR_KS_PASS" ] || { echo "нужен FALAR_KS_PASS (пароль хранилища)"; exit 1; }
+  export FALAR_KS_PASS FALAR_KEY_PASS=${FALAR_KEY_PASS:-$FALAR_KS_PASS}
+  apksigner sign --ks "$FALAR_KEYSTORE" --ks-key-alias "${FALAR_KEY_ALIAS:-falar}" \
+    --ks-pass env:FALAR_KS_PASS --key-pass env:FALAR_KEY_PASS --out $OUTAPK $OUT/aligned.apk
+  KIND="релизный ключ"
+else
+  apksigner sign --ks $R/tools/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android --out $OUTAPK $OUT/aligned.apk
+  KIND="ОТЛАДОЧНЫЙ ключ, не для раздачи"
+fi
+ls -la $OUTAPK | awk -v k="$KIND" '{print "APK:",$5/1048576,"MB",$NF,"·",k}'
+sha256sum $OUTAPK | awk '{print "sha256:",$1}'

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Falar — переводчик разговора без интернета</title>
+<meta name="description" content="Приложение для Android: слушает бразильский португальский и переводит на русский, и обратно. Всё считается на телефоне, без интернета.">
+<meta property="og:title" content="Falar — переводчик разговора без интернета">
+<meta property="og:description" content="Бразильский португальский и русский. Распознавание, перевод и голос — на самом телефоне.">
+<meta property="og:image" content="img/icon.png">
+<link rel="icon" href="img/icon.png">
+<style>
+/* Одна страница без внешних запросов: ни шрифтов, ни счётчиков, ни библиотек. Открывается
+   с телефона на медленной сети и ничего не рассказывает о том, кто её открыл. */
+:root{
+  --plum:#802244; --deep:#3D0C2A; --gold:#E0B878; --mint:#6FE0BC;
+  --bg:#ffffff; --fg:#1a1420; --dim:#5d5566; --card:#faf7f9; --line:#e6dfe6;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#15101a; --fg:#f2ecf2; --dim:#a79db0; --card:#1e1725; --line:#332a3a; }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px}
+a{color:var(--plum)}
+@media (prefers-color-scheme: dark){ a{color:var(--gold)} }
+
+/* шапка */
+.hero{background:linear-gradient(135deg,var(--plum),var(--deep));color:#fff;padding:56px 0 48px;text-align:center}
+.hero a{color:#fff}
+.icon{width:112px;height:112px;border-radius:26px;display:block;margin:0 auto 18px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35)}
+h1{font-size:44px;margin:0 0 6px;letter-spacing:-.5px}
+.tagline{font-size:20px;margin:0 auto 4px;max-width:30ch;opacity:.97}
+.sub{font-size:16px;opacity:.72;margin:10px auto 28px;max-width:44ch}
+.btn{display:inline-block;margin:0 0 10px;transition:transform .12s ease}
+.btn img{display:block;width:280px;max-width:80vw;height:auto}
+.btn:hover{transform:translateY(-2px)}
+.under{font-size:15px;opacity:.78;margin:6px 0 0}
+.under a{text-decoration:underline;text-underline-offset:3px}
+
+/* тело */
+section{padding:44px 0;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+h2{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
+h2+.lead{color:var(--dim);margin:0 0 22px}
+.cards{display:grid;gap:14px;grid-template-columns:1fr}
+@media(min-width:620px){ .cards{grid-template-columns:1fr 1fr} }
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+.card h3{margin:0 0 6px;font-size:18px}
+.card p{margin:0;color:var(--dim);font-size:16px}
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+ol.steps li{counter-increment:s;position:relative;padding:0 0 22px 52px}
+ol.steps li:before{content:counter(s);position:absolute;left:0;top:-2px;width:34px;height:34px;
+  border-radius:50%;background:var(--plum);color:#fff;font-weight:700;display:grid;place-items:center}
+ol.steps li b{display:block;margin-bottom:2px}
+ol.steps li span{color:var(--dim)}
+table{border-collapse:collapse;width:100%;font-size:16px}
+td,th{text-align:left;padding:9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{width:42%;font-weight:600}
+tr:last-child td,tr:last-child th{border-bottom:0}
+.note{background:var(--card);border-left:3px solid var(--gold);border-radius:0 12px 12px 0;
+  padding:14px 18px;margin:20px 0 0;color:var(--dim);font-size:16px}
+ul.plain{padding-left:22px;margin:0;color:var(--dim)}
+ul.plain li{margin-bottom:8px}
+ul.plain b{color:var(--fg);font-weight:600}
+.qr{display:flex;gap:18px;align-items:center;background:var(--card);border:1px solid var(--line);
+  border-radius:16px;padding:16px 18px;margin-top:22px}
+.qr img{width:104px;height:104px;border-radius:10px;background:#fff;flex:none}
+.qr p{margin:0;color:var(--dim);font-size:16px}
+footer{padding:34px 0 60px;color:var(--dim);font-size:15px;text-align:center}
+footer a{color:var(--dim)}
+code{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:.92em}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <img class="icon" src="img/icon.png" alt="">
+    <h1>Falar</h1>
+    <p class="tagline">Разговор на двух языках без интернета</p>
+    <p class="sub">Собеседник говорит по-бразильски, вы слышите русский. Вы отвечаете по-русски,
+      он слышит португальский. Распознавание, перевод и голос считает сам телефон.</p>
+    <a class="btn" href="https://github.com/Annoyt/FALAR/releases/latest/download/Falar.apk">
+      <img src="img/btn-download.png" alt="Скачать APK"></a>
+    <p class="under">83 МБ · Android 9 и новее ·
+      <a href="https://github.com/Annoyt/FALAR/releases/latest">облегчённая сборка и суммы</a></p>
+  </div>
+</div>
+
+<div class="wrap">
+
+<section>
+  <h2>Что он делает</h2>
+  <p class="lead">Одно приложение на телефоне, без учётной записи и без подписки.</p>
+  <div class="cards">
+    <div class="card"><h3>Переводит вживую</h3>
+      <p>От конца фразы до перевода в ухе около секунды. Измерено на телефоне пятилетней давности.</p></div>
+    <div class="card"><h3>Показывает крупно</h3>
+      <p>Когда вы в наушниках, собеседник читает свою сторону с экрана. Под словами — как их прочесть вслух, русскими буквами с ударением.</p></div>
+    <div class="card"><h3>Работает в самолёте</h3>
+      <p>Сеть нужна один раз, чтобы скачать модели. Дальше связь не нужна совсем.</p></div>
+    <div class="card"><h3>Учит вас словам</h3>
+      <p>Слова из ваших же разговоров собираются в отдельную вкладку: что вы уже знаете, что стоит повторить.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Как поставить</h2>
+  <p class="lead">Приложения нет в Google Play, поэтому Android спросит разрешение один раз.</p>
+  <ol class="steps">
+    <li><b>Скачайте файл</b><span>Кнопка выше. Браузер предупредит, что такие файлы могут навредить — это обычное предупреждение для всего, что не из магазина.</span></li>
+    <li><b>Откройте скачанный файл</b><span>Android спросит, можно ли этому браузеру ставить приложения. Разрешите, вернитесь и откройте файл ещё раз.</span></li>
+    <li><b>Разрешите микрофон</b><span>Без него слушать нечем. Приложение распознаёт речь всех, кто рядом, поэтому предупредите собеседника.</span></li>
+    <li><b>Дайте скачать модели</b><span>Около 2 ГБ, один раз, по Wi-Fi. Можно остановить и продолжить позже с того же места. После этого интернет не нужен.</span></li>
+  </ol>
+  <div class="note">Если телефон скажет «Play Protect не проверил это приложение» — так он говорит
+    обо всём, что поставлено мимо магазина. Проверить, что файл не подменили, можно по контрольной
+    сумме на <a href="https://github.com/Annoyt/FALAR/releases/latest">странице релиза</a>.</div>
+  <div class="qr">
+    <img src="img/qr.png" alt="">
+    <p>Читаете с компьютера? Наведите камеру телефона — эта же страница откроется на нём.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Что нужно от телефона</h2>
+  <table>
+    <tr><th>Android</th><td>9 и новее, процессор arm64 (почти все телефоны с 2018 года)</td></tr>
+    <tr><th>Память на диске</th><td>около 2 ГБ под обязательные модели, ещё 1,1 ГБ под необязательные</td></tr>
+    <tr><th>Оперативная память</th><td>4 ГБ хватает; от 6 ГБ нужно только для контекстного уточнителя, который можно не ставить</td></tr>
+    <tr><th>Интернет</th><td>один раз, чтобы скачать модели</td></tr>
+    <tr><th>Наушники</th><td>не обязательны, но с ними удобнее: перевод в ухо вам, крупный текст на экране собеседнику</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Что уходит в интернет</h2>
+  <p class="lead">Ничего, пока вы сами не включите последний пункт.</p>
+  <ul class="plain">
+    <li><b>Речь и переводы остаются на телефоне.</b> Распознавание, перевод и голос считаются на нём же. Разговоры лежат в памяти приложения и никуда не отправляются.</li>
+    <li><b>Загрузка моделей</b> — обращение к Hugging Face и к релизам проекта при первом запуске. Только скачивание, ничего о вас не передаётся.</li>
+    <li><b>Пересмотр разговора облачной моделью</b> — необязательная возможность. Выключена, пока вы не включите её сами и не подтвердите согласие. Тогда текст разговора уходит выбранной бесплатной модели, чтобы она поправила перевод по смыслу.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Честно о том, чего нет</h2>
+  <ul class="plain">
+    <li><b>Только Android.</b> На iPhone поставить нельзя: Apple не разрешает ставить приложения мимо своего магазина.</li>
+    <li><b>Только бразильский португальский и русский.</b> Другие языки не поддерживаются.</li>
+    <li><b>Это ранняя версия.</b> Перевод ошибается, особенно на именах, числах и на шумной улице. Ошибку можно поправить прямо в разговоре, и приложение её запомнит.</li>
+    <li><b>Плохой перевод можно прислать.</b> Кнопка в меню реплики откроет готовое сообщение разработчику — вы только нажмёте «отправить».</li>
+  </ul>
+</section>
+
+</div>
+
+<footer>
+  <p><a href="https://github.com/Annoyt/FALAR">Исходный код на GitHub</a> ·
+     <a href="https://github.com/Annoyt/FALAR/issues">Сообщить о проблеме</a></p>
+  <p>«Falar» по-португальски значит «говорить».</p>
+</footer>
+
+</body>
+</html>
