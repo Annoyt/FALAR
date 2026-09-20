@@ -38,7 +38,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Экран первого запуска: разрешения и загрузка моделей по манифесту; блок моделей в «Системе». */
   View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
   Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify; ToggleButton tSetupAny, tAnyNet;
-  ModelStore.State mst; boolean micForever, svcStarted;
+  ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint;
   /** Держат крупный текст и читают его вслух; и видна ли сейчас транскрипция. */
   boolean holdingRead = false, cribVisible = false; Button bReadGuard;
 
@@ -358,18 +358,29 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       @Override public View getView(int pos, View cv, ViewGroup parent) {
         String[] t = getItem(pos);
         boolean srcPt = t[0].startsWith("pt");
-        LinearLayout row = new LinearLayout(MainActivity.this);
-        row.setOrientation(LinearLayout.VERTICAL); row.setPadding(4, 10, 4, 10);
+        LinearLayout col = new LinearLayout(MainActivity.this);
+        col.setOrientation(LinearLayout.VERTICAL);
         TextView pt = new TextView(MainActivity.this);
         pt.setText(srcPt ? t[1] : t[2]); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(Color.DKGRAY);
         TextView ru = new TextView(MainActivity.this);
-        ru.setText((srcPt ? t[2] : t[1]) + ("1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : "")); pt.setTextColor(Color.DKGRAY);
+        ru.setText((srcPt ? t[2] : t[1]) + ("1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : ""));
         ru.setTextSize(Math.max(10, szRu - 3)); ru.setTextColor(Color.GRAY);
-        row.addView(pt); row.addView(ru);
+        col.addView(pt); col.addView(ru);
+        // Метка «•••» — только знак того, что у реплики есть меню. Нажимается вся строка:
+        // кликабельный потомок внутри ListView отнимает нажатие у самой строки.
+        TextView dots = new TextView(MainActivity.this);
+        dots.setText("•••"); dots.setTextSize(16); dots.setTextColor(0xFF9AA0AA); dots.setPadding(16, 2, 4, 2);
+        LinearLayout row = new LinearLayout(MainActivity.this);
+        row.setOrientation(LinearLayout.HORIZONTAL); row.setPadding(4, 10, 4, 10);
+        row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+        row.addView(dots);
         return row;
       }
     });
-    histList.setOnItemLongClickListener((p, vv, pos, id) -> {
+    histList.setOnItemClickListener((p, vv, pos, id) -> {
+      if (pos < histRows.size()) editTurn(Integer.parseInt(histRows.get(pos)[3]), histRows.get(pos)[1]);
+    });
+    histList.setOnItemLongClickListener((p, vv, pos, id) -> {   // прежний жест оставлен: к нему привыкли
       if (pos >= histRows.size()) return false;
       editTurn(Integer.parseInt(histRows.get(pos)[3]), histRows.get(pos)[1]);
       return true;
@@ -705,13 +716,26 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     });
     v.addView(bigBox);
 
+    // Русская строка и рядом видимая точка входа в меню последней реплики. Раньше меню открывалось
+    // долгим нажатием на крупный текст, а этот жест занят чтением вслух; долгое нажатие само по
+    // себе не видно, и «как теперь удалить лишнюю фразу» — первый вопрос, который это вызвало.
+    LinearLayout ruRow = new LinearLayout(this); ruRow.setOrientation(LinearLayout.HORIZONTAL);
+    ruRow.setPadding(0, 12, 0, 0);
     smallRu = new TextView(this); smallRu.setTextSize(17); smallRu.setTextColor(Color.DKGRAY);
-    smallRu.setPadding(0, 12, 0, 0); v.addView(smallRu);
+    ruRow.addView(smallRu, new LinearLayout.LayoutParams(0, -2, 1f));
+    bTurn = new TextView(this); bTurn.setText("•••"); bTurn.setTextSize(18); bTurn.setTextColor(0xFF33507A);
+    bTurn.setPadding(24, 2, 8, 8); ruRow.addView(bTurn);
+    v.addView(ruRow);
+    View.OnClickListener lastMenu = x -> { if (svc != null && svc.chats != null && svc.chats.size() > 0) turnMenu(svc.chats.size() - 1); };
+    bTurn.setOnClickListener(lastMenu);
     smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
 
     // Прежние реплики — список, а не сплошной текст: каждую надо уметь удалить или перенести
     // в другой разговор. Случайная фраза из комнаты иначе остаётся в контексте уточнителя
     // и в разборе слов для заучивания.
+    histHint = new TextView(this); histHint.setTextSize(11); histHint.setTextColor(Color.GRAY);
+    histHint.setPadding(4, 6, 4, 2); histHint.setText("нажмите на реплику — поправить, удалить, перенести");
+    v.addView(histHint);
     histList = new ListView(this);
     histList.setDivider(null);
     v.addView(histList, new LinearLayout.LayoutParams(-1, 0, 1f));
