@@ -67,7 +67,9 @@ Android 9 и новее, процессор arm64. При первом запу�
 EOF
 
 git -C $R tag -a "$TAG" -m "Falar $VER"
-git -C $R -c credential.helper='!gh auth git-credential' push -q origin "$TAG"
+# Пустой помощник первым сбрасывает список: у git они складываются, и настроенный глобально
+# `store` отвечает раньше нашего, отдавая давно протухшую запись — «Invalid username or token».
+git -C $R -c credential.helper= -c credential.helper='!gh auth git-credential' push -q origin "$TAG"
 gh release create "$TAG" -R $REPO --title "Falar $VER" --notes-file $NOTES ${DRAFT:+--draft} \
   $A/Falar.apk $A/Falar-slim.apk $A/SHA256SUMS.txt
 rm -f $NOTES
