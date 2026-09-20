@@ -39,6 +39,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
   Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify; ToggleButton tSetupAny, tAnyNet;
   ModelStore.State mst; boolean micForever, svcStarted;
+  /** Держат крупный текст и читают его вслух; и видна ли сейчас транскрипция. */
+  boolean holdingRead = false, cribVisible = false; Button bReadGuard;
 
   final ServiceConnection conn = new ServiceConnection() {
     public void onServiceConnected(ComponentName n, IBinder b) { svc = ((TranslatorService.LocalBinder) b).get(); svc.setListener(MainActivity.this); }
@@ -205,6 +207,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (!cribManual) cribShown = cribDefault();
     bigBox.removeAllViews();
     boolean crib = cribShown && pt.length() > 1 && pt.matches("(?s).*\\p{L}.*");
+    cribVisible = crib; syncGuard();
     if (!crib) {
       TextView t = new TextView(this); t.setTextSize(szPt); t.setTypeface(null, Typeface.BOLD);
       t.setTextColor(Color.BLACK); t.setLineSpacing(0, 1.05f); t.setText(pt);
@@ -219,12 +222,38 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
   boolean cribDefault() { return bigDir.startsWith("ru") || prefs.getBoolean("translit_other", false); }
 
+  void startReading() {
+    holdingRead = true; buzz();
+    if (!cribShown) { cribManual = true; cribShown = true; showBig(bigText, bigDir, bigRefined); }
+    else syncGuard();
+    refreshHint();
+  }
+  void stopReading() {
+    if (!holdingRead) return;
+    holdingRead = false;
+    cribManual = false; showBig(bigText, bigDir, bigRefined);   // транскрипция возвращается к своему обычному состоянию
+    refreshHint();
+  }
+  /** Микрофон глушим, пока человек читает вслух. Что считать чтением — задаёт настройка:
+   *  только удержание текста (по умолчанию) или всё время, пока транскрипция на экране. */
+  void syncGuard() {
+    if (svc == null) return;
+    int g = svc.readGuard;
+    svc.setReadingAloud(g >= 1 && holdingRead || g == 2 && cribVisible);
+  }
+  void refreshReadGuard() {
+    if (bReadGuard == null || svc == null) return;
+    bReadGuard.setText("🔇 пока читаю вслух: " + (svc.readGuard == 0 ? "слушать всегда"
+        : svc.readGuard == 1 ? "молчать, пока держу текст" : "молчать, пока видна транскрипция"));
+  }
+
   /** Строка-подсказка: состояние, потом пометка о спрятанной транскрипции, потом тема разговора. */
   void setHint(String s) { hintBase = s == null ? "" : s; refreshHint(); }
   void refreshHint() {
     if (hint == null) return;
     String h = hintBase;
-    if (cribDefault() && !cribShown && bigText.length() > 1) h += (h.isEmpty() ? "" : " · ") + "транскрипция скрыта · касание вернёт";
+    if (holdingRead) h = "читаете вслух · микрофон не слушает";
+    else if (cribDefault() && !cribShown && bigText.length() > 1) h += (h.isEmpty() ? "" : " · ") + "транскрипция скрыта · касание вернёт";
     // Причина, по которой «получше» серая, — здесь же: в журнал её никто не пойдёт читать посреди разговора.
     if (svc != null && svc.eng != null && !svc.cloudBusy) {
       String m = svc.improveMode();
@@ -664,7 +693,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // вслух. Касание прячет и возвращает её, долгое нажатие открывает меню правки реплики.
     bigBox = new FlowLayout(this); bigBox.setClickable(true); bigBox.setLongClickable(true);
     bigBox.setOnClickListener(x -> { if (bigText.length() < 2) return; cribManual = true; cribShown = !cribShown; showBig(bigText, bigDir, bigRefined); refreshHint(); });
-    bigBox.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
+    // Удержание крупного текста — «читаю вслух»: транскрипция показывается на время удержания,
+    // и микрофон в это время не слушает. Иначе приложение слышит, как владелец произносит
+    // португальскую фразу с экрана, считает его собеседником и переводит ему её же обратно.
+    // Меню реплики переехало на русскую строку под текстом: жест удержания занят чтением.
+    bigBox.setOnLongClickListener(x -> { if (bigText.length() < 2) return false; startReading(); return true; });
+    bigBox.setOnTouchListener((bv, e) -> {
+      int a = e.getAction();
+      if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) stopReading();
+      return false;                       // касание и удержание обрабатываются своими слушателями
+    });
+    smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
     v.addView(bigBox);
 
     smallRu = new TextView(this); smallRu.setTextSize(17); smallRu.setTextColor(Color.DKGRAY);
@@ -1114,6 +1153,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     tTranslitOther.setTextOn("транскрипция и для реплик собеседника: ВКЛ"); tTranslitOther.setTextOff("транскрипция и для реплик собеседника: выкл");
     tTranslitOther.setChecked(prefs.getBoolean("translit_other", false)); v.addView(tTranslitOther);
     tTranslitOther.setOnCheckedChangeListener((vv, on) -> { prefs.edit().putBoolean("translit_other", on).apply(); cribManual = false; showBig(bigText, bigDir, bigRefined); refreshHint(); });
+    // Что считать чтением вслух. «Пока видна транскрипция» по умолчанию не ставим: она висит
+    // на экране до следующей реплики, и в этом положении ответ собеседника пропускается.
+    bReadGuard = new Button(this); bReadGuard.setTextSize(13); bReadGuard.setText("🔇 пока читаю вслух"); style(bReadGuard); v.addView(bReadGuard);
+    bReadGuard.setOnClickListener(vv -> { if (svc == null) return; svc.setReadGuard((svc.readGuard + 1) % 3); refreshReadGuard(); syncGuard(); });
     sizeLbl = new TextView(this); sizeLbl.setTextSize(14); sizeLbl.setTextColor(Color.GRAY); v.addView(sizeLbl);
     sPt = new SeekBar(this); sPt.setMax(48); sPt.setProgress((int) szPt); v.addView(sPt);
     sRu = new SeekBar(this); sRu.setMax(48); sRu.setProgress((int) szRu); v.addView(sRu);
@@ -1277,8 +1320,16 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
     refreshSetup();
   }
+  /** Экран ушёл — глушить микрофон больше не за что: палец с текста снят, а в положении
+   *  «молчать, пока видна транскрипция» иначе приложение осталось бы глухим в кармане. */
+  @Override protected void onPause() {
+    super.onPause();
+    holdingRead = false;
+    if (svc != null) svc.setReadingAloud(false);
+  }
   @Override protected void onResume() {
     super.onResume();
+    syncGuard();
     if (setupView != null && setupView.getVisibility() == View.VISIBLE) {   // вернулись из настроек приложения
       if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { micForever = false; startSvc(); }
       refreshSetup();
@@ -1313,7 +1364,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (bigText.length() < 2)
       setHint(svc != null && (svc.listenPt || svc.listenRu) ? "Pode falar · здесь появится перевод"
                                                             : "Микрофон выключен — включите «Слушать» или удержание");
-    refreshChats(); refreshKey(null); refreshVoice(); markListen(); refreshBetter(); refreshIntervals();
+    refreshChats(); refreshKey(null); refreshVoice(); markListen(); refreshBetter(); refreshIntervals(); refreshReadGuard();
   }
   @Override public void onStatus(String s) { status.setText(s); }
   /** Журнал сам прокручивается к последней строке. Без этого он показывал три строки запуска

@@ -40,6 +40,13 @@ public class TranslatorService extends Service {
    *  чужой язык и шум 0.00–0.27, между ними разрыв. См. results/2026-09-12-langgate.md. */
   static final double LANG_MIN = 0.40;
   public volatile Engine eng; public Phrasebook pb; public Speaker spk; public WordList words; public Cloud cloud; public Chats chats; public Learn learn; public volatile boolean autoDir = false; volatile boolean recording = false, vadMode = false, running = true, capturing = false; volatile long muteUntil = 0;
+  /** «Читаю вслух»: человек держит крупный текст и произносит португальскую фразу сам, по
+   *  транскрипции. Микрофон в это время глух — иначе приложение слышит владельца, считает его
+   *  собеседником и переводит ему же его фразу обратно. */
+  public volatile boolean readingAloud = false;
+  /** 0 — слушать всегда, 1 — молчать, пока держат текст, 2 — молчать, пока показана транскрипция.
+   *  При 1 и 2 работают ещё два тихих фильтра: своя фраза с экрана и свой голос по-португальски. */
+  public volatile int readGuard = 1;
   /** Стендовое (bench/air): «молчать» — переводить, но не озвучивать, иначе собственный голос
    *  лезет в воздух между фразами и портит замер; уровень фона для SNR каждого сегмента. */
   volatile boolean silent = false; volatile double noiseRms = 0; volatile double segNoiseDb = Double.NaN, segDb = Double.NaN; volatile long segAt = 0; volatile long segPos = 0; volatile String fixedDir = null; volatile String dumpSegs = null; volatile int rawSec = 0; volatile boolean feeding = false; volatile long vadSamples = 0; volatile boolean duplex = true; volatile boolean autoLang = true; volatile String micSource = "builtin";
@@ -134,6 +141,7 @@ public class TranslatorService extends Service {
       micSource = pr.getString("micsrc", "builtin");
       holdMs = pr.getInt("hold", 1500);
       refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
+      readGuard = pr.getInt("read_guard", 1);
       heartbeat(); startWarm(); startSay(); watchNetwork();
       boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
       if (lp || lr) setListen(lp, lr); else { log("🎚 микрофон выключен: включите «Слушать PT» или «Слушать RU»"); status("Микрофон выключен"); }
@@ -175,6 +183,8 @@ public class TranslatorService extends Service {
     // Стенд: модели по манифесту. modelsbase — локальный сервер вместо Hugging Face (adb reverse), не сохраняется.
     if (i != null && i.hasExtra("modelsbase") && store != null) { String b = i.getStringExtra("modelsbase"); store.baseOverride = b == null || b.isEmpty() || "off".equals(b) ? null : b; log("⬇ стенд: источник моделей " + (store.baseOverride == null ? "Hugging Face" : store.baseOverride)); }
     if (i != null && i.hasExtra("anynet")) setAnyNet("1".equals(i.getStringExtra("anynet")));
+    if (i != null && i.hasExtra("readguard")) setReadGuard(Integer.parseInt(i.getStringExtra("readguard")));
+    if (i != null && i.hasExtra("reading")) setReadingAloud("1".equals(i.getStringExtra("reading")));
     if (i != null && i.hasExtra("models") && store != null) {
       String m = i.getStringExtra("models");
       if ("check".equals(m)) worker.submit(() -> { long t = System.nanoTime(); ModelStore.Plan p = store.check("all"); ModelStore.State st = store.state();
@@ -1303,7 +1313,7 @@ public class TranslatorService extends Service {
         // Во время подачи записи микрофон в очередь не пускаем: иначе в замер подмешивается
         // живая комната и повтор перестаёт быть повтором.
         if (micGainDb != 0) { double mg = Math.pow(10, micGainDb / 20.0); for (int k = 0; k < n; k++) win[k] = clip(win[k] * mg); }
-        if (vadMode && !feeding && eng != null && System.currentTimeMillis() > muteUntil)
+        if (vadMode && !feeding && eng != null && !readingAloud && System.currentTimeMillis() > muteUntil)
           if (!capQ.offer(n == win.length ? win.clone() : Arrays.copyOf(win, n))) framesDropped++;
       }
       rec.stop(); rec.release(); capRouted = null;
@@ -1401,21 +1411,66 @@ public class TranslatorService extends Service {
 
   /** Направление берём из языка опознанного профиля; неопознанный голос — язык «не мой». */
   void route(float[] seg) {
-    String dir = "pt2ru";
-    if (fixedDir != null) { process(fixedDir, seg, 16000); return; }   // стенд: направление задано, профилей голоса нет
+    String dir = fixedDir != null ? fixedDir : "pt2ru";
+    // Опознаём говорящего и при заданном направлении тоже. Раньше «Слушать PT» задавало
+    // направление жёстко и выходило отсюда сразу, поэтому отпечаток голоса в этом режиме не
+    // работал вовсе: прочитанная владельцем вслух португальская фраза шла как речь собеседника.
     if (spk != null && spk.ready && spk.has(Speaker.ME)) {
       long t = System.nanoTime(); String who = spk.identify(seg, 16000); long ms = (System.nanoTime() - t) / 1000000;
-      if (Speaker.ME.equals(who) && !autoDir) {                       // фильтр своего голоса: молчаливый пропуск выглядит как поломка, поэтому показываем
-        String m = "🎤 пропущен свой голос (" + String.format("%.2f", spk.lastScore) + ") — включите «авто-направление», чтобы переводить и его";
-        log(m); status(m); notify(m); tsvSeg("skip_self", "", "", "", String.format(Locale.ROOT, "%.2f", spk.lastScore), seg.length / 16.0, 0, 0); return;
-      }
       String lang = who != null ? spk.langOf(who) : spk.fallbackLang();
-      dir = "ru".equals(lang) ? "ru2pt" : "pt2ru";
       lastSpkMs = ms; lastSpkWho = (who == null ? "?" : who) + " " + lang + " " + String.format("%.2f", spk.lastScore);
+      if (fixedDir == null) {
+        if (Speaker.ME.equals(who) && !autoDir) {                     // фильтр своего голоса: молчаливый пропуск выглядит как поломка, поэтому показываем
+          String m = "🎤 пропущен свой голос (" + String.format("%.2f", spk.lastScore) + ") — включите «авто-направление», чтобы переводить и его";
+          log(m); status(m); notify(m); tsvSeg("skip_self", "", "", "", String.format(Locale.ROOT, "%.2f", spk.lastScore), seg.length / 16.0, 0, 0); lastSpkWho = null; return;
+        }
+        dir = "ru".equals(lang) ? "ru2pt" : "pt2ru";
+      }
     }
     process(dir, seg, 16000);
   }
   volatile long lastSpkMs = 0; volatile String lastSpkWho = null;
+
+  /** Португальская речь, которая на самом деле не речь собеседника: владелец читает вслух
+   *  фразу с экрана по транскрипции. Два признака, оба без настройки и без сети.
+   *  Первый: сказанное почти целиком состоит из слов фразы, которая сейчас на экране — значит
+   *  её прочли, а не произнесли заново. Второй: голос опознан как голос владельца, а речь
+   *  португальская; вход от владельца всегда русский, поэтому это не вход.
+   *  Отпечаток голоса языка не различает — он опознаёт человека; язык берём из самого текста.
+   *  Возвращает причину для показа или null. Молча не выбрасываем ничего: сегодня уже видели,
+   *  как молчаливое поведение выглядит поломкой. */
+  String readSkip(String dir, String asr, String who, String kind) {
+    if (readGuard == 0 || !"pt2ru".equals(dir) || !"asr".equals(kind)) return null;
+    if (Speaker.ME.equals(who))
+      return "🔇 пропущено: это ваш голос, а речь португальская — вход от вас всегда русский";
+    String shown = fromScreen(asr);
+    if (shown != null)
+      return "🔇 пропущено: вы прочли вслух фразу с экрана — «" + (shown.length() > 40 ? shown.substring(0, 40) + "…" : shown) + "»";
+    return null;
+  }
+  /** Португальские стороны последних реплик — то, что было на экране крупно. */
+  String fromScreen(String asr) {
+    List<String> shown = new ArrayList<>();
+    synchronized (history) {
+      for (Turn t : history.subList(Math.max(0, history.size() - Heard.DEPTH), history.size()))
+        shown.add(t.dir.startsWith("pt") ? t.asr : (t.refined != null ? t.refined : t.mt));
+    }
+    return Heard.fromScreen(asr, shown);
+  }
+
+  /** Экран сообщает, что человек держит крупный текст и читает его вслух. */
+  public void setReadingAloud(boolean on) {
+    if (readingAloud == on) return;
+    readingAloud = on;
+    log(on ? "🔇 читаете вслух — микрофон не слушает" : "🎙 слушаю снова");
+    if (!on) muteUntil = Math.max(muteUntil, System.currentTimeMillis() + 250);   // хвост своего голоса в буфере
+  }
+  public void setReadGuard(int v) {
+    readGuard = Math.max(0, Math.min(2, v));
+    getSharedPreferences("at", MODE_PRIVATE).edit().putInt("read_guard", readGuard).apply();
+    log("🔇 пока читаю вслух: " + (readGuard == 0 ? "слушать всегда"
+        : readGuard == 1 ? "молчать, пока держу текст" : "молчать, пока показана транскрипция"));
+  }
 
   /** Набранная фраза. Отбой по языку здесь выключен: это не подслушанная комната, а явная просьба
    *  перевести — направление всё равно определяется по самому тексту. */
@@ -1588,6 +1643,8 @@ public class TranslatorService extends Service {
       if (lastSpkWho != null) { spkTag = " · 🎤" + lastSpkWho + " (" + lastSpkMs + " мс)"; String w = lastSpkWho.split(" ")[0]; if (!"?".equals(w)) who = w; lastSpkWho = null; }
       Once r = translateOnce(dirIn, asrIn, auto, gate);
       if (r.skip != null) { log(r.skip); tsvSeg(r.skipKind, r.dir, r.asr, "", r.lkTag, durMs, srcMs, 0); return; }
+      String guard = readSkip(r.dir, r.asr, who, kind);
+      if (guard != null) { log(guard); hint(guard); status(guard); tsvSeg("skip_read", r.dir, r.asr, "", "", durMs, srcMs, 0); return; }
       String dir = r.dir, asr = r.asr, mt = r.mt, tag = r.tag + (spkTag == null ? "" : spkTag);
       long t2 = System.nanoTime();
       final long at = System.currentTimeMillis();
