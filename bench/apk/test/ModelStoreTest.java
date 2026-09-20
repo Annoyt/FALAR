@@ -291,6 +291,22 @@ public class ModelStoreTest {
     eq(st.phase, ModelStore.DONE, "T19 done"); eq(srv.count("tts_x.zip"), 0, "T19 без запроса");
     eq(shaFile(new File(d, "tts_x/tokens.txt")), sha(tokens), "T19 распаковано");
 
+    // T21 «проверить файлы»: сообщение до и после, и оно не пустое ни в одном исходе
+    d = tmpDir("t21"); final List<String> seen = new ArrayList<>();
+    ModelStore vs = new ModelStore(d, man, () -> true, x -> { synchronized (seen) { seen.add(x.phase + "|" + x.message); } }, l -> {});
+    vs.baseOverride = srv.base(); vs.start("core"); waitDone(vs);
+    synchronized (seen) { seen.clear(); }
+    p = vs.verifyNow("core");
+    eq(p.need.size(), 0, "T21 всё на месте");
+    ok(seen.size() >= 2, "T21 состояние обновилось дважды: " + seen.size());
+    ok(seen.get(0).startsWith(ModelStore.CHECK + "|Проверяю"), "T21 сообщение до: " + seen.get(0));
+    ok(seen.get(seen.size() - 1).contains("все файлы на месте"), "T21 сообщение после: " + seen.get(seen.size() - 1));
+    Files.write(new File(d, "small.txt").toPath(), rnd(10_000, 77));
+    p = vs.verifyNow("core");
+    eq(p.need.size(), 1, "T21 подмена найдена");
+    ok(vs.state().message.contains("не сошлось или нет 1") && vs.state().message.contains("small.txt"), "T21 сообщение о несовпавшем: " + vs.state().message);
+    eq(vs.state().phase, ModelStore.IDLE, "T21 фаза после проверки — не занято");
+
     // T20 строки прогресса
     ModelStore.State ds = new ModelStore.State(); ds.phase = ModelStore.DOWN; ds.done = 812_000_000; ds.total = 1_981_000_000; ds.bps = 6_200_000; ds.file = "asr_multi/encoder.int8.onnx";
     eq(ModelStore.describe(ds), "Загрузка 40 % · 812.0 из 1981.0 МБ · 6.2 МБ/с · asr_multi/encoder.int8.onnx", "T20 строка загрузки");

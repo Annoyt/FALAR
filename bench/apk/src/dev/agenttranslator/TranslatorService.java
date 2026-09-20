@@ -996,11 +996,10 @@ public class TranslatorService extends Service {
     if (store == null || store.running()) return;
     new Thread(() -> {
       long t = System.nanoTime();
-      ModelStore.Plan p = store.verify("all");
+      ModelStore.Plan p = store.verifyNow("all");
       long ms = (System.nanoTime() - t) / 1000000;
       log("📦 проверка файлов: на месте " + p.have + ", не сошлось или нет " + p.need.size() + (p.need.isEmpty() ? "" : " " + p.need) + " · " + ms + " мс, " + ModelStore.mb(store.hashedBytes) + " МБ прочитано");
       tsv("models_verify", "" + p.have, "" + p.need.size(), "" + ms);
-      ModelStore.State st = store.state(); Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
     }, "models-verify").start();
   }
   /** Необязательное докачано при работающих движках: подключаем то, что грузится из файлов при

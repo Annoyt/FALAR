@@ -1011,6 +1011,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  Всё, что было здесь вперемешку, разъехалось по смыслу: «получше» и «запомнить» — к реплике,
    *  на экран разговора; свои слова и очистка — в «Изучение»; голоса — в отдельный режим.
    *  Причина не в красоте: среди восьми кнопок действия настройку не находили вовсе. */
+  /** «Система» прокручивается целиком. Раньше это была колонка без прокрутки с журналом на
+   *  остатке высоты: всё, что не влезало, молча обрезалось снизу — и при каждом новом переключателе
+   *  «пропадали» настройки размера шрифта и журнал вместе с ответами приложения на нажатия.
+   *  Теперь список настроек прокручивается, а журналу дана своя высота, а не остаток. */
   View buildSys() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 12, 24, 12);
     status = new TextView(this); status.setTextSize(15); status.setText("Запуск сервиса…"); v.addView(status);
@@ -1091,7 +1095,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     style(tAnyNet);
     bModelsDl.setOnClickListener(vv -> optionalDialog());
     bModelsStop.setOnClickListener(vv -> { if (svc != null) svc.cancelModels(); });
-    bModelsVerify.setOnClickListener(vv -> { if (svc != null) { svc.verifyModels(); onLog("📦 проверяю файлы моделей — это чтение всех моделей с диска, несколько секунд"); } });
+    bModelsVerify.setOnClickListener(vv -> { if (svc != null) svc.verifyModels(); });
     tCtx = new ToggleButton(this); tCtx.setTextOn("🧠 контекст (LLM в фоне): ВКЛ"); tCtx.setTextOff("🧠 контекст (LLM в фоне): выкл"); tCtx.setChecked(false); tCtx.setEnabled(false); v.addView(tCtx);
     // Как часто разбирать контекст: локально (уточнитель 🧠) и в облаке (пересмотр всего разговора).
     // 0 — только по кнопке «получше». Кнопки перебирают значения по кругу: без AndroidX это проще
@@ -1118,11 +1122,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       public void onStopTrackingTouch(SeekBar sb) { prefs.edit().putFloat("szPt", szPt).putFloat("szRu", szRu).apply(); }
     };
     sPt.setOnSeekBarChangeListener(sl); sRu.setOnSeekBarChangeListener(sl);
+    TextView logLbl = new TextView(this); logLbl.setTextSize(13); logLbl.setTextColor(Color.GRAY);
+    logLbl.setPadding(0, 16, 0, 0); logLbl.setText("Журнал: сюда приложение отвечает на нажатия"); v.addView(logLbl);
     logView = new TextView(this); logView.setTextSize(13); logView.setMovementMethod(new ScrollingMovementMethod()); logView.setTextColor(Color.DKGRAY);
     logScroll = new ScrollView(this); logScroll.addView(logView);
-    v.addView(logScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-    return v;
+    v.addView(logScroll, new LinearLayout.LayoutParams(-1, dp(260)));
+    ScrollView outer = new ScrollView(this); outer.addView(v);
+    return outer;
   }
+  int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
   /** Режим настройки голосов. Отдельный экран потому, что это разовая настройка со своим смыслом:
    *  приложение запоминает, как звучите вы и собеседник, и дальше выводит направление перевода
@@ -1403,7 +1411,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       + (s.optMissing == 0 ? "все на месте" : "нет " + s.optMissing + " (" + ModelStore.mb(s.optBytes) + " МБ)"));
     if (s.busy() || !s.message.isEmpty()) sb.append("\n").append(progressLine(s));
     modelsLbl.setText(sb);
-    bModelsDl.setEnabled(!s.busy() && s.optMissing > 0); bModelsStop.setVisibility(s.busy() ? View.VISIBLE : View.GONE); bModelsVerify.setEnabled(!s.busy());
+    bModelsDl.setEnabled(!s.busy() && s.optMissing > 0);
+    bModelsStop.setVisibility(ModelStore.CHECK.equals(s.phase) ? View.GONE : s.busy() ? View.VISIBLE : View.GONE);
+    bModelsVerify.setEnabled(!s.busy());
+    bModelsVerify.setText(ModelStore.CHECK.equals(s.phase) ? "проверяю…" : "проверить файлы моделей");
   }
   static String modelTitle(ModelStore.Item it) {
     String p = it.path;

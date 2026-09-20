@@ -134,8 +134,25 @@ public class ModelStore {
   public Plan quick(String tier) { return plan(tier(tier), 0); }
   /** Наличие, размер и sha256; хэшируются только файлы, которых нет в .verified.json. */
   public Plan check(String tier) { return plan(tier(tier), 1); }
-  /** Всё заново, кэш проверок не в счёт: кнопка «проверить файлы моделей». */
+  /** Всё заново, кэш проверок не в счёт. */
   public Plan verify(String tier) { return plan(tier(tier), 2); }
+  /** То же, но с сообщением на экране до и после: чтение трёх гигабайт длится секунды, и без
+   *  этого кнопка «проверить файлы моделей» выглядит мёртвой — нажал, а в ответ тишина. */
+  public Plan verifyNow(String tier) {
+    synchronized (st) { st.phase = CHECK; st.message = "Проверяю файлы моделей, это чтение всего с диска…"; }
+    push(true);
+    long t = System.nanoTime(), b = hashedBytes;
+    Plan p = verify(tier);
+    long ms = (System.nanoTime() - t) / 1000000;
+    synchronized (st) {
+      st.phase = IDLE;
+      st.message = p.need.isEmpty()
+          ? "Проверено: все файлы на месте, " + mb(hashedBytes - b) + " МБ за " + String.format(Locale.ROOT, "%.1f", ms / 1000.0) + " с"
+          : "Проверено: не сошлось или нет " + p.need.size() + " — " + p.need.get(0) + (p.need.size() > 1 ? " и другие" : "");
+    }
+    push(true);
+    return p;
+  }
 
   Plan plan(List<Item> list, int depth) {
     Plan p = new Plan();
