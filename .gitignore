@@ -36,3 +36,4 @@ __pycache__/
 *.pyc
 tools/json.jar
 bench/apk/SHA256SUMS.txt
+bench/apk/latest.json

@@ -51,8 +51,26 @@ done
 cd $A && sha256sum Falar.apk Falar-slim.apk > SHA256SUMS.txt && cd $R
 FULL=$(du -h $A/Falar.apk | cut -f1); SLIMSZ=$(du -h $A/Falar-slim.apk | cut -f1)
 
-NOTES=$(mktemp)
-cat > $NOTES <<EOF
+# latest.json — то, что приложение читает само, чтобы узнать о новой версии. Лежит среди файлов
+# релиза, адрес постоянный: releases/latest/download/latest.json. Номер сборки, размер и sha256
+# берутся из того, что реально собрано, — сверять обновление до установки иначе нечем.
+# MIN_CODE=<число> — пометить обновление обязательным (ниже этой сборки пользоваться нельзя).
+# NOTES='…' — строка, которую человек увидит в уведомлении.
+python3 - "$A" "$VER" "${MIN_CODE:-0}" "${NOTES:-}" <<'PY'
+import hashlib, json, os, re, sys
+a, ver, mincode, notes = sys.argv[1:5]
+code = int(re.search(r'versionCode="(\d+)"', open(os.path.join(a, "AndroidManifest.xml"), encoding="utf-8").read()).group(1))
+def item(name):
+    p = os.path.join(a, name)
+    return {"apk": name, "size": os.path.getsize(p), "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()}
+d = item("Falar.apk")
+d.update({"versionCode": code, "versionName": ver, "minVersionCode": int(mincode), "notes": notes, "slim": item("Falar-slim.apk")})
+json.dump(d, open(os.path.join(a, "latest.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+print("  latest.json: сборка", code, ver, ("· обязательное с " + mincode) if int(mincode) else "")
+PY
+
+RELNOTES=$(mktemp)
+cat > $RELNOTES <<EOF
 Установка и что это такое — на странице <https://annoyt.github.io/FALAR/>.
 
 | Файл | Размер | Кому |
@@ -70,8 +88,8 @@ git -C $R tag -a "$TAG" -m "Falar $VER"
 # Пустой помощник первым сбрасывает список: у git они складываются, и настроенный глобально
 # `store` отвечает раньше нашего, отдавая давно протухшую запись — «Invalid username or token».
 git -C $R -c credential.helper= -c credential.helper='!gh auth git-credential' push -q origin "$TAG"
-gh release create "$TAG" -R $REPO --title "Falar $VER" --notes-file $NOTES ${DRAFT:+--draft} \
-  $A/Falar.apk $A/Falar-slim.apk $A/SHA256SUMS.txt
-rm -f $NOTES
+gh release create "$TAG" -R $REPO --title "Falar $VER" --notes-file $RELNOTES ${DRAFT:+--draft} \
+  $A/Falar.apk $A/Falar-slim.apk $A/SHA256SUMS.txt $A/latest.json
+rm -f $RELNOTES
 echo "== готово: $(gh release view "$TAG" -R $REPO --json url --jq .url)"
 echo "   кнопка на странице ведёт на https://github.com/$REPO/releases/latest/download/Falar.apk"

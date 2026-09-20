@@ -39,6 +39,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
   Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify; ToggleButton tSetupAny, tAnyNet;
   ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint; ScrollView bigScroll;
+  TextView updLbl; Button bUpdate, bUpdateGo;
   /** Держат крупный текст и читают его вслух; и видна ли сейчас транскрипция. */
   boolean holdingRead = false, cribVisible = false; Button bReadGuard;
 
@@ -1095,6 +1096,18 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   View buildSys() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 12, 24, 12);
     status = new TextView(this); status.setTextSize(15); status.setText("Запуск сервиса…"); v.addView(status);
+    // Обновление приложения. Стоит первым в «Системе»: магазина нет, и это единственное место,
+    // где человек вообще может узнать, что вышла новая версия.
+    updLbl = new TextView(this); updLbl.setTextSize(13); updLbl.setTextColor(0xFF33507A); updLbl.setPadding(0, 10, 0, 0); v.addView(updLbl);
+    LinearLayout rowU = new LinearLayout(this); rowU.setOrientation(LinearLayout.HORIZONTAL);
+    bUpdate = new Button(this); bUpdate.setText("проверить обновления"); bUpdate.setTextSize(13);
+    rowU.addView(bUpdate, new LinearLayout.LayoutParams(0, -2, 1f));
+    bUpdateGo = new Button(this); bUpdateGo.setText("обновить"); bUpdateGo.setTextSize(13); bUpdateGo.setVisibility(View.GONE);
+    rowU.addView(bUpdateGo, new LinearLayout.LayoutParams(-2, -2));
+    v.addView(rowU);
+    for (Button b : new Button[]{bUpdate, bUpdateGo}) style(b);
+    bUpdate.setOnClickListener(vv -> { if (svc != null) svc.checkUpdates(true); });
+    bUpdateGo.setOnClickListener(vv -> { if (svc != null) svc.installUpdate(); });
     TextView ml = new TextView(this); ml.setTextSize(13); ml.setTextColor(Color.GRAY);
     ml.setText("Вход: чувствительность и источник"); v.addView(ml);
     // Ползунок показывает то, что сервис применяет на самом деле. Раньше он всегда рисовал +0 дБ,
@@ -1402,6 +1415,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       setHint(svc != null && (svc.listenPt || svc.listenRu) ? "Pode falar · здесь появится перевод"
                                                             : "Микрофон выключен — включите «Слушать» или удержание");
     refreshChats(); refreshKey(null); refreshVoice(); markListen(); refreshBetter(); refreshIntervals(); refreshReadGuard();
+    onUpdate(svc == null ? "" : svc.updateState);
   }
   @Override public void onStatus(String s) { status.setText(s); }
   /** Журнал сам прокручивается к последней строке. Без этого он показывал три строки запуска
@@ -1422,6 +1436,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (isFinishing() || isDestroyed()) return;
     if (manual) namesDialog(names);
     else onLog("📝 имена от модели: " + names.size() + " — долгое нажатие на подсказку, чтобы добавить в свои слова");
+  }
+  @Override public void onUpdate(String state) {
+    if (updLbl == null) return;
+    boolean has = svc != null && svc.update != null;
+    updLbl.setText("Falar " + (svc == null ? "" : svc.myName()) + (state == null || state.isEmpty() ? " · обновления проверяются раз в сутки" : " · " + state));
+    bUpdateGo.setVisibility(has && !svc.updateBusy ? View.VISIBLE : View.GONE);
+    bUpdateGo.setText(has ? "обновить до " + svc.update.name : "обновить");
+    bUpdate.setEnabled(svc != null && !svc.updateBusy);
   }
   @Override public void onModels(ModelStore.State s) {
     mst = s; refreshSetup(); refreshModels();

@@ -28,7 +28,9 @@ public class TranslatorService extends Service {
     /** Имена собственные из облачного ответа — кандидаты в свои слова, добавляет человек. */
     void onNames(java.util.List<String[]> names, boolean manual);
     /** Модели по манифесту: чего не хватает, ход загрузки. Первый вызов — итог проверки при старте. */
-    void onModels(ModelStore.State s); }
+    void onModels(ModelStore.State s);
+    /** Состояние проверки и установки обновления приложения; пустая строка — сказать нечего. */
+    void onUpdate(String state); }
   public class LocalBinder extends Binder { public TranslatorService get() { return TranslatorService.this; } }
   final IBinder binder = new LocalBinder(); final Handler main = new Handler(Looper.getMainLooper());
   final ExecutorService worker = Executors.newSingleThreadExecutor(); volatile Listener listener;
@@ -47,6 +49,11 @@ public class TranslatorService extends Service {
   /** 0 — слушать всегда, 1 — молчать, пока держат текст, 2 — молчать, пока показана транскрипция.
    *  При 1 и 2 работают ещё два тихих фильтра: своя фраза с экрана и свой голос по-португальски. */
   public volatile int readGuard = 1;
+  /** Найденное обновление и строка о нём для экрана. Магазина нет, и без этой проверки человек,
+   *  поставивший сборку однажды, о следующей не узнает никогда. */
+  public volatile Updates.Info update; public volatile String updateState = ""; public volatile boolean updateBusy = false;
+  /** Стенд: описание релиза берётся отсюда вместо GitHub. Не сохраняется. */
+  public volatile String updateBase;
   /** Стендовое (bench/air): «молчать» — переводить, но не озвучивать, иначе собственный голос
    *  лезет в воздух между фразами и портит замер; уровень фона для SNR каждого сегмента. */
   volatile boolean silent = false; volatile double noiseRms = 0; volatile double segNoiseDb = Double.NaN, segDb = Double.NaN; volatile long segAt = 0; volatile long segPos = 0; volatile String fixedDir = null; volatile String dumpSegs = null; volatile int rawSec = 0; volatile boolean feeding = false; volatile long vadSamples = 0; volatile boolean duplex = true; volatile boolean autoLang = true; volatile String micSource = "builtin";
@@ -142,6 +149,7 @@ public class TranslatorService extends Service {
       holdMs = pr.getInt("hold", 1500);
       refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
       readGuard = pr.getInt("read_guard", 1);
+      maybeCheckUpdates();
       heartbeat(); startWarm(); startSay(); watchNetwork();
       boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
       if (lp || lr) setListen(lp, lr); else { log("🎚 микрофон выключен: включите «Слушать PT» или «Слушать RU»"); status("Микрофон выключен"); }
@@ -158,6 +166,18 @@ public class TranslatorService extends Service {
 
   @Override public int onStartCommand(Intent i, int flags, int id) {
     if (i != null && ACT_STOP.equals(i.getAction())) { stopSelf(); return START_NOT_STICKY; }
+    // Ответ системного установщика. Первый — просьба показать человеку окно подтверждения:
+    // без неё сессия висит, а снаружи выглядит, будто обновление молча не поставилось.
+    if (i != null && ACT_INSTALLED.equals(i.getAction())) {
+      int st = i.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -1);
+      if (st == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+        Intent ui = i.getParcelableExtra(Intent.EXTRA_INTENT);
+        if (ui != null) { ui.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); try { startActivity(ui); } catch (Throwable e) { log("⬆ окно установки не открылось: " + e); } }
+      } else if (st == android.content.pm.PackageInstaller.STATUS_SUCCESS) { upd("Обновление установлено"); log("⬆ обновление установлено"); }
+      else { String m = i.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
+        upd("Установка не прошла: " + m); log("⬆ установка не прошла (" + st + "): " + m); }
+      return START_STICKY;
+    }
     if (i != null && i.hasExtra("enrollwav")) { final String wav = i.getStringExtra("enrollwav"), who = i.getStringExtra("who") == null ? Speaker.ME : i.getStringExtra("who");
       worker.submit(() -> { try { WaveReader wr = new WaveReader(wav); long t = System.nanoTime();
         String lang = i.getStringExtra("lang") == null ? "ru" : i.getStringExtra("lang");
@@ -190,6 +210,10 @@ public class TranslatorService extends Service {
     // Стенд: модели по манифесту. modelsbase — локальный сервер вместо Hugging Face (adb reverse), не сохраняется.
     if (i != null && i.hasExtra("modelsbase") && store != null) { String b = i.getStringExtra("modelsbase"); store.baseOverride = b == null || b.isEmpty() || "off".equals(b) ? null : b; log("⬇ стенд: источник моделей " + (store.baseOverride == null ? "Hugging Face" : store.baseOverride)); }
     if (i != null && i.hasExtra("anynet")) setAnyNet("1".equals(i.getStringExtra("anynet")));
+    if (i != null && i.hasExtra("updatebase")) { String b = i.getStringExtra("updatebase"); updateBase = b == null || b.isEmpty() || "off".equals(b) ? null : b; log("⬆ стенд: описание релиза из " + (updateBase == null ? "GitHub" : updateBase)); }
+    if (i != null && i.hasExtra("update")) { String u = i.getStringExtra("update");
+      if ("check".equals(u)) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("update_check").apply(); checkUpdates(true); }
+      else if ("install".equals(u)) installUpdate(); }
     if (i != null && i.hasExtra("readguard")) setReadGuard(Integer.parseInt(i.getStringExtra("readguard")));
     if (i != null && i.hasExtra("reading")) setReadingAloud("1".equals(i.getStringExtra("reading")));
     if (i != null && i.hasExtra("models") && store != null) {
@@ -524,6 +548,7 @@ public class TranslatorService extends Service {
     listener = l; if (l != null && eng != null) main.post(l::onReady);
     // Экран мог подключиться после проверки моделей при старте — отдаём ему итог сразу.
     if (l != null && store != null) { ModelStore.State st = store.state(); main.post(() -> l.onModels(st)); }
+    if (l != null) { String u = updateState; main.post(() -> l.onUpdate(u)); }
   }
   /** Что слушаем. Ни одна кнопка не нажата — микрофон отпускается совсем: приложение не должно
    *  держать вход и гореть точкой записи, когда его не просили слушать.
@@ -1043,6 +1068,124 @@ public class TranslatorService extends Service {
         @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities c) { hint(null); }
       });
     } catch (Throwable e) { log("сеть: слежение не включилось: " + e); }
+  }
+
+  // ---- обновление приложения --------------------------------------------------------------
+  static final long UPDATE_EVERY = 24L * 3600 * 1000;
+  static final String ACT_INSTALLED = "dev.agenttranslator.INSTALLED";
+
+  /** Облегчённая сборка — та, в которой нет llama.cpp. Обновлять её полной нельзя: человек
+   *  выбрал 22 МБ вместо 83 осознанно, и молча утянуть остальное было бы подменой выбора. */
+  boolean slimBuild() { return !new File(getApplicationInfo().nativeLibraryDir, "libllama-server.so").exists(); }
+  public int myCode() {
+    try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode; } catch (Exception e) { return 0; }
+  }
+  public String myName() {
+    try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return "?"; }
+  }
+  void upd(String s) { updateState = s; Listener l = listener; if (l != null) main.post(() -> l.onUpdate(s)); }
+  void maybeCheckUpdates() {
+    long last = getSharedPreferences("at", MODE_PRIVATE).getLong("update_check", 0);
+    if (System.currentTimeMillis() - last < UPDATE_EVERY) { upd(""); return; }
+    checkUpdates(false);
+  }
+  /** Проверка новой версии. Раз в сутки сама, по кнопке — когда попросят. Ошибку не прячем:
+   *  «обновлений нет» и «проверить не вышло» — разные вещи, и молчание вместо второго означало
+   *  бы, что приложение навсегда перестало обновляться, а снаружи это незаметно. */
+  public void checkUpdates(final boolean manual) {
+    if (updateBusy) return;
+    updateBusy = true; upd("Проверяю…");
+    new Thread(() -> {
+      try {
+        if (!online()) { upd("Нет сети — проверю позже"); return; }
+        String base = updateBase == null || updateBase.isEmpty() ? Updates.LATEST : updateBase;
+        Updates.Info i = Updates.parse(get(base), slimBuild());
+        getSharedPreferences("at", MODE_PRIVATE).edit().putLong("update_check", System.currentTimeMillis()).apply();
+        int my = myCode();
+        if (Updates.newer(my, i)) {
+          update = i;
+          String m = Updates.describe(my, i);
+          upd(m + (i.notes.isEmpty() ? "" : "\n" + i.notes));
+          log("⬆ " + m + (i.notes.isEmpty() ? "" : " — " + i.notes));
+          notify(m + " — «Система», кнопка обновления");
+        } else {
+          update = null; upd("Установлена последняя версия (" + myName() + ")");
+          if (manual) log("⬆ обновлений нет, установлена " + myName());
+        }
+      } catch (Throwable t) {
+        upd("Проверить не вышло: " + t);
+        log("⬆ проверка обновления не вышла: " + t);
+      } finally { updateBusy = false; }
+    }, "update-check").start();
+  }
+  String get(String url) throws java.io.IOException {
+    java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+    c.setConnectTimeout(10000); c.setReadTimeout(15000); c.setInstanceFollowRedirects(true);
+    c.setRequestProperty("User-Agent", "Falar/" + myName());
+    try {
+      int code = c.getResponseCode();
+      if (code != 200) throw new java.io.IOException("HTTP " + code);
+      java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+      try (java.io.InputStream in = c.getInputStream()) { byte[] b = new byte[8192]; int n; while ((n = in.read(b)) > 0) bo.write(b, 0, n); }
+      return new String(bo.toByteArray(), "UTF-8");
+    } finally { c.disconnect(); }
+  }
+  /** Скачать и отдать системному установщику. Сумма считается на лету и сверяется до установки:
+   *  обновление — самый прямой способ подсунуть человеку чужое приложение, и полагаться на то,
+   *  что по дороге ничего не подменили, тут нельзя. */
+  public void installUpdate() {
+    final Updates.Info i = update;
+    if (i == null || updateBusy) return;
+    updateBusy = true;
+    new Thread(() -> {
+      File dir = new File(getExternalFilesDir(null), "update"); dir.mkdirs();
+      File[] old = dir.listFiles(); if (old != null) for (File x : old) x.delete();   // недокачанное с прошлого раза
+      File f = new File(dir, i.apk);
+      try {
+        String base = updateBase == null || updateBase.isEmpty() ? Updates.LATEST : updateBase;
+        upd("Скачиваю " + i.name + "…");
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(i.url(base)).openConnection();
+        c.setConnectTimeout(15000); c.setReadTimeout(30000); c.setInstanceFollowRedirects(true);
+        c.setRequestProperty("User-Agent", "Falar/" + myName());
+        long done = 0;
+        try {
+          if (c.getResponseCode() != 200) throw new java.io.IOException("HTTP " + c.getResponseCode());
+          try (java.io.InputStream in = c.getInputStream(); java.io.OutputStream o = new java.io.BufferedOutputStream(new java.io.FileOutputStream(f), 1 << 18)) {
+            byte[] b = new byte[1 << 16]; int n; long tick = 0;
+            while ((n = in.read(b)) > 0) {
+              o.write(b, 0, n); md.update(b, 0, n); done += n;
+              if (done - tick > (1 << 21)) { tick = done; upd("Скачиваю " + i.name + ": " + (i.size > 0 ? done * 100 / i.size : 0) + " %"); }
+            }
+          }
+        } finally { c.disconnect(); }
+        if (done != i.size) throw new java.io.IOException("размер не сошёлся: " + done + " вместо " + i.size);
+        String got = ModelStore.hex(md.digest());
+        if (!got.equalsIgnoreCase(i.sha256)) { f.delete(); upd("Файл не сошёлся по контрольной сумме — не ставлю"); log("⬆ контрольная сумма обновления не сошлась, файл выброшен"); return; }
+        upd("Устанавливаю " + i.name + "…"); log("⬆ обновление скачано и сверено, отдаю установщику");
+        install(f);
+        f.delete();          // установщик уже скопировал файл в свою сессию: 83 МБ незачем держать
+      } catch (Throwable t) {
+        f.delete(); upd("Обновление не скачалось: " + t); log("⬆ обновление не скачалось: " + t);
+      } finally { updateBusy = false; }
+    }, "update-install").start();
+  }
+  void install(File apk) throws java.io.IOException {
+    android.content.pm.PackageInstaller pi = getPackageManager().getPackageInstaller();
+    android.content.pm.PackageInstaller.SessionParams p =
+        new android.content.pm.PackageInstaller.SessionParams(android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+    p.setAppPackageName(getPackageName());
+    int id = pi.createSession(p);
+    android.content.pm.PackageInstaller.Session ses = pi.openSession(id);
+    try {
+      try (java.io.OutputStream o = ses.openWrite("falar", 0, apk.length()); java.io.InputStream in = new java.io.FileInputStream(apk)) {
+        byte[] b = new byte[1 << 16]; int n; while ((n = in.read(b)) > 0) o.write(b, 0, n);
+        ses.fsync(o);
+      }
+      PendingIntent pe = PendingIntent.getService(this, 7, new Intent(this, TranslatorService.class).setAction(ACT_INSTALLED),
+          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+      ses.commit(pe.getIntentSender());
+    } finally { ses.close(); }
   }
 
   static final int CLOUD_BUDGET = 6000;
