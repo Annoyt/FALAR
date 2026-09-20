@@ -1084,6 +1084,10 @@ public class TranslatorService extends Service {
     try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return "?"; }
   }
   void upd(String s) { updateState = s; Listener l = listener; if (l != null) main.post(() -> l.onUpdate(s)); }
+  /** Конец работы: сначала снять занятость, потом повторить состояние. Иначе последнее сообщение
+   *  уходит на экран, пока признак ещё стоит, и кнопка проверки остаётся серой навсегда —
+   *  ровно это и случилось после первой же неудачной проверки. */
+  void updDone() { updateBusy = false; upd(updateState); }
   void maybeCheckUpdates() {
     long last = getSharedPreferences("at", MODE_PRIVATE).getLong("update_check", 0);
     if (System.currentTimeMillis() - last < UPDATE_EVERY) { upd(""); return; }
@@ -1115,7 +1119,7 @@ public class TranslatorService extends Service {
       } catch (Throwable t) {
         upd("Проверить не вышло: " + t);
         log("⬆ проверка обновления не вышла: " + t);
-      } finally { updateBusy = false; }
+      } finally { updDone(); }
     }, "update-check").start();
   }
   String get(String url) throws java.io.IOException {
@@ -1167,7 +1171,7 @@ public class TranslatorService extends Service {
         f.delete();          // установщик уже скопировал файл в свою сессию: 83 МБ незачем держать
       } catch (Throwable t) {
         f.delete(); upd("Обновление не скачалось: " + t); log("⬆ обновление не скачалось: " + t);
-      } finally { updateBusy = false; }
+      } finally { updDone(); }
     }, "update-install").start();
   }
   void install(File apk) throws java.io.IOException {

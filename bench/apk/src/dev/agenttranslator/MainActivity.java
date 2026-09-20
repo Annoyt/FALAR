@@ -727,7 +727,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       }
     };
     bigScroll.setFillViewport(true);
-    bigScroll.addView(bigBox);
+    // В прокрутку уходит вся текущая реплика: и крупный текст, и русская строка под ним. Русский
+    // перевод длинного монолога сам по себе занимает шесть строк, и, оставь его снаружи, нижний
+    // ряд кнопок опять уезжал бы за край — уже по другой причине.
+    LinearLayout turnCol = new LinearLayout(this); turnCol.setOrientation(LinearLayout.VERTICAL);
+    turnCol.addView(bigBox);
+    bigScroll.addView(turnCol);
     v.addView(bigScroll);
 
     // Русская строка и рядом видимая точка входа в меню последней реплики. Раньше меню открывалось
@@ -739,7 +744,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     ruRow.addView(smallRu, new LinearLayout.LayoutParams(0, -2, 1f));
     bTurn = new TextView(this); bTurn.setText("•••"); bTurn.setTextSize(18); bTurn.setTextColor(0xFF33507A);
     bTurn.setPadding(24, 2, 8, 8); ruRow.addView(bTurn);
-    v.addView(ruRow);
+    turnCol.addView(ruRow);
     View.OnClickListener lastMenu = x -> { if (svc != null && svc.chats != null && svc.chats.size() > 0) turnMenu(svc.chats.size() - 1); };
     bTurn.setOnClickListener(lastMenu);
     smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
