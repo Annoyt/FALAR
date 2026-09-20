@@ -38,7 +38,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Экран первого запуска: разрешения и загрузка моделей по манифесту; блок моделей в «Системе». */
   View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
   Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify; ToggleButton tSetupAny, tAnyNet;
-  ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint;
+  ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint; ScrollView bigScroll;
   /** Держат крупный текст и читают его вслух; и видна ли сейчас транскрипция. */
   boolean holdingRead = false, cribVisible = false; Button bReadGuard;
 
@@ -206,6 +206,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (newTurn) cribManual = false;
     if (!cribManual) cribShown = cribDefault();
     bigBox.removeAllViews();
+    if (bigScroll != null && newTurn) bigScroll.post(() -> bigScroll.scrollTo(0, 0));
     boolean crib = cribShown && pt.length() > 1 && pt.matches("(?s).*\\p{L}.*");
     cribVisible = crib; syncGuard();
     if (!crib) {
@@ -714,7 +715,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) stopReading();
       return false;                       // касание и удержание обрабатываются своими слушателями
     });
-    v.addView(bigBox);
+    // Крупный текст прокручивается и не растёт выше половины экрана. Без этого длинная фраза
+    // (а с транскрипцией каждое слово занимает две строки) выдавливала за нижний край список
+    // реплик и весь ряд кнопок — «получше», «запомнить», «＋ новый» становились недоступны,
+    // и начать новый разговор было нечем. Прокрутки на этом экране не было вовсе.
+    bigScroll = new ScrollView(this) {
+      @Override protected void onMeasure(int wSpec, int hSpec) {
+        int max = Math.round(getResources().getDisplayMetrics().heightPixels * 0.5f);
+        super.onMeasure(wSpec, MeasureSpec.makeMeasureSpec(max, MeasureSpec.AT_MOST));
+      }
+    };
+    bigScroll.setFillViewport(true);
+    bigScroll.addView(bigBox);
+    v.addView(bigScroll);
 
     // Русская строка и рядом видимая точка входа в меню последней реплики. Раньше меню открывалось
     // долгим нажатием на крупный текст, а этот жест занят чтением вслух; долгое нажатие само по

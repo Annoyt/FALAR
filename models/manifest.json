@@ -1,373 +1,373 @@
 {
- "manifest_version": 1,
- "app": "0.21.0",
- "own_repo": "youannoingme/falar-models",
- "device_dir": "Android/data/app.falar/files/models",
- "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо.",
- "total_core_bytes": 1981012638,
- "total_optional_bytes": 1188932476,
- "files": [
-  {
-   "path": "silero_vad.onnx",
-   "size": 643854,
-   "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
-   "tier": "core",
-   "license": "MIT",
-   "source": {
-    "type": "url",
-    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
-   }
-  },
-  {
-   "path": "asr_multi/encoder.int8.onnx",
-   "size": 652184281,
-   "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
-    "file": "encoder.int8.onnx",
-    "revision": "main"
-   }
-  },
-  {
-   "path": "asr_multi/decoder.int8.onnx",
-   "size": 11845275,
-   "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
-    "file": "decoder.int8.onnx",
-    "revision": "main"
-   }
-  },
-  {
-   "path": "asr_multi/joiner.int8.onnx",
-   "size": 6355277,
-   "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
-    "file": "joiner.int8.onnx",
-    "revision": "main"
-   }
-  },
-  {
-   "path": "asr_multi/tokens.txt",
-   "size": 93939,
-   "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
-    "file": "tokens.txt",
-    "revision": "main"
-   }
-  },
-  {
-   "path": "mt/pt2ru/encoder_model.onnx",
-   "size": 139826134,
-   "sha256": "c063b87dc8f4d0bcbb17efdda477af491bdef149c21c9ba45264c2bb25eff4a6",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/pt2ru/encoder_model.onnx",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
-   "how": "optimum-onnx export + int8 dynamic quantization"
-  },
-  {
-   "path": "mt/pt2ru/decoder_model.onnx",
-   "size": 228413307,
-   "sha256": "94371ee4f8acac0863042859039cb2ae2266c8d5b9770e207677d579c8a5e4bf",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/pt2ru/decoder_model.onnx",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
-   "how": "optimum-onnx export + int8 dynamic quantization"
-  },
-  {
-   "path": "mt/pt2ru/decoder_with_past_model.onnx",
-   "size": 215739604,
-   "sha256": "eb7236ee021efa023d95391dbf0c0bf8f4854b94d39173ead8cf060a6cc1378e",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/pt2ru/decoder_with_past_model.onnx",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
-   "how": "optimum-onnx export + int8 dynamic quantization"
-  },
-  {
-   "path": "mt/pt2ru/pt2ru_source_pieces.tsv",
-   "size": 961044,
-   "sha256": "31df866c1c161a561cf7c15f9af3a6a3e0bdd96ba24cc75c33c655db8b5991cc",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/pt2ru/pt2ru_source_pieces.tsv",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
-   "how": "pieces of source.spm as TSV for the in-app tokenizer"
-  },
-  {
-   "path": "mt/pt2ru/pt2ru_vocab.json",
-   "size": 2526923,
-   "sha256": "8fd0707bc0579f52f5f1bbd8c4bc1313fd17fd33b3217a2788b133ed9d7c7008",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/pt2ru/pt2ru_vocab.json",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
-   "how": "vocab.json of the Marian model"
-  },
-  {
-   "path": "mt/ru2pt/encoder_model.onnx",
-   "size": 139827157,
-   "sha256": "15a249ba51ff61801d6ae4f140cb329589680f941bb8952996e7b2ef8cfdf37c",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/ru2pt/encoder_model.onnx",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
-   "how": "optimum-onnx export + int8 dynamic quantization"
-  },
-  {
-   "path": "mt/ru2pt/decoder_model.onnx",
-   "size": 228415358,
-   "sha256": "2771c398c77f88e822c863d8640cec5e16d106135061ece40aab73c6142f7aad",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/ru2pt/decoder_model.onnx",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
-   "how": "optimum-onnx export + int8 dynamic quantization"
-  },
-  {
-   "path": "mt/ru2pt/decoder_with_past_model.onnx",
-   "size": 215741655,
-   "sha256": "87c0942a7af9393658a6f56cedb336d0d2fa5acbe5284a205f170a0c1d34d886",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/ru2pt/decoder_with_past_model.onnx",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
-   "how": "optimum-onnx export + int8 dynamic quantization"
-  },
-  {
-   "path": "mt/ru2pt/ru2pt_source_pieces.tsv",
-   "size": 1144725,
-   "sha256": "1c30e1ff7774181f9090abf633a6fc0206f5464dd94526f8077d77d6af0fdccf",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/ru2pt/ru2pt_source_pieces.tsv",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
-   "how": "pieces of source.spm as TSV for the in-app tokenizer"
-  },
-  {
-   "path": "mt/ru2pt/ru2pt_vocab.json",
-   "size": 2526902,
-   "sha256": "679de3ab1139def112b69f58b1653b645c0dca87654d259d85645f3539c34f15",
-   "tier": "core",
-   "license": "CC-BY-4.0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "mt/ru2pt/ru2pt_vocab.json",
-    "revision": "main"
-   },
-   "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
-   "how": "vocab.json of the Marian model"
-  },
-  {
-   "path": "speaker/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
-   "size": 29596978,
-   "sha256": "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b",
-   "tier": "optional",
-   "license": "Apache-2.0",
-   "source": {
-    "type": "hf",
-    "repo": "csukuangfj/speaker-embedding-models",
-    "file": "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
-    "revision": "main"
-   },
-   "role": "отпечаток голоса; без него разделение говорящих выключено"
-  },
-  {
-   "path": "denoiser/gtcrn_simple.onnx",
-   "size": 535638,
-   "sha256": "e77603ac0c23dac3227dd2d7135b3a585cbee2679048aecfa886657d3ae1b534",
-   "tier": "optional",
-   "license": "see sherpa-onnx release",
-   "source": {
-    "type": "url",
-    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx"
-   },
-   "role": "шумоподавитель; в конвейере выключен"
-  },
-  {
-   "path": "llm/Hy-MT2-1.8B-Q4_K_M.gguf",
-   "size": 1133080448,
-   "sha256": "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
-   "tier": "optional",
-   "license": "Apache-2.0",
-   "source": {
-    "type": "hf",
-    "repo": "tencent/Hy-MT2-1.8B-GGUF",
-    "file": "Hy-MT2-1.8B-Q4_K_M.gguf",
-    "revision": "main"
-   },
-   "role": "контекстный уточнитель; только полная сборка"
-  },
-  {
-   "path": "phrasebook.json",
-   "size": 15621,
-   "sha256": "9ef64c5867dd86e0fb3bccf75b18530ffe16bdde5a73057e6c6139f9b5a64e20",
-   "tier": "core",
-   "license": "project",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "phrasebook.json",
-    "revision": "main"
-   },
-   "role": "затравка разговорника, 177 фраз; в репозитории bench/apk/phrasebook_seed.json",
-   "repo_path": "bench/apk/phrasebook_seed.json"
-  },
-  {
-   "path": "phrasebook_tatoeba.tsv",
-   "size": 24892621,
-   "sha256": "f6115d9232368a201beb8ed1c1f12de27b6a3890d6db83b861414d5cbe4976aa",
-   "tier": "optional",
-   "license": "CC-BY-2.0-FR",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "phrasebook_tatoeba.tsv",
-    "revision": "main"
-   },
-   "derived_from": "Tatoeba",
-   "role": "корпус 189 900 пар; без него словарь фраз только из затравки",
-   "repo_path": "data/tatoeba/phrasebook_tatoeba.tsv"
-  },
-  {
-   "path": "common_words.txt",
-   "size": 826791,
-   "sha256": "8761bb41059cbbdbb879a974839d2fa3b35a75e573984ecd0f13351ea4f970a6",
-   "tier": "optional",
-   "license": "CC-BY-2.0-FR",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "common_words.txt",
-    "revision": "main"
-   },
-   "derived_from": "Tatoeba",
-   "role": "частотный словарь для проверки языка и стоп-слов",
-   "repo_path": "data/common_words.txt"
-  }
- ],
- "archives": [
-  {
-   "path": "tts_ru",
-   "kind": "zip",
-   "size": 67383016,
-   "sha256": "13b0747a3a7e92d4438cdb5922cae72dd8989a6ef4bda06b3a559a7ccf2143a5",
-   "tier": "core",
-   "license": "CC0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "tts_ru.zip",
-    "revision": "main"
-   },
-   "unpack_to": ".",
-   "origin": {
-    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-dmitri-medium.tar.bz2",
-    "sha256": "c86d0803737de13d441923ff3b3f309482fab8d7af3ec85949942809eb9a3660",
-    "note": "тот же onnx и tokens.txt, что в тарболе sherpa-onnx; zip вместо tar.bz2, потому что в Android нет bzip2"
-   },
-   "check": [
+  "manifest_version": 1,
+  "app": "0.21.1",
+  "own_repo": "youannoingme/falar-models",
+  "device_dir": "Android/data/app.falar/files/models",
+  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо.",
+  "total_core_bytes": 1981012638,
+  "total_optional_bytes": 1188932476,
+  "files": [
     {
-     "path": "tts_ru/ru_RU-dmitri-medium.onnx",
-     "sha256": "f98e751ed00b34b3e1b09ff8c3a7cfbd620fc24777e500e1605e10e7bbb86ea2"
+      "path": "silero_vad.onnx",
+      "size": 643854,
+      "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+      "tier": "core",
+      "license": "MIT",
+      "source": {
+        "type": "url",
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+      }
     },
     {
-     "path": "tts_ru/tokens.txt",
-     "sha256": "2619c1a9de1bcf928162f40c583caf39368cfd6b2340c7bcad51dc634411ec36"
-    }
-   ]
-  },
-  {
-   "path": "tts_pt",
-   "kind": "zip",
-   "size": 67368566,
-   "sha256": "13e9be621ad43657a67338b9925ffc8cbd68821956fca800adbecba71fc277b2",
-   "tier": "core",
-   "license": "CC0",
-   "source": {
-    "type": "hf",
-    "repo": "youannoingme/falar-models",
-    "file": "tts_pt.zip",
-    "revision": "main"
-   },
-   "unpack_to": ".",
-   "origin": {
-    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-pt_BR-faber-medium.tar.bz2",
-    "sha256": "7add3f923ad6bc25ca8a192805fd1a64d1b3893e4611c4a9719545a825039a83",
-    "note": "то же"
-   },
-   "check": [
-    {
-     "path": "tts_pt/pt_BR-faber-medium.onnx",
-     "sha256": "956b4f1733903891c4ba0973d0603b2a3d8c09c8432fb3bb5203a90a7431daca"
+      "path": "asr_multi/encoder.int8.onnx",
+      "size": 652184281,
+      "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        "file": "encoder.int8.onnx",
+        "revision": "main"
+      }
     },
     {
-     "path": "tts_pt/tokens.txt",
-     "sha256": "2619c1a9de1bcf928162f40c583caf39368cfd6b2340c7bcad51dc634411ec36"
+      "path": "asr_multi/decoder.int8.onnx",
+      "size": 11845275,
+      "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        "file": "decoder.int8.onnx",
+        "revision": "main"
+      }
+    },
+    {
+      "path": "asr_multi/joiner.int8.onnx",
+      "size": 6355277,
+      "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        "file": "joiner.int8.onnx",
+        "revision": "main"
+      }
+    },
+    {
+      "path": "asr_multi/tokens.txt",
+      "size": 93939,
+      "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        "file": "tokens.txt",
+        "revision": "main"
+      }
+    },
+    {
+      "path": "mt/pt2ru/encoder_model.onnx",
+      "size": 139826134,
+      "sha256": "c063b87dc8f4d0bcbb17efdda477af491bdef149c21c9ba45264c2bb25eff4a6",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/pt2ru/encoder_model.onnx",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
+      "how": "optimum-onnx export + int8 dynamic quantization"
+    },
+    {
+      "path": "mt/pt2ru/decoder_model.onnx",
+      "size": 228413307,
+      "sha256": "94371ee4f8acac0863042859039cb2ae2266c8d5b9770e207677d579c8a5e4bf",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/pt2ru/decoder_model.onnx",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
+      "how": "optimum-onnx export + int8 dynamic quantization"
+    },
+    {
+      "path": "mt/pt2ru/decoder_with_past_model.onnx",
+      "size": 215739604,
+      "sha256": "eb7236ee021efa023d95391dbf0c0bf8f4854b94d39173ead8cf060a6cc1378e",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/pt2ru/decoder_with_past_model.onnx",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
+      "how": "optimum-onnx export + int8 dynamic quantization"
+    },
+    {
+      "path": "mt/pt2ru/pt2ru_source_pieces.tsv",
+      "size": 961044,
+      "sha256": "31df866c1c161a561cf7c15f9af3a6a3e0bdd96ba24cc75c33c655db8b5991cc",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/pt2ru/pt2ru_source_pieces.tsv",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
+      "how": "pieces of source.spm as TSV for the in-app tokenizer"
+    },
+    {
+      "path": "mt/pt2ru/pt2ru_vocab.json",
+      "size": 2526923,
+      "sha256": "8fd0707bc0579f52f5f1bbd8c4bc1313fd17fd33b3217a2788b133ed9d7c7008",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/pt2ru/pt2ru_vocab.json",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
+      "how": "vocab.json of the Marian model"
+    },
+    {
+      "path": "mt/ru2pt/encoder_model.onnx",
+      "size": 139827157,
+      "sha256": "15a249ba51ff61801d6ae4f140cb329589680f941bb8952996e7b2ef8cfdf37c",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/ru2pt/encoder_model.onnx",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
+      "how": "optimum-onnx export + int8 dynamic quantization"
+    },
+    {
+      "path": "mt/ru2pt/decoder_model.onnx",
+      "size": 228415358,
+      "sha256": "2771c398c77f88e822c863d8640cec5e16d106135061ece40aab73c6142f7aad",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/ru2pt/decoder_model.onnx",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
+      "how": "optimum-onnx export + int8 dynamic quantization"
+    },
+    {
+      "path": "mt/ru2pt/decoder_with_past_model.onnx",
+      "size": 215741655,
+      "sha256": "87c0942a7af9393658a6f56cedb336d0d2fa5acbe5284a205f170a0c1d34d886",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/ru2pt/decoder_with_past_model.onnx",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
+      "how": "optimum-onnx export + int8 dynamic quantization"
+    },
+    {
+      "path": "mt/ru2pt/ru2pt_source_pieces.tsv",
+      "size": 1144725,
+      "sha256": "1c30e1ff7774181f9090abf633a6fc0206f5464dd94526f8077d77d6af0fdccf",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/ru2pt/ru2pt_source_pieces.tsv",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
+      "how": "pieces of source.spm as TSV for the in-app tokenizer"
+    },
+    {
+      "path": "mt/ru2pt/ru2pt_vocab.json",
+      "size": 2526902,
+      "sha256": "679de3ab1139def112b69f58b1653b645c0dca87654d259d85645f3539c34f15",
+      "tier": "core",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "mt/ru2pt/ru2pt_vocab.json",
+        "revision": "main"
+      },
+      "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
+      "how": "vocab.json of the Marian model"
+    },
+    {
+      "path": "speaker/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+      "size": 29596978,
+      "sha256": "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b",
+      "tier": "optional",
+      "license": "Apache-2.0",
+      "source": {
+        "type": "hf",
+        "repo": "csukuangfj/speaker-embedding-models",
+        "file": "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+        "revision": "main"
+      },
+      "role": "отпечаток голоса; без него разделение говорящих выключено"
+    },
+    {
+      "path": "denoiser/gtcrn_simple.onnx",
+      "size": 535638,
+      "sha256": "e77603ac0c23dac3227dd2d7135b3a585cbee2679048aecfa886657d3ae1b534",
+      "tier": "optional",
+      "license": "see sherpa-onnx release",
+      "source": {
+        "type": "url",
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx"
+      },
+      "role": "шумоподавитель; в конвейере выключен"
+    },
+    {
+      "path": "llm/Hy-MT2-1.8B-Q4_K_M.gguf",
+      "size": 1133080448,
+      "sha256": "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
+      "tier": "optional",
+      "license": "Apache-2.0",
+      "source": {
+        "type": "hf",
+        "repo": "tencent/Hy-MT2-1.8B-GGUF",
+        "file": "Hy-MT2-1.8B-Q4_K_M.gguf",
+        "revision": "main"
+      },
+      "role": "контекстный уточнитель; только полная сборка"
+    },
+    {
+      "path": "phrasebook.json",
+      "size": 15621,
+      "sha256": "9ef64c5867dd86e0fb3bccf75b18530ffe16bdde5a73057e6c6139f9b5a64e20",
+      "tier": "core",
+      "license": "project",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "phrasebook.json",
+        "revision": "main"
+      },
+      "role": "затравка разговорника, 177 фраз; в репозитории bench/apk/phrasebook_seed.json",
+      "repo_path": "bench/apk/phrasebook_seed.json"
+    },
+    {
+      "path": "phrasebook_tatoeba.tsv",
+      "size": 24892621,
+      "sha256": "f6115d9232368a201beb8ed1c1f12de27b6a3890d6db83b861414d5cbe4976aa",
+      "tier": "optional",
+      "license": "CC-BY-2.0-FR",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "phrasebook_tatoeba.tsv",
+        "revision": "main"
+      },
+      "derived_from": "Tatoeba",
+      "role": "корпус 189 900 пар; без него словарь фраз только из затравки",
+      "repo_path": "data/tatoeba/phrasebook_tatoeba.tsv"
+    },
+    {
+      "path": "common_words.txt",
+      "size": 826791,
+      "sha256": "8761bb41059cbbdbb879a974839d2fa3b35a75e573984ecd0f13351ea4f970a6",
+      "tier": "optional",
+      "license": "CC-BY-2.0-FR",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "common_words.txt",
+        "revision": "main"
+      },
+      "derived_from": "Tatoeba",
+      "role": "частотный словарь для проверки языка и стоп-слов",
+      "repo_path": "data/common_words.txt"
     }
-   ]
-  }
- ]
+  ],
+  "archives": [
+    {
+      "path": "tts_ru",
+      "kind": "zip",
+      "size": 67383016,
+      "sha256": "13b0747a3a7e92d4438cdb5922cae72dd8989a6ef4bda06b3a559a7ccf2143a5",
+      "tier": "core",
+      "license": "CC0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "tts_ru.zip",
+        "revision": "main"
+      },
+      "unpack_to": ".",
+      "origin": {
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-dmitri-medium.tar.bz2",
+        "sha256": "c86d0803737de13d441923ff3b3f309482fab8d7af3ec85949942809eb9a3660",
+        "note": "тот же onnx и tokens.txt, что в тарболе sherpa-onnx; zip вместо tar.bz2, потому что в Android нет bzip2"
+      },
+      "check": [
+        {
+          "path": "tts_ru/ru_RU-dmitri-medium.onnx",
+          "sha256": "f98e751ed00b34b3e1b09ff8c3a7cfbd620fc24777e500e1605e10e7bbb86ea2"
+        },
+        {
+          "path": "tts_ru/tokens.txt",
+          "sha256": "2619c1a9de1bcf928162f40c583caf39368cfd6b2340c7bcad51dc634411ec36"
+        }
+      ]
+    },
+    {
+      "path": "tts_pt",
+      "kind": "zip",
+      "size": 67368566,
+      "sha256": "13e9be621ad43657a67338b9925ffc8cbd68821956fca800adbecba71fc277b2",
+      "tier": "core",
+      "license": "CC0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "tts_pt.zip",
+        "revision": "main"
+      },
+      "unpack_to": ".",
+      "origin": {
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-pt_BR-faber-medium.tar.bz2",
+        "sha256": "7add3f923ad6bc25ca8a192805fd1a64d1b3893e4611c4a9719545a825039a83",
+        "note": "то же"
+      },
+      "check": [
+        {
+          "path": "tts_pt/pt_BR-faber-medium.onnx",
+          "sha256": "956b4f1733903891c4ba0973d0603b2a3d8c09c8432fb3bb5203a90a7431daca"
+        },
+        {
+          "path": "tts_pt/tokens.txt",
+          "sha256": "2619c1a9de1bcf928162f40c583caf39368cfd6b2340c7bcad51dc634411ec36"
+        }
+      ]
+    }
+  ]
 }
