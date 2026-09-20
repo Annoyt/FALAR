@@ -84,11 +84,12 @@ Android 9 и новее, процессор arm64. При первом запу�
 Контрольные суммы — в \`SHA256SUMS.txt\`. Что изменилось — в [bench/apk/README.md](https://github.com/$REPO/blob/$TAG/bench/apk/README.md).
 EOF
 
+# Тег на сервере создаёт сам gh по своему токену (--target). Через git push это не делается:
+# помощники учётных данных складываются, глобально настроенный `store` отвечает первым протухшей
+# записью, и выпуск падает на «Invalid username or token» уже после сборки. Локальный тег ставим
+# для себя, чтобы сборку можно было повторить.
 git -C $R tag -a "$TAG" -m "Falar $VER"
-# Пустой помощник первым сбрасывает список: у git они складываются, и настроенный глобально
-# `store` отвечает раньше нашего, отдавая давно протухшую запись — «Invalid username or token».
-git -C $R -c credential.helper= -c credential.helper='!gh auth git-credential' push -q origin "$TAG"
-gh release create "$TAG" -R $REPO --title "Falar $VER" --notes-file $RELNOTES ${DRAFT:+--draft} \
+gh release create "$TAG" -R $REPO --target "$(git -C $R rev-parse HEAD)" --title "Falar $VER" --notes-file $RELNOTES ${DRAFT:+--draft} \
   $A/Falar.apk $A/Falar-slim.apk $A/SHA256SUMS.txt $A/latest.json
 rm -f $RELNOTES
 echo "== готово: $(gh release view "$TAG" -R $REPO --json url --jq .url)"
