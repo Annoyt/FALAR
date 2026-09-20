@@ -2,10 +2,12 @@
 # Выпуск публичного релиза: две сборки релизным ключом, контрольные суммы, тег и релиз на GitHub
 # с постоянными именами файлов (на них ссылается кнопка «Скачать APK» на странице и в README).
 #
-#   FALAR_KEYSTORE=~/falar-release.keystore FALAR_KS_PASS=… bash tools/release.sh
-#   FALAR_KEYSTORE=… FALAR_KS_PASS=… DRAFT=1 bash tools/release.sh    # черновик, посмотреть и опубликовать руками
+#   bash tools/release.sh            # спросит пароль ключа, соберёт, проверит подпись, выпустит
+#   DRAFT=1 bash tools/release.sh    # черновик: посмотреть и опубликовать кнопкой на GitHub
 #
-# Пароль передаётся только через окружение и нигде не печатается. Версия берётся из манифеста
+# Ключ по умолчанию ~/falar-release.keystore, другой — через FALAR_KEYSTORE. Пароль можно передать
+# в FALAR_KS_PASS, но лучше дать скрипту спросить: в команде он попадёт в историю оболочки и будет
+# виден в списке процессов. Нигде не печатается. Версия берётся из манифеста
 # приложения: менять её надо там, а заодно поднимать `app` в models/manifest.json (build.sh это
 # проверяет). Имена файлов Falar.apk и Falar-slim.apk постоянные — ссылка
 # releases/latest/download/Falar.apk не должна ломаться от версии к версии.
@@ -13,9 +15,20 @@ set -e
 R=$(cd "$(dirname "$0")/.." && pwd); A=$R/bench/apk
 REPO=${REPO:-Annoyt/FALAR}
 
-[ -n "$FALAR_KEYSTORE" ] || { echo "нужен FALAR_KEYSTORE — публичный релиз отладочным ключом не выпускаем"; exit 1; }
-[ -n "$FALAR_KS_PASS" ] || { echo "нужен FALAR_KS_PASS"; exit 1; }
+[ -n "$FALAR_KEYSTORE" ] || FALAR_KEYSTORE=~/falar-release.keystore
+[ -f "$FALAR_KEYSTORE" ] || { echo "нет файла ключа: $FALAR_KEYSTORE"; exit 1; }
 command -v gh >/dev/null || { echo "нужен gh"; exit 1; }
+# Пароль спрашиваем здесь и держим только в окружении этого запуска: в команде он попал бы
+# в историю оболочки и в список процессов, а на бумажке его забывают. Ввод не отображается.
+if [ -z "$FALAR_KS_PASS" ]; then
+  printf 'пароль ключа %s: ' "$(basename "$FALAR_KEYSTORE")" >&2
+  read -rs FALAR_KS_PASS; echo >&2
+  [ -n "$FALAR_KS_PASS" ] || { echo "пароль пустой"; exit 1; }
+fi
+export FALAR_KEYSTORE FALAR_KS_PASS
+# Проверяем пароль до сборки: собирать три минуты, чтобы упасть на подписи, незачем.
+keytool -list -keystore "$FALAR_KEYSTORE" -alias "${FALAR_KEY_ALIAS:-falar}" -storepass:env FALAR_KS_PASS >/dev/null 2>&1 \
+  || { echo "пароль не подошёл или нет ключа ${FALAR_KEY_ALIAS:-falar} в хранилище"; exit 1; }
 
 VER=$(grep -o 'versionName="[^"]*"' $A/AndroidManifest.xml | cut -d'"' -f2)
 TAG=v$VER

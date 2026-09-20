@@ -35,3 +35,4 @@ bench/air/rec/
 __pycache__/
 *.pyc
 tools/json.jar
+bench/apk/SHA256SUMS.txt
