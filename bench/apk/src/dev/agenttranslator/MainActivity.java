@@ -703,11 +703,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) stopReading();
       return false;                       // касание и удержание обрабатываются своими слушателями
     });
-    smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
     v.addView(bigBox);
 
     smallRu = new TextView(this); smallRu.setTextSize(17); smallRu.setTextColor(Color.DKGRAY);
     smallRu.setPadding(0, 12, 0, 0); v.addView(smallRu);
+    smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
 
     // Прежние реплики — список, а не сплошной текст: каждую надо уметь удалить или перенести
     // в другой разговор. Случайная фраза из комнаты иначе остаётся в контексте уточнителя

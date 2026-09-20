@@ -174,6 +174,13 @@ public class TranslatorService extends Service {
       final String t = i.getStringExtra("feedtext").replace("\\n", "\n");
       worker.submit(() -> processText("pt2ru", unshout(t), true, false, 0, 0, "текст"));
     }
+    // То же, но как будто это распознанная речь, а не набранный текст: фильтры чтения вслух
+    // работают только на микрофонном пути, а проверять эвристику на живом голосе нельзя —
+    // распознавание одной и той же фразы отличается от раза к разу, воспроизводимости нет.
+    if (i != null && i.hasExtra("feedasr")) {
+      final String t = i.getStringExtra("feedasr").replace("\\n", "\n");
+      worker.submit(() -> processText("pt2ru", unshout(t), true, false, 0, 0, "asr"));
+    }
     if (i != null && i.hasExtra("hold")) {
       holdMs = Math.max(0, Math.min(6000, Integer.parseInt(i.getStringExtra("hold"))));
       getSharedPreferences("at", MODE_PRIVATE).edit().putInt("hold", holdMs).apply();
