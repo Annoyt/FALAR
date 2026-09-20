@@ -40,6 +40,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify; ToggleButton tSetupAny, tAnyNet;
   ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint; ScrollView bigScroll;
   TextView updLbl; Button bUpdate, bUpdateGo;
+  /** Экран показывает состояние сервиса галочками, а setChecked дёргает обработчик так же, как
+   *  палец. Без этого признака показ «контекст включён» сам же включал контекст ещё раз и
+   *  записывал это как выбор человека — LLM стартовал дважды, а «само включилось» становилось
+   *  неотличимо от «включил я». */
+  boolean uiSync = false;
   /** Держат крупный текст и читают его вслух; и видна ли сейчас транскрипция. */
   boolean holdingRead = false, cribVisible = false; Button bReadGuard;
 
@@ -120,7 +125,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // «Говорить» принимает любой язык: направление определяется по сказанному.
     bAnswer.setOnTouchListener((v, e) -> { pressed(v, e); return ptt(e, "ru2pt"); });
     CompoundButton.OnCheckedChangeListener lis = (v, on) -> {
-      if (svc == null) return;
+      if (svc == null || uiSync) return;
       svc.setListen(tListenPt.isChecked(), tListenRu.isChecked());
       setHint(!tListenPt.isChecked() && !tListenRu.isChecked() ? "Микрофон выключен"
           : tListenPt.isChecked() && tListenRu.isChecked() ? "Pode falar · слушаю оба языка, направление по реплике"
@@ -130,7 +135,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     tListenPt.setOnCheckedChangeListener(lis); tListenRu.setOnCheckedChangeListener(lis);
     bPin.setOnClickListener(v -> { if (svc != null && !svc.pinLast()) onLog("нечего запоминать"); });
     bBetter.setOnClickListener(v -> improve());
-    tCtx.setOnCheckedChangeListener((v, on) -> { if (svc != null) svc.setContext(on); });
+    tCtx.setOnCheckedChangeListener((v, on) -> { if (svc != null && !uiSync) svc.setContext(on); });
     bVoice.setOnTouchListener((v, e) -> { pressed(v, e); return enroll(e, "я", tLang.isChecked() ? "pt" : "ru"); });
     bVoice2.setOnTouchListener((v, e) -> { pressed(v, e); return enroll(e, "собеседник", tLang.isChecked() ? "ru" : "pt"); });
     tAuto.setOnCheckedChangeListener((v, on) -> {
@@ -1410,8 +1415,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bPin.setEnabled(true); bBetter.setEnabled(true);
     tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bVoice.setEnabled(true); bVoice2.setEnabled(true); bWord.setEnabled(true);
     bAnswer.setEnabled(true); bPhoto.setEnabled(true); bType.setEnabled(true);
+    uiSync = true;
     tCtx.setChecked(svc != null && svc.contextMode);
     if (svc != null) { tListenPt.setChecked(svc.listenPt); tListenRu.setChecked(svc.listenRu); }
+    uiSync = false;
     markListen();
     // Текущий разговор показываем сразу: при запуске список реплик оставался пустым, хотя
     // разговор продолжается — выглядело так, будто вся история пропала.
@@ -1431,7 +1438,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (logLast != null) logLast.setText(s.replace('\n', ' '));   // свёрнутый журнал всё равно показывает последний ответ
     if (logScroll != null && logScroll.getVisibility() == View.VISIBLE) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     if (s.startsWith("🎤") && voiceMsg != null) { voiceMsg.setText(s); refreshVoice(); }
-    if (s.startsWith("🧠") && tCtx != null && svc != null && tCtx.isChecked() != svc.contextMode) tCtx.setChecked(svc.contextMode);
+    if (s.startsWith("🧠") && tCtx != null && svc != null && tCtx.isChecked() != svc.contextMode) { uiSync = true; tCtx.setChecked(svc.contextMode); uiSync = false; }
     if (s.startsWith("☁") && keyState != null && svc != null && svc.cloud != null) refreshKey(null);
     if (s.startsWith("☁") || s.startsWith("🧠")) refreshBetter();
   }

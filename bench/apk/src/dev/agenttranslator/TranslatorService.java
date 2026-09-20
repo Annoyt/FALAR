@@ -149,6 +149,7 @@ public class TranslatorService extends Service {
       holdMs = pr.getInt("hold", 1500);
       refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
       readGuard = pr.getInt("read_guard", 1);
+      restoreContext();
       maybeCheckUpdates();
       heartbeat(); startWarm(); startSay(); watchNetwork();
       boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
@@ -665,15 +666,42 @@ public class TranslatorService extends Service {
     log(on ? "↔ авто-направление по языку профиля: " + (spk == null ? "" : spk.describe()) + ", неопознанный голос → " + (spk == null ? "pt" : spk.fallbackLang())
            : "↔ авто-направление выключено");
   }
-  public void setContext(boolean on) {
+  /** Файл уточнителя на месте. */
+  public boolean hasLlm() {
+    File[] gg = new File(getExternalFilesDir(null), "models/llm").listFiles((d, n) -> n.endsWith(".gguf"));
+    return gg != null && gg.length > 0;
+  }
+  public void setContext(boolean on) { setContext(on, true); }
+  /** remember=false — включение по умолчанию, а не выбор человека: в настройках ничего не пишем,
+   *  чтобы «само включилось» не превратилось в «человек включил» и выключение осталось за ним. */
+  public void setContext(boolean on, boolean remember) {
+    if (remember) getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("ctx", on).apply();
     contextMode = on; if (!on) { log("🧠 контекст выключен"); return; }
     if (llm != null && llm.ready) { log("🧠 контекст включён"); return; }
     llmWorker.submit(() -> { try {
-      File ld = new File(getExternalFilesDir(null), "models/llm"); File[] gg = ld.listFiles((d, n) -> n.endsWith(".gguf")); if (gg == null || gg.length == 0) { log("🧠 нет .gguf в " + ld); contextMode = false; return; }
+      File ld = new File(getExternalFilesDir(null), "models/llm"); File[] gg = ld.listFiles((d, n) -> n.endsWith(".gguf")); if (gg == null || gg.length == 0) { log("🧠 контекст выключен: уточнителя нет, скачайте его в «Системе» кнопкой необязательного"); contextMode = false; return; }
       File pick = gg[0]; for (File f : gg) if (f.getName().toLowerCase().contains("hy-mt")) pick = f;
       log("🧠 запускаю LLM: " + pick.getName() + " …"); long t = System.nanoTime();
-      Llm l = new Llm(getApplicationInfo().nativeLibraryDir, pick.getAbsolutePath(), new File(getExternalFilesDir(null), "llama-server.log").getAbsolutePath()); if (l.start(4)) { llm = l; log("🧠 LLM готов за " + (System.nanoTime() - t) / 1000000 + " мс — уточняю переводы по контексту в фоне"); if (refineEvery > 0) kickLocal(); } else log("🧠 LLM не поднялся");
+      Llm l = new Llm(getApplicationInfo().nativeLibraryDir, pick.getAbsolutePath(), new File(getExternalFilesDir(null), "llama-server.log").getAbsolutePath());
+      if (l.start(4)) { llm = l; log("🧠 LLM готов за " + (System.nanoTime() - t) / 1000000 + " мс — уточняю переводы по контексту в фоне"); if (refineEvery > 0) kickLocal(); }
+      // Переключатель не должен оставаться включённым при мёртвом сервере: снаружи это выглядит
+      // как «контекст работает», а на деле не уточняется ничего.
+      else { contextMode = false; log("🧠 LLM не поднялся — контекст выключен, подробности в llama-server.log"); }
     } catch (Throwable e) { Log.e(TAG, "llm", e); log("🧠 ошибка LLM: " + e); contextMode = false; } });
+  }
+  /** Состояние контекста при запуске. Раньше оно нигде не сохранялось, и переключатель каждый
+   *  раз начинался выключенным — снаружи это выглядело как «само отключается». Выбор человека
+   *  запоминается; если выбора не было, контекст включён, когда уточнитель скачан. */
+  void restoreContext() {
+    android.content.SharedPreferences pr = getSharedPreferences("at", MODE_PRIVATE);
+    boolean has = hasLlm();
+    if (!pr.contains("ctx")) {
+      if (has) { log("🧠 уточнитель на месте — включаю контекст"); setContext(true, false); }
+      return;
+    }
+    boolean want = pr.getBoolean("ctx", false);
+    if (want && !has) { log("🧠 контекст был включён, но уточнителя нет — выключен"); contextMode = false; return; }
+    if (want) setContext(true, false);
   }
   static final String SYS = "You are a professional interpreter for a conversation between Brazilian Portuguese and Russian speakers. Each numbered turn shows the speaker's language in brackets, the raw speech-recognition transcript (it may contain recognition errors) and a quick draft translation. Using the whole dialogue as context, produce the best translation of the LAST turn (Portuguese turns into Russian, Russian turns into Brazilian Portuguese), correcting obvious recognition errors from context. Also re-translate the PREVIOUS turn if the later context changes its meaning; otherwise keep it. Answer with exactly two lines and nothing else:\nPREV: <translation of the previous turn>\nLAST: <translation of the last turn>";
   /** После каждой реплики: считаем реплики с последнего разбора и запускаем локальный или облачный
@@ -1054,6 +1082,8 @@ public class TranslatorService extends Service {
       if (words != null && new File(modelsDir, "common_words.txt").exists()) { words.loadCommon(); log("📝 " + words.stats()); }
       if (chats != null) learn = new Learn(chats, modelsDir, getExternalFilesDir(null));
       if (new File(modelsDir, "denoiser").isDirectory() && eng.denoiser == null) log("🔇 шумоподавитель скачан — подключится после перезапуска приложения");
+      // Уточнитель только что скачали — включаем, если человек не выключал его сам.
+      if (hasLlm() && !contextMode && !getSharedPreferences("at", MODE_PRIVATE).contains("ctx")) { log("🧠 уточнитель скачан — включаю контекст"); setContext(true, false); }
       status("Готово. " + pb.stats());
     } catch (Throwable t) { log("подключение скачанного: " + t); }
   }
