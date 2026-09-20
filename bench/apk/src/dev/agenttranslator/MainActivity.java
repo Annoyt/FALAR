@@ -357,7 +357,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final boolean mine = t[0].startsWith("ru");
     final java.util.List<String> items = new java.util.ArrayList<>();
     if (mine) { items.add("Исправить текст"); items.add("Исправить перевод"); }
-    items.add("Произнести ещё раз"); items.add("Удалить реплику"); items.add("Перенести в другой разговор");
+    items.add("Произнести ещё раз"); items.add("Сообщить о переводе"); items.add("Удалить реплику"); items.add("Перенести в другой разговор");
     String title = t[1].length() > 40 ? t[1].substring(0, 40) + "…" : t[1];
     new android.app.AlertDialog.Builder(this)
         .setTitle(title)
@@ -366,10 +366,46 @@ public class MainActivity extends Activity implements TranslatorService.Listener
           if (it.equals("Исправить текст")) editSource(idx, t[1]);
           else if (it.equals("Исправить перевод")) editTranslation(idx, t[1], t[2]);
           else if (it.equals("Произнести ещё раз")) svc.sayTurn(idx);
+          else if (it.equals("Сообщить о переводе")) reportTurn(t[0], t[1], t[2]);
           else if (it.equals("Удалить реплику")) { boolean wasLast = idx == svc.chats.size() - 1; if (svc.dropTurn(idx)) { refreshHist(); refreshChats(); if (wasLast) showLastTurn(); } }
           else moveTurnTo(idx);
         })
         .setNegativeButton("отмена", null).show();
+  }
+  /** «Сообщить о переводе»: готовое обсуждение на GitHub, человек только нажимает «отправить».
+   *  Ни токенов, ни своего сервера — обычная ссылка в браузер. Разговор публичный, поэтому
+   *  что именно уйдёт, написано в диалоге до того, как браузер открылся, а не после. */
+  void reportTurn(final String dir, final String src, final String dst) {
+    LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(40, 8, 40, 0);
+    TextView was = new TextView(this); was.setTextSize(14);
+    was.setText(src + "\n→ " + dst); box.addView(was);
+    final EditText in = new EditText(this);
+    in.setHint("как надо было перевести"); in.setMinLines(2); in.setTextSize(16); box.addView(in);
+    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(Color.GRAY);
+    note.setText("Откроется страница на GitHub с уже заполненным сообщением — останется нажать «отправить». "
+               + "Обсуждение открытое: эта реплика, ваш вариант, версия приложения и модель телефона будут видны всем. "
+               + "Остальной разговор не отправляется.");
+    box.addView(note);
+    new android.app.AlertDialog.Builder(this)
+        .setTitle("Сообщить о переводе").setView(box)
+        .setPositiveButton("открыть", (d, w) -> openReport(dir, src, dst, in.getText().toString().trim()))
+        .setNegativeButton("отмена", null).show();
+  }
+  void openReport(String dir, String src, String dst, String mine) {
+    String ver;
+    try { ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { ver = "?"; }
+    String body = "Направление: " + (dir.startsWith("pt") ? "португальский → русский" : "русский → португальский")
+        + "\nИсходник: " + src
+        + "\nПеревод приложения: " + dst
+        + "\nКак правильно: " + (mine.isEmpty() ? "(не указано)" : mine)
+        + "\n\nFalar " + ver + " · " + Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE;
+    String title = "перевод: " + (src.length() > 60 ? src.substring(0, 60) + "…" : src);
+    try {
+      String url = "https://github.com/Annoyt/FALAR/issues/new?labels=translation"
+          + "&title=" + java.net.URLEncoder.encode(title, "UTF-8")
+          + "&body=" + java.net.URLEncoder.encode(body, "UTF-8");
+      startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+    } catch (Exception e) { onLog("не открылось: " + e); }
   }
   void editSource(final int idx, String src) {
     final EditText in = new EditText(this);
