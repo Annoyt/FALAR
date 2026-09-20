@@ -52,10 +52,10 @@ public class Updates {
       i.size = b.getLong("size");
       i.sha256 = b.getString("sha256");
       if (i.code <= 0 || i.apk.isEmpty() || i.sha256.length() != 64 || i.size <= 0)
-        throw new IllegalArgumentException("описание релиза неполное: " + i);
+        throw new IllegalArgumentException("описание версии неполное");
       return i;
     } catch (JSONException e) {
-      throw new IllegalArgumentException("описание релиза не разобрано: " + e.getMessage());
+      throw new IllegalArgumentException("описание версии не разобрано");   // подробность — в журнал, не на экран
     }
   }
 

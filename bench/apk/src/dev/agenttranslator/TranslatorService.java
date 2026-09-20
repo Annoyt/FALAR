@@ -1088,6 +1088,19 @@ public class TranslatorService extends Service {
    *  уходит на экран, пока признак ещё стоит, и кнопка проверки остаётся серой навсегда —
    *  ровно это и случилось после первой же неудачной проверки. */
   void updDone() { updateBusy = false; upd(updateState); }
+  /** Причина словами. На экран не должен попадать текст исключения: «java.io.IOException: HTTP 404»
+   *  человеку ничего не говорит и выглядит поломкой приложения, а не отсутствием файла. Подробность
+   *  остаётся в журнале. */
+  static String why(Throwable t) {
+    String m = t.getMessage() == null ? "" : t.getMessage();
+    if (t instanceof IllegalArgumentException) return m;                 // это уже наш русский текст
+    if (m.contains("HTTP 404")) return "в последнем выпуске нет описания версии";
+    if (m.startsWith("HTTP")) return "GitHub ответил: " + m;
+    if (t instanceof java.net.UnknownHostException) return "нет связи с github.com";
+    if (t instanceof java.net.SocketTimeoutException) return "GitHub не ответил вовремя";
+    if (t instanceof java.io.IOException) return "связь прервалась";
+    return "не получилось";
+  }
   void maybeCheckUpdates() {
     long last = getSharedPreferences("at", MODE_PRIVATE).getLong("update_check", 0);
     if (System.currentTimeMillis() - last < UPDATE_EVERY) { upd(""); return; }
@@ -1101,7 +1114,7 @@ public class TranslatorService extends Service {
     updateBusy = true; upd("Проверяю…");
     new Thread(() -> {
       try {
-        if (!online()) { upd("Нет сети — проверю позже"); return; }
+        if (!online()) { upd("нет сети — проверю позже"); return; }
         String base = updateBase == null || updateBase.isEmpty() ? Updates.LATEST : updateBase;
         Updates.Info i = Updates.parse(get(base), slimBuild());
         getSharedPreferences("at", MODE_PRIVATE).edit().putLong("update_check", System.currentTimeMillis()).apply();
@@ -1113,11 +1126,11 @@ public class TranslatorService extends Service {
           log("⬆ " + m + (i.notes.isEmpty() ? "" : " — " + i.notes));
           notify(m + " — «Система», кнопка обновления");
         } else {
-          update = null; upd("Установлена последняя версия (" + myName() + ")");
+          update = null; upd("установлена последняя версия");
           if (manual) log("⬆ обновлений нет, установлена " + myName());
         }
       } catch (Throwable t) {
-        upd("Проверить не вышло: " + t);
+        upd("проверить не вышло — " + why(t));
         log("⬆ проверка обновления не вышла: " + t);
       } finally { updDone(); }
     }, "update-check").start();
@@ -1170,7 +1183,7 @@ public class TranslatorService extends Service {
         install(f);
         f.delete();          // установщик уже скопировал файл в свою сессию: 83 МБ незачем держать
       } catch (Throwable t) {
-        f.delete(); upd("Обновление не скачалось: " + t); log("⬆ обновление не скачалось: " + t);
+        f.delete(); upd("обновление не скачалось — " + why(t)); log("⬆ обновление не скачалось: " + t);
       } finally { updDone(); }
     }, "update-install").start();
   }
