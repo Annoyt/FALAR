@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "app": "0.22.1",
+  "app": "0.22.2",
   "own_repo": "youannoingme/falar-models",
   "device_dir": "Android/data/app.falar/files/models",
   "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо.",
