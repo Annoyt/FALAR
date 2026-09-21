@@ -1133,7 +1133,9 @@ public class TranslatorService extends Service {
   }
   void maybeCheckUpdates() {
     long last = getSharedPreferences("at", MODE_PRIVATE).getLong("update_check", 0);
-    if (System.currentTimeMillis() - last < UPDATE_EVERY) { upd(""); return; }
+    // Найденное обновление переживает перезапуск сервиса: иначе строка состояния обнулялась,
+    // а кнопка «обновить» оставалась — экран говорил две разные вещи одновременно.
+    if (System.currentTimeMillis() - last < UPDATE_EVERY) { upd(update == null ? "" : Updates.describe(myCode(), update)); return; }
     checkUpdates(false);
   }
   /** Проверка новой версии. Раз в сутки сама, по кнопке — когда попросят. Ошибку не прячем:

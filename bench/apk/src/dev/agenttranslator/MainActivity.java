@@ -1452,7 +1452,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   @Override public void onUpdate(String state) {
     if (updLbl == null) return;
     boolean has = svc != null && svc.update != null;
-    updLbl.setText("Falar " + (svc == null ? "" : svc.myName()) + (state == null || state.isEmpty() ? " · обновления проверяются раз в сутки" : " · " + state));
+    // Если обновление уже найдено, строка берётся из него, а не из последнего сообщения: сообщение
+    // может быть пустым после перезапуска сервиса, и тогда экран противоречил бы собственной кнопке.
+    String line = state == null || state.isEmpty()
+        ? (has ? Updates.describe(svc.myCode(), svc.update) : "обновления проверяются раз в сутки")
+        : state;
+    updLbl.setText("Falar " + (svc == null ? "" : svc.myName()) + " · " + line);
     bUpdateGo.setVisibility(has && !svc.updateBusy ? View.VISIBLE : View.GONE);
     bUpdateGo.setText(has ? "обновить до " + svc.update.name : "обновить");
     bUpdate.setEnabled(svc != null && !svc.updateBusy);
