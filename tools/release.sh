@@ -18,6 +18,10 @@ REPO=${REPO:-Annoyt/FALAR}
 [ -n "$FALAR_KEYSTORE" ] || FALAR_KEYSTORE=~/falar-release.keystore
 [ -f "$FALAR_KEYSTORE" ] || { echo "нет файла ключа: $FALAR_KEYSTORE"; exit 1; }
 command -v gh >/dev/null || { echo "нужен gh"; exit 1; }
+# GITHUB_TOKEN/GH_TOKEN в окружении перебивают рабочий ключ из связки, и если он протух, gh
+# отвечает 401 уже после сборки. Снимаем их на время выпуска: ключ из связки заведомо годен,
+# раз человек им пользуется.
+unset GITHUB_TOKEN GH_TOKEN
 # Авторизацию gh проверяем до сборки. Дважды выпуск падал уже после трёх минут работы: в
 # интерактивной оболочке gh не авторизован и отвечает 401, а git при этом берёт протухшую
 # запись из глобального `store` и говорит «Invalid username or token» — по этому тексту
