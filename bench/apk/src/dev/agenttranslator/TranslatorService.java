@@ -176,7 +176,7 @@ public class TranslatorService extends Service {
         if (ui != null) { ui.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); try { startActivity(ui); } catch (Throwable e) { log("⬆ окно установки не открылось: " + e); } }
       } else if (st == android.content.pm.PackageInstaller.STATUS_SUCCESS) { upd("Обновление установлено"); log("⬆ обновление установлено"); }
       else { String m = i.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
-        upd("Установка не прошла: " + m); log("⬆ установка не прошла (" + st + "): " + m); }
+        upd("установка не прошла — " + installWhy(m)); log("⬆ установка не прошла (" + st + "): " + m); }
       return START_STICKY;
     }
     if (i != null && i.hasExtra("enrollwav")) { final String wav = i.getStringExtra("enrollwav"), who = i.getStringExtra("who") == null ? Speaker.ME : i.getStringExtra("who");
@@ -1121,6 +1121,16 @@ public class TranslatorService extends Service {
   /** Причина словами. На экран не должен попадать текст исключения: «java.io.IOException: HTTP 404»
    *  человеку ничего не говорит и выглядит поломкой приложения, а не отсутствием файла. Подробность
    *  остаётся в журнале. */
+  /** Отказ установщика словами. Его собственные тексты английские и не для человека, а самый
+   *  частый из них — про подпись — означает тупик: поверх сборки, подписанной другим ключом,
+   *  обновление не встанет никогда, сколько ни нажимай. Об этом надо сказать прямо. */
+  static String installWhy(String m) {
+    if (m == null) return "причина не названа";
+    if (m.contains("signatures do not match")) return "это приложение подписано другим ключом, чем выпуск. Поверх него обновление не встанет: снимите приложение и поставьте заново со страницы (разговоры и настройки при этом пропадут)";
+    if (m.contains("INSUFFICIENT_STORAGE")) return "не хватает места на телефоне";
+    if (m.contains("ABORTED")) return "установка отменена";
+    return m;
+  }
   static String why(Throwable t) {
     String m = t.getMessage() == null ? "" : t.getMessage();
     if (t instanceof IllegalArgumentException) return m;                 // это уже наш русский текст
