@@ -19,14 +19,15 @@ for a in org/junit/platform/junit-platform-console-standalone/1.11.4/junit-platf
   [ -f "$P/$(basename $a)" ] || curl -sSfL -o "$P/$(basename $a)" "$M/$a"
 done
 [ -f "$J" ] || curl -sSfL -o "$J" "$M/org/json/json/20240303/json-20240303.jar"
-T=${1:-Brief,Heard,Updates,ModelStore}
+T=${1:-Brief,Heard,Updates,ModelStore,Memo}
 TARGETS=$(echo "$T" | tr ',' '\n' | sed 's/^/dev.agenttranslator./' | paste -sd,)
 OUT=$A/out/pit; C=$A/out/pit-classes; rm -rf "$C"; mkdir -p "$C" "$OUT"
 JU=$P/junit-platform-console-standalone-1.11.4.jar
 # Компилируем все наборы: обёртка SuitesTest ссылается на каждый. Ограничиваем только то, что мутируется.
-SRC=""; for t in Brief Heard Updates ModelStore Chats; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
+SRC=""; for t in Brief Heard Updates ModelStore Chats Memo; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
 SRC="$SRC $A/src/dev/agenttranslator/Phrasebook.java $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java"
-javac --release 11 -nowarn -g -cp "$J:$JU" -d "$C" $SRC $A/test/SuitesTest.java
+SRC="$SRC $A/src/dev/agenttranslator/Cloud.java"      # ради Cloud.Review; заглушки Android — только для сборки
+javac --release 11 -nowarn -g -cp "$J:$JU:$R/tools/android.jar" -d "$C" $SRC $A/test/SuitesTest.java
 CP=$(ls $P/pitest*.jar $P/commons-*.jar | paste -sd:):$JU
 java -cp "$CP" org.pitest.mutationtest.commandline.MutationCoverageReport \
   --classPath "$C,$J,$JU" --reportDir "$OUT" --targetClasses "$TARGETS" \

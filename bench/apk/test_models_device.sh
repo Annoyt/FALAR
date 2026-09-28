@@ -37,6 +37,9 @@ stop_serve() { [ -n "$SRV" ] && kill $SRV 2>/dev/null; SRV=""; for p in $(ss -lt
 mark() { sh "wc -l < $LOG" 2>/dev/null | awk '{print $1+0}'; }
 # wait_line <метка> <шаблон> <сек> — первая строка журнала после метки, подходящая под шаблон
 wait_line() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG 2>/dev/null | grep -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
+# То же для «одно из»: шаблон расширенный. Grep телефона (toybox) не понимает «\|» в простом шаблоне,
+# и ожидание с ним молча досиживало до таймаута — а M9 после него проваливался с пустой строкой.
+wait_any() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG 2>/dev/null | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
 exists() { [ "$(sh "[ -f $M/$1 ] && echo y")" = y ]; }
 size() { sh "stat -c %s $M/$1 2>/dev/null" | awk '{print $1+0}'; }
 trap 'stop_serve' EXIT
@@ -57,7 +60,7 @@ $ADB shell am force-stop $PKG; sleep 1
 m=$(mark); start_app; l2=$(wait_line "$m" '📦 модели' 60); say "  $l2"
 case "$l1" in *прохэшировано*) a=0;; *) a=1;; esac; case "$l2" in *"по кэшу"*) b=0;; *) b=1;; esac
 res $(( a || b )) "M1 первый старт хэширует, второй по кэшу"
-wait_line "$m" 'микрофон выключен\|Слушаю\|🎚' 120 >/dev/null; sleep 1
+wait_any "$m" 'микрофон выключен|Слушаю|🎚' 120 >/dev/null; sleep 1
 start_app --es modelsbase $BASE; sleep 1
 
 # M2: необязательное с локального источника
@@ -141,7 +144,7 @@ if [ -n "$FULL" ]; then
   start_app --es modelsbase $BASE; sleep 1
   t0=$(date +%s); start_app --es models core
   l=$(wait_line "$m" '⬇ модели (core)' 1800); say "  $l  ($(( $(date +%s) - t0 )) с)"
-  l2=$(wait_line "$m" 'Готово. ASR\|ASR+VAD загружены' 300); say "  $l2"
+  l2=$(wait_any "$m" 'Готово\. ASR|ASR\+VAD загружены' 300); say "  $l2"
   ok=1; case "$l" in *Готово*) [ -n "$l2" ] && ok=0;; esac
   res $ok "M9 обязательное скачано, движки поднялись"
   $ADB shell am force-stop $PKG; sleep 1

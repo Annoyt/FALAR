@@ -45,6 +45,57 @@ public class ChatsTest {
     c2.open(c.current);
     ok(c2.humanAt(at), "C9 пометка пережила перечитывание с диска");
 
+    // память разговора: облако пишет, человек правит, автоматика правку человека не трогает
+    ok(c.setMemo("Хозяйка (женщина) показывает квартиру", Chats.BY_CLOUD), "C10 облако записало память");
+    eq(c.memoBy, Chats.BY_CLOUD, "C10 пометка «облако»");
+    ok(!c.setMemo("Хозяйка (женщина) показывает квартиру", Chats.BY_CLOUD), "C10 та же память от того же — не запись");
+    ok(c.setMemo("Хозяйка Мария (женщина) сдаёт квартиру мне", Chats.BY_USER), "C11 человек поправил память");
+    ok(!c.setMemo("Другое от облака", Chats.BY_CLOUD), "C11 облако не перезаписывает память человека");
+    ok(!c.setMemo("Другое от модели", Chats.BY_LLM), "C11 модель тоже");
+    ok(!c.setMemo("", Chats.BY_CLOUD), "C11 и стереть её автоматика не может");
+    eq(c.memo, "Хозяйка Мария (женщина) сдаёт квартиру мне", "C11 память человека на месте");
+    Chats c3 = new Chats(c.dir.getParentFile());
+    c3.open(c.current);
+    eq(c3.memo, "Хозяйка Мария (женщина) сдаёт квартиру мне", "C12 память пережила перечитывание с диска");
+    eq(c3.memoBy, Chats.BY_USER, "C12 и пометка «человек» тоже");
+    ok(c.setMemo("  ", Chats.BY_USER), "C13 человек стёр память");
+    eq(c.memo + "|" + c.memoBy, "|", "C13 память пуста и снова за автоматикой");
+    ok(!c.setMemo("", Chats.BY_USER), "C13 стереть пустую — не запись");
+    ok(c.setMemo("Снова от облака", Chats.BY_CLOUD), "C13 облако снова пишет");
+    ok(c.setMemo("Снова от облака", Chats.BY_USER), "C14 человек подтвердил тот же текст — запись");
+    eq(c.memoBy, Chats.BY_USER, "C14 и теперь память его");
+    Chats c5 = new Chats(c.dir.getParentFile());
+    c5.open(c.current);
+    ok(c5.setMemo("", Chats.BY_USER) && new Chats(c.dir.getParentFile()).memo.isEmpty(), "C14 стёртая память не остаётся в файле");
+
+    // новый разговор — без памяти; прежний свою сохранил
+    c.setMemo("Память первого", Chats.BY_USER);
+    long first = c.current;
+    c.newChat("Другой");
+    eq(c.memo + "|" + c.memoBy, "|", "C15 новый разговор без памяти");
+    c.open(first);
+    eq(c.memo, "Память первого", "C15 прежний вернул свою память");
+
+    // потолок в 500 реплик: продолжение — тот же разговор, память, тема и глоссарий переходят
+    Chats r = new Chats(tmp());
+    r.setTopic("Аренда"); r.setMemo("Хозяйка (женщина)", Chats.BY_CLOUD);
+    r.addTerms(Collections.singletonList(new String[]{"aluguel", "аренда"}), Chats.BY_CLOUD);
+    long was = r.current;
+    for (int k = 0; k < Chats.KEEP; k++) r.add("pt2ru", "frase " + k, "фраза " + k, null, 10_000 + k);
+    eq(r.size(), Chats.KEEP, "C16 ровно потолок");
+    ok(!r.rolled, "C16 до потолка продолжения нет");
+    r.add("pt2ru", "mais uma", "ещё одна", null, 99_999);
+    ok(r.rolled && r.current != was, "C16 после потолка начато продолжение");
+    eq(r.size(), 1, "C16 в продолжении одна реплика");
+    eq(r.memo + "|" + r.memoBy, "Хозяйка (женщина)|" + Chats.BY_CLOUD, "C17 память перешла в продолжение");
+    eq(r.topic, "Аренда", "C17 тема перешла");
+    eq(r.terms().size(), 1, "C17 глоссарий перешёл");
+    Chats r2 = new Chats(r.dir.getParentFile());
+    r2.open(r.current);
+    eq(r2.memo + "|" + r2.topic + "|" + r2.terms().size(), "Хозяйка (женщина)|Аренда|1", "C18 в файле продолжения тоже");
+    r2.open(was);
+    eq(r2.size(), Chats.KEEP, "C18 прежний разговор остался целым");
+
     System.out.println(fails == 0 ? "Chats: " + checks + " проверок, все прошли" : "Chats: провалов " + fails + " из " + checks);
     return fails;
   }

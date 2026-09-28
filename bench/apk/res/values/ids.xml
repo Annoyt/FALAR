@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Имена видов, по которым стенд находит их на экране (uiautomator: resource-id="app.falar:id/…"). -->
+<resources>
+  <item name="hint" type="id"/>
+</resources>

@@ -371,11 +371,15 @@ public class Cloud {
         + "Reply in exactly this plain-text format, no markdown, no reasoning, no other lines. Example of a complete "
         + "reply for a DIFFERENT conversation (illustrative only, never copy its values):\n"
         + "TOPIC: Ремонт машины в мастерской\n"
+        + "MEMO: " + Memo.EXAMPLE + "\n"
         + "FIX 3: Сколько стоит замена масла?\n"
         + "FIX 7: Quando o carro fica pronto?\n"
         + "TERMS: oficina=мастерская; orçamento=смета\n"
         + "NAMES: Auto Center Silva=Ауто Сентер Силва\n"
-        + "Rules: TOPIC is what this conversation is about, 3-7 words in Russian. FIX lines: one per turn whose draft "
+        + "Rules: TOPIC is what this conversation is about, 3-7 words in Russian. MEMO is one line in Russian, at most "
+        + "300 characters: the key facts of the WHOLE conversation that an interpreter needs later — who the speakers are "
+        + "(role; man or woman), where they are, what they agreed on, names and numbers that matter. If \"Memo so far\" is "
+        + "given, rewrite it with what the new turns add: keep what is still true, drop what no longer matters. FIX lines: one per turn whose draft "
         + "is wrong, unnatural or misses context, giving a better DRAFT — a \"PT draft\" is replaced by Brazilian "
         + "Portuguese, a \"RU draft\" by Russian; never rewrite the transcript line, only the draft; use the context "
         + "to resolve recognition errors; always include a FIX line for the last turn; never explain. TERMS: up to 8 "
@@ -384,15 +388,18 @@ public class Cloud {
         + "line if none. NAMES: proper names of people, places, businesses, dishes, each as Portuguese=Russian "
         + "transcription; omit the line if none.";
 
-  /** Разбор целого разговора: тема, правки нескольких реплик, пары терминов и имена.
+  /** Разбор целого разговора: тема, память, правки нескольких реплик, пары терминов и имена.
+   *  memo — прежняя память разговора: снимок — только хвост разговора в 6000 знаков, и всё, что
+   *  раньше, модель узнаёт из памяти и переписывает её с учётом новых реплик.
    *  Возвращает сырой текст ответа (разбирается {@link Review#parse}) или null с причиной в lastError.
    *  Ответ без единой строки TOPIC или FIX считается отказом модели, и перебор идёт дальше:
    *  бесплатные модели отвечают и словом «null», и переводом вместо разметки. */
-  public String review(String transcript, String topic, String glossary) {
+  public String review(String transcript, String topic, String glossary, String memo) {
     if (!ready) { lastError = "нет ключа OpenRouter"; return null; }
     String sys = REVIEW_SYS;
     StringBuilder u = new StringBuilder();
     if (topic != null && !topic.isEmpty()) u.append("Topic so far: ").append(topic).append('\n');
+    if (memo != null && !memo.isEmpty()) u.append("Memo so far: ").append(memo).append('\n');
     if (glossary != null && !glossary.isEmpty()) u.append("Known terms: ").append(glossary).append('\n');
     u.append("Transcript:\n").append(transcript);
     // Годный ответ — хотя бы одна строка FIX: последнюю реплику модель обязана поправить. Тема одна
@@ -404,9 +411,9 @@ public class Cloud {
     finally { maxTries = 5; }
   }
 
-  /** Разобранный ответ на review(): тема, правки по номерам реплик снимка, пары, имена. */
+  /** Разобранный ответ на review(): тема, память, правки по номерам реплик снимка, пары, имена. */
   public static class Review {
-    public String topic = "";
+    public String topic = "", memo = "";
     public final Map<Integer, String> fixes = new LinkedHashMap<>();
     public final List<String[]> terms = new ArrayList<>(), names = new ArrayList<>();
     static final java.util.regex.Pattern FIX = java.util.regex.Pattern.compile("(?i)^\\W*FIX\\s*#?\\s*(\\d+)\\s*[:\\-–—]\\s*(.+)$");
@@ -420,6 +427,7 @@ public class Cloud {
         if (l.isEmpty()) continue;
         String up = l.toUpperCase(Locale.ROOT);
         if (up.startsWith("TOPIC")) { String t = after(l).replaceAll("[\"«»]", "").trim(); if (usable(t) && t.matches(".*\\p{IsCyrillic}.*") && !t.equalsIgnoreCase("Ремонт машины в мастерской")) r.topic = t; continue; }   // тема по-русски и не из примера
+        if (up.startsWith("MEMO")) { String t = Memo.clean(after(l)); if (t != null) r.memo = t; continue; }   // по-русски и не пример
         java.util.regex.Matcher m = FIX.matcher(l);
         if (m.find()) { String t = m.group(2).trim().replaceAll("^[\"«]|[\"»]$", ""); if (usable(t)) r.fixes.put(Integer.parseInt(m.group(1)), t); continue; }
         if (up.startsWith("TERMS")) { pairs(after(l), r.terms); continue; }

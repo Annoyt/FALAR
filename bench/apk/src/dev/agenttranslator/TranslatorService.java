@@ -140,6 +140,12 @@ public class TranslatorService extends Service {
       eng = new Engine(models, this::log); pb = new Phrasebook(models);
       spk = new Speaker(models); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
       chats = new Chats(getExternalFilesDir(null)); learn = new Learn(chats, models, getExternalFilesDir(null));
+      // Рабочая история — из текущего разговора. Раньше после запуска она была пустой, и уточнитель
+      // видел только реплики, сказанные после перезапуска, — а процесс теперь завершается через
+      // минуту в свёрнутом виде, и каждое возвращение было бы разговором с чистого листа.
+      // Восстановленные реплики уже разобраны в прошлый раз: отметку разбора ставим на последнюю.
+      rebuildHistory();
+      synchronized (history) { if (!history.isEmpty()) { lastLocalAt = history.get(history.size() - 1).at; log("↩ продолжаем разговор: восстановлено реплик " + history.size()); } }
       log("📝 " + words.stats());
       if (pb.pinsWithDigits > 0) log("📌 пинов с числом без маски: " + pb.pinsWithDigits + " — они не срабатывают, перезакрепите их кнопкой «запомнить»");
       log(cloud.ready ? "☁ «получше» доступно: " + cloud.models.length + " бесплатных моделей"
@@ -230,6 +236,10 @@ public class TranslatorService extends Service {
       log("🧠 проба уточнителя: " + (ok ? "поднят" : "не поднят"));
       if (ok) { main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); }
     });
+    if (i != null && i.hasExtra("llmneed")) {
+      try { llmNeed = Long.parseLong(i.getStringExtra("llmneed").trim()) << 20; log("🧠 стенд: уточнителю нужно " + (llmNeed >> 20) + " МБ сверх порога системы (до перезапуска)"); }
+      catch (RuntimeException e) { log("🧠 стенд: llmneed — число мегабайт, а пришло «" + i.getStringExtra("llmneed") + "»"); }
+    }
     if (i != null && i.hasExtra("llmload")) {   // стенд: как сервер держит веса (mmap|none), вступает при следующем запуске уточнителя
       String m = i.getStringExtra("llmload"); getSharedPreferences("at", MODE_PRIVATE).edit().putString("llm_load", m).apply();
       log("🧠 режим загрузки уточнителя: " + m + " — перезапускаю его");
@@ -514,6 +524,8 @@ public class TranslatorService extends Service {
     // Стендовая правка реплики без экрана: «<индекс>|<текст>» — исходник, «<индекс>|<текст>|pin» — перевод.
     if (i != null && i.hasExtra("edittext")) { String[] p = i.getStringExtra("edittext").split("\\|", 2); if (p.length == 2) reTranslate(Integer.parseInt(p[0].trim()), p[1]); }
     if (i != null && i.hasExtra("edittrans")) { final String[] p = i.getStringExtra("edittrans").split("\\|", 3); if (p.length >= 2) worker.submit(() -> fixTranslation(Integer.parseInt(p[0].trim()), p[1], p.length > 2 && p[2].contains("pin"))); }
+    // Стенд: память разговора, как будто вписанная человеком; «off» — вернуть её автоматике.
+    if (i != null && i.hasExtra("memo")) { String m = i.getStringExtra("memo"); setMemoByUser(m == null || "off".equals(m) ? "" : m.replace("\\n", " ")); }
     if (i != null && i.hasExtra("clearterms")) { int n = chats == null ? 0 : chats.clearTerms(); log("🗑 подсказки разговора убраны: " + n); }
     if (i != null && i.hasExtra("translit")) { StringBuilder b = new StringBuilder(); for (String w : i.getStringExtra("translit").split("\\s+")) b.append(w).append('=').append(Translit.say(w)).append(' '); log("🔤 " + b.toString().trim()); }
     if (i != null && i.hasExtra("soak")) {
@@ -763,6 +775,9 @@ public class TranslatorService extends Service {
   static final long LLM_IDLE_MS = 45_000;
   /** Сколько памяти нужно сверх системного порога, чтобы поднять сервер: 1,25–1,5 ГБ по замеру. */
   static final long LLM_NEED = 1500L << 20;
+  /** Порог в работе. Меняется только стендом (--es llmneed <МБ>) и живёт до перезапуска: чтобы
+   *  проверить разбор на телефоне, где ядро и уточнитель вместе не помещаются. */
+  volatile long llmNeed = LLM_NEED;
   final Runnable llmIdleUnload = () -> { if (!refineRunning) unloadLlm("простой " + LLM_IDLE_MS / 1000 + " с"); };
   void unloadLlm(String why) {
     main.removeCallbacks(llmIdleUnload);
@@ -776,9 +791,9 @@ public class TranslatorService extends Service {
       ActivityManager am = getSystemService(ActivityManager.class);
       ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo(); am.getMemoryInfo(mi);
       long spare = mi.availMem - mi.threshold;
-      boolean ok = !mi.lowMemory && spare > LLM_NEED;
+      boolean ok = !mi.lowMemory && spare > llmNeed;
       tsv("llm_room", "" + (mi.availMem >> 20), "" + (mi.threshold >> 20), mi.lowMemory ? "low" : "", ok ? "ok" : "no");
-      if (!ok) log("🧠 разбор отложен: свободно " + (mi.availMem >> 20) + " МБ при пороге системы " + (mi.threshold >> 20) + " МБ — уточнителю нужно ещё " + (LLM_NEED >> 20) + " МБ сверху");
+      if (!ok) log("🧠 разбор отложен: свободно " + (mi.availMem >> 20) + " МБ при пороге системы " + (mi.threshold >> 20) + " МБ — уточнителю нужно ещё " + (llmNeed >> 20) + " МБ сверху");
       return ok;
     } catch (Throwable e) { return true; }
   }
@@ -932,7 +947,11 @@ public class TranslatorService extends Service {
       if (x != null) whole.append(x.optString("src", "")).append('\n');
     }
     String ctx = whole.length() > 1200 ? whole.substring(whole.length() - 1200) : whole.toString();
-    String tp = o.optString("topic", ""); if (!tp.isEmpty()) ctx = "Tema: " + tp + "\n" + ctx;
+    // Всё, что старше последних 1200 знаков, уточнитель знает только из памяти разговора.
+    List<String[]> rows = new ArrayList<>();
+    for (int k = 0; k < t.length(); k++) { org.json.JSONObject x = t.optJSONObject(k); if (x != null) rows.add(Chats.row(x, k)); }
+    String mb = Memo.block(Memo.who(rows), o.optString("memo", ""), o.optString("topic", ""), Memo.CAP);
+    if (!mb.isEmpty()) ctx = mb + "\n" + ctx;
     for (int k = 0; k < t.length() && running; k++) {
       org.json.JSONObject x = t.optJSONObject(k);
       if (x == null) continue;
@@ -981,6 +1000,23 @@ public class TranslatorService extends Service {
     if (!chats.topic.isEmpty()) return chats.topic;
     return learn == null ? "" : learn.keywords(chats.all(), 6);
   }
+  /** Память разговора для фона уточнителя: кто говорит (по грамматике исходных реплик), ключевые
+   *  детали (от облака или человека) и тема. Всё, что старше свежего куска, уточнитель знает
+   *  только отсюда. Считается раз на проход разбора. */
+  volatile String lastMemoLogged = "";
+  String memoBlock(String topic) {
+    if (chats == null) return topic.isEmpty() ? "" : "Tema: " + topic;
+    return Memo.block(Memo.who(chats.all()), chats.memo, topic, Memo.CAP);
+  }
+  public String whoLine() { return chats == null ? "" : Memo.who(chats.all()); }
+  /** Память, вписанная человеком: автоматика её больше не перезаписывает. Пустая — вернуть автоматике. */
+  public boolean setMemoByUser(String text) {
+    if (chats == null) return false;
+    boolean ok = chats.setMemo(text, Chats.BY_USER);
+    String t = text == null ? "" : text.trim();
+    log(t.isEmpty() ? "🧠 память разговора возвращена автоматике" : "🧠 память разговора записана вами (" + t.length() + " зн.) — облако и уточнитель её не перезапишут");
+    return ok;
+  }
   /** Строка снимка: направление целиком ([ru→pt]), чтобы модель правила черновик после «=>», а не исходник —
    *  с пометкой одного языка она чинила распознавание вместо перевода. */
   static String line(int n, String dir, String who, String src, String draft) {
@@ -1012,15 +1048,18 @@ public class TranslatorService extends Service {
       if (chats != null) todo.removeIf(t -> chats.humanAt(t.at));
       if (todo.isEmpty()) continue;
       boolean hy = llm.model.toLowerCase().contains("hy-mt");
-      String topic = topicLine();
+      String topic = topicLine(), memo = memoBlock(topic);
+      // Что уточнитель знает о разговоре сверх свежих реплик — в журнал, когда это меняется: иначе
+      // не понять, почему перевод вышел таким, а смотреть «Память разговора» посреди разговора некогда.
+      if (!memo.equals(lastMemoLogged)) { lastMemoLogged = memo; log("🧠 память для уточнителя: " + (memo.isEmpty() ? "пусто" : memo.replace('\n', ' ')) + " (" + memo.length() + " зн.)"); }
       int changed = 0, pairs = 0; long t0 = System.nanoTime(); int from = Math.max(0, h.length - 8);
       if (hy) {
         for (Turn L : todo) {
           int idx = indexOf(h, L); if (idx < 0) continue;
           String tgt = L.dir.substring(3);
-          String tm = terms(L.dir, L.asr), tp = topic.isEmpty() ? "" : "Tema: " + topic + "\n";
+          String tm = terms(L.dir, L.asr), tp = memo.isEmpty() ? "" : memo + "\n";
           // Бюджет из окна модели: без него длинные реплики переполняли окно, сервер отказывал,
-          // и уточнитель замолкал навсегда. Старое сжато в строку темы, свежее — в пределах бюджета.
+          // и уточнитель замолкал навсегда. Старое — в памяти разговора, свежее — в пределах бюджета.
           int budget = Brief.budget(llmCpt, L.asr.length(), tm.length(), tp.length());
           if (budget < 0) { log("🔁 #" + L.n + " длиннее окна уточнителя (" + L.asr.length() + " знаков) — оставляю перевод как есть"); continue; }
           List<String> fresh = Brief.fit(backgroundLines(h, idx), Math.min(budget, Brief.FRESH_CHARS));
@@ -1041,13 +1080,14 @@ public class TranslatorService extends Service {
       } else {
         StringBuilder u = new StringBuilder(); Map<Integer, Turn> byN = new HashMap<>();
         // Та же защита окна для общей модели: реплики с конца, пока влезают в бюджет.
-        int budget = Math.min(Brief.budget(llmCpt, 0, 0, topic.length() + Cloud.REVIEW_SYS.length()), Brief.FRESH_CHARS * 2);
+        String had = chats == null ? "" : chats.memo;
+        int budget = Math.min(Brief.budget(llmCpt, 0, 0, topic.length() + had.length() + Cloud.REVIEW_SYS.length()), Brief.FRESH_CHARS * 2);
         int start = h.length, used = 0;
         while (start > 0) { Turn x = h[start - 1]; int len = x.asr.length() + (x.refined != null ? x.refined : x.mt).length() + 20; if (used + len > budget && start < h.length) break; used += len; start--; }
         from = Math.max(from, start);
         for (int i = from; i < h.length; i++) { int n = i - from + 1; byN.put(n, h[i]); u.append(line(n, h[i].dir, null, h[i].asr, h[i].refined != null ? h[i].refined : h[i].mt)); }
         long t = System.nanoTime();
-        String out = llm.chat(Cloud.REVIEW_SYS, (topic.isEmpty() ? "" : "Topic so far: " + topic + "\n") + "Transcript:\n" + u, 400);
+        String out = llm.chat(Cloud.REVIEW_SYS, (topic.isEmpty() ? "" : "Topic so far: " + topic + "\n") + (had.isEmpty() ? "" : "Memo so far: " + had + "\n") + "Transcript:\n" + u, 500);
         long ms = (System.nanoTime() - t) / 1000000;
         Cloud.Review r = Cloud.Review.parse(out);
         for (Map.Entry<Integer, String> e : r.fixes.entrySet()) {
@@ -1058,13 +1098,15 @@ public class TranslatorService extends Service {
         if (chats != null && chats.current == chatId) {
           if (!r.terms.isEmpty()) pairs = chats.addTerms(r.terms, Chats.BY_LLM);
           if (!r.topic.isEmpty() && chats.topic.isEmpty()) { chats.setTopic(r.topic); chats.nameFromTopic(r.topic); }
-        } else if (!r.terms.isEmpty() || !r.topic.isEmpty()) log("🧠 разговор сменился, пока шёл разбор — тема и пары отброшены");
+          if (!r.memo.isEmpty() && chats.setMemo(r.memo, Chats.BY_LLM)) log("🧠 память разговора обновлена моделью (" + r.memo.length() + " зн.)");
+        } else if (!r.terms.isEmpty() || !r.topic.isEmpty() || !r.memo.isEmpty()) log("🧠 разговор сменился, пока шёл разбор — тема, память и пары отброшены");
         if (r.fixes.isEmpty() && r.topic.isEmpty()) log("🧠 ответ модели не разобран (" + ms + " мс): " + (out == null ? "" : out.replace('\n', ' ')));
       }
       if (chats == null || chats.current == chatId) lastLocalAt = todo.get(todo.size() - 1).at;
       long ms = (System.nanoTime() - t0) / 1000000;
       String tp = chats == null || chats.topic.isEmpty() ? (topic.isEmpty() ? "нет" : "по словам: " + topic) : chats.topic;
-      log("🧠 разбор контекста: реплик " + todo.size() + ", правок " + changed + (hy ? ", пары не извлекаются: переводная модель" : ", пар " + pairs) + " · тема: " + tp + " (" + ms + " мс)");
+      log("🧠 разбор контекста: реплик " + todo.size() + ", правок " + changed + (hy ? ", пары не извлекаются: переводная модель" : ", пар " + pairs) + " · тема: " + tp
+          + " · память " + memo.length() + " зн." + (chats == null || chats.memo.isEmpty() ? "" : Chats.BY_USER.equals(chats.memoBy) ? " (ваша)" : " (" + chats.memoBy + ")") + " (" + ms + " мс)");
       tsv("local_pass", "" + todo.size(), "" + changed, "" + pairs, "" + ms);
       hint("🧠 разбор: реплик " + todo.size() + ", правок " + changed + (hy ? "" : ", пар " + pairs));
     } } catch (Throwable e) { Log.e(TAG, "refine", e); log("🔁 ошибка уточнения: " + e); }
@@ -1420,7 +1462,7 @@ public class TranslatorService extends Service {
         StringBuilder gl = new StringBuilder();
         for (String[] t : chats.terms()) { if (gl.length() > 0) gl.append("; "); gl.append(t[0]).append('=').append(t[1]); }
         long t0 = System.nanoTime();
-        String out = cloud.review(tr.toString(), topic, gl.toString());
+        String out = cloud.review(tr.toString(), topic, gl.toString(), chats.memo);
         long ms = (System.nanoTime() - t0) / 1000000;
         String trail = String.join(" · ", new ArrayList<>(cloud.trail));
         if (!trail.isEmpty()) { log("☁ след перебора: " + trail); tsv("cloud_trail", trail); }
@@ -1451,6 +1493,10 @@ public class TranslatorService extends Service {
         }
         boolean named = false;
         if (!r.topic.isEmpty()) { chats.setTopic(r.topic); named = chats.nameFromTopic(r.topic); }
+        // Память переписывается целиком: облако получило прежнюю и дополнило её новыми репликами.
+        // Вписанную человеком не трогаем — только говорим, что ответ был.
+        String memoNote = r.memo.isEmpty() ? "" : chats.setMemo(r.memo, Chats.BY_CLOUD) ? " · память обновлена (" + r.memo.length() + " зн.)"
+            : Chats.BY_USER.equals(chats.memoBy) ? " · память ваша, не тронута" : "";
         int pairs = r.terms.isEmpty() ? 0 : chats.addTerms(r.terms, Chats.BY_CLOUD);
         // Пара из глоссария — перевод слова для изучения: облачная пара знает контекст, одиночный MT нет.
         if (learn != null) for (String[] t : r.terms) { String w = t[0].trim().toLowerCase(Locale.ROOT); if (w.length() >= 3 && w.matches("\\p{L}+") && learn.inCorpus(w)) learn.putWordRu(w, t[1]); }
@@ -1461,11 +1507,11 @@ public class TranslatorService extends Service {
         String sum = "☁ ушло " + rows.size() + " реплик, " + chars + " знаков · " + cloud.lastUsed + " за " + ms + " мс · правок " + fixed
             + (learned > 0 ? " (в выученное " + learned + ")" : "") + (masked > 0 ? " (с масками мимо " + masked + ")" : "")
             + (wrongLang.length() > 0 ? " · не на языке цели: " + wrongLang : "") + ", пар " + pairs
-            + (r.names.isEmpty() ? "" : ", имён " + r.names.size()) + (r.topic.isEmpty() ? "" : " · тема: " + r.topic) + (named ? " (стала названием)" : "");
-        log(sum); tsv("cloud_review", "" + rows.size(), "" + chars, cloud.lastUsed, "" + ms, "" + fixed, "" + pairs, "" + r.names.size(), r.topic);
+            + (r.names.isEmpty() ? "" : ", имён " + r.names.size()) + (r.topic.isEmpty() ? "" : " · тема: " + r.topic) + (named ? " (стала названием)" : "") + memoNote;
+        log(sum); tsv("cloud_review", "" + rows.size(), "" + chars, cloud.lastUsed, "" + ms, "" + fixed, "" + pairs, "" + r.names.size(), r.topic, "" + r.memo.length());
         // На экране — коротко: список отброшенных номеров нужен стенду, а не собеседнику, который читает этот экран.
         hint("☁ " + rows.size() + " реплик, " + chars + " зн. · " + cloud.lastUsed.replace(":free", "") + " · " + (ms / 1000) + " с · правок " + fixed + ", пар " + pairs
-            + (r.names.isEmpty() ? "" : ", имён " + r.names.size()) + (r.topic.isEmpty() ? "" : " · " + r.topic));
+            + (r.names.isEmpty() ? "" : ", имён " + r.names.size()) + (r.topic.isEmpty() ? "" : " · " + r.topic) + memoNote);
         final String fLastFix = lastFix; final String[] lastRow = all.isEmpty() ? null : all.get(all.size() - 1);
         final Listener l = listener;
         if (l != null) main.post(() -> { l.onHistory(); if (fLastFix != null && lastRow != null) l.onTurn(lastRow[0], lastRow[1], fLastFix, true); if (!r.names.isEmpty()) l.onNames(new ArrayList<>(r.names), manual); });

@@ -20,6 +20,10 @@ import org.json.*;
  *  облачному запросу, а не OPUS-MT, до которого подсказки не доходят. Оба поля необязательные —
  *  старый файл без них читается как раньше.
  *
+ *  **Память** (`memo`, `memoBy`) — ключевые детали разговора для уточнителя: роли, место,
+ *  договорённости. Пишет её облачный пересмотр, дополняя прежнюю, или человек; написанное
+ *  человеком автоматика не перезаписывает (см. Memo). Поле тоже необязательное.
+ *
  *  Реплика: `dir`, `src`, `dst`, `at`, необязательно `fixed` (улучшенный перевод), `by` (кто
  *  улучшил: user/cloud/llm) и `who` (кто говорил, если голос опознан). Правка человека (`by=user`)
  *  для автоматики неприкосновенна.
@@ -33,6 +37,8 @@ public class Chats {
   public long current;
   public String name = "";
   public volatile String topic = "";
+  /** Ключевые детали разговора и кто их написал: cloud, llm или user. */
+  public volatile String memo = "", memoBy = "";
   JSONArray turns = new JSONArray();          // в Android у JSONArray нет clear(), пересоздаём
   JSONArray terms = new JSONArray();
 
@@ -59,8 +65,11 @@ public class Chats {
     // сказанное дальше исчезало без единого слова. Теперь разговор продолжается в новом,
     // с тем же именем и пометкой, — данные не теряются, а файл не растёт без предела.
     if (turns.length() >= KEEP) {
-      String was = name;
+      String was = name, m = memo, mb = memoBy, tp = topic; JSONArray tm = terms;
       newChat(was.isEmpty() ? "" : was + " · продолжение");
+      // Продолжение — тот же разговор: память, тема и глоссарий переходят в него. Иначе на 500-й
+      // реплике уточнитель посреди разговора начинал бы с чистого листа.
+      memo = m; memoBy = mb; topic = tp; terms = tm;
       rolled = true;
     }
     try {
@@ -103,7 +112,7 @@ public class Chats {
     if (left == 0) dropIfEmpty(); else save();
     current = System.currentTimeMillis();
     name = who == null ? "" : who;
-    turns = new JSONArray(); terms = new JSONArray(); topic = "";
+    turns = new JSONArray(); terms = new JSONArray(); topic = ""; memo = ""; memoBy = "";
     save();
     return left;
   }
@@ -118,6 +127,8 @@ public class Chats {
     if (turns == null) turns = new JSONArray();
     name = o == null ? "" : o.optString("name", "");
     topic = o == null ? "" : o.optString("topic", "");
+    memo = o == null ? "" : o.optString("memo", "");
+    memoBy = memo.isEmpty() ? "" : o.optString("memoBy", "");
     terms = o == null ? null : o.optJSONArray("terms");
     if (terms == null) terms = new JSONArray();
     return left;
@@ -308,6 +319,16 @@ public class Chats {
   }
   public synchronized int clearTerms() { int n = terms.length(); terms = new JSONArray(); save(); return n; }
 
+  /** Записать ключевые детали. Написанное человеком автоматика не перезаписывает; пустая строка
+   *  от человека возвращает память автоматике. false — не записано: защищено или не изменилось. */
+  public synchronized boolean setMemo(String text, String by) {
+    String t = text == null ? "" : text.trim(), b = by == null ? "" : by;
+    if (BY_USER.equals(memoBy) && !BY_USER.equals(b)) return false;
+    if (t.equals(memo) && (t.isEmpty() || b.equals(memoBy))) return false;
+    memo = t; memoBy = t.isEmpty() ? "" : b;
+    save(); return true;
+  }
+
   /** Последние реплики текущего разговора — их сервис возвращает в рабочую историю при открытии:
    *  направление, исходник, перевод (улучшенный, если есть), метка времени. */
   public synchronized List<String[]> tail(int n) {
@@ -330,6 +351,7 @@ public class Chats {
       if (o == null) o = new JSONObject();
       o.put("id", current).put("name", name).put("saved", System.currentTimeMillis()).put("turns", turns);
       if (topic.isEmpty()) o.remove("topic"); else o.put("topic", topic);
+      if (memo.isEmpty()) { o.remove("memo"); o.remove("memoBy"); } else o.put("memo", memo).put("memoBy", memoBy);
       if (terms.length() == 0) o.remove("terms"); else o.put("terms", terms);
       write(file(current), o.toString());
     } catch (Exception ignore) {}
@@ -385,7 +407,7 @@ public class Chats {
   public synchronized boolean delete(long id) {
     boolean ok = file(id).delete();
     if (ok && id == current) {                    // удалили тот, в котором сидим — начинаем чистый
-      current = System.currentTimeMillis(); name = ""; turns = new JSONArray(); terms = new JSONArray(); topic = "";
+      current = System.currentTimeMillis(); name = ""; turns = new JSONArray(); terms = new JSONArray(); topic = ""; memo = ""; memoBy = "";
       save();                                     // иначе замена существует только в памяти и в списке её нет
     }
     return ok;
