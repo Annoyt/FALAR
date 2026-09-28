@@ -240,6 +240,24 @@ public class TranslatorService extends Service {
     // Стенд: способ загрузки перевода для замера памяти («off» — как всегда); вступает при следующем запуске.
     if (i != null && i.hasExtra("mtvariant")) { String v = i.getStringExtra("mtvariant"); v = v == null || "off".equals(v) ? "" : v;
       getSharedPreferences("at", MODE_PRIVATE).edit().putString("mt_variant", v).apply(); log("🧪 стенд: перевод грузится как «" + (v.isEmpty() ? "обычно" : v) + "» со следующего запуска"); }
+    // Стенд: сырой перевод пачки фраз самим движком — без правил, словаря, выученного, озвучки и без
+    // записи в разговор. Нужен, чтобы сравнивать способы перевода на телефоне по эталонам: одна и та
+    // же фраза на столе и на телефоне переводится по-разному. Строки файла: «pt2ru|ru2pt \t исходник»;
+    // ответ — рядом, в «<файл>.out»: «направление \t исходник \t перевод \t мс».
+    if (i != null && i.hasExtra("mtbatch")) { final String path = i.getStringExtra("mtbatch");
+      worker.submit(() -> {
+        if (eng == null) { log("🧪 пачка: движок ещё загружается"); return; }
+        int n = 0; long t0 = System.nanoTime();
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(path), "UTF-8"));
+             java.io.Writer w = new java.io.OutputStreamWriter(new java.io.FileOutputStream(path + ".out"), "UTF-8")) {
+          for (String line; (line = r.readLine()) != null; ) {
+            String[] f = line.split("\t", 2); if (f.length < 2 || !(f[0].equals("pt2ru") || f[0].equals("ru2pt"))) continue;
+            long t = System.nanoTime(); String out = eng.translate(f[0], f[1]); long ms = (System.nanoTime() - t) / 1000000;
+            w.write(f[0] + "\t" + f[1] + "\t" + out.replace('\t', ' ').replace('\n', ' ') + "\t" + ms + "\n"); n++;
+          }
+          log("🧪 пачка: " + n + " фраз за " + (System.nanoTime() - t0) / 1000000 + " мс · резидентно " + Engine.rssMb() + " МБ → " + path + ".out");
+        } catch (Throwable e) { log("🧪 пачка оборвалась на " + n + ": " + e); }
+      }); }
     if (i != null && i.hasExtra("rss")) {
       android.os.Debug.MemoryInfo mi = new android.os.Debug.MemoryInfo(); android.os.Debug.getMemoryInfo(mi);
       log("🧪 память: резидентно " + Engine.rssMb() + " МБ · PSS " + (mi.getTotalPss() >> 10) + " МБ · нативная куча " + (android.os.Debug.getNativeHeapAllocatedSize() >> 20) + " МБ");

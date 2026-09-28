@@ -55,21 +55,31 @@ public class WordList {
         int sp2 = line.indexOf(' ', sp + 1); if (sp2 < 0) sp2 = line.length();
         String lang = line.substring(0, sp), w = line.substring(sp + 1, sp2);
         int freq = 0; try { if (sp2 < line.length()) freq = Integer.parseInt(line.substring(sp2 + 1).trim()); } catch (Exception ignore) {}
-        common.computeIfAbsent(lang, k -> new HashSet<>(1 << 15)).add(w);
-        if (w.length() >= STEM && freq >= STEM_MIN_FREQ)
-          stems.computeIfAbsent(lang, k -> new HashSet<>(1 << 15)).add(w.substring(0, STEM));
+        // И форма без диакритики: распознавание иногда теряет ударение («sabado»). Имя без него
+        // («Sao Pedro») от этого не пострадает — оно совпадает со своим словом точно, а точное
+        // совпадение принимается всегда.
+        String pw = plain(w);
+        Set<String> cs = common.computeIfAbsent(lang, k -> new HashSet<>(1 << 15));
+        cs.add(w); cs.add(pw);
+        if (w.length() >= STEM && freq >= STEM_MIN_FREQ) {
+          Set<String> ss = stems.computeIfAbsent(lang, k -> new HashSet<>(1 << 15));
+          ss.add(w.substring(0, STEM)); if (pw.length() >= STEM) ss.add(pw.substring(0, STEM));
+        }
         commonCount++;
       }
     } catch (Exception e) { e.printStackTrace(); }
   }
-  /** Обычное ли это слово языка: само в списке или делит с ним основу (русский флективен). */
+  /** Обычное ли это слово языка: само в списке или делит с ним основу (русский флективен).
+   *  Список построен с диакритикой («sábado», «você»), а распознавание её иногда теряет, поэтому
+   *  ищем обе формы. Раньше искалась только форма без диакритики — и любое обычное слово с
+   *  ударением считалось необычным: имя «São Pedro» из своих слов подменяло «sábado». */
   boolean isCommon(String w, String lang) {
     Set<String> c = common.get(lang); if (c == null) return false;
-    String p = plain(w).replaceAll("[^\\p{L}]", "");
+    String a = w.toLowerCase(Locale.ROOT).replace('ё', 'е').replaceAll("[^\\p{L}]", ""), p = plain(a);
     if (p.length() < 3) return true;                       // слишком коротко, чтобы судить
-    if (c.contains(p)) return true;
+    if (c.contains(a) || c.contains(p)) return true;
     Set<String> st = stems.get(lang);
-    return st != null && p.length() >= STEM && st.contains(p.substring(0, STEM));
+    return st != null && p.length() >= STEM && (st.contains(a.substring(0, STEM)) || st.contains(p.substring(0, STEM)));
   }
 
   // ---- фонетика

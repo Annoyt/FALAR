@@ -12,4 +12,5 @@ public class SuitesTest {
   @Test void modelStore() throws Exception { assertEquals(0, ModelStoreTest.run()); }
   @Test void chats() throws Exception { assertEquals(0, ChatsTest.run()); }
   @Test void memo() { assertEquals(0, MemoTest.run()); }
+  @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
 }

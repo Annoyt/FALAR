@@ -24,7 +24,7 @@ TARGETS=$(echo "$T" | tr ',' '\n' | sed 's/^/dev.agenttranslator./' | paste -sd,
 OUT=$A/out/pit; C=$A/out/pit-classes; rm -rf "$C"; mkdir -p "$C" "$OUT"
 JU=$P/junit-platform-console-standalone-1.11.4.jar
 # Компилируем все наборы: обёртка SuitesTest ссылается на каждый. Ограничиваем только то, что мутируется.
-SRC=""; for t in Brief Heard Updates ModelStore Chats Memo; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
+SRC=""; for t in Brief Heard Updates ModelStore Chats Memo WordList; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
 SRC="$SRC $A/src/dev/agenttranslator/Phrasebook.java $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java"
 SRC="$SRC $A/src/dev/agenttranslator/Cloud.java"      # ради Cloud.Review; заглушки Android — только для сборки
 javac --release 11 -nowarn -g -cp "$J:$JU:$R/tools/android.jar" -d "$C" $SRC $A/test/SuitesTest.java
@@ -33,4 +33,5 @@ java -cp "$CP" org.pitest.mutationtest.commandline.MutationCoverageReport \
   --classPath "$C,$J,$JU" --reportDir "$OUT" --targetClasses "$TARGETS" \
   --targetTests dev.agenttranslator.SuitesTest --sourceDirs "$A/src" \
   --outputFormats HTML,CSV --timestampedReports=false --threads 4 --timeoutConst 8000 \
+  --jvmArgs "-Dfalar.common=$R/data/common_words.txt" \
   --mutators STRONGER 2>&1 | grep -E "^>>|Generated|Killed|mutations|test strength|Line Coverage|ERROR|Exception" | grep -v "^\s*$" || true
