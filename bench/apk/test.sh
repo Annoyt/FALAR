@@ -6,7 +6,8 @@
 #   Brief      — бюджет контекста уточнителя, чтобы запрос не перерастал окно модели;
 #   Chats      — правка человека неприкосновенна для автоматики («два перевода подряд» после правки);
 #   Memo       — память разговора: кто говорит (по грамматике исходников), ключевые детали, потолок;
-#   WordList   — свои слова: искажённое имя находится, обычное слово («sábado») именем не подменяется.
+#   WordList   — свои слова: искажённое имя находится, обычное слово («sábado») именем не подменяется;
+#   Pressure   — когда выгружать уточнитель по сигналу памяти: пик от подъёма пережидаем.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
 #   bash bench/apk/test.sh
 # org.json на столе берётся с Maven (на телефоне он в системе); tools/json.jar не в git.
@@ -23,7 +24,8 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Chats.java $A/src/dev/agenttranslator/Phrasebook.java \
   $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java $A/test/ChatsTest.java \
   $A/src/dev/agenttranslator/Memo.java $A/src/dev/agenttranslator/Cloud.java $A/test/MemoTest.java \
-  $A/src/dev/agenttranslator/WordList.java $A/test/WordListTest.java
+  $A/src/dev/agenttranslator/WordList.java $A/test/WordListTest.java \
+  $A/src/dev/agenttranslator/Pressure.java $A/test/PressureTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -32,4 +34,5 @@ java -cp "$OUT:$J" dev.agenttranslator.BriefTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ChatsTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.MemoTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WordListTest "$R/data/common_words.txt" || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.PressureTest || fail=1
 exit $fail

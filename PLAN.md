@@ -152,8 +152,8 @@ Piper даёт RTF 0.15 на одном ядре и не масштабируе�
 |---|---|---|---|
 | VAD | `silero_vad` (sherpa-onnx) | 208 КБ | MIT |
 | ASR обоих языков | `parakeet-tdt-0.6b-v3-int8` — WER 2.6% / 1.2% | 640 МБ | CC-BY-4.0 |
-| MT pt→ru | `opus-mt-tc-big-pt-zle` int8 ONNX | 584 МБ | CC-BY-4.0 |
-| MT ru→pt | `opus-mt-tc-big-zle-pt` int8 ONNX | 584 МБ | CC-BY-4.0 |
+| MT pt→ru | `opus-mt-tc-big-pt-zle` int8 ONNX, кодировщик с K/V + декодер с кэшем | 368 МБ (до 0.23 — 584) | CC-BY-4.0 |
+| MT ru→pt | `opus-mt-tc-big-zle-pt` int8 ONNX, кодировщик с K/V + декодер с кэшем | 368 МБ (до 0.23 — 584) | CC-BY-4.0 |
 | TTS ru | Piper `ru_RU-dmitri-medium` fp32 | 63 МБ | CC0 |
 | TTS pt-BR | Piper `pt_BR-faber-medium` fp32 | 63 МБ | CC0 |
 | Отпечаток голоса | 3D-Speaker CAM++ | 28 МБ | Apache-2.0 |

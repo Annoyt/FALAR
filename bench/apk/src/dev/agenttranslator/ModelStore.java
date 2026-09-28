@@ -28,7 +28,13 @@ import org.json.JSONObject;
  *  Докачка: <путь>.part, при обрыве — повтор с Range: bytes=<есть>-, с удвоением паузы до 60 с.
  *  Сервер, ответивший 200 вместо 206, обнуляет .part. Хэш не сошёлся — файл выбрасывается,
  *  ошибка запоминается, остальные качаются дальше. Архив после проверки распаковывается
- *  по одной записи через временный файл, пути с «..» отвергаются, потом сверяются check-файлы. */
+ *  по одной записи через временный файл, пути с «..» отвергаются, потом сверяются check-файлы.
+ *
+ *  Замена файлов (replaces у элемента): новый файл заменяет прежние. Пока прежние на месте и
+ *  верны, обязательный новый считается имеющимся — приложение работает прежним путём и никого не
+ *  заставляет качать; новый предлагается отдельно («облегчить»). Когда новый скачан и сверен,
+ *  прежние удаляются (cleanObsolete). Новой установке прежние не качаются вовсе. Так перевод
+ *  перешёл с трёх файлов на направление на два (0.23.0). */
 public class ModelStore {
   public interface Net { boolean allowed(); }
   public interface Log { void log(String s); }
@@ -37,9 +43,11 @@ public class ModelStore {
   public static class Item {
     public final String path, sha256, tier, url, name; public final long size;
     public final boolean archive; public final String unpackTo; public final List<String[]> check;
-    Item(String path, long size, String sha256, String tier, String[] src, boolean archive, String unpackTo, List<String[]> check) {
+    /** Файлы, которые этот заменяет: {путь, размер, sha256}. */
+    public final List<String[]> replaces;
+    Item(String path, long size, String sha256, String tier, String[] src, boolean archive, String unpackTo, List<String[]> check, List<String[]> replaces) {
       this.path = path; this.size = size; this.sha256 = sha256; this.tier = tier; this.url = src[0]; this.name = src[1];
-      this.archive = archive; this.unpackTo = unpackTo; this.check = check;
+      this.archive = archive; this.unpackTo = unpackTo; this.check = check; this.replaces = replaces;
     }
     public boolean core() { return "core".equals(tier); }
     /** Что качается: файл по пути или zip рядом с каталогом. */
@@ -55,11 +63,14 @@ public class ModelStore {
     /** Итог последней проверки: чего не хватает по ярусам; checked — проверка уже была (до неё
      *  нули ничего не значат, и экран первого запуска по ним прятаться не должен). */
     public boolean checked; public int coreMissing, optMissing; public long coreBytes, optBytes;
+    /** Замены, которые можно скачать: прежние файлы на месте, новых нет. */
+    public int upgrade; public long upgradeBytes;
     public boolean busy() { return DOWN.equals(phase) || WAIT.equals(phase) || RETRY.equals(phase) || UNPACK.equals(phase) || CHECK.equals(phase); }
     public State copy() {
       State s = new State();
       s.phase = phase; s.tier = tier; s.file = file; s.message = message; s.done = done; s.total = total; s.bps = bps; s.retryIn = retryIn;
       s.errors = new ArrayList<>(errors); s.checked = checked; s.coreMissing = coreMissing; s.optMissing = optMissing; s.coreBytes = coreBytes; s.optBytes = optBytes;
+      s.upgrade = upgrade; s.upgradeBytes = upgradeBytes;
       return s;
     }
   }
@@ -94,8 +105,11 @@ public class ModelStore {
       JSONArray fs = m.optJSONArray("files");
       for (int i = 0; fs != null && i < fs.length(); i++) {
         JSONObject f = fs.getJSONObject(i);
+        List<String[]> rep = new ArrayList<>();
+        JSONArray rs = f.optJSONArray("replaces");
+        for (int j = 0; rs != null && j < rs.length(); j++) { JSONObject r = rs.getJSONObject(j); rep.add(new String[]{r.getString("path"), "" + r.getLong("size"), r.getString("sha256")}); }
         items.add(new Item(f.getString("path"), f.getLong("size"), f.getString("sha256"), f.optString("tier", "core"),
-                           srcUrl(f.getJSONObject("source")), false, null, null));
+                           srcUrl(f.getJSONObject("source")), false, null, null, rep));
       }
       JSONArray as = m.optJSONArray("archives");
       for (int i = 0; as != null && i < as.length(); i++) {
@@ -104,7 +118,7 @@ public class ModelStore {
         JSONArray cs = a.optJSONArray("check");
         for (int j = 0; cs != null && j < cs.length(); j++) check.add(new String[]{cs.getJSONObject(j).getString("path"), cs.getJSONObject(j).getString("sha256")});
         items.add(new Item(a.getString("path"), a.getLong("size"), a.getString("sha256"), a.optString("tier", "core"),
-                           srcUrl(a.getJSONObject("source")), true, a.optString("unpack_to", "."), check));
+                           srcUrl(a.getJSONObject("source")), true, a.optString("unpack_to", "."), check, Collections.emptyList()));
       }
     } catch (JSONException e) { throw new IllegalArgumentException("манифест моделей: " + e.getMessage()); }
     loadVerified();
@@ -157,11 +171,40 @@ public class ModelStore {
   Plan plan(List<Item> list, int depth) {
     Plan p = new Plan();
     for (Item it : list) {
-      boolean ok = it.archive ? archiveOk(it, depth) : fileOk(new File(dir, it.path), it.size, it.sha256, depth);
-      if (ok) p.have++; else { p.need.add(it); p.bytes += it.size; }
+      if (present(it, depth) || replacedOk(it, depth)) p.have++; else { p.need.add(it); p.bytes += it.size; }
     }
     if (depth > 0) summarize();
     return p;
+  }
+  /** Сам элемент на месте и верен. */
+  boolean present(Item it, int depth) { return it.archive ? archiveOk(it, depth) : fileOk(new File(dir, it.path), it.size, it.sha256, depth); }
+  /** Все заменяемые им файлы на месте и верны — прежний путь работает, новый пока не обязателен. */
+  boolean replacedOk(Item it, int depth) {
+    if (it.replaces.isEmpty()) return false;
+    for (String[] r : it.replaces) if (!fileOk(new File(dir, r[0]), Long.parseLong(r[1]), r[2], depth)) return false;
+    return true;
+  }
+  /** Замены, которые можно скачать: прежние на месте и верны, нового нет. */
+  public List<Item> upgrades() {
+    List<Item> r = new ArrayList<>();
+    for (Item it : items) if (!it.replaces.isEmpty() && !present(it, 1) && replacedOk(it, 1)) r.add(it);
+    return r;
+  }
+  /** Удалить файлы, заменённые уже скачанными и сверенными. Прежние трогаются, только когда новый
+   *  на месте и хэш сошёлся: иначе приложению не с чем было бы переводить. Возвращает освобождённые байты. */
+  public long cleanObsolete() {
+    long freed = 0; int n = 0;
+    for (Item it : items) {
+      if (it.replaces.isEmpty() || !present(it, 1)) continue;
+      for (String[] r : it.replaces) {
+        File f = new File(dir, r[0]);
+        if (!f.isFile()) continue;
+        long len = f.length();
+        if (f.delete()) { freed += len; n++; forget(r[0]); }
+      }
+    }
+    if (n > 0) { log.log("📦 удалены заменённые файлы: " + n + ", освобождено " + mb(freed) + " МБ"); summarize(); }
+    return freed;
   }
   boolean archiveOk(Item it, int depth) {
     for (String[] c : it.check) if (!fileOk(new File(dir, c[0]), -1, c[1], depth)) return false;
@@ -214,15 +257,24 @@ public class ModelStore {
       Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     } catch (Exception e) { log.log("модели: кэш проверок не записан: " + e); }
   }
-  /** Сводка «чего не хватает» в состоянии — по кэшу, без хэширования. */
+  synchronized void forget(String key) {
+    if (verified.remove(key) == null) return;
+    try {
+      File f = new File(dir, ".verified.json"), tmp = new File(dir, ".verified.json.tmp");
+      Files.write(tmp.toPath(), new JSONObject(verified).toString(1).getBytes(StandardCharsets.UTF_8));
+      Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    } catch (Exception e) { log.log("модели: кэш проверок не записан: " + e); }
+  }
+  /** Сводка «чего не хватает» в состоянии — по кэшу, без хэширования. Заменённое новым файлом
+   *  не считается нехваткой, пока прежние на месте; оно идёт отдельной строкой «можно облегчить». */
   void summarize() {
-    int cm = 0, om = 0; long cb = 0, ob = 0;
+    int cm = 0, om = 0, up = 0; long cb = 0, ob = 0, ub = 0;
     for (Item it : items) {
-      boolean ok = it.archive ? archiveOk(it, 1) : fileOk(new File(dir, it.path), it.size, it.sha256, 1);
-      if (ok) continue;
+      if (present(it, 1)) continue;
+      if (replacedOk(it, 1)) { up++; ub += it.size; continue; }
       if (it.core()) { cm++; cb += it.size; } else { om++; ob += it.size; }
     }
-    synchronized (st) { st.checked = true; st.coreMissing = cm; st.coreBytes = cb; st.optMissing = om; st.optBytes = ob; }
+    synchronized (st) { st.checked = true; st.coreMissing = cm; st.coreBytes = cb; st.optMissing = om; st.optBytes = ob; st.upgrade = up; st.upgradeBytes = ub; }
   }
 
   // ---- загрузка ----------------------------------------------------------------------------
@@ -265,6 +317,7 @@ public class ModelStore {
       if (cancelled) break;
       if (fetch(it)) ok++;
     }
+    cleanObsolete();
     summarize();
     synchronized (st) {
       if (cancelled) { st.phase = PAUSED; st.message = "Остановлено: скачано " + mb(st.done) + " из " + mb(st.total) + " МБ, продолжится с этого места"; }

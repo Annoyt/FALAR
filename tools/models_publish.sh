@@ -11,8 +11,11 @@ R=$(cd "$(dirname "$0")/.." && pwd); M=$R/models
 REPO=$(python3 -c "import json;print(json.load(open('$M/manifest.json'))['own_repo'])")
 STAGE=$(mktemp -d)
 mkdir -p $STAGE/mt/pt2ru $STAGE/mt/ru2pt
+# С 0.23.0 перевод — encoder_kv_model.onnx (tools/mt_encoder_kv.py) и decoder_with_past_model.onnx.
+# Прежние encoder_model.onnx и decoder_model.onnx в репозитории остаются — их качают сборки до 0.23;
+# hf upload удалённые файлы, которых нет в выкладке, не трогает.
 for d in pt2ru ru2pt; do
-  cp $M/mt/$d/encoder_model.onnx $M/mt/$d/decoder_model.onnx $M/mt/$d/decoder_with_past_model.onnx $STAGE/mt/$d/
+  cp $M/mt/$d/encoder_kv_model.onnx $M/mt/$d/decoder_with_past_model.onnx $STAGE/mt/$d/
   cp $M/mt/$d/${d}_source_pieces.tsv $M/mt/$d/${d}_vocab.json $STAGE/mt/$d/
 done
 (cd $M && zip -q -r -X $STAGE/tts_ru.zip tts_ru && zip -q -r -X $STAGE/tts_pt.zip tts_pt)
@@ -28,7 +31,7 @@ tags: [translation, onnx, opus-mt, falar]
 # falar-models
 
 Производные файлы офлайн-переводчика pt-BR ↔ ru Falar (бывший AgentTranslator). Не веса, а форматы:
-- \`mt/*\`: экспорт Helsinki-NLP opus-mt-tc-big-pt-zle и -zle-pt в ONNX int8 (optimum) и токенизатор — CC-BY-4.0, авторство Helsinki-NLP / OPUS-MT;
+- \`mt/*\`: экспорт Helsinki-NLP opus-mt-tc-big-pt-zle и -zle-pt в ONNX int8 (optimum) и токенизатор — CC-BY-4.0, авторство Helsinki-NLP / OPUS-MT; с 0.23.0 приложение берёт \`encoder_kv_model.onnx\` (кодировщик вместе с K/V перекрёстного внимания из \`decoder_model.onnx\`) и \`decoder_with_past_model.onnx\`;
 - \`tts_ru.zip\`, \`tts_pt.zip\`: голоса Piper dmitri и faber из тарболов sherpa-onnx, перепакованы в zip — CC0;
 - \`phrasebook_tatoeba.tsv\`, \`common_words.txt\`: корпус фраз и частотный словарь, добытые из Tatoeba — CC-BY 2.0 FR;
 - \`phrasebook.json\`: затравка разговорника проекта;

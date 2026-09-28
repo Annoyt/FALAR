@@ -1,10 +1,10 @@
 {
   "manifest_version": 1,
-  "app": "0.22.2",
+  "app": "0.23.0",
   "own_repo": "youannoingme/falar-models",
   "device_dir": "Android/data/app.falar/files/models",
-  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо.",
-  "total_core_bytes": 1981012638,
+  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
+  "total_core_bytes": 1549468297,
   "total_optional_bytes": 1188932476,
   "files": [
     {
@@ -71,34 +71,31 @@
       }
     },
     {
-      "path": "mt/pt2ru/encoder_model.onnx",
-      "size": 139826134,
-      "sha256": "c063b87dc8f4d0bcbb17efdda477af491bdef149c21c9ba45264c2bb25eff4a6",
+      "path": "mt/pt2ru/encoder_kv_model.onnx",
+      "size": 152468296,
+      "sha256": "a1cd52860a64a443e185ca05dd4574612a97cbe3558860b6898a7a5f17720342",
       "tier": "core",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
         "repo": "youannoingme/falar-models",
-        "file": "mt/pt2ru/encoder_model.onnx",
+        "file": "mt/pt2ru/encoder_kv_model.onnx",
         "revision": "main"
       },
       "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
-      "how": "optimum-onnx export + int8 dynamic quantization"
-    },
-    {
-      "path": "mt/pt2ru/decoder_model.onnx",
-      "size": 228413307,
-      "sha256": "94371ee4f8acac0863042859039cb2ae2266c8d5b9770e207677d579c8a5e4bf",
-      "tier": "core",
-      "license": "CC-BY-4.0",
-      "source": {
-        "type": "hf",
-        "repo": "youannoingme/falar-models",
-        "file": "mt/pt2ru/decoder_model.onnx",
-        "revision": "main"
-      },
-      "derived_from": "Helsinki-NLP/opus-mt-tc-big-pt-zle",
-      "how": "optimum-onnx export + int8 dynamic quantization"
+      "how": "encoder_model.onnx + cross-attention K/V from decoder_model.onnx (tools/mt_encoder_kv.py): the first decoding step runs in decoder_with_past with an empty past",
+      "replaces": [
+        {
+          "path": "mt/pt2ru/decoder_model.onnx",
+          "size": 228413307,
+          "sha256": "94371ee4f8acac0863042859039cb2ae2266c8d5b9770e207677d579c8a5e4bf"
+        },
+        {
+          "path": "mt/pt2ru/encoder_model.onnx",
+          "size": 139826134,
+          "sha256": "c063b87dc8f4d0bcbb17efdda477af491bdef149c21c9ba45264c2bb25eff4a6"
+        }
+      ]
     },
     {
       "path": "mt/pt2ru/decoder_with_past_model.onnx",
@@ -146,34 +143,31 @@
       "how": "vocab.json of the Marian model"
     },
     {
-      "path": "mt/ru2pt/encoder_model.onnx",
-      "size": 139827157,
-      "sha256": "15a249ba51ff61801d6ae4f140cb329589680f941bb8952996e7b2ef8cfdf37c",
+      "path": "mt/ru2pt/encoder_kv_model.onnx",
+      "size": 152469319,
+      "sha256": "305181b07c0521ccce77ce0f3feac8677f4e7536ad9dcb1bc3657453795f5c2e",
       "tier": "core",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
         "repo": "youannoingme/falar-models",
-        "file": "mt/ru2pt/encoder_model.onnx",
+        "file": "mt/ru2pt/encoder_kv_model.onnx",
         "revision": "main"
       },
       "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
-      "how": "optimum-onnx export + int8 dynamic quantization"
-    },
-    {
-      "path": "mt/ru2pt/decoder_model.onnx",
-      "size": 228415358,
-      "sha256": "2771c398c77f88e822c863d8640cec5e16d106135061ece40aab73c6142f7aad",
-      "tier": "core",
-      "license": "CC-BY-4.0",
-      "source": {
-        "type": "hf",
-        "repo": "youannoingme/falar-models",
-        "file": "mt/ru2pt/decoder_model.onnx",
-        "revision": "main"
-      },
-      "derived_from": "Helsinki-NLP/opus-mt-tc-big-zle-pt",
-      "how": "optimum-onnx export + int8 dynamic quantization"
+      "how": "encoder_model.onnx + cross-attention K/V from decoder_model.onnx (tools/mt_encoder_kv.py): the first decoding step runs in decoder_with_past with an empty past",
+      "replaces": [
+        {
+          "path": "mt/ru2pt/decoder_model.onnx",
+          "size": 228415358,
+          "sha256": "2771c398c77f88e822c863d8640cec5e16d106135061ece40aab73c6142f7aad"
+        },
+        {
+          "path": "mt/ru2pt/encoder_model.onnx",
+          "size": 139827157,
+          "sha256": "15a249ba51ff61801d6ae4f140cb329589680f941bb8952996e7b2ef8cfdf37c"
+        }
+      ]
     },
     {
       "path": "mt/ru2pt/decoder_with_past_model.onnx",

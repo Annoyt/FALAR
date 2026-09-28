@@ -38,7 +38,7 @@ Q4_K_M, silero и GTCRN на устройстве совпадают с опуб
 | каталог | размер | что это | откуда взялось |
 |---|---|---|---|
 | `asr_multi/` | 640 МБ | parakeet-tdt-0.6b-v3 int8, распознавание обоих языков | HF `csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` |
-| `mt/pt2ru/`, `mt/ru2pt/` | 562 МБ каждый | перевод, int8 ONNX (три файла) + свой токенизатор: пьесы SentencePiece и vocab Marian | экспорт optimum-onnx из `Helsinki-NLP/opus-mt-tc-big-pt-zle` и `-zle-pt`; с 0.20 лежит там же, где на телефоне |
+| `mt/pt2ru/`, `mt/ru2pt/` | 372 МБ каждый (с 0.23.0) | перевод, int8 ONNX: `encoder_kv_model.onnx` (кодировщик + K/V перекрёстного внимания, `tools/mt_encoder_kv.py`) и `decoder_with_past_model.onnx`, + свой токенизатор: пьесы SentencePiece и vocab Marian. Прежние `encoder_model.onnx` и `decoder_model.onnx` в зеркале остаются: из них собирается новый файл, их качают сборки до 0.23 | экспорт optimum-onnx из `Helsinki-NLP/opus-mt-tc-big-pt-zle` и `-zle-pt`; с 0.20 лежит там же, где на телефоне |
 | `tts_ru/`, `tts_pt/` | 79 МБ каждый | Piper dmitri и faber + tokens.txt + espeak-ng-data | тарболы sherpa-onnx `vits-piper-*` |
 | `silero_vad.onnx` | 636 КБ | silero VAD, в корне каталога, как на телефоне | релиз sherpa-onnx `asr-models` |
 | `speaker/` | 29 МБ | 3D-Speaker CAM++, отпечаток голоса | HF `csukuangfj/speaker-embedding-models` |

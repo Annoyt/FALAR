@@ -315,6 +315,90 @@ public class ModelStoreTest {
     eq(ModelStore.describe(ds), "Загрузка 40 % · 812.0 из 1981.0 МБ · 6.2 МБ/с · asr_multi/encoder.int8.onnx", "T20 строка загрузки");
 
     srv.hs.stop(0);
+    // R: замена файлов — новый файл вместо двух прежних (перевод с трёх сессий на две, 0.23.0)
+    byte[] enc = rnd(300_000, 21), dec = rnd(400_000, 22), kv = rnd(350_000, 23), past = rnd(250_000, 24);
+    srv = new Srv();                                                                   // прежний уже остановлен выше
+    srv.files.put("mt/y/kv.onnx", kv); srv.files.put("mt/y/past.onnx", past);          // прежних на сервере нет вовсе
+    String rman = "{\"manifest_version\":1,\"app\":\"0.23.0\",\"files\":["
+      + file("mt/y/kv.onnx", kv, "core", hf("mt/y/kv.onnx")).replaceFirst("\\}$", ",\"replaces\":[{\"path\":\"mt/y/enc.onnx\",\"size\":" + enc.length
+        + ",\"sha256\":\"" + sha(enc) + "\"},{\"path\":\"mt/y/dec.onnx\",\"size\":" + dec.length + ",\"sha256\":\"" + sha(dec) + "\"}]}") + ","
+      + file("mt/y/past.onnx", past, "core", hf("mt/y/past.onnx")) + "]}";
+    File rd = tmpDir("r1");
+    ModelStore r = store(rd, rman, srv);
+    eq(r.byPath("mt/y/kv.onnx").replaces.size(), 2, "R0 замена разобрана из манифеста");
+    ModelStore.Plan rp = r.check("core");
+    eq(rp.need.size(), 2, "R1 новая установка: нужны новый файл и декодер");
+    ok(rp.need.contains(r.byPath("mt/y/kv.onnx")), "R1 среди нужных — новый файл, прежних в плане нет");
+    eq(r.state().upgrade, 0, "R1 облегчать нечего");
+    ok(r.start("core"), "R1 старт");
+    ModelStore.State rs = waitDone(r);
+    eq(rs.phase, ModelStore.DONE, "R1 скачано: " + rs.message + " " + rs.errors);
+    ok(!new File(rd, "mt/y/enc.onnx").exists() && !new File(rd, "mt/y/dec.onnx").exists(), "R1 прежние файлы не качались");
+    eq(r.cleanObsolete(), 0L, "R1 удалять нечего");
+
+    // R2 обновление: прежние на месте, нового нет — работает прежний путь, никто не заставляет качать
+    File ud = tmpDir("r2"); new File(ud, "mt/y").mkdirs();
+    Files.write(new File(ud, "mt/y/enc.onnx").toPath(), enc); Files.write(new File(ud, "mt/y/dec.onnx").toPath(), dec);
+    Files.write(new File(ud, "mt/y/past.onnx").toPath(), past);
+    r = store(ud, rman, srv);
+    rp = r.check("core");
+    ok(rp.complete(), "R2 обязательное считается на месте: прежние файлы заменяют новый");
+    rs = r.state();
+    eq(rs.coreMissing, 0, "R2 экрана первого запуска не будет");
+    eq(rs.upgrade, 1, "R2 но можно облегчить");
+    eq(rs.upgradeBytes, (long) kv.length, "R2 и сколько качать");
+    eq(r.upgrades().size(), 1, "R2 список замен");
+    eq(r.cleanObsolete(), 0L, "R2 пока нового нет, прежние не трогаются");
+    ok(new File(ud, "mt/y/enc.onnx").exists() && new File(ud, "mt/y/dec.onnx").exists(), "R2 прежние на месте");
+
+    // R3 скачали замену — прежние удалены, из кэша проверок тоже
+    synchronized (logs) { logs.clear(); }
+    ok(r.start(r.upgrades(), "upgrade"), "R3 старт замены");
+    rs = waitDone(r);
+    eq(rs.phase, ModelStore.DONE, "R3 скачано: " + rs.message + " " + rs.errors);
+    eq(shaFile(new File(ud, "mt/y/kv.onnx")), sha(kv), "R3 новый файл на месте и верный");
+    ok(!new File(ud, "mt/y/enc.onnx").exists() && !new File(ud, "mt/y/dec.onnx").exists(), "R3 прежние удалены");
+    ok(!r.verified.containsKey("mt/y/enc.onnx") && !r.verified.containsKey("mt/y/dec.onnx"), "R3 и забыты в кэше проверок");
+    boolean said; synchronized (logs) { said = logs.stream().anyMatch(l -> l.contains("удалены заменённые файлы: 2") && l.contains(ModelStore.mb(enc.length + dec.length))); }
+    ok(said, "R3 в журнале — сколько удалено и освобождено");
+    rs = r.state(); eq(rs.upgrade + rs.coreMissing, 0, "R3 после замены — всё на месте, облегчать нечего");
+    ok(!new ModelStore(ud, rman, () -> true, st2 -> {}, l -> {}).verified.containsKey("mt/y/dec.onnx"), "R3 кэш проверок на диске тоже без прежних");
+
+    // R4 прежние битые — это не замена, новый обязателен
+    File bd = tmpDir("r4"); new File(bd, "mt/y").mkdirs();
+    Files.write(new File(bd, "mt/y/enc.onnx").toPath(), enc); Files.write(new File(bd, "mt/y/dec.onnx").toPath(), rnd(dec.length, 99));
+    Files.write(new File(bd, "mt/y/past.onnx").toPath(), past);
+    r = store(bd, rman, srv);
+    rp = r.check("core");
+    eq(rp.need.size(), 1, "R4 битый прежний — новый файл нужен");
+    rs = r.state(); eq(rs.coreMissing, 1, "R4 и считается нехваткой"); eq(rs.upgrade, 0, "R4 а не облегчением");
+
+    // R5 новый битый, прежние верные — прежние НЕ удаляются: иначе переводить было бы нечем
+    File cd = tmpDir("r5"); new File(cd, "mt/y").mkdirs();
+    Files.write(new File(cd, "mt/y/enc.onnx").toPath(), enc); Files.write(new File(cd, "mt/y/dec.onnx").toPath(), dec);
+    Files.write(new File(cd, "mt/y/kv.onnx").toPath(), rnd(kv.length, 98)); Files.write(new File(cd, "mt/y/past.onnx").toPath(), past);
+    r = store(cd, rman, srv);
+    eq(r.cleanObsolete(), 0L, "R5 новый не сверился — удалять нельзя");
+    ok(new File(cd, "mt/y/enc.onnx").exists() && new File(cd, "mt/y/dec.onnx").exists(), "R5 прежние целы");
+    r.check("core"); eq(r.state().upgrade, 1, "R5 битый новый — снова предлагается скачать");
+
+    // R6 новый положен рядом с прежними (руками или прошлой загрузкой) — прежние убираются при проверке
+    File md = tmpDir("r6"); new File(md, "mt/y").mkdirs();
+    Files.write(new File(md, "mt/y/enc.onnx").toPath(), enc); Files.write(new File(md, "mt/y/dec.onnx").toPath(), dec);
+    Files.write(new File(md, "mt/y/kv.onnx").toPath(), kv); Files.write(new File(md, "mt/y/past.onnx").toPath(), past);
+    r = store(md, rman, srv);
+    eq(r.cleanObsolete(), (long) (enc.length + dec.length), "R6 освобождено ровно по размеру прежних");
+    ok(!new File(md, "mt/y/enc.onnx").exists() && !new File(md, "mt/y/dec.onnx").exists(), "R6 прежние удалены");
+    ok(r.check("core").complete(), "R6 всё обязательное на месте");
+
+    // R7 из прежних есть только один — замены нет
+    File hd = tmpDir("r7"); new File(hd, "mt/y").mkdirs();
+    Files.write(new File(hd, "mt/y/enc.onnx").toPath(), enc); Files.write(new File(hd, "mt/y/past.onnx").toPath(), past);
+    r = store(hd, rman, srv);
+    eq(r.check("core").need.size(), 1, "R7 половина прежних — не замена");
+    for (File f : new File[]{rd, ud, bd, cd, md, hd}) del(f);
+    srv.hs.stop(0);
+
     System.out.println(fails == 0 ? "ModelStore: " + checks + " проверок, все прошли" : "ModelStore: провалов " + fails + " из " + checks);
     return fails;
   }

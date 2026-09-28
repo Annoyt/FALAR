@@ -37,7 +37,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   float szPt = 34, szRu = 17;
   /** Экран первого запуска: разрешения и загрузка моделей по манифесту; блок моделей в «Системе». */
   View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
-  Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify; ToggleButton tSetupAny, tAnyNet;
+  Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify, bModelsUp; ToggleButton tSetupAny, tAnyNet;
   ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint; ScrollView bigScroll;
   TextView updLbl; Button bUpdate, bUpdateGo;
   /** Экран показывает состояние сервиса галочками, а setChecked дёргает обработчик так же, как
@@ -1235,7 +1235,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     tAnyNet.setChecked(prefs.getBoolean("models_any_net", false)); v.addView(tAnyNet);
     tAnyNet.setOnCheckedChangeListener((vv, on) -> setAnyNet(on));
     bModelsVerify = new Button(this); bModelsVerify.setText("проверить файлы моделей"); bModelsVerify.setTextSize(13); bModelsVerify.setEnabled(false); v.addView(bModelsVerify);
-    for (Button b : new Button[]{bModelsDl, bModelsStop, bModelsVerify}) style(b);
+    // Появляется, когда у перевода есть файлы полегче, а на телефоне — прежние (обновление 0.23).
+    bModelsUp = new Button(this); bModelsUp.setTextSize(13); bModelsUp.setVisibility(View.GONE); v.addView(bModelsUp);
+    for (Button b : new Button[]{bModelsDl, bModelsStop, bModelsVerify, bModelsUp}) style(b);
+    bModelsUp.setOnClickListener(vv -> upgradeDialog());
     style(tAnyNet);
     bModelsDl.setOnClickListener(vv -> optionalDialog());
     bModelsStop.setOnClickListener(vv -> { if (svc != null) svc.cancelModels(); });
@@ -1606,7 +1609,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     setupMic.setText(mic ? "✓ разрешён" : micForever ? "Доступ запрещён — включите микрофон в настройках приложения." : "Без микрофона слушать нечем. Разрешение спросит система.");
     bSetupMic.setText(micForever && !mic ? "открыть настройки приложения" : "разрешить микрофон"); bSetupMic.setVisibility(mic ? View.GONE : View.VISIBLE);
     ModelStore.State s = mst; boolean busy = s != null && s.busy();
-    if (!mic) setupText.setText("Обязательные модели (около 2 ГБ, с Hugging Face) — после разрешения микрофона.");
+    if (!mic) setupText.setText("Обязательные модели (около 1,6 ГБ, с Hugging Face) — после разрешения микрофона.");
     else if (svc == null || s == null || !s.checked) setupText.setText("Проверяю, что уже лежит на телефоне…");
     else if (s.coreMissing == 0 && !busy) setupText.setText("✓ модели на месте");
     else setupText.setText("Не хватает " + s.coreMissing + " файлов, " + ModelStore.mb(s.coreBytes) + " МБ. Качается с Hugging Face один раз; "
@@ -1626,7 +1629,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       + (s.coreMissing == 0 ? "все на месте" : "нет " + s.coreMissing + " (" + ModelStore.mb(s.coreBytes) + " МБ)") + " · необязательные "
       + (s.optMissing == 0 ? "все на месте" : "нет " + s.optMissing + " (" + ModelStore.mb(s.optBytes) + " МБ)"));
     if (s.busy() || !s.message.isEmpty()) sb.append("\n").append(progressLine(s));
+    if (s.upgrade > 0) sb.append("\nМожно облегчить перевод: скачать ").append(ModelStore.mb(s.upgradeBytes)).append(" МБ");
     modelsLbl.setText(sb);
+    bModelsUp.setVisibility(s.upgrade > 0 && !s.busy() ? View.VISIBLE : View.GONE);
+    bModelsUp.setText("⬇ облегчить перевод · " + ModelStore.mb(s.upgradeBytes) + " МБ");
     bModelsDl.setEnabled(!s.busy() && s.optMissing > 0);
     bModelsStop.setVisibility(ModelStore.CHECK.equals(s.phase) ? View.GONE : s.busy() ? View.VISIBLE : View.GONE);
     bModelsVerify.setEnabled(!s.busy());
@@ -1638,6 +1644,18 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       : p.startsWith("denoiser/") ? "🔇 шумоподавитель" : p.equals("phrasebook_tatoeba.tsv") ? "📚 корпус фраз Tatoeba (190 тыс. пар)"
       : p.equals("common_words.txt") ? "📝 частотные слова: поиск имён в речи" : p;
     return t + " · " + ModelStore.mb(it.size) + " МБ";
+  }
+  /** «Облегчить перевод»: новые файлы перевода вместо прежних — перевод занимает на полгигабайта меньше
+   *  памяти, и уточнитель чаще помещается рядом. Качается по выбору: 305 МБ — не мелочь. */
+  void upgradeDialog() {
+    if (svc == null || svc.store == null) return;
+    ModelStore.State s = mst; long mb = s == null ? 0 : s.upgradeBytes;
+    new android.app.AlertDialog.Builder(this).setTitle("Облегчить перевод")
+        .setMessage("Перевод займёт примерно на 500 МБ меньше памяти телефона, а уточнителю чаще хватит места рядом с ним. "
+                  + "Скачать " + ModelStore.mb(mb) + " МБ; после проверки прежние файлы перевода удалятся и освободят около 736 МБ. "
+                  + "Новый способ заработает при следующем запуске приложения. Переводы те же почти всегда: на проверке совпали 96 % фраз.")
+        .setPositiveButton("скачать", (d, w) -> { if (svc != null) new Thread(svc::downloadUpgrade, "upgrade").start(); })
+        .setNegativeButton("не сейчас", null).show();
   }
   /** Необязательное — по выбору: LLM на 1,1 ГБ слабому телефону ни к чему. */
   void optionalDialog() {

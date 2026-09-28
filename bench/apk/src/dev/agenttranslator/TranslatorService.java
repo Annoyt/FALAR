@@ -123,7 +123,10 @@ public class TranslatorService extends Service {
           + (p.need.isEmpty() ? "" : ", не хватает " + ModelStore.mb(p.bytes) + " МБ") + " · проверка " + ms + " мс"
           + (store.hashedBytes > 0 ? ", прохэшировано " + ModelStore.mb(store.hashedBytes) + " МБ" : ", по кэшу"));
       tsv("models_check", "" + p.have, "" + p.need.size(), "" + p.bytes, "" + ms, "" + store.hashedBytes);
+      // Заменённое уже скачанным и сверенным — убрать до загрузки движков: они возьмут новый путь.
+      store.cleanObsolete();
       ModelStore.State st = store.state(); Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
+      if (st.upgrade > 0) log("📦 можно облегчить перевод: скачать " + ModelStore.mb(st.upgradeBytes) + " МБ — «Система» → «облегчить перевод»; до тех пор работает прежний путь");
       if (!p.need.isEmpty()) {
         status("Нужно скачать модели: " + p.need.size() + " файлов, " + ModelStore.mb(p.bytes) + " МБ");
         notify("Нужно скачать модели (" + ModelStore.mb(p.bytes) + " МБ)"); return;
@@ -282,6 +285,7 @@ public class TranslatorService extends Service {
       else if ("verify".equals(m)) verifyModels();
       else if ("stop".equals(m)) cancelModels();
       else if ("core".equals(m) || "optional".equals(m) || "all".equals(m)) downloadModels(m);
+      else if ("upgrade".equals(m)) worker.submit(this::downloadUpgrade);
       else { ModelStore.Item it = store.byPath(m); if (it != null) downloadModels(Collections.singletonList(it)); else log("⬇ нет такого элемента в манифесте: " + m); }
     }
     if (i != null && i.hasExtra("auto")) setAutoDir("1".equals(i.getStringExtra("auto")));
@@ -840,7 +844,7 @@ public class TranslatorService extends Service {
       Llm l = new Llm(getApplicationInfo().nativeLibraryDir, pick.getAbsolutePath(), new File(getExternalFilesDir(null), "llama-server.log").getAbsolutePath());
       l.loadMode = getSharedPreferences("at", MODE_PRIVATE).getString("llm_load", "mmap");
       if (!l.start(4)) { log("🧠 уточнитель не поднялся — подробности в llama-server.log"); return false; }
-      llm = l; log("🧠 LLM готов за " + (System.nanoTime() - t) / 1000000 + " мс");
+      llm = l; llmLoadedAt = android.os.SystemClock.elapsedRealtime(); log("🧠 LLM готов за " + (System.nanoTime() - t) / 1000000 + " мс");
       measureCpt(l);
       return true;
     } catch (Throwable e) { Log.e(TAG, "llm", e); log("🧠 ошибка LLM: " + e); return false; }
@@ -1259,6 +1263,7 @@ public class TranslatorService extends Service {
     if (phaseChanged && (ModelStore.DONE.equals(st.phase) || ModelStore.ERROR.equals(st.phase) || ModelStore.PAUSED.equals(st.phase))) {
       notify(ModelStore.describe(st));
       if (eng == null) worker.submit(() -> { if (store.check("core").complete()) { status("Модели скачаны, загружаю движки…"); loadAll(); } else status(st.message); });
+      else if (ModelStore.DONE.equals(st.phase) && "upgrade".equals(st.tier)) log("📦 перевод станет легче со следующего запуска приложения: память освобождается только вместе с процессом");
       else if (ModelStore.DONE.equals(st.phase)) worker.submit(this::reloadOptional);
     }
     lastModelPhase = st.phase;
@@ -1269,11 +1274,19 @@ public class TranslatorService extends Service {
     log(ok ? "⬇ загрузка моделей: " + tier + (store.baseOverride != null ? " (стенд: " + store.baseOverride + ")" : "") : "⬇ загрузка уже идёт");
     return ok;
   }
-  public boolean downloadModels(List<ModelStore.Item> items) {
+  public boolean downloadModels(List<ModelStore.Item> items) { return downloadModels(items, "optional"); }
+  public boolean downloadModels(List<ModelStore.Item> items, String tier) {
     if (store == null || items.isEmpty()) return false;
-    boolean ok = store.start(items, "optional");
+    boolean ok = store.start(items, tier);
     log(ok ? "⬇ загрузка: " + items : "⬇ загрузка уже идёт");
     return ok;
+  }
+  /** «Облегчить перевод»: скачать новые файлы, которые заменяют прежние; прежние удалятся после сверки. */
+  public boolean downloadUpgrade() {
+    if (store == null) return false;
+    List<ModelStore.Item> up = store.upgrades();
+    if (up.isEmpty()) { log("📦 облегчать нечего: новые файлы уже на месте"); return false; }
+    return downloadModels(up, "upgrade");
   }
   public void cancelModels() { if (store != null && store.running()) { store.cancel(); log("⬇ остановка загрузки"); } }
   /** Кнопка «проверить файлы моделей»: всё хэшируется заново, итог в журнал и на экран. */
@@ -2416,12 +2429,20 @@ public class TranslatorService extends Service {
     // что система к этому вела. На Redmi сигнал «памяти мало» пришёл в ту же секунду, как
     // поднялся уточнитель: приложение вместе с ним занимает около четырёх гигабайт.
     tsv("trim", "" + level);
-    // Выгружаем только когда система вот-вот начнёт убивать процессы (или мы уже в фоне): на
-    // «памяти маловато» выгрузка означала бы поднимать и ронять уточнитель по кругу. UI_HIDDEN —
-    // это просто свёрнутый экран, не нехватка памяти.
-    boolean critical = level == TRIM_MEMORY_RUNNING_CRITICAL || level >= TRIM_MEMORY_BACKGROUND;
-    if (critical && llm != null) unloadLlm("памяти критически мало (уровень " + level + "), подниму при следующем разборе");
+    // Выгружаем, когда давление держится или мы в фоне (Pressure): критический сигнал сразу после
+    // подъёма уточнителя вызывает сам подъём, и выгрузка на нём означала, что уточнитель в
+    // разговоре не работал вовсе. «Памяти маловато» и UI_HIDDEN — не повод.
+    long now = android.os.SystemClock.elapsedRealtime();
+    boolean go = Pressure.unload(level, now, llm != null ? llmLoadedAt : 0, lastCritical);
+    if (level == TRIM_MEMORY_RUNNING_CRITICAL) {
+      if (llm != null && !go) log("🧠 памяти критически мало (уровень 15) — " + (now - llmLoadedAt < Pressure.GRACE_MS
+          ? "пик после подъёма уточнителя, пережидаю" : "пережидаю: выгружу, если повторится в ближайшие " + Pressure.REPEAT_MS / 1000 + " с"));
+      lastCritical = now;
+    }
+    if (go) unloadLlm("памяти критически мало (уровень " + level + (level >= TRIM_MEMORY_BACKGROUND ? ", приложение в фоне" : ", давление держится") + "), подниму при следующем разборе");
   }
+  /** Когда поднят уточнитель и когда был прошлый критический сигнал — монотонное время, мс. */
+  volatile long llmLoadedAt = 0, lastCritical = 0;
   @Override public void onDestroy() {
     running = false; main.removeCallbacks(idleStop);
     if (store != null) store.cancel();
