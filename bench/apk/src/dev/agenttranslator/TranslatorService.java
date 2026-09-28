@@ -324,7 +324,8 @@ public class TranslatorService extends Service {
             + ") · наибольшее " + (all.isEmpty() ? 0 : Collections.max(all)) + " мс · резидентно " + rss0 + " → до " + rssMax + " МБ → " + path);
       }, "ocrbench").start(); }
     // Стенд: снимок, лежащий на телефоне, — весь путь, как после камеры: чтение, перевод, наложение.
-    if (i != null && i.hasExtra("photofile") && chats != null) {
+    if (i != null && i.hasExtra("photofile") && chats != null && !mod(Modules.OCR)) log("📷 стенд: модуль «Чтение снимков» выключен — снимок не читается");
+    else if (i != null && i.hasExtra("photofile") && chats != null) {
       try {
         File src = new File(i.getStringExtra("photofile")), dst = new File(chats.photos(), "p" + System.currentTimeMillis() + ".jpg");
         chats.photos().mkdirs(); java.nio.file.Files.copy(src.toPath(), dst.toPath());

@@ -59,6 +59,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
+    // Камера занимает много памяти, и пока она открыта, система выгружает Falar; снимок потом
+    // приходит в заново созданный экран. Адрес снимка и ждущий снимок — из сохранённого состояния,
+    // иначе снимок терялся молча (владелец, 29.09: «реальная картинка из камеры не прилетела»).
+    if (b != null) {
+      String pu = b.getString(K_PHOTO_URI), pp = b.getString(K_PENDING);
+      if (pu != null) photoUri = android.net.Uri.parse(pu);
+      if (pp != null) pendingPhoto = android.net.Uri.parse(pp);
+      cloudPhoto = b.getBoolean(K_CLOUD_PHOTO, false); pendingCloud = b.getBoolean(K_PENDING_CLOUD, false);
+    }
     LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
 
     prefs = getSharedPreferences("at", MODE_PRIVATE);
@@ -986,11 +995,35 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     } catch (Throwable t) { onLog("📷 не вышло открыть: " + t); }
   }
 
+  static final String K_PHOTO_URI = "photo_uri", K_PENDING = "photo_pending", K_CLOUD_PHOTO = "cloud_photo", K_PENDING_CLOUD = "photo_pending_cloud";
+  /** Снимок пришёл раньше, чем поднялся сервис с движками: прочитаем в onReady. */
+  android.net.Uri pendingPhoto; boolean pendingCloud;
+
+  @Override protected void onSaveInstanceState(Bundle out) {
+    super.onSaveInstanceState(out);
+    if (photoUri != null) out.putString(K_PHOTO_URI, photoUri.toString());
+    if (pendingPhoto != null) out.putString(K_PENDING, pendingPhoto.toString());
+    out.putBoolean(K_CLOUD_PHOTO, cloudPhoto); out.putBoolean(K_PENDING_CLOUD, pendingCloud);
+  }
+
   @Override protected void onActivityResult(int req, int res, Intent data) {
     super.onActivityResult(req, res, data);
-    if (req != REQ_PHOTO || res != RESULT_OK) return;
+    if (req != REQ_PHOTO) return;
+    if (res != RESULT_OK) { if (res != RESULT_CANCELED) onLog("📷 камера вернула отказ (" + res + ")"); return; }
     final android.net.Uri u = data != null && data.getData() != null ? data.getData() : photoUri;
-    if (u == null || svc == null) return;
+    if (u == null) { onLog("📷 снимок не вернулся: камера не отдала файл"); return; }
+    if (svc == null || svc.eng == null) {
+      pendingPhoto = u; pendingCloud = cloudPhoto;
+      setHint("📷 снимок получен — прочитаю, как только приложение загрузится");
+      onLog("📷 снимок получен до загрузки приложения — ждёт движков");
+      return;
+    }
+    handlePhoto(u, cloudPhoto);
+  }
+
+  /** Прочитать снимок u: офлайн — без спроса, облаком — с согласием на каждый снимок. */
+  void handlePhoto(final android.net.Uri u, final boolean cloudPhoto) {
+    if (svc == null) return;
     final boolean offline = svc.ocr != null && svc.ocr.ready() && svc.mod(Modules.OCR) && !cloudPhoto;
     if (!offline && !svc.cloudReady()) {             // читать нечем: модели снимков ещё качаются, а облака нет
       onLog(svc.mod(Modules.OCR) ? "📷 чтение снимков ещё докачивается — снимок прочитается, когда модели придут; попробуйте позже"
@@ -1706,6 +1739,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
   @Override public void onReady() {
+    if (pendingPhoto != null && svc != null) {       // снимок ждал движков — теперь читаем
+      final android.net.Uri u = pendingPhoto; final boolean c = pendingCloud; pendingPhoto = null;
+      new Handler(Looper.getMainLooper()).post(() -> handlePhoto(u, c));
+    }
     bPin.setEnabled(true); bBetter.setEnabled(true);
     tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bVoice.setEnabled(true); bVoice2.setEnabled(true); bWord.setEnabled(true);
     bMic.setEnabled(true); bPhoto.setEnabled(true); bType.setEnabled(true);
