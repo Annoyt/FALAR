@@ -24,7 +24,14 @@ PY
 mkdir -p $OUT/assets && cp $R/models/manifest.json $OUT/assets/models_manifest.json
 aapt2 link -o $OUT/base.apk --manifest $A/AndroidManifest.xml -I "$AJ" --java $OUT/gen -A $OUT/assets --min-sdk-version 28 --target-sdk-version 33 $OUT/res.zip
 javac --release 11 -nowarn -cp "$AJ:$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/*.java $A/sherpa-java-api/*.java $OUT/gen/app/falar/R.java
-java -cp $R8 com.android.tools.r8.D8 --release --min-api 28 --lib "$AJ" --output $OUT/stage $(find $OUT/classes -name '*.class') $A/libs/onnxruntime-1.29.0-classes.jar 2>&1 | grep -vE 'warning|Warning|^Note' || true
+# Код выхода D8 не терять: раньше его вывод шёл через grep с «|| true», и когда 28.09.2026 на
+# сборке упала сама JVM (внутренняя ошибка JIT), скрипт спокойно собрал APK без половины кода —
+# на 250 КБ меньше. Такой файл ушёл бы и в релиз: release.sh проверяет подпись, а не содержимое.
+D8OUT=$(java -cp $R8 com.android.tools.r8.D8 --release --min-api 28 --lib "$AJ" --output $OUT/stage $(find $OUT/classes -name '*.class') $A/libs/onnxruntime-1.29.0-classes.jar 2>&1) \
+  || { echo "$D8OUT" | tail -20; echo "D8 упал — APK не собран"; exit 1; }
+echo "$D8OUT" | grep -vE 'warning|Warning|^Note' || true
+[ -s $OUT/stage/classes.dex ] && [ $(stat -c %s $OUT/stage/classes.dex) -gt 400000 ] \
+  || { echo "classes.dex пуст или подозрительно мал ($(stat -c %s $OUT/stage/classes.dex 2>/dev/null) байт) — APK не собран"; exit 1; }
 # SLIM=1 — сборка без llama.cpp: это 228 МБ из 285 ради необязательного контекстного уточнителя.
 # Приложение без него работает, переключатель «🧠 контекст» просто сообщает об ошибке.
 if [ -n "$SLIM" ]; then
