@@ -221,6 +221,10 @@ public class TranslatorService extends Service {
       else if ("install".equals(u)) installUpdate(); }
     // Стенд: поднять уточнитель так же, как перед проходом разбора (проверка памяти, замер
     // токенизатора), и дать ему уйти по простою — без разбора и без касания разговоров.
+    // Стенд: слушание, как кнопками «Слушать PT/RU», без касаний экрана владельца.
+    if (i != null && i.hasExtra("listen")) { String w = i.getStringExtra("listen");
+      setListen("pt".equals(w) || "both".equals(w), "ru".equals(w) || "both".equals(w));
+      Listener l = listener; if (l != null) main.post(l::onReady); }
     if (i != null && i.hasExtra("llmprobe")) llmWorker.submit(() -> {
       boolean ok = ensureLlm();
       log("🧠 проба уточнителя: " + (ok ? "поднят" : "не поднят"));
@@ -1003,6 +1007,9 @@ public class TranslatorService extends Service {
       for (Turn t : h) if (t.at > lastLocalAt) todo.add(t);
       if (lastLocalAt == 0 && todo.size() > 2) todo = new ArrayList<>(todo.subList(todo.size() - 2, todo.size()));   // первый проход: как раньше, две последние
       if (todo.size() > 5) todo = new ArrayList<>(todo.subList(todo.size() - 5, todo.size()));
+      // Правленное человеком не разбираем вовсе: менять его всё равно нельзя, а разбор — это
+      // 10–20 секунд процессора и поднятый уточнитель.
+      if (chats != null) todo.removeIf(t -> chats.humanAt(t.at));
       if (todo.isEmpty()) continue;
       boolean hy = llm.model.toLowerCase().contains("hy-mt");
       String topic = topicLine();

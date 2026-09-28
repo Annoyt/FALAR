@@ -179,7 +179,12 @@ public class Chats {
     if (x == null) return 0;
     try {
       long at = System.currentTimeMillis();
-      x.put("src", src).put("dst", dst).put("at", at); x.remove("fixed"); x.remove("by");
+      // Правка текста — правка человека: он сказал, что имел в виду. Раньше пометка «человек»
+      // здесь стиралась, реплика с новой меткой времени выглядела свежей машинной, и уточнитель
+      // через несколько секунд переводил её заново — поверх только что сделанного исправления
+      // («Posso oferecer uvas e maçãs» → «Posso sugerir…», журнал 20.09). Снаружи это выглядело
+      // как «два перевода подряд».
+      x.put("src", src).put("dst", dst).put("at", at).put("by", BY_USER); x.remove("fixed");
       save(); return at;
     } catch (JSONException e) { return 0; }
   }
@@ -193,6 +198,14 @@ public class Chats {
   }
   /** То же по метке времени: облачный ответ нумерует реплики снимка, а за время запроса они могли
    *  удалиться или переехать, поэтому применяем по `at`, а не по индексу. */
+  /** Реплика с такой меткой правлена человеком — автоматика её не трогает. */
+  public synchronized boolean humanAt(long at) {
+    for (int k = 0; k < turns.length(); k++) {
+      JSONObject x = turns.optJSONObject(k);
+      if (x != null && x.optLong("at", -1) == at) return BY_USER.equals(x.optString("by", ""));
+    }
+    return false;
+  }
   public synchronized boolean fixByAt(long at, String fixed, String by) {
     for (int k = 0; k < turns.length(); k++) {
       JSONObject x = turns.optJSONObject(k);

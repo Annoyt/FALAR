@@ -10,4 +10,5 @@ public class SuitesTest {
   @Test void heard() throws Exception { assertEquals(0, HeardTest.run()); }
   @Test void updates() throws Exception { assertEquals(0, UpdatesTest.run()); }
   @Test void modelStore() throws Exception { assertEquals(0, ModelStoreTest.run()); }
+  @Test void chats() throws Exception { assertEquals(0, ChatsTest.run()); }
 }

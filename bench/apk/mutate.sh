@@ -24,7 +24,8 @@ TARGETS=$(echo "$T" | tr ',' '\n' | sed 's/^/dev.agenttranslator./' | paste -sd,
 OUT=$A/out/pit; C=$A/out/pit-classes; rm -rf "$C"; mkdir -p "$C" "$OUT"
 JU=$P/junit-platform-console-standalone-1.11.4.jar
 # Компилируем все наборы: обёртка SuitesTest ссылается на каждый. Ограничиваем только то, что мутируется.
-SRC=""; for t in Brief Heard Updates ModelStore; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
+SRC=""; for t in Brief Heard Updates ModelStore Chats; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
+SRC="$SRC $A/src/dev/agenttranslator/Phrasebook.java $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java"
 javac --release 11 -nowarn -g -cp "$J:$JU" -d "$C" $SRC $A/test/SuitesTest.java
 CP=$(ls $P/pitest*.jar $P/commons-*.jar | paste -sd:):$JU
 java -cp "$CP" org.pitest.mutationtest.commandline.MutationCoverageReport \
