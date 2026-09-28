@@ -28,6 +28,11 @@ import org.json.*;
  *  улучшил: user/cloud/llm) и `who` (кто говорил, если голос опознан). Правка человека (`by=user`)
  *  для автоматики неприкосновенна.
  *
+ *  Реплика со снимка (с 0.24) несёт ещё `photo`: имя файла в files/photos, размер снимка и
+ *  абзацы с их прямоугольниками — по ним перевод рисуется поверх фото (PhotoView). Это не
+ *  диалог: в рабочую историю уточнителя, в облачный пересмотр и в «кто говорит» такие реплики
+ *  не идут (dialog(), tail()). Файл снимка удаляется вместе с репликой и с разговором.
+ *
  *  Всё лежит на устройстве: это транскрипты приватных разговоров людей, которые не знают,
  *  что их записывают (§7 плана). */
 public class Chats {
@@ -61,6 +66,10 @@ public class Chats {
 
   /** `at` приходит снаружи: служба создаёт рабочую реплику с той же меткой, по ней потом сшиваются правки. */
   public synchronized void add(String dirn, String src, String dst, String who, long at) {
+    try { add(turn(dirn, src, dst, who, at)); } catch (JSONException ignore) {}
+  }
+
+  synchronized void add(JSONObject x) {
     // Потолок был тихим: на 500-й реплике добавление просто переставало работать, и всё
     // сказанное дальше исчезало без единого слова. Теперь разговор продолжается в новом,
     // с тем же именем и пометкой, — данные не теряются, а файл не растёт без предела.
@@ -72,10 +81,8 @@ public class Chats {
       memo = m; memoBy = mb; topic = tp; terms = tm;
       rolled = true;
     }
-    try {
-      turns.put(turn(dirn, src, dst, who, at));
-      save();
-    } catch (JSONException ignore) {}
+    turns.put(x);
+    save();
   }
 
   static JSONObject turn(String dirn, String src, String dst, String who, long at) throws JSONException {
@@ -88,16 +95,41 @@ public class Chats {
    *  человек уже переключился на другой. Раньше она попадала в новый разговор: окно около двух
    *  секунд, и чужая фраза портила контекст обоим. */
   public synchronized boolean addTo(long id, String dirn, String src, String dst, String who, long at) {
-    if (id == current) { add(dirn, src, dst, who, at); return true; }
+    try { return addTurn(id, turn(dirn, src, dst, who, at)); } catch (JSONException e) { return false; }
+  }
+
+  /** Реплика готовым объектом — например, со снимком — в разговор `id`, как addTo. */
+  public synchronized boolean addTurn(long id, JSONObject x) {
+    if (id == current) { add(x); return true; }
     try {
       JSONObject o = load(id);
       if (o == null) return false;                    // разговор удалили — реплике некуда лечь
       JSONArray t = o.optJSONArray("turns"); if (t == null) t = new JSONArray();
-      t.put(turn(dirn, src, dst, who, at));
+      t.put(x);
       o.put("turns", t).put("saved", System.currentTimeMillis());
       write(file(id), o.toString());
       return true;
     } catch (Exception e) { return false; }
+  }
+
+  /** Каталог снимков при репликах «📷»: рядом с разговорами, внутри файлов приложения. */
+  public File photos() { return new File(dir.getParentFile(), "photos"); }
+
+  /** Снимок реплики idx текущего разговора — {file, w, h, blocks} — или null. */
+  public synchronized JSONObject photo(int idx) {
+    JSONObject x = idx < 0 || idx >= turns.length() ? null : turns.optJSONObject(idx);
+    JSONObject p = x == null ? null : x.optJSONObject("photo");
+    try { return p == null ? null : new JSONObject(p.toString()); } catch (JSONException e) { return null; }
+  }
+
+  /** Удалить файлы снимков у реплик массива: вместе с репликой или разговором уходит и фото —
+   *  иначе копии чужих вывесок и переписок копились бы в приложении без видимой ссылки. */
+  void dropPhotos(JSONArray t, int from, int to) {
+    for (int k = from; k < to && t != null && k < t.length(); k++) {
+      JSONObject x = t.optJSONObject(k), p = x == null ? null : x.optJSONObject("photo");
+      String f = p == null ? "" : p.optString("file", "");
+      if (!f.isEmpty() && !f.contains("/")) new File(photos(), f).delete();
+    }
   }
 
   public synchronized int size() { return turns.length(); }
@@ -163,7 +195,18 @@ public class Chats {
     return new String[]{x.optString("dir", "pt2ru"), x.optString("src", ""),
                         x.optString("fixed", x.optString("dst", "")), String.valueOf(k),
                         x.optString("fixed", "").isEmpty() ? "" : "1", x.optString("by", ""),
-                        String.valueOf(x.optLong("at", 0)), x.optString("who", "")};
+                        String.valueOf(x.optLong("at", 0)), x.optString("who", ""),
+                        x.has("photo") ? PHOTO : ""};
+  }
+  /** Метка реплики со снимком в ряду all() (поле 8). */
+  public static final String PHOTO = "📷";
+
+  /** Реплики разговора без снимков: сам диалог — для уточнителя, облака и «кто говорит».
+   *  Текст вывески не сказан ни одной из сторон, и «obrigada» на ней — не про собеседницу. */
+  public synchronized List<String[]> dialog() {
+    List<String[]> out = new ArrayList<>();
+    for (String[] r : all()) if (r[8].isEmpty()) out.add(r);
+    return out;
   }
   /** Одна реплика тем же рядом, что и в all(); null, если такой нет. */
   public synchronized String[] turn(int idx) {
@@ -176,6 +219,7 @@ public class Chats {
    *  или чужой разговор, попавший в запись, потом уходит и в уточнение перевода, и в разбор слов. */
   public synchronized boolean deleteTurn(int idx) {
     if (idx < 0 || idx >= turns.length()) return false;
+    dropPhotos(turns, idx, idx + 1);
     turns.remove(idx);
     save(); return true;
   }
@@ -333,11 +377,11 @@ public class Chats {
    *  направление, исходник, перевод (улучшенный, если есть), метка времени. */
   public synchronized List<String[]> tail(int n) {
     List<String[]> out = new ArrayList<>();
-    for (int k = Math.max(0, turns.length() - n); k < turns.length(); k++) {
+    for (int k = turns.length() - 1; k >= 0 && out.size() < n; k--) {
       JSONObject x = turns.optJSONObject(k);
-      if (x == null) continue;
-      out.add(new String[]{x.optString("dir", "pt2ru"), x.optString("src", ""),
-                           x.optString("fixed", x.optString("dst", "")), String.valueOf(x.optLong("at", 0))});
+      if (x == null || x.has("photo")) continue;      // снимок — не реплика диалога (см. dialog())
+      out.add(0, new String[]{x.optString("dir", "pt2ru"), x.optString("src", ""),
+                              x.optString("fixed", x.optString("dst", "")), String.valueOf(x.optLong("at", 0))});
     }
     return out;
   }
@@ -405,6 +449,9 @@ public class Chats {
   /** Удалить разговор. Нужно по-настоящему, а не пометкой: по этим разговорам потом идёт разбор
    *  слов для заучивания, и мусорные диалоги портили бы частоты. */
   public synchronized boolean delete(long id) {
+    JSONObject gone = id == current ? null : load(id);
+    JSONArray t = id == current ? turns : gone == null ? null : gone.optJSONArray("turns");
+    if (t != null && file(id).exists()) dropPhotos(t, 0, t.length());
     boolean ok = file(id).delete();
     if (ok && id == current) {                    // удалили тот, в котором сидим — начинаем чистый
       current = System.currentTimeMillis(); name = ""; turns = new JSONArray(); terms = new JSONArray(); topic = ""; memo = ""; memoBy = "";

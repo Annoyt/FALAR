@@ -50,6 +50,7 @@ public class ModelStore {
       this.archive = archive; this.unpackTo = unpackTo; this.check = check; this.replaces = replaces;
     }
     public boolean core() { return "core".equals(tier); }
+    public boolean auto() { return AUTO.equals(tier); }
     /** Что качается: файл по пути или zip рядом с каталогом. */
     File target(File dir) { return new File(dir, archive ? path + ".zip" : path); }
     @Override public String toString() { return path; }
@@ -65,15 +66,19 @@ public class ModelStore {
     public boolean checked; public int coreMissing, optMissing; public long coreBytes, optBytes;
     /** Замены, которые можно скачать: прежние файлы на месте, новых нет. */
     public int upgrade; public long upgradeBytes;
+    /** Недостающее из яруса auto: докачивается само в фоне и запуск не держит. */
+    public int autoMissing; public long autoBytes;
     public boolean busy() { return DOWN.equals(phase) || WAIT.equals(phase) || RETRY.equals(phase) || UNPACK.equals(phase) || CHECK.equals(phase); }
     public State copy() {
       State s = new State();
       s.phase = phase; s.tier = tier; s.file = file; s.message = message; s.done = done; s.total = total; s.bps = bps; s.retryIn = retryIn;
       s.errors = new ArrayList<>(errors); s.checked = checked; s.coreMissing = coreMissing; s.optMissing = optMissing; s.coreBytes = coreBytes; s.optBytes = optBytes;
-      s.upgrade = upgrade; s.upgradeBytes = upgradeBytes;
+      s.upgrade = upgrade; s.upgradeBytes = upgradeBytes; s.autoMissing = autoMissing; s.autoBytes = autoBytes;
       return s;
     }
   }
+  /** Ярус файлов, которые докачиваются сами и запуск не держат (см. autos()). */
+  public static final String AUTO = "auto";
   public static final String IDLE = "idle", CHECK = "check", WAIT = "wait", DOWN = "down", RETRY = "retry", UNPACK = "unpack",
                              DONE = "done", PAUSED = "paused", ERROR = "error";
 
@@ -281,13 +286,34 @@ public class ModelStore {
   /** Сводка «чего не хватает» в состоянии — по кэшу, без хэширования. Заменённое новым файлом
    *  не считается нехваткой, пока прежние на месте; оно идёт отдельной строкой «можно облегчить». */
   void summarize() {
-    int cm = 0, om = 0, up = 0; long cb = 0, ob = 0, ub = 0;
+    int cm = 0, om = 0, up = 0, am = 0; long cb = 0, ob = 0, ub = 0, ab = 0;
     for (Item it : items) {
       if (present(it, 1)) continue;
       if (replacedOk(it, 1)) { up++; ub += it.size; continue; }
+      if (it.auto()) { am++; ab += it.size; continue; }
       if (it.core()) { cm++; cb += it.size; } else { om++; ob += it.size; }
     }
-    synchronized (st) { st.checked = true; st.coreMissing = cm; st.coreBytes = cb; st.optMissing = om; st.optBytes = ob; st.upgrade = up; st.upgradeBytes = ub; }
+    synchronized (st) { st.checked = true; st.coreMissing = cm; st.coreBytes = cb; st.optMissing = om; st.optBytes = ob; st.upgrade = up; st.upgradeBytes = ub; st.autoMissing = am; st.autoBytes = ab; }
+  }
+
+  /** Ярус auto — файлы новой возможности (с 0.24 — чтение снимков): у новой установки и у
+   *  обновившейся они докачиваются сами в фоне, а запуск не держат. Обязательными (core) их
+   *  сделать нельзя: у обновившихся приложение ушло бы на экран первой загрузки из-за 18 МБ. */
+  public List<Item> autos() {
+    List<Item> r = new ArrayList<>();
+    for (Item it : items) if (it.auto() && !present(it, 1)) r.add(it);
+    return r;
+  }
+
+  /** Почему ярус auto сейчас не докачивается сам (null — можно): как autoUpgradeBlock. */
+  public static String autoFetchBlock(State s, boolean running, boolean tried, boolean net, long free, long spare) {
+    if (s == null || !s.checked) return "файлы ещё не проверены";
+    if (s.autoMissing == 0) return "докачивать нечего";
+    if (running) return "уже идёт загрузка";
+    if (tried) return "в этот запуск уже пробовали";
+    if (!net) return "нет подходящей сети";
+    if (free >= 0 && free < s.autoBytes + spare) return "мало места: нужно ещё " + mb(s.autoBytes + spare - free) + " МБ";
+    return null;
   }
 
   // ---- загрузка ----------------------------------------------------------------------------

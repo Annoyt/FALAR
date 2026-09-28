@@ -3,7 +3,7 @@
 """Собирает каталог models/ по манифесту: что есть и совпало по sha256 — оставляет, чего нет —
 скачивает из источника (Hugging Face или прямой URL), архивы распаковывает и проверяет.
 
-  python3 tools/models_fetch.py            # только обязательное (tier=core)
+  python3 tools/models_fetch.py            # обязательное и докачиваемое само (tier=core, auto)
   python3 tools/models_fetch.py --all      # плюс необязательное: LLM, отпечаток голоса, корпус
   python3 tools/models_fetch.py --check    # ничего не качать, только сверить, что лежит
 
@@ -47,7 +47,7 @@ def main():
     m = json.load(open(MAN, encoding="utf-8"))
     bad = 0
     for e in m["files"]:
-        if e["tier"] != "core" and not want_all: continue
+        if e["tier"] not in ("core", "auto") and not want_all: continue   # auto приложение докачивает само — зеркалу тоже нужно
         # затравка и корпус лежат в самом репозитории (repo_path), остальное — в models/ под путём устройства
         dst = os.path.join(ROOT, e["repo_path"]) if e.get("repo_path") else os.path.join(OUT, e["path"])
         ok = os.path.exists(dst) and os.path.getsize(dst) == e["size"] and sha256(dst) == e["sha256"]

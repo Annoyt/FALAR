@@ -399,6 +399,39 @@ public class ModelStoreTest {
     for (File f : new File[]{rd, ud, bd, cd, md, hd}) del(f);
     srv.hs.stop(0);
 
+    // U: ярус auto — новая возможность докачивается сама и запуск не держит (чтение снимков, 0.24)
+    byte[] udet = rnd(120_000, 31), urec = rnd(90_000, 32), ucore = rnd(50_000, 33);
+    Srv us = new Srv(); us.files.put("ocr/det.onnx", udet); us.files.put("ocr/rec.onnx", urec); us.files.put("core.bin", ucore);
+    String uman = "{\"manifest_version\":1,\"app\":\"0.24.0\",\"files\":[" + file("core.bin", ucore, "core", hf("core.bin")) + ","
+        + file("ocr/det.onnx", udet, "auto", hf("ocr/det.onnx")) + "," + file("ocr/rec.onnx", urec, "auto", hf("ocr/rec.onnx")) + "]}";
+    File ad = tmpDir("u1"); ad.mkdirs(); Files.write(new File(ad, "core.bin").toPath(), ucore);
+    ModelStore u = store(ad, uman, us);
+    ok(u.check("core").complete(), "U1 без файлов auto обязательное на месте — экрана первого запуска нет");
+    ModelStore.State ust = u.state();
+    eq(ust.coreMissing + ":" + ust.optMissing, "0:0", "U1 ни нехваткой, ни необязательным auto не считается");
+    eq(ust.autoMissing + ":" + ust.autoBytes, "2:" + (udet.length + urec.length), "U1 зато видно, что докачать и сколько");
+    eq(u.autos().size(), 2, "U1 список докачки");
+    eq(u.check("optional").need.size(), 0, "U1 кнопка «необязательное» auto не тянет");
+    ok(u.start(u.autos(), ModelStore.AUTO), "U2 старт докачки");
+    ust = waitDone(u);
+    eq(ust.phase + ":" + ust.tier, ModelStore.DONE + ":" + ModelStore.AUTO, "U2 докачано, ярус в состоянии — auto: " + ust.message);
+    eq(shaFile(new File(ad, "ocr/rec.onnx")), sha(urec), "U2 файл на месте и верный");
+    eq(u.state().autoMissing, 0, "U2 докачивать больше нечего");
+    eq(u.autos().size(), 0, "U2 и список пуст");
+    ModelStore.State fs = new ModelStore.State();
+    eq(ModelStore.autoFetchBlock(null, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "U3 нет состояния");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "U3 до проверки не решаем");
+    fs.checked = true;
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1L << 40, 0), "докачивать нечего", "U3 нечего");
+    fs.autoMissing = 2; fs.autoBytes = 1000;
+    eq(ModelStore.autoFetchBlock(fs, true, false, true, 1L << 40, 0), "уже идёт загрузка", "U4 не вмешиваемся в идущую загрузку");
+    eq(ModelStore.autoFetchBlock(fs, false, true, true, 1L << 40, 0), "в этот запуск уже пробовали", "U4 одна попытка на запуск");
+    eq(ModelStore.autoFetchBlock(fs, false, false, false, 1L << 40, 0), "нет подходящей сети", "U4 без разрешённой сети — ждём");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1499, 500), "мало места: нужно ещё 0.0 МБ", "U5 места на байт меньше — нет");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1500, 500), null, "U5 ровно хватает — качаем");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, -1, 500), null, "U5 место неизвестно — не мешаем");
+    us.hs.stop(0); del(ad);
+
     // A: облегчать ли само — без кнопки, по разрешённой сети и с запасом места
     ModelStore.State as = new ModelStore.State();
     eq(ModelStore.autoUpgradeBlock(null, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "A1 нет состояния");

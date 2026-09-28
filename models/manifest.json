@@ -3,9 +3,10 @@
   "app": "0.23.1",
   "own_repo": "youannoingme/falar-models",
   "device_dir": "Android/data/app.falar/files/models",
-  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
+  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить, auto — докачивается само в фоне и запуск не держит (новая возможность: у обновившихся не должно быть экрана первой загрузки). Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
   "total_core_bytes": 1549468297,
   "total_optional_bytes": 1188932476,
+  "total_auto_bytes": 17785025,
   "files": [
     {
       "path": "silero_vad.onnx",
@@ -300,6 +301,33 @@
       "derived_from": "Tatoeba",
       "role": "частотный словарь для проверки языка и стоп-слов",
       "repo_path": "data/common_words.txt"
+    },
+    {
+      "path": "ocr/det.onnx",
+      "size": 9880512,
+      "sha256": "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
+      "tier": "auto",
+      "license": "Apache-2.0",
+      "source": {
+        "type": "hf",
+        "repo": "PaddlePaddle/PP-OCRv6_small_det_onnx",
+        "file": "inference.onnx",
+        "revision": "28fe5895c24fd108c19eb3e8479f4ab385fbfc62"
+      },
+      "role": "детектор строк текста на снимке (PP-OCRv6 small, DB); выбран замером на 32 снимках вывесок — bench/ocr, tools/ocr_eval.py"
+    },
+    {
+      "path": "ocr/rec.onnx",
+      "size": 7904513,
+      "sha256": "b20bd37c168a570f583afbc8cd7925603890efbcdc000a59e22c269d160b5f5a",
+      "tier": "auto",
+      "license": "Apache-2.0",
+      "source": {
+        "type": "url",
+        "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/latin_PP-OCRv5_rec_mobile.onnx"
+      },
+      "derived_from": "PaddlePaddle/latin_PP-OCRv5_mobile_rec (конвертация RapidAI в ONNX, словарь из 502 знаков вшит в метаданные character)",
+      "role": "распознаватель строки: латиница с диакритикой pt-BR (PP-OCRv5 mobile latin, CTC)"
     }
   ],
   "archives": [

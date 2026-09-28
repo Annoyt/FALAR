@@ -3,6 +3,7 @@ package dev.agenttranslator;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.*;
+import org.json.*;
 
 /** Хранение разговоров: правка человека неприкосновенна для автоматики. Именно здесь была ошибка
  *  «двух переводов подряд»: правка текста стирала пометку «человек», и уточнитель через несколько
@@ -95,6 +96,37 @@ public class ChatsTest {
     eq(r2.memo + "|" + r2.topic + "|" + r2.terms().size(), "Хозяйка (женщина)|Аренда|1", "C18 в файле продолжения тоже");
     r2.open(was);
     eq(r2.size(), Chats.KEEP, "C18 прежний разговор остался целым");
+
+    // реплика со снимком: в разговоре и на экране есть, в диалоге для уточнителя и облака — нет
+    Chats ph = new Chats(tmp());
+    File pd = ph.photos(); pd.mkdirs();
+    File jpg = new File(pd, "p1.jpg"); Files.write(jpg.toPath(), new byte[]{1, 2, 3});
+    ph.add("pt2ru", "Obrigada, eu mesma", "Спасибо, я сама", null, 1_000);
+    JSONObject photo = new JSONObject().put("file", "p1.jpg").put("w", 100).put("h", 80)
+        .put("blocks", new JSONArray().put(new JSONObject().put("f", new JSONArray("[50,40,1,0,80,20]")).put("src", "PERIGO").put("dst", "Опасно")));
+    ok(ph.addTurn(ph.current, Chats.turn("pt2ru", "PERIGO", "Опасно", null, 2_000).put("photo", photo)), "C19 реплика со снимком легла в разговор");
+    ph.add("ru2pt", "Я понял", "Entendi", null, 3_000);
+    eq(ph.all().size(), 3, "C19 на экране все три реплики");
+    eq(ph.all().get(1)[8], Chats.PHOTO, "C19 у реплики со снимком метка 📷");
+    eq(ph.all().get(0)[8], "", "C19 у обычной — нет");
+    eq(ph.dialog().size(), 2, "C20 в диалоге для уточнителя и облака снимка нет");
+    List<String[]> tl = ph.tail(2);
+    eq(tl.size() + ":" + tl.get(0)[1] + ":" + tl.get(1)[1], "2:Obrigada, eu mesma:Я понял", "C20 рабочая история — две последние реплики диалога, снимок пропущен");
+    JSONObject back = ph.photo(1);
+    eq(back == null ? null : back.optString("file"), "p1.jpg", "C21 снимок читается по номеру реплики");
+    back.put("file", "hack.jpg");
+    eq(ph.photo(1).optString("file"), "p1.jpg", "C21 наружу отдаётся копия, разговор не портится");
+    ok(ph.photo(0) == null && ph.photo(9) == null, "C21 у обычной реплики и за концом — null");
+    Chats ph2 = new Chats(ph.dir.getParentFile()); ph2.open(ph.current);
+    eq(ph2.photo(1) == null ? null : ph2.photo(1).optJSONArray("blocks").length(), 1, "C22 снимок с абзацами пережил запись на диск");
+    ok(ph.deleteTurn(1) && !jpg.exists(), "C23 удалили реплику — удалён и файл снимка");
+    File jpg2 = new File(pd, "p2.jpg"); Files.write(jpg2.toPath(), new byte[]{4});
+    ph.addTurn(ph.current, Chats.turn("pt2ru", "SAÍDA", "Выход", null, 4_000).put("photo", new JSONObject().put("file", "p2.jpg")));
+    long keep = ph.current; ph.newChat("Другой");
+    ok(ph.delete(keep) && !jpg2.exists(), "C24 удалили разговор (не текущий) — удалены и его снимки");
+    File jpg3 = new File(pd, "p3.jpg"); Files.write(jpg3.toPath(), new byte[]{5});
+    ph.addTurn(ph.current, Chats.turn("pt2ru", "ENTRADA", "Вход", null, 5_000).put("photo", new JSONObject().put("file", "../p3.jpg")));
+    ok(ph.delete(ph.current) && jpg3.exists(), "C25 имя файла с путём не удаляет ничего вне каталога снимков");
 
     System.out.println(fails == 0 ? "Chats: " + checks + " проверок, все прошли" : "Chats: провалов " + fails + " из " + checks);
     return fails;

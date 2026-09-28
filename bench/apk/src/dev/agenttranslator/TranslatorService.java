@@ -33,7 +33,10 @@ public class TranslatorService extends Service {
     void onUpdate(String state);
     /** Что приложение делает прямо сейчас: «перевожу…», «уточняю перевод» — для полосы на экране
      *  разговора. what == null — ничего; total > 0 — сделано done из total, иначе без хода. */
-    void onBusy(String what, int done, int total); }
+    void onBusy(String what, int done, int total);
+    /** Снимок прочитан и переведён: реплика «📷» с меткой at легла в разговор chatId — показать
+     *  перевод поверх снимка. */
+    void onPhoto(long chatId, long at); }
   public class LocalBinder extends Binder { public TranslatorService get() { return TranslatorService.this; } }
   final IBinder binder = new LocalBinder(); final Handler main = new Handler(Looper.getMainLooper());
   final ExecutorService worker = Executors.newSingleThreadExecutor(); volatile Listener listener;
@@ -130,6 +133,7 @@ public class TranslatorService extends Service {
       store.cleanObsolete();
       ModelStore.State st = store.state(); Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
       if (st.upgrade > 0) log("📦 можно облегчить перевод: скачать " + ModelStore.mb(st.upgradeBytes) + " МБ — «Система» → «облегчить перевод»; до тех пор работает прежний путь");
+      if (st.autoMissing > 0) log("📦 чтение снимков докачается само: " + ModelStore.mb(st.autoBytes) + " МБ по разрешённой сети; до тех пор снимок читает облако — по согласию");
       if (!p.need.isEmpty()) {
         status("Нужно скачать модели: " + p.need.size() + " файлов, " + ModelStore.mb(p.bytes) + " МБ");
         notify("Нужно скачать модели (" + ModelStore.mb(p.bytes) + " МБ)"); return;
@@ -267,6 +271,41 @@ public class TranslatorService extends Service {
           log("🧪 пачка: " + n + " фраз за " + (System.nanoTime() - t0) / 1000000 + " мс · резидентно " + Engine.rssMb() + " МБ → " + path + ".out");
         } catch (Throwable e) { log("🧪 пачка оборвалась на " + n + ": " + e); }
       }); }
+    // Стенд: офлайн-чтение набора снимков (bench/ocr) — каталог на телефоне с pNN.jpg. На каждый
+    // pNN.txt (строки как на вывеске) и pNN.para (абзацы для перевода), время — в журнал и at.tsv.
+    // Сверка с расшифровкой — на столе: tools/ocr_eval.py --got <каталог>.
+    if (i != null && i.hasExtra("ocrbench")) { final String path = i.getStringExtra("ocrbench");
+      new Thread(() -> {
+        if (ocr == null || !ocr.ready()) { log("🧪 снимки: моделей чтения нет (models/ocr)"); return; }
+        File[] fs = new File(path).listFiles((d, n) -> n.toLowerCase(Locale.ROOT).endsWith(".jpg"));
+        if (fs == null || fs.length == 0) { log("🧪 снимки: в " + path + " нет .jpg"); return; }
+        Arrays.sort(fs); List<Long> all = new ArrayList<>(), det = new ArrayList<>(), rec = new ArrayList<>(), load = new ArrayList<>();
+        long rss0 = Engine.rssMb(), rssMax = rss0;
+        for (File f : fs) {
+          try {
+            android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeFile(f.getAbsolutePath());
+            if (bm == null) { log("🧪 снимки: не прочитался " + f.getName()); continue; }
+            int w = bm.getWidth(), h = bm.getHeight(); int[] px = new int[w * h]; bm.getPixels(px, 0, w, 0, 0, w, h); bm.recycle();
+            long t = System.nanoTime(); Ocr.Page pg = ocr.read(px, w, h); long ms = (System.nanoTime() - t) / 1_000_000;
+            rssMax = Math.max(rssMax, Engine.rssMb());
+            String base = f.getName().substring(0, f.getName().length() - 4);
+            StringBuilder pr = new StringBuilder(); for (OcrCore.Para p : pg.paras) pr.append(pr.length() > 0 ? "\n" : "").append(p.text);
+            write(new File(f.getParentFile(), base + ".txt"), pg.lines); write(new File(f.getParentFile(), base + ".para"), pr.toString());
+            all.add(ms); det.add(pg.detMs); rec.add(pg.recMs); load.add(pg.loadMs);
+            tsv("ocrbench", base, "" + w, "" + h, "" + pg.boxes, "" + pg.loadMs, "" + pg.detMs, "" + pg.recMs, "" + pg.layoutMs, "" + ms);
+          } catch (Throwable e) { log("🧪 снимки: " + f.getName() + " — " + e); }
+        }
+        log("🧪 снимки: " + all.size() + " · медиана " + med(all) + " мс (модели " + med(load) + ", детектор " + med(det) + ", распознаватель " + med(rec)
+            + ") · наибольшее " + (all.isEmpty() ? 0 : Collections.max(all)) + " мс · резидентно " + rss0 + " → до " + rssMax + " МБ → " + path);
+      }, "ocrbench").start(); }
+    // Стенд: снимок, лежащий на телефоне, — весь путь, как после камеры: чтение, перевод, наложение.
+    if (i != null && i.hasExtra("photofile") && chats != null) {
+      try {
+        File src = new File(i.getStringExtra("photofile")), dst = new File(chats.photos(), "p" + System.currentTimeMillis() + ".jpg");
+        chats.photos().mkdirs(); java.nio.file.Files.copy(src.toPath(), dst.toPath());
+        photoRead(dst);
+      } catch (Throwable e) { log("📷 стенд: " + e); }
+    }
     if (i != null && i.hasExtra("rss")) {
       android.os.Debug.MemoryInfo mi = new android.os.Debug.MemoryInfo(); android.os.Debug.getMemoryInfo(mi);
       log("🧪 память: резидентно " + Engine.rssMb() + " МБ · PSS " + (mi.getTotalPss() >> 10) + " МБ · нативная куча " + (android.os.Debug.getNativeHeapAllocatedSize() >> 20) + " МБ");
@@ -1072,7 +1111,7 @@ public class TranslatorService extends Service {
   String topicLine() {
     if (chats == null) return "";
     if (!chats.topic.isEmpty()) return chats.topic;
-    return learn == null ? "" : learn.keywords(chats.all(), 6);
+    return learn == null ? "" : learn.keywords(chats.dialog(), 6);
   }
   /** Память разговора для фона уточнителя: кто говорит (по грамматике исходных реплик), ключевые
    *  детали (от облака или человека) и тема. Всё, что старше свежего куска, уточнитель знает
@@ -1080,9 +1119,9 @@ public class TranslatorService extends Service {
   volatile String lastMemoLogged = "";
   String memoBlock(String topic) {
     if (chats == null) return topic.isEmpty() ? "" : "Tema: " + topic;
-    return Memo.block(Memo.who(chats.all()), chats.memo, topic, Memo.CAP);
+    return Memo.block(Memo.who(chats.dialog()), chats.memo, topic, Memo.CAP);
   }
-  public String whoLine() { return chats == null ? "" : Memo.who(chats.all()); }
+  public String whoLine() { return chats == null ? "" : Memo.who(chats.dialog()); }
   /** Память, вписанная человеком: автоматика её больше не перезаписывает. Пустая — вернуть автоматике. */
   public boolean setMemoByUser(String text) {
     if (chats == null) return false;
@@ -1313,7 +1352,7 @@ public class TranslatorService extends Service {
    *  завершении — движки, если теперь есть всё обязательное, или подключение необязательного. */
   void onStoreState(ModelStore.State st) {
     Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
-    if (st.busy() && st.total > 0) busy("models", ("upgrade".equals(st.tier) ? "облегчаю перевод" : "качаю модели") + " · " + (int) (st.done * 100 / st.total) + " %",
+    if (st.busy() && st.total > 0) busy("models", ("upgrade".equals(st.tier) ? "облегчаю перевод" : ModelStore.AUTO.equals(st.tier) ? "докачиваю чтение снимков" : "качаю модели") + " · " + (int) (st.done * 100 / st.total) + " %",
         (int) (st.done * 100 / st.total), 100);
     else if (!st.busy()) busy("models", null, 0, 0);
     long now = System.currentTimeMillis();
@@ -1323,6 +1362,11 @@ public class TranslatorService extends Service {
       notify(ModelStore.describe(st));
       if (eng == null) worker.submit(() -> { if (store.check("core").complete()) { status("Модели скачаны, загружаю движки…"); loadAll(); } else status(st.message); });
       else if (ModelStore.DONE.equals(st.phase) && "upgrade".equals(st.tier)) log("📦 перевод станет легче со следующего запуска приложения: память освобождается только вместе с процессом");
+      else if (ModelStore.DONE.equals(st.phase) && ModelStore.AUTO.equals(st.tier)) {
+        log("📷 чтение снимков готово: снимок теперь читается на телефоне, без сети");
+        // облегчение перевода могло ждать, пока шла эта загрузка
+        worker.submit(() -> maybeAutoUpgrade(""));
+      }
       else if (ModelStore.DONE.equals(st.phase)) worker.submit(this::reloadOptional);
     }
     lastModelPhase = st.phase;
@@ -1345,6 +1389,7 @@ public class TranslatorService extends Service {
   volatile boolean autoUpgradeTried = false;
   synchronized void maybeAutoUpgrade(String why) {
     if (store == null) return;
+    maybeAutoFetch();
     ModelStore.State st = store.state();
     String no = ModelStore.autoUpgradeBlock(st, store.running(), autoUpgradeTried, netAllowed(), store.usable(), store.spareBytes);
     if (no != null) {
@@ -1355,6 +1400,20 @@ public class TranslatorService extends Service {
     autoUpgradeTried = true;
     log("📦 облегчаю перевод в фоне: " + ModelStore.mb(st.upgradeBytes) + " МБ" + why + " — заработает со следующего запуска");
     downloadUpgrade();
+  }
+  volatile boolean autoFetchTried = false;
+  /** Ярус auto (чтение снимков): докачать самому, как облегчение перевода, — по разрешённой сети,
+   *  при запасе места, раз за запуск. Идёт первым: 18 МБ вместо сотен, и возможность, а не экономия. */
+  synchronized void maybeAutoFetch() {
+    ModelStore.State st = store.state();
+    String no = ModelStore.autoFetchBlock(st, store.running(), autoFetchTried, netAllowed(), store.usable(), store.spareBytes);
+    if (no != null) {
+      if (no.startsWith("мало места") && !autoFetchTried) { autoFetchTried = true; log("📦 чтение снимков отложено: " + no); }
+      return;
+    }
+    autoFetchTried = true;
+    log("📦 докачиваю чтение снимков в фоне: " + ModelStore.mb(st.autoBytes) + " МБ");
+    downloadModels(store.autos(), ModelStore.AUTO);
   }
   /** «Облегчить перевод»: скачать новые файлы, которые заменяют прежние; прежние удалятся после сверки. */
   public boolean downloadUpgrade() {
@@ -1563,7 +1622,7 @@ public class TranslatorService extends Service {
     final long chatId = chats.current;
     cloudWorker.submit(() -> {
       try {
-        List<String[]> all = chats.all();
+        List<String[]> all = chats.dialog();             // снимки — не диалог и без согласия на их отправку
         List<String[]> rows = new ArrayList<>(); int chars = 0;
         for (int k = all.size() - 1; k >= 0; k--) {
           String[] r = all.get(k); String ln = line(0, r[0], r[7], r[1], r[2]);
@@ -2001,6 +2060,80 @@ public class TranslatorService extends Service {
     worker.submit(() -> processText("pt2ru", t, true, false, 0, 0, "набрано"));
   }
 
+  /** Снимок с текстом — офлайн: распознать (Ocr), перевести абзацами тем же путём, что речь
+   *  (словарь, свои слова, маски), сохранить реплику «📷» со снимком и прямоугольниками абзацев
+   *  и показать перевод поверх фото (PhotoView). Без озвучки: снимок читают глазами — у меню или
+   *  таблички это десятки строк (решение владельца 28.09). В выученное не копится (learn=false).
+   *  jpg — уже повёрнутый по EXIF и уменьшенный до 2048 px снимок в каталоге снимков разговоров. */
+  public void photoRead(final File jpg) {
+    if (jpg == null || !jpg.exists() || ocr == null || !ocr.ready()) return;
+    final long chatId = chats == null ? 0 : chats.current;
+    new Thread(() -> {
+      long t0 = System.nanoTime();
+      busy("live", "читаю снимок…", 0, 0);
+      try {
+        android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+        o.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888;
+        android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeFile(jpg.getAbsolutePath(), o);
+        if (bm == null) { log("📷 снимок не прочитался"); jpg.delete(); return; }
+        int w = bm.getWidth(), h = bm.getHeight(); int[] px = new int[w * h];
+        bm.getPixels(px, 0, w, 0, 0, w, h); bm.recycle();
+        Ocr.Page pg = ocr.read(px, w, h); px = null;
+        long tOcr = (System.nanoTime() - t0) / 1_000_000;
+        String how = "детектор " + pg.detMs + " мс, распознаватель " + pg.recMs + " мс, модели " + pg.loadMs + " мс, рамок " + pg.boxes;
+        if (pg.paras.isEmpty()) {
+          log("📷 текста не нашлось за " + tOcr + " мс (" + w + "×" + h + "; " + how + ")"); hint("📷 на снимке не нашлось текста");
+          tsv("ocr", "" + w, "" + h, "" + pg.boxes, "0", "0", "" + pg.loadMs, "" + pg.detMs, "" + pg.recMs, "" + tOcr);
+          jpg.delete(); return;
+        }
+        org.json.JSONArray blocks = new org.json.JSONArray(); StringBuilder src = new StringBuilder(), dst = new StringBuilder();
+        int done = 0, skipped = 0;
+        for (int i = 0; i < pg.paras.size(); i++) {
+          busy("live", "перевожу снимок…", i, pg.paras.size());
+          OcrCore.Para p = pg.paras.get(i);
+          String ru = null, why = photoSkip(p.text);
+          if (why == null) { Once r = translateOnce("pt2ru", unshout(p.text), false, false, false); if (r.skip == null && r.mt != null && !r.mt.trim().isEmpty()) ru = r.mt.trim(); }
+          else skipped++;
+          double[] f = p.frame(); org.json.JSONArray fa = new org.json.JSONArray();
+          for (double v : f) fa.put(Math.round(v * 1000) / 1000.0);
+          org.json.JSONObject b = new org.json.JSONObject().put("f", fa).put("src", p.text);
+          if (ru != null) { b.put("dst", ru); done++; dst.append(dst.length() > 0 ? "\n" : "").append(ru); }
+          blocks.put(b); src.append(src.length() > 0 ? "\n" : "").append(p.text);
+        }
+        long at = System.currentTimeMillis();
+        org.json.JSONObject photo = new org.json.JSONObject().put("file", jpg.getName()).put("w", w).put("h", h).put("blocks", blocks);
+        boolean saved = chats != null && chats.addTurn(chatId, Chats.turn("pt2ru", src.toString(), dst.toString(), null, at).put("photo", photo));
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        log("📷 OCR за " + tOcr + " мс, с переводом " + ms + " мс (" + w + "×" + h + "; " + how + "): абзацев " + pg.paras.size()
+            + ", переведено " + done + (skipped > 0 ? ", оставлено как есть " + skipped : "") + " · " + pg.lines.replace('\n', ' '));
+        tsv("ocr", "" + w, "" + h, "" + pg.boxes, "" + pg.paras.size(), "" + done, "" + pg.loadMs, "" + pg.detMs, "" + pg.recMs, "" + ms);
+        if (!saved) { log("📷 разговор удалили, пока читался снимок — реплике некуда лечь"); jpg.delete(); return; }
+        Listener l = listener;
+        if (l != null) main.post(() -> { l.onHistory(); l.onPhoto(chatId, at); });
+      } catch (Throwable t) { Log.e(TAG, "photo", t); log("📷 не вышло прочитать снимок: " + t); jpg.delete(); }
+      finally { busy("live", null, 0, 0); }
+    }, "photo").start();
+  }
+
+  static long med(List<Long> v) { if (v.isEmpty()) return 0; List<Long> c = new ArrayList<>(v); Collections.sort(c); return c.get(c.size() / 2); }
+  static void write(File f, String text) throws java.io.IOException {
+    try (java.io.Writer w = new java.io.OutputStreamWriter(new java.io.FileOutputStream(f), "UTF-8")) { w.write(text); }
+  }
+
+  /** Почему абзац снимка не переводить (null — переводить). Текст не на португальском остаётся
+   *  как есть: английский абзац на табличке переводчик pt→ru превращал в мусор («⁇ 2019 ⁇ Все
+   *  права защищены»). Одиночные служебные слова («DO») и обрывки без букв — тоже: переводчик
+   *  на них выдумывает. Короткое название («SAÍDA», «Guapíara») переводится — это и нужно. */
+  String photoSkip(String t) {
+    String letters = t.replaceAll("[^\\p{L}]", "");
+    if (letters.length() < 2) return "без букв";
+    boolean func = true;
+    for (String w : t.trim().split("\\s+")) if (!OcrCore.CONT.contains(w.replaceAll("[^\\p{L}\\p{N}]", "").toLowerCase(Locale.ROOT))) { func = false; break; }
+    if (func) return "служебные слова";
+    if (words != null) { double lk = words.looksLike(t, "pt"); if (lk >= 0 && lk < LANG_MIN) return "не португальский"; }
+    return null;
+  }
+
   /** Снимок: сначала текст, потом обычный путь перевода. Разделение намеренное — распознаёт
    *  снимок один узел, а переводит тот же самый, что и речь, со словарём, своими словами и
    *  накоплением слов для изучения. Поэтому облачная модель просится вернуть только текст,
@@ -2012,8 +2145,7 @@ public class TranslatorService extends Service {
     new Thread(() -> {
       long t0 = System.nanoTime();
       String text = null, how = null;
-      if (ocr != null && ocr.ready) { text = ocr.read(jpeg); how = "OCR"; }
-      if ((text == null || text.trim().isEmpty()) && allowCloud && cloud != null && cloud.ready) {
+      if (allowCloud && cloud != null && cloud.ready) {
         text = cloud.image(jpeg); how = "облако " + cloud.lastUsed;
       }
       if ((text == null || text.trim().isEmpty()) && !allowCloud) {
@@ -2030,8 +2162,8 @@ public class TranslatorService extends Service {
       processText("pt2ru", unshout(text.trim()), true, false, 0, ms, "фото");
     }, "photo").start();
   }
-  /** Офлайн-распознавание текста на снимке. Пока не подключено — поле есть, чтобы облачный путь
-   *  был запасным, а не единственным. */
+  /** Офлайн-распознавание текста на снимке (models/ocr). Без моделей снимок читает облако — по
+   *  согласию на каждый снимок. */
   public volatile Ocr ocr;
 
   /** Вывески пишут прописными, а модель перевода на таком входе ломается: «FARMÁCIA» она перевела
@@ -2087,7 +2219,10 @@ public class TranslatorService extends Service {
    *
    *  gate — отбивать ли реплику, не похожую на ожидаемый язык. Для микрофона да: туда попадает
    *  чужая речь из комнаты. Для набранного и снятого — нет: это попросили перевести явно. */
-  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate) throws Exception {
+  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate) throws Exception { return translateOnce(dirIn, asrIn, auto, gate, true); }
+  /** learn — копить ли фразу в выученное (learned.json). Для снимка нет: текст вывески не сказан
+   *  в разговоре, и его повторы портили бы и быстрый путь, и частоты. */
+  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate, boolean learn) throws Exception {
     Once r = new Once();
     String dir = dirIn, asr = asrIn;
     String src = dir.substring(0, 2), tgt = dir.substring(3);
@@ -2126,13 +2261,13 @@ public class TranslatorService extends Service {
         StringBuilder sb = new StringBuilder(); int pbHits = 0;
         for (String sn : sents) {
           Phrasebook.Hit h = pb.lookup(dir, sn);
-          String part; if (h != null) { part = h.dst; pbHits++; } else { part = eng.translate(dir, sn); pb.record(dir, sn, part); }
+          String part; if (h != null) { part = h.dst; pbHits++; } else { part = eng.translate(dir, sn); if (learn) pb.record(dir, sn, part); }
           if (sb.length() > 0) sb.append(' '); sb.append(part);
         }
         maskedMt = sb.toString(); mt = TextRules.unmask(maskedMt, mk, tgt);
         tag = pbHits > 0 ? "словарь+MT (" + pbHits + "/" + sents.length + ")" : "MT (" + sents.length + " фразы)";
       } else {
-        String mtM = eng.translate(dir, mk.text); hits = pb.record(dir, mk.text, mtM);
+        String mtM = eng.translate(dir, mk.text); hits = learn ? pb.record(dir, mk.text, mtM) : 0;
         // На третьем повторе фраза стала быстрой — и её выученный перевод (в том числе правка от
         // облака) должен прозвучать уже сейчас, а не со следующего раза.
         if (hits >= Phrasebook.PROMOTE_HITS) { Phrasebook.Hit fh = pb.lookup(dir, mk.text); if (fh != null) mtM = fh.dst; }
@@ -2179,7 +2314,8 @@ public class TranslatorService extends Service {
       final String fTgt = r.tgt;                 // направление могло смениться по языку реплики
       final long[] first = {0}; double audioS = 0;
       final boolean cacheable = r.cacheable;
-      if (silent || !here) { first[0] = t2; tag += silent ? " · без озвучки" : " · разговор сменился, без озвучки"; }
+      // Снимок не озвучивается: его читают глазами (решение владельца 28.09).
+      if (silent || !here || kind.equals("фото")) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : " · снимок, без озвучки"; }
       // Пауза до озвучки. Перевод уже готов и уже на экране — ждёт только голос, и ждёт он
       // не таймера, а тишины: пока человек говорит, переводы копятся в очереди и произносятся
       // после того, как он замолчал. Иначе на длинном монологе перевод начинает звучать

@@ -39,3 +39,7 @@ bench/apk/SHA256SUMS.txt
 bench/apk/latest.json
 tools/pit/
 hs_err_pid*.log
+
+# Проверочный набор OCR: снимки с Wikimedia Commons качаются по bench/ocr/photos.json
+bench/ocr/photos/
+bench/ocr/runs/

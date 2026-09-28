@@ -14,5 +14,6 @@ public class SuitesTest {
   @Test void memo() { assertEquals(0, MemoTest.run()); }
   @Test void pressure() { assertEquals(0, PressureTest.run()); }
   @Test void cloud() throws Exception { assertEquals(0, CloudTest.run()); }
+  @Test void ocrCore() throws Exception { assertEquals(0, OcrCoreTest.run(new java.io.File(System.getProperty("falar.golden", "../../bench/ocr/runs/golden")))); }
   @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
 }

@@ -392,8 +392,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (svc == null || svc.chats == null) return;
     String[] t = svc.chats.turn(svc.chats.size() - 1);
     if (t == null) { showBig("—", "pt2ru", false); smallRu.setText(""); return; }
-    boolean srcPt = t[0].startsWith("pt");
-    showBig(srcPt ? t[1] : t[2], t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : t[1]);
+    boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]);
+    showBig((photo ? "📷 " : "") + (srcPt ? t[1] : t[2]), t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : t[1]);
   }
 
   final java.util.List<String[]> histRows = new java.util.ArrayList<>();
@@ -412,7 +412,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         LinearLayout col = new LinearLayout(MainActivity.this);
         col.setOrientation(LinearLayout.VERTICAL);
         TextView pt = new TextView(MainActivity.this);
-        pt.setText(srcPt ? t[1] : t[2]); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(Color.DKGRAY);
+        pt.setText((Chats.PHOTO.equals(t[8]) ? "📷 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(Color.DKGRAY);
+        if (Chats.PHOTO.equals(t[8])) pt.setMaxLines(3);
         TextView ru = new TextView(MainActivity.this);
         ru.setText((srcPt ? t[2] : t[1]) + ("1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : ""));
         ru.setTextSize(Math.max(10, szRu - 3)); ru.setTextColor(Color.GRAY);
@@ -429,7 +430,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       }
     });
     histList.setOnItemClickListener((p, vv, pos, id) -> {
-      if (pos < histRows.size()) editTurn(Integer.parseInt(histRows.get(pos)[3]), histRows.get(pos)[1]);
+      if (pos >= histRows.size()) return;
+      String[] t = histRows.get(pos);
+      if (Chats.PHOTO.equals(t[8])) openPhoto(Integer.parseInt(t[3]));      // снимок — перевод поверх фото, меню — долгим нажатием
+      else editTurn(Integer.parseInt(t[3]), t[1]);
     });
     histList.setOnItemLongClickListener((p, vv, pos, id) -> {   // прежний жест оставлен: к нему привыкли
       if (pos >= histRows.size()) return false;
@@ -446,16 +450,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   void turnMenu(final int idx) {
     if (svc == null || svc.chats == null) return;
     final String[] t = svc.chats.turn(idx); if (t == null) return;
-    final boolean mine = t[0].startsWith("ru");
+    final boolean mine = t[0].startsWith("ru"), photo = Chats.PHOTO.equals(t[8]);
     final java.util.List<String> items = new java.util.ArrayList<>();
+    if (photo) items.add("Показать снимок");
     if (mine) { items.add("Исправить текст"); items.add("Исправить перевод"); }
-    items.add("Произнести ещё раз"); items.add("Сообщить о переводе"); items.add("Удалить реплику"); items.add("Перенести в другой разговор");
+    if (!photo) items.add("Произнести ещё раз");       // снимок не озвучивается: его читают глазами
+    items.add("Сообщить о переводе"); items.add("Удалить реплику"); items.add("Перенести в другой разговор");
     String title = t[1].length() > 40 ? t[1].substring(0, 40) + "…" : t[1];
     new android.app.AlertDialog.Builder(this)
         .setTitle(title)
         .setItems(items.toArray(new String[0]), (d, w) -> {
           String it = items.get(w);
-          if (it.equals("Исправить текст")) editSource(idx, t[1]);
+          if (it.equals("Показать снимок")) openPhoto(idx);
+          else if (it.equals("Исправить текст")) editSource(idx, t[1]);
           else if (it.equals("Исправить перевод")) editTranslation(idx, t[1], t[2]);
           else if (it.equals("Произнести ещё раз")) svc.sayTurn(idx);
           else if (it.equals("Сообщить о переводе")) reportTurn(t[0], t[1], t[2]);
@@ -806,7 +813,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bTurn = new TextView(this); bTurn.setText("•••"); bTurn.setTextSize(18); bTurn.setTextColor(0xFF33507A);
     bTurn.setPadding(24, 2, 8, 8); ruRow.addView(bTurn);
     turnCol.addView(ruRow);
-    View.OnClickListener lastMenu = x -> { if (svc != null && svc.chats != null && svc.chats.size() > 0) turnMenu(svc.chats.size() - 1); };
+    View.OnClickListener lastMenu = x -> {
+      if (svc == null || svc.chats == null || svc.chats.size() == 0) return;
+      int last = svc.chats.size() - 1; String[] t = svc.chats.turn(last);
+      if (t != null && Chats.PHOTO.equals(t[8])) openPhoto(last); else turnMenu(last);   // снимок — сразу перевод поверх фото
+    };
     bTurn.setOnClickListener(lastMenu);
     smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
 
@@ -946,23 +957,113 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (req != REQ_PHOTO || res != RESULT_OK) return;
     final android.net.Uri u = data != null && data.getData() != null ? data.getData() : photoUri;
     if (u == null || svc == null) return;
+    final boolean offline = svc.ocr != null && svc.ocr.ready() && !cloudPhoto;
     new Thread(() -> {
+      if (offline) {                         // офлайн — без спроса: наружу ничего не уходит
+        final java.io.File f = svc.chats == null ? null : savePhoto(u, svc.chats.photos());
+        runOnUiThread(() -> { if (f == null) onLog("📷 снимок не прочитался"); else svc.photoRead(f); });
+        return;
+      }
       final byte[] jpeg = jpegOf(u);
       runOnUiThread(() -> {
         if (jpeg == null) { onLog("📷 снимок не прочитался"); return; }
-        boolean offline = svc.ocr != null && svc.ocr.ready && !cloudPhoto;
-        if (offline) { svc.photoText(jpeg, false); return; }   // офлайн — без спроса, наружу ничего не уходит
-        // Офлайн-распознавания пока нет, значит снимок уйдёт наружу. Спрашиваем каждый раз:
-        // на снимке может быть чужая переписка, а правило проекта — разговоры остаются здесь.
+        // Облако — третья сторона. Спрашиваем каждый раз: на снимке может быть чужая переписка,
+        // а правило проекта — разговоры остаются здесь.
+        boolean noModels = svc.ocr == null || !svc.ocr.ready();
         new android.app.AlertDialog.Builder(this)
             .setTitle("Отправить снимок в облако?")
-            .setMessage("Офлайн-распознавание текста ещё не подключено. Снимок (" + (jpeg.length / 1024) + " КБ) "
-                      + "уйдёт бесплатной модели OpenRouter — это третья сторона. Перевод потом считается здесь, "
-                      + "на устройстве.")
+            .setMessage((noModels ? "Модели офлайн-чтения ещё не скачаны. " : "")
+                      + "Снимок (" + (jpeg.length / 1024) + " КБ) уйдёт бесплатной модели OpenRouter — это третья сторона. "
+                      + "Перевод потом считается здесь, на устройстве.")
             .setPositiveButton("отправить", (d, w) -> svc.photoText(jpeg, true))
             .setNegativeButton("отмена", null).show();
       });
     }, "photo").start();
+  }
+
+  /** Длинная сторона снимка для офлайн-чтения. Замер на наборе вывесок (bench/ocr): при 1000 px
+   *  слов прочитано на 3 пункта меньше, чем при 1280, при 800 — на 10; детектор всё равно
+   *  смотрит на 960, а строки вырезаются из полного снимка. */
+  static final int PHOTO_MAX = 2048;
+
+  /** Снимок для офлайн-чтения — в каталог снимков разговоров: до PHOTO_MAX по длинной стороне,
+   *  повёрнутый по EXIF (камера пишет портрет как пейзаж с пометкой, а BitmapFactory её не
+   *  применяет — распознаватель читает строки только горизонтально), JPEG 90. */
+  java.io.File savePhoto(android.net.Uri u, java.io.File dir) {
+    try {
+      android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+      o.inJustDecodeBounds = true;
+      try (java.io.InputStream in = getContentResolver().openInputStream(u)) { android.graphics.BitmapFactory.decodeStream(in, null, o); }
+      int max = Math.max(o.outWidth, o.outHeight), sz = 1;
+      if (max <= 0) return null;
+      while (max / (sz * 2) >= 1600) sz *= 2;           // грубо — не ниже 1600, точно — дальше матрицей
+      android.graphics.BitmapFactory.Options o2 = new android.graphics.BitmapFactory.Options(); o2.inSampleSize = sz;
+      android.graphics.Bitmap bm;
+      try (java.io.InputStream in = getContentResolver().openInputStream(u)) { bm = android.graphics.BitmapFactory.decodeStream(in, null, o2); }
+      if (bm == null) return null;
+      bm = oriented(bm, exifRotation(u), PHOTO_MAX);
+      dir.mkdirs();
+      java.io.File f = new java.io.File(dir, "p" + System.currentTimeMillis() + ".jpg");
+      try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) { bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out); }
+      bm.recycle();
+      return f;
+    } catch (Throwable t) { return null; }
+  }
+
+  /** Поворот снимка по EXIF, градусы по часовой. */
+  int exifRotation(android.net.Uri u) {
+    try (java.io.InputStream in = getContentResolver().openInputStream(u)) {
+      int o = new android.media.ExifInterface(in).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL);
+      return o == android.media.ExifInterface.ORIENTATION_ROTATE_90 ? 90 : o == android.media.ExifInterface.ORIENTATION_ROTATE_180 ? 180
+           : o == android.media.ExifInterface.ORIENTATION_ROTATE_270 ? 270 : 0;
+    } catch (Throwable t) { return 0; }
+  }
+
+  /** Повернуть и уменьшить до max по длинной стороне одной матрицей; исходник освобождается. */
+  static android.graphics.Bitmap oriented(android.graphics.Bitmap bm, int rot, int max) {
+    float k = Math.min(1f, (float) max / Math.max(bm.getWidth(), bm.getHeight()));
+    if (k >= 1f && rot == 0) return bm;
+    android.graphics.Matrix m = new android.graphics.Matrix(); m.postScale(k, k); m.postRotate(rot);
+    android.graphics.Bitmap r = android.graphics.Bitmap.createBitmap(bm, 0, 0, bm.getWidth(), bm.getHeight(), m, true);
+    if (r != bm) bm.recycle();
+    return r;
+  }
+
+  /** Перевод поверх снимка во весь экран (PhotoView). Касание абзаца — его оригинал и перевод
+   *  текстом внизу, удержание — снимок без перевода, «✕» или «назад» — закрыть. */
+  void openPhoto(int idx) {
+    if (svc == null || svc.chats == null) return;
+    org.json.JSONObject p = svc.chats.photo(idx);
+    if (p == null) return;
+    java.io.File f = new java.io.File(svc.chats.photos(), p.optString("file", ""));
+    final android.graphics.Bitmap bm = f.isFile() ? android.graphics.BitmapFactory.decodeFile(f.getAbsolutePath()) : null;
+    if (bm == null) { onLog("📷 файла снимка нет — осталась только реплика с текстом"); return; }
+    final android.app.Dialog d = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+    FrameLayout root = new FrameLayout(this); root.setBackgroundColor(Color.BLACK);
+    final PhotoView pv = new PhotoView(this, bm, p.optJSONArray("blocks"));
+    root.addView(pv, new FrameLayout.LayoutParams(-1, -1));
+    final String tip = "касание абзаца — его текст здесь · удержание — оригинал · щипок — крупнее";
+    final TextView info = new TextView(this); info.setTextColor(Color.WHITE); info.setTextSize(16);
+    info.setBackgroundColor(0xE0202020); info.setPadding(32, 20, 32, 28); info.setText(tip);
+    info.setMaxLines(8); info.setMovementMethod(new ScrollingMovementMethod());
+    root.addView(info, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+    Button close = new Button(this); close.setText("✕"); close.setTextSize(20);
+    close.setOnClickListener(v -> d.dismiss());
+    root.addView(close, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END));
+    pv.onPick = (src, dst) -> {
+      info.scrollTo(0, 0);
+      info.setText(src == null ? tip : src + "\n→ " + (dst == null || dst.isEmpty() ? "(оставлено как есть: не португальский или служебное слово)" : dst));
+    };
+    d.setContentView(root);
+    d.setOnDismissListener(x -> bm.recycle());
+    d.show();
+  }
+
+  @Override public void onPhoto(long chatId, long at) {
+    if (isFinishing() || isDestroyed() || svc == null || svc.chats == null || svc.chats.current != chatId) return;
+    showLastTurn();
+    java.util.List<String[]> all = svc.chats.all();
+    for (int k = all.size() - 1; k >= 0; k--) if (all.get(k)[6].equals(String.valueOf(at))) { openPhoto(k); break; }
   }
 
   /** Снимок в JPEG разумного размера: 12 Мп ни распознавателю, ни каналу не нужны. */
@@ -979,6 +1080,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       android.graphics.Bitmap bm;
       try (java.io.InputStream in = getContentResolver().openInputStream(u)) { bm = android.graphics.BitmapFactory.decodeStream(in, null, o2); }
       if (bm == null) return null;
+      bm = oriented(bm, exifRotation(u), 1024);          // облаку тоже — портрет с камеры иначе лежит на боку
       java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
       bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, bo);
       bm.recycle();
