@@ -128,7 +128,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
     // «Говорить» принимает любой язык: направление определяется по сказанному.
     // Позицию кнопки ставит удержание, а не нажатость вида: палец, съехавший с кнопки, запись не
-    // останавливает, и кольцо не должно замирать, пока микрофон ещё пишет.
+    // останавливает, и пульс не должен гаснуть, пока микрофон ещё пишет.
     bMic.setOnTouchListener((v, e) -> {
       boolean r = ptt(e, "ru2pt");
       if (r) bMic.setActive(e.getAction() == MotionEvent.ACTION_DOWN);
@@ -851,8 +851,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     histHint.setPadding(4, 6, 4, 2); histHint.setText("нажмите на реплику — поправить, удалить, перенести");
     v.addView(histHint);
     histList = new ListView(this);
-    histList.setDivider(null);
-    v.addView(histList, new LinearLayout.LayoutParams(-1, 0, 1f));
+    histList.setDivider(null); histList.setClipToPadding(false);
+    // Кнопка удержания плавает над репликами, а не занимает свой ряд: место у текста она не
+    // отнимает, и текст за ней виден. Видна только в режиме удержания (mode).
+    FrameLayout histBox = new FrameLayout(this); histBox.setClipChildren(false);   // ореол шире кнопки
+    histBox.addView(histList, new FrameLayout.LayoutParams(-1, -1));
+    bMic = new MicButton(this); bMic.setEnabled(false);
+    bMic.setContentDescription("Удерживайте и говорите — по-португальски или по-русски");
+    FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(dp(128), dp(128), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+    mp.bottomMargin = dp(10);
+    histBox.addView(bMic, mp);
+    v.addView(histBox, new LinearLayout.LayoutParams(-1, 0, 1f));
 
     // Низ экрана — ряд режимов, над ним панель выбранного. Раньше всё лежало вповалку тремя
     // рядами и съедало место у текста, который и есть главное на этом экране. Режим переключает
@@ -896,17 +905,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     return v;
   }
 
-  /** Удержание. Кнопка зовёт на обоих языках — FALAR и ГОВОРИ по кольцу: она принимает тот,
-   *  на котором в неё говорят. */
+  /** Удержание. Сама кнопка плавает над репликами (buildTalk), здесь — подсказка к ней. Кнопка
+   *  зовёт на обоих языках — FALAR и ГОВОРИ по кольцу: принимает тот, на котором в неё говорят. */
   View buildPtt() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setGravity(Gravity.CENTER_HORIZONTAL);
-    bMic = new MicButton(this); bMic.setEnabled(false);
-    bMic.setContentDescription("Удерживайте и говорите — по-португальски или по-русски");
-    v.addView(bMic, new LinearLayout.LayoutParams(dp(128), dp(128)));
     TextView t = new TextView(this); t.setTextSize(11); t.setTextColor(Color.GRAY); t.setGravity(Gravity.CENTER);
-    t.setText("Удерживайте и говорите — направление определится по сказанному");
-    v.addView(t);
-    return v;
+    t.setPadding(0, 6, 0, 6);
+    t.setText("Удерживайте круг и говорите — язык определится по сказанному");
+    return t;
   }
 
   View buildListen() {
@@ -929,6 +934,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     panelInput.setVisibility(m == 0 ? View.VISIBLE : View.GONE);
     panelPtt.setVisibility(m == 1 ? View.VISIBLE : View.GONE);
     panelListen.setVisibility(m == 2 ? View.VISIBLE : View.GONE);
+    // Пока круг над списком, список дотягивается выше него: последняя реплика не остаётся под кругом.
+    boolean micOn = m == 1 && !folded;
+    bMic.setVisibility(micOn ? View.VISIBLE : View.GONE);
+    histList.setPadding(0, 0, 0, micOn ? dp(138) : 0);
     Button[] bs = {bModeInput, bModePtt, bModeListen};
     for (int k = 0; k < bs.length; k++) bs[k].setTypeface(null, k == m ? Typeface.BOLD : Typeface.NORMAL);
     for (int k = 0; k < bs.length; k++) bs[k].setSelected(k == m && !folded);
