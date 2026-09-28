@@ -94,7 +94,10 @@ public class ModelStoreTest {
   }
   static ModelStore store(File d, String man, Srv srv) { return store(d, man, srv, () -> true); }
 
-  public static void main(String[] a) throws Exception {
+  /** Один прогон: счётчики обнуляются, потому что PIT гоняет набор много раз в одной JVM. */
+  public static int run() throws Exception {
+    fails = 0; checks = 0;
+    synchronized (logs) { logs.clear(); }
     Srv srv = new Srv();
     byte[] big = rnd((3 << 20) + 123, 1), mid = rnd((1 << 20) + 7, 2), small = rnd(10_000, 3), opt1 = rnd(200_000, 4), opt2 = rnd(50_000, 5);
     byte[] onnx = rnd(700_000, 6), tokens = "a 1\nb 2\n".getBytes(StandardCharsets.UTF_8), esp = rnd(3000, 7);
@@ -313,6 +316,7 @@ public class ModelStoreTest {
 
     srv.hs.stop(0);
     System.out.println(fails == 0 ? "ModelStore: " + checks + " проверок, все прошли" : "ModelStore: провалов " + fails + " из " + checks);
-    System.exit(fails == 0 ? 0 : 1);
+    return fails;
   }
+  public static void main(String[] a) throws Exception { System.exit(run() == 0 ? 0 : 1); }
 }

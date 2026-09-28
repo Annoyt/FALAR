@@ -14,7 +14,9 @@ public class UpdatesTest {
     catch (RuntimeException e) { fails++; checks++; System.out.println("  ПРОВАЛ: " + what + " — не то исключение: " + e); }
   }
 
-  public static void main(String[] a) {
+  /** Один прогон: счётчики обнуляются, потому что PIT гоняет набор много раз в одной JVM. */
+  public static int run() throws Exception {
+    fails = 0; checks = 0;
     String full = "{\"versionCode\":23,\"versionName\":\"0.22.0\",\"minVersionCode\":0,\"notes\":\"обновления из приложения\","
         + "\"apk\":\"Falar.apk\",\"size\":86830694,\"sha256\":\"" + sha('a') + "\","
         + "\"slim\":{\"apk\":\"Falar-slim.apk\",\"size\":22456703,\"sha256\":\"" + sha('b') + "\"}}";
@@ -45,6 +47,7 @@ public class UpdatesTest {
     ok(Updates.required(22, m), "U5 ниже минимальной — обязательное");
     ok(!Updates.required(23, m), "U5 на минимальной — не обязательное");
     ok(!Updates.required(22, i), "U5 без минимальной — не обязательное");
+    ok(!Updates.required(0, null), "U5 описания нет — не обязательное и не падает");
 
     // строки для человека
     eq(Updates.describe(22, i), "Вышла версия 0.22.0 · 87 МБ", "U6 строка об обновлении");
@@ -52,6 +55,8 @@ public class UpdatesTest {
     eq(Updates.describe(23, i), "Установлена последняя версия", "U6 строка без обновления");
     eq(Updates.describe(22, m), "Вышла версия 0.22.0 · 87 МБ · обновление обязательное", "U6 строка об обязательном");
     eq(Updates.describe(22, null), "", "U6 нет описания — нет строки");
+    Updates.Info nameless = Updates.parse("{\"versionCode\":23,\"apk\":\"Falar.apk\",\"size\":5000000,\"sha256\":\"" + sha('e') + "\"}", false);
+    eq(Updates.describe(22, nameless), "Вышла версия 23 · 5 МБ", "U6 без имени версии — номер сборки");
 
     // мусор не должен выглядеть как «обновлений нет»
     bad("", false, "U7 пустая строка");
@@ -62,12 +67,14 @@ public class UpdatesTest {
     bad("{\"versionCode\":0,\"apk\":\"x.apk\",\"size\":10,\"sha256\":\"" + sha('c') + "\"}", false, "U7 нулевой номер сборки");
     bad("{\"versionCode\":23,\"apk\":\"x.apk\",\"size\":0,\"sha256\":\"" + sha('c') + "\"}", false, "U7 нулевой размер");
     bad("<html>404</html>", false, "U7 страница ошибки вместо файла");
+    bad("{\"versionCode\":23,\"apk\":\"\",\"size\":10,\"sha256\":\"" + sha('c') + "\"}", false, "U7 пустое имя файла");
 
     // облегчённой сборке без своего раздела достаётся общий файл, а не ошибка
     String noSlim = "{\"versionCode\":23,\"versionName\":\"0.22.0\",\"apk\":\"Falar.apk\",\"size\":10,\"sha256\":\"" + sha('d') + "\"}";
     eq(Updates.parse(noSlim, true).apk, "Falar.apk", "U8 нет раздела slim — берётся общий");
 
     System.out.println(fails == 0 ? "Updates: " + checks + " проверок, все прошли" : "Updates: провалов " + fails + " из " + checks);
-    System.exit(fails == 0 ? 0 : 1);
+    return fails;
   }
+  public static void main(String[] a) throws Exception { System.exit(run() == 0 ? 0 : 1); }
 }

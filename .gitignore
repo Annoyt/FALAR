@@ -37,3 +37,5 @@ __pycache__/
 tools/json.jar
 bench/apk/SHA256SUMS.txt
 bench/apk/latest.json
+tools/pit/
+hs_err_pid*.log

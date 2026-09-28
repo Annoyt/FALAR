@@ -12,7 +12,9 @@ public class HeardTest {
   static void caught(String said, List<String> shown, String what) { ok(Heard.fromScreen(said, shown) != null, what + " — должно было отсеяться: «" + said + "»"); }
   static void passed(String said, List<String> shown, String what) { ok(Heard.fromScreen(said, shown) == null, what + " — не должно было отсеяться: «" + said + "»"); }
 
-  public static void main(String[] a) {
+  /** Один прогон: счётчики обнуляются, потому что PIT гоняет набор много раз в одной JVM. */
+  public static int run() throws Exception {
+    fails = 0; checks = 0;
     String p1 = "Você precisa trocar a correia dentada, senão o motor pode quebrar.";
     String p2 = "Bom dia, posso ajudar?";
     String p3 = "Preciso da conta, por favor.";
@@ -59,10 +61,37 @@ public class HeardTest {
     edge.add(0, p1);
     caught(p1, edge, "H21 фраза на самой границе глубины");
 
+    // границы порогов: ровно три слова и ровно 80 %
+    caught("trocar a correia", screen, "H23 ровно три слова из фразы — уже чтение");
+    caught("trocar a correia dentada hoje", screen, "H24 ровно 80 % (4 из 5) — чтение");
+    passed("trocar a correia hoje amanha", screen, "H25 60 % (3 из 5) — не чтение");
+
+    // пустые строки не съедают глубину просмотра
+    List<String> blanks = new ArrayList<>(); blanks.add(p1);
+    for (int k = 0; k < Heard.DEPTH + 3; k++) blanks.add("   ");
+    caught(p1, blanks, "H26 пустые строки новее фразы не считаются в глубину");
+    caught(p1, Arrays.asList(p1, null, ""), "H27 null и пустая новее фразы — пропускаются, а не роняют");
+
+    // эхо собственной озвучки: одно слово тоже эхо, если оно только что прозвучало
+    long end = 1_000_000;
+    ok(Heard.echo("Obrigado", "Obrigado.", end + 1000, end), "E1 одно слово сразу после озвучки — эхо");
+    ok(Heard.echo("preciso da conta", "Preciso da conta, por favor.", end + 3999, end), "E2 кусок фразы в пределах 4 с — эхо");
+    ok(Heard.echo("preciso da conta", "Preciso da conta, por favor.", end + 4000, end), "E3 ровно 4 с — ещё эхо");
+    ok(!Heard.echo("preciso da conta", "Preciso da conta, por favor.", end + 4001, end), "E3 позже 4 с — уже нет");
+    ok(!Heard.echo("quanto custa", "Preciso da conta, por favor.", end + 500, end), "E4 другие слова — не эхо");
+    ok(!Heard.echo("preciso de agua gelada", "Preciso da conta.", end + 500, end), "E5 одно общее слово из четырёх — не эхо");
+    ok(!Heard.echo("preciso da conta agora", "Preciso da conta.", end + 500, end), "E6 три из четырёх, 75 % — не эхо");
+    ok(Heard.echo("preciso da conta agora sim", "Preciso da conta agora.", end + 500, end), "E6 четыре из пяти, 80 % — эхо");
+    ok(!Heard.echo("", "Preciso da conta.", end + 500, end), "E7 пусто — не эхо");
+    ok(!Heard.echo("preciso", null, end + 500, end), "E8 ничего не звучало — не эхо");
+    ok(!Heard.echo("preciso", "preciso", end - 70_000, end), "E9 часы ушли назад больше чем на минуту — не эхо");
+    ok(Heard.echo("preciso", "preciso", end - 60_000, end), "E9 ровно минута до конца озвучки — ещё сверяем");
+
     // возвращается именно та фраза, которую прочли
     eq(Heard.fromScreen("Preciso da conta por favor", screen), p3, "H22 вернулась прочитанная фраза");
 
     System.out.println(fails == 0 ? "Heard: " + checks + " проверок, все прошли" : "Heard: провалов " + fails + " из " + checks);
-    System.exit(fails == 0 ? 0 : 1);
+    return fails;
   }
+  public static void main(String[] a) throws Exception { System.exit(run() == 0 ? 0 : 1); }
 }

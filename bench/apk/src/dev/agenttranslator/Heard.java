@@ -31,8 +31,27 @@ public class Heard {
         .toLowerCase(Locale.ROOT)
         .replaceAll("[^\\p{L}\\p{N}]+", " ").trim();
     List<String> r = new ArrayList<>();
-    if (!n.isEmpty()) for (String w : n.split(" ")) if (!w.isEmpty()) r.add(w);
+    for (String w : n.split(" ")) if (!w.isEmpty()) r.add(w);   // "".split(" ") даёт одну пустую строку — её и отсекает проверка
     return r;
+  }
+
+  /** Секунды после конца собственной озвучки, в которые услышанное сверяется с ней как с эхом. */
+  public static final int ECHO_MS = 4000;
+
+  /** Эхо собственной озвучки: приложение только что проговорило spoken, и микрофон услышал said.
+   *  В отличие от чтения с экрана, здесь не нужен порог в три слова: известно, что именно и когда
+   *  было сказано, поэтому и одно слово, совпавшее с только что произнесённым, — эхо. Без этого
+   *  исправленная короткая фраза, проговорённая вслух, возвращалась обратно переводом на русский. */
+  public static boolean echo(String said, String spoken, long now, long spokenEnd) {
+    // Раньше конца озвучки на минуту и больше — часы ушли назад, сверять не с чем. Пустое spoken
+    // отсекается ниже: words(null) пусто, совпадений нет.
+    if (now < spokenEnd - 60_000 || now - spokenEnd > ECHO_MS) return false;
+    List<String> a = words(said);
+    if (a.isEmpty()) return false;
+    Set<String> w = new HashSet<>(words(spoken));
+    int common = 0;
+    for (String x : a) if (w.contains(x)) common++;
+    return common * 100 >= a.size() * NEED_PERCENT;
   }
 
   /** Фраза из показанных, из слов которой почти целиком состоит сказанное; null — не чтение.
@@ -45,8 +64,7 @@ public class Heard {
       String phrase = shown.get(i);
       if (phrase == null || phrase.trim().isEmpty()) continue;
       seen++;
-      Set<String> w = new HashSet<>(words(phrase));
-      if (w.isEmpty()) continue;
+      Set<String> w = new HashSet<>(words(phrase));      // пустое множество совпадений не даст — отдельная проверка не нужна
       int common = 0;
       for (String x : a) if (w.contains(x)) common++;
       if (common * 100 >= a.size() * NEED_PERCENT) return phrase;
