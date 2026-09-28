@@ -399,6 +399,20 @@ public class ModelStoreTest {
     for (File f : new File[]{rd, ud, bd, cd, md, hd}) del(f);
     srv.hs.stop(0);
 
+    // A: облегчать ли само — без кнопки, по разрешённой сети и с запасом места
+    ModelStore.State as = new ModelStore.State();
+    eq(ModelStore.autoUpgradeBlock(null, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "A1 нет состояния");
+    eq(ModelStore.autoUpgradeBlock(as, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "A1 до проверки не решаем");
+    as.checked = true;
+    eq(ModelStore.autoUpgradeBlock(as, false, false, true, 1L << 40, 0), "облегчать нечего", "A2 замен нет");
+    as.upgrade = 1; as.upgradeBytes = 1000;
+    eq(ModelStore.autoUpgradeBlock(as, true, false, true, 1L << 40, 0), "уже идёт загрузка", "A3 не вмешиваемся в идущую загрузку");
+    eq(ModelStore.autoUpgradeBlock(as, false, true, true, 1L << 40, 0), "в этот запуск уже пробовали", "A4 одна попытка на запуск");
+    eq(ModelStore.autoUpgradeBlock(as, false, false, false, 1L << 40, 0), "нет подходящей сети", "A5 без разрешённой сети — ждём");
+    eq(ModelStore.autoUpgradeBlock(as, false, false, true, 1499, 500), "мало места: нужно ещё 0.0 МБ", "A6 места на байт меньше нужного — нет");
+    eq(ModelStore.autoUpgradeBlock(as, false, false, true, 1500, 500), null, "A6 ровно хватает — качаем");
+    eq(ModelStore.autoUpgradeBlock(as, false, false, true, -1, 500), null, "A7 место неизвестно — не мешаем");
+
     System.out.println(fails == 0 ? "ModelStore: " + checks + " проверок, все прошли" : "ModelStore: провалов " + fails + " из " + checks);
     return fails;
   }

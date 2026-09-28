@@ -190,6 +190,19 @@ public class ModelStore {
     for (Item it : items) if (!it.replaces.isEmpty() && !present(it, 1) && replacedOk(it, 1)) r.add(it);
     return r;
   }
+  /** Облегчать ли само, без кнопки: null — да, иначе почему нет. Качаем только по сети, по которой
+   *  разрешено качать модели (по умолчанию Wi-Fi), и только если места хватает с запасом: пока
+   *  замена идёт, на телефоне лежат и прежние файлы, и новые. Одна попытка на запуск приложения —
+   *  не вышло, остаётся кнопка. */
+  public static String autoUpgradeBlock(State s, boolean running, boolean tried, boolean net, long free, long spare) {
+    if (s == null || !s.checked) return "файлы ещё не проверены";
+    if (s.upgrade == 0) return "облегчать нечего";
+    if (running) return "уже идёт загрузка";
+    if (tried) return "в этот запуск уже пробовали";
+    if (!net) return "нет подходящей сети";
+    if (free >= 0 && free < s.upgradeBytes + spare) return "мало места: нужно ещё " + mb(s.upgradeBytes + spare - free) + " МБ";
+    return null;
+  }
   /** Удалить файлы, заменённые уже скачанными и сверенными. Прежние трогаются, только когда новый
    *  на месте и хэш сошёлся: иначе приложению не с чем было бы переводить. Возвращает освобождённые байты. */
   public long cleanObsolete() {

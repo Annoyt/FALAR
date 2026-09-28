@@ -2,4 +2,5 @@
 <!-- Имена видов, по которым стенд находит их на экране (uiautomator: resource-id="app.falar:id/…"). -->
 <resources>
   <item name="hint" type="id"/>
+  <item name="busy" type="id"/>
 </resources>

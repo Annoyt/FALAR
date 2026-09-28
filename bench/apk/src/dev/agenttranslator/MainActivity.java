@@ -750,6 +750,16 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Касание строки с названием — «Память разговора»: что уточнитель знает о разговоре.
     hint.setOnClickListener(x -> memoDialog());
     hint.setOnLongClickListener(x -> { memoDialog(); return true; });
+    // Полоса «что приложение делает сейчас»: распознаёт, переводит, поднимает уточнитель, уточняет,
+    // пересматривает в облаке, облегчает перевод. Место под неё держится всегда (INVISIBLE, а не
+    // GONE): иначе крупный текст подпрыгивал бы на каждой реплике.
+    busyRow = new LinearLayout(this); busyRow.setOrientation(LinearLayout.HORIZONTAL); busyRow.setGravity(Gravity.CENTER_VERTICAL);
+    busyRow.setId(app.falar.R.id.busy);
+    busyBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); busyBar.setIndeterminate(true);
+    busyRow.addView(busyBar, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+    busyLbl = new TextView(this); busyLbl.setTextSize(12); busyLbl.setTextColor(0xFF33507A); busyLbl.setPadding(16, 0, 0, 0); busyLbl.setSingleLine(true);
+    busyRow.addView(busyLbl, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+    busyRow.setVisibility(View.INVISIBLE); v.addView(busyRow);
 
     // Крупный текст — контейнер с переносом по словам: под каждым словом транскрипция для чтения
     // вслух. Касание прячет и возвращает её, долгое нажатие открывает меню правки реплики.
@@ -1681,6 +1691,16 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     setHint((srcIsPt ? "собеседник" : "вы") + (refined ? " · уточнено" : ""));
     smallRu.setText(ru);
     refreshBetter();
+  }
+  LinearLayout busyRow; ProgressBar busyBar; TextView busyLbl;
+  @Override public void onBusy(String what, int done, int total) {
+    if (busyRow == null) return;
+    if (what == null) { busyRow.setVisibility(View.INVISIBLE); return; }
+    busyRow.setVisibility(View.VISIBLE);
+    busyBar.setIndeterminate(total <= 0);
+    if (total > 0) { busyBar.setMax(total); busyBar.setProgress(done); }
+    // «уточняю перевод · 1 из 2»: номер той, что в работе, а не уже сделанных. У процентов свой текст.
+    busyLbl.setText(total > 0 && !what.contains("%") ? what + " · " + Math.min(done + 1, total) + " из " + total : what);
   }
   @Override protected void onDestroy() { unbindSvc(); super.onDestroy(); }
 }
