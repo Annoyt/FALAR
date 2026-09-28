@@ -382,7 +382,9 @@ public final class OcrCore {
    *  Строка: наклон до 15°, середина следующей рамки не дальше полувысоты от средней линии
    *  предыдущей, промежуток до 1,2 высоты (дальше — соседняя колонка). Блок: строки одной
    *  высоты (в 1,5 раза; в 2,5 — после служебного слова), перекрытые по горизонтали, с шагом до
-   *  1,8 высоты. Блоки сверху вниз, стоящие рядом по вертикали — слева направо. */
+   *  1,8 высоты. Блоки сверху вниз, стоящие рядом по вертикали — слева направо. Цифры штрихкода
+   *  в строку с текстом не встают: на этикетке они стояли вровень с последней строкой соседней
+   *  колонки и уезжали в перевод посреди фразы («feche a 7 896025804067 tampa»). */
   public static List<List<Row>> layout(List<Item> in) {
     List<Item> items = new ArrayList<>();
     for (Item it : in) if (!it.t.isEmpty()) items.add(it);
@@ -392,7 +394,7 @@ public final class OcrCore {
       Row best = null; double bd = 0;
       for (Row row : rows) {
         Item a = row.items.get(row.items.size() - 1);
-        if (Math.abs(a.ux * it.ux + a.uy * it.uy) < 0.966) continue;
+        if (Math.abs(a.ux * it.ux + a.uy * it.uy) < 0.966 || barcode(a.t) != barcode(it.t)) continue;
         double hmax = Math.max(a.h, it.h), hmin = Math.min(a.h, it.h);
         if (hmax > 2 * hmin) continue;
         double vx = it.cx - a.cx, vy = it.cy - a.cy, perp = Math.abs(a.ux * vy - a.uy * vx);
@@ -437,10 +439,19 @@ public final class OcrCore {
     return new double[]{x0, x1, y0, y1};
   }
 
+  static final Pattern LETTER = Pattern.compile("\\p{L}"), DIGITS8 = Pattern.compile("\\d(?:[ '’\"]?\\d){7,}"),
+      DASH_END = Pattern.compile("\\s[-–—]$");
+  /** Цифры под штрихкодом: восемь и больше цифр подряд и ни одной буквы. Между группами цифр
+   *  распознаватель ставит пробел или кавычку («"896025'804067"» на смазанном снимке). Телефон
+   *  «3242-3300» и цены под это не подходят. */
+  static boolean barcode(String t) { return !LETTER.matcher(t).find() && DIGITS8.matcher(t).find(); }
+  static int count(String s, char c) { int n = 0; for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++; return n; }
+
   /** Строки блока → фразы для перевода. Склеиваем, только когда обрыв очевиден: перенос со
-   *  знаком «-», запятая в конце, строка кончается служебным словом («… ESTREITA E») или
-   *  следующая начинается со строчной. Иначе строка — отдельная фраза: у вывески строки чаще
-   *  самостоятельны (часы работы, цены, список направлений), и склейка их портила бы. */
+   *  знаком «-», запятая в конце, строка кончается служебным словом («… ESTREITA E»), открытой
+   *  скобкой или тире («(5°C - / 10°C)») или следующая начинается со строчной. Иначе строка —
+   *  отдельная фраза: у вывески строки чаще самостоятельны (часы работы, цены, список
+   *  направлений), и склейка их портила бы. Цифры штрихкода не склеиваются ни с чем. */
   public static List<Para> paragraphs(List<Row> block) {
     List<String> texts = new ArrayList<>(); List<List<Row>> rows = new ArrayList<>();
     for (Row r : block) {
@@ -450,8 +461,9 @@ public final class OcrCore {
         if (prev.endsWith("-") && prev.length() > 1 && Character.isLetter(prev.charAt(prev.length() - 2))) {
           texts.set(k, prev.substring(0, prev.length() - 1) + t); rows.get(k).add(r); continue;
         }
-        if (!END.matcher(prev).find() && (prev.endsWith(",") || CONT.contains(lastWord(prev))
-            || Character.isLowerCase(t.charAt(0)))) {          // текст строки не пустой: пустые рамки отсеяны в layout
+        if (!barcode(prev) && !barcode(t) && !END.matcher(prev).find() && (prev.endsWith(",") || CONT.contains(lastWord(prev))
+            || Character.isLowerCase(t.charAt(0))            // текст строки не пустой: пустые рамки отсеяны в layout
+            || count(prev, '(') > count(prev, ')') || DASH_END.matcher(prev).find())) {
           texts.set(k, prev + " " + t); rows.get(k).add(r); continue;
         }
       }

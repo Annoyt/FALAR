@@ -17,6 +17,8 @@
 .venv/bin/python tools/ocr_eval.py --only "v6 small det + v5 rec · 960" --save bench/ocr/runs/ref
 .venv/bin/python tools/ocr_golden.py                                # данные для OcrCoreTest
 .venv/bin/python tools/ocr_overlay.py bench/ocr/photos/p03.jpg      # макет перевода поверх фото
+.venv/bin/python tools/ocr_words.py eval                            # правка слов: до и после, каждая правка
+.venv/bin/python tools/ocr_words.py golden                          # данные для OcrWordsTest
 ```
 
 Модели-кандидаты лежат в `models/ocr-cand/` (не в git; выбранная пара — в `models/ocr/`).

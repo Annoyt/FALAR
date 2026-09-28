@@ -144,6 +144,23 @@ public class OcrCoreTest {
     List<String> pt = new ArrayList<>(); for (OcrCore.Para pp : OcrCore.paragraphs(rows)) pt.add(pp.text);
     ok(pt.equals(Arrays.asList("NÃO SÃO PERMITIDOS JOGOS COM BOLAS E APARELHOS.", "Foi inaugurada em 1867 para atender", "Adulto R$ 25,00", "Criança R$ 12,50", "Das 9:00, às 16:00")),
         "L8 перенос со знаком «-» склеивается без пробела, строчная буква и запятая продолжают фразу, цены остаются отдельно: " + pt);
+    // этикетка соуса: штрихкод слева стоит вровень с последней строкой колонки справа
+    List<OcrCore.Item> label = new ArrayList<>(Arrays.asList(
+        item(300, 10, 560, 34, "conservar em geladeira (5°C -"), item(300, 40, 560, 64, "10°C) e consumir em"),
+        item(300, 70, 560, 94, "30 dias. Após o uso, feche a"), item(60, 100, 290, 124, "7 896025 804067"), item(300, 100, 380, 124, "tampa.")));
+    List<List<OcrCore.Row>> lb = OcrCore.layout(label);
+    ok(texts(lb).contains("7 896025 804067") && texts(lb).contains("tampa."), "L10 цифры штрихкода не встают в строку с текстом рядом: " + texts(lb));
+    ok(paras(lb).contains("conservar em geladeira (5°C - 10°C) e consumir em 30 dias. Após o uso, feche a tampa."),
+        "L10 открытая скобка и тире в конце строки продолжают фразу, штрихкод в неё не попадает: " + paras(lb));
+    ok(OcrCore.barcode("7 896025804067\"") && OcrCore.barcode("78960258") && OcrCore.barcode("\"896025'804067\"") && !OcrCore.barcode("7896025") && !OcrCore.barcode("3242-3300")
+        && !OcrCore.barcode("Lote 78960258") && !OcrCore.barcode("(11) 3242 330"), "L11 штрихкод — от восьми цифр подряд и без букв; телефон и лот — нет");
+    rows.clear();
+    for (String t : new String[]{"feche a", "7 896025 804067", "tampa.", "Entre 5 -", "10 graus", "Preço (sem", "taxa) R$ 5"}) {
+      OcrCore.Row r = new OcrCore.Row(); r.items.add(item(0, 0, 10, 10, t)); r.close(); rows.add(r);
+    }
+    pt.clear(); for (OcrCore.Para pp : OcrCore.paragraphs(rows)) pt.add(pp.text);
+    ok(pt.equals(Arrays.asList("feche a", "7 896025 804067", "tampa.", "Entre 5 - 10 graus", "Preço (sem taxa) R$ 5")),
+        "L12 штрихкод не склеивается ни со служебным словом до, ни со строчной после; тире и скобка склеивают: " + pt);
     OcrCore.Para para = OcrCore.paragraphs(OcrCore.layout(its).get(0)).get(0);
     double[] f = para.frame();
     ok(near(f[0], 105, 1e-9) && near(f[1], 20, 1e-9) && near(f[4], 190, 1e-9) && near(f[5], 20, 1e-9), "L9 прямоугольник абзаца — по его рамкам");

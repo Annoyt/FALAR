@@ -8,6 +8,7 @@
 #   bash bench/apk/mutate.sh Cloud           # порядок облачных моделей (сеть и файл ключа исключены)
 #   bash bench/apk/mutate.sh OcrCore         # чтение снимков; сверка с эталоном выключена ради скорости,
 #   GOLDEN=bench/ocr/runs/golden bash …      # с ней — медленнее, но и места, которые видит только эталон
+#   bash bench/apk/mutate.sh OcrWords        # правка слов снимка (маленький словарь, настоящий и эталон)
 # Отчёт: bench/apk/out/pit/index.html. Нужные jar-файлы — в tools/pit (не в git), качаются сами.
 set -e
 A=$(cd "$(dirname "$0")" && pwd); R=$A/../..; P=$R/tools/pit; J=$R/tools/json.jar
@@ -27,7 +28,7 @@ TARGETS=$(echo "$T" | tr ',' '\n' | sed 's/^/dev.agenttranslator./' | paste -sd,
 OUT=$A/out/pit; C=$A/out/pit-classes; rm -rf "$C"; mkdir -p "$C" "$OUT"
 JU=$P/junit-platform-console-standalone-1.11.4.jar
 # Компилируем все наборы: обёртка SuitesTest ссылается на каждый. Ограничиваем только то, что мутируется.
-SRC=""; for t in Brief Heard Updates ModelStore Chats Memo WordList Pressure OcrCore Modules; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
+SRC=""; for t in Brief Heard Updates ModelStore Chats Memo WordList Pressure OcrCore OcrWords Modules; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
 SRC="$SRC $A/src/dev/agenttranslator/Phrasebook.java $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java $A/test/TextRulesTest.java"
 SRC="$SRC $A/src/dev/agenttranslator/Cloud.java $A/test/CloudTest.java"      # ради Cloud.Review и порядка моделей; заглушки Android — только для сборки
 javac --release 11 -nowarn -g -cp "$J:$JU:$R/tools/android.jar" -d "$C" $SRC $A/test/SuitesTest.java
@@ -36,6 +37,6 @@ java -cp "$CP" org.pitest.mutationtest.commandline.MutationCoverageReport \
   --classPath "$C,$J,$JU" --reportDir "$OUT" --targetClasses "$TARGETS" \
   --targetTests dev.agenttranslator.SuitesTest --sourceDirs "$A/src" \
   --outputFormats HTML,CSV --timestampedReports=false --threads 4 --timeoutConst 8000 \
-  --jvmArgs "-Dfalar.common=$R/data/common_words.txt,-Dfalar.golden=${GOLDEN:-/нет}" \
+  --jvmArgs "-Dfalar.common=$R/data/common_words.txt,-Dfalar.ocrwords=$R/data/ocr_words_pt.txt,-Dfalar.golden=${GOLDEN:-/нет}" \
   --excludedMethods "sweep,call,fetchAll,configure,refreshCaps,save,title,better,review,image,keyId,keyTail,Cloud" \
   --mutators STRONGER 2>&1 | grep -E "^>>|Generated|Killed|mutations|test strength|Line Coverage|ERROR|Exception" | grep -v "^\s*$" || true

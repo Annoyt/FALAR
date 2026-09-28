@@ -280,7 +280,10 @@ def layout(boxes, texts, min_score=0.5):
     Сравнение по средней линии, а не по вертикальному охвату: на снятой под углом вывеске охват
     длинной строки задевает соседние, и строки склеивались («Segunda-Quinta … Domingos … Sabados»).
     Блок: строки одной высоты (в 1,5 раза), перекрытые по горизонтали, с шагом до 1,8 высоты.
-    Блоки — сверху вниз, а стоящие рядом по вертикали — слева направо (колонки)."""
+    Блоки — сверху вниз, а стоящие рядом по вертикали — слева направо (колонки).
+    Цифры штрихкода (barcode) в строку с текстом не встают: на этикетке соуса «7 896025 804067»
+    стояли вровень с последней строкой колонки справа и уезжали в перевод посреди фразы
+    («feche a 7 896025804067 tampa»)."""
     items = []
     for b, (t, s) in zip(boxes, texts):
         if s < min_score or not t.strip():
@@ -293,7 +296,7 @@ def layout(boxes, texts, min_score=0.5):
         best, bd = None, None
         for row in rows:
             a = row[-1]
-            if abs(float(np.dot(a['u'], it['u']))) < 0.966:
+            if abs(float(np.dot(a['u'], it['u']))) < 0.966 or barcode(a['t']) != barcode(it['t']):
                 continue
             hmax, hmin = max(a['h'], it['h']), min(a['h'], it['h'])
             if hmax > 2 * hmin:
@@ -356,11 +359,19 @@ def layout(boxes, texts, min_score=0.5):
     return blocks
 
 
+def barcode(t):
+    """Цифры под штрихкодом: восемь и больше цифр подряд и ни одной буквы. Между группами цифр
+    распознаватель ставит пробел или кавычку («"896025'804067"» на смазанном снимке). Телефон
+    «3242-3300» и цены под это не подходят."""
+    return not re.search(r'[^\W\d_]', t) and bool(re.search(r'\d(?:[ \'’"]?\d){7,}', t))
+
+
 def paragraphs(block):
     """Строки блока -> фразы для перевода. Склеиваем, только когда обрыв очевиден: перенос со
-    знаком «-», запятая в конце, строка кончается служебным словом («… ESTREITA E») или
-    следующая начинается со строчной. Иначе строка — отдельная фраза: у вывески строки чаще
-    самостоятельны (часы работы, цены, список направлений), и склейка их портила бы."""
+    знаком «-», запятая в конце, строка кончается служебным словом («… ESTREITA E»), открытой
+    скобкой или тире («(5°C - / 10°C)») или следующая начинается со строчной. Иначе строка —
+    отдельная фраза: у вывески строки чаще самостоятельны (часы работы, цены, список
+    направлений), и склейка их портила бы. Цифры штрихкода не склеиваются ни с чем."""
     out = []                                   # [(текст, [строки блока])]
     for r in block:
         t = r['text']
@@ -369,7 +380,11 @@ def paragraphs(block):
             last = re.sub(r'[^\w]', '', prev.split()[-1].lower()) if prev.split() else ''
             if prev.endswith('-') and len(prev) > 1 and prev[-2].isalpha():
                 out[-1] = (prev[:-1] + t, rows + [r]); continue
-            if not re.search(r'[.!?:;]$', prev) and (prev.endswith(',') or last in CONT or t[:1].islower()):
+            if barcode(prev) or barcode(t):
+                pass
+            elif not re.search(r'[.!?:;]$', prev) and (prev.endswith(',') or last in CONT or t[:1].islower()
+                                                     or prev.count('(') > prev.count(')')
+                                                     or re.search(r'\s[-–—]$', prev)):
                 out[-1] = (prev + ' ' + t, rows + [r]); continue
         out.append((t, [r]))
     return out

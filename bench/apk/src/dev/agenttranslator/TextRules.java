@@ -34,12 +34,28 @@ public class TextRules {
     P("\\b\\d{1,2}:\\d{2}\\b"),
     P("\\b\\d+(?:[.,]\\d+)?\\b") };
   static final String[] KIND = {"addr", "money", "time", "num"};
+  /** Только текст вывески (снимок): номер дома «nº 123» — переводчик читал «Nº» как «Нет»;
+   *  температура «5°C» — знака градуса нет в словаре переводчика, выходило «5 ⁇ C»; цифры через
+   *  пробел, дефис или дробь — одним куском («7 896025 804067», «3242-3300», «10/05/2026»): два
+   *  плейсхолдера подряд переводчик переписывал кириллицей («СК3 СК4») или выдумывал вокруг них
+   *  «Модель:». Речь это не трогает: там цифры через пробел — разные числа. */
+  static final Pattern[] PT_SIGN = { PT[0], PT[1], PT[2],
+    P("(?i)\\bn\\.?[º°]\\s?\\d+"),
+    P("\\b\\d+(?:[.,]\\d+)?\\s?[º°]\\s?[CF]?(?!\\p{L})"),
+    P("\\b\\d+(?:[.,]\\d+)?(?:[ /-]\\d+(?:[.,]\\d+)?)+\\b"),
+    PT[3] };
+  static final String[] KIND_SIGN = {"addr", "money", "time", "no", "num", "num", "num"};
   /** Плейсхолдер слота. «N1» не годится: замер на самой модели показал, что в ru→pt она съедает
    *  букву и оставляет «1» (выживает 1 раз из 6), из-за чего слот теряется и уезжает в конец фразы.
    *  «XQ1» выживает 6 из 6 в обе стороны. Проверка: tools/placeholder_probe.py */
   static String ph(int i) { return "XQ" + i; }
   // Чистим и старый формат «N1»: он остался внутри записей learned.json, накопленных до смены.
-  static final Pattern PH_LEFT = P("\\b(?:XQ|N)\\d+\\b");
+  // И «СК1» — плейсхолдер, который переводчик переписал кириллицей (см. lookalike).
+  static final Pattern PH_LEFT = P("\\b(?:XQ|N|[XХ][QК]|СК)\\d+\\b");
+  /** Плейсхолдер, переписанный переводчиком кириллицей: рядом с другим плейсхолдером или знаком
+   *  градуса «XQ3» выходит как «СК3» («feche a XQ3 XQ4 tampa» → «закройте СК3 СК4 крышка»), и
+   *  число уезжало в конец фразы, а «СК3» оставалось в переводе. */
+  static Pattern lookalike(String ph) { return P("(?<![\\p{L}\\p{N}])(?:[XХ][QК]|[СC][КK])" + ph.substring(2) + "(?!\\p{N})"); }
   /** Плейсхолдер только старого формата «N1» — признак записи, устаревшей после смены формата.
    *  Раньше проверка ловила и нынешний «XQ1», и выученные записи с числом в переводе выбрасывались
    *  как устаревшие при каждом запуске: `record` пишет маскированный текст, то есть с плейсхолдером,
@@ -144,25 +160,27 @@ public class TextRules {
   public static Masked mask(String text, String lang) { return mask(text, lang, new ArrayList<String[]>()); }
   /** Нумерация слотов продолжается с уже занятых — список своих слов проходит раньше и занимает первые. */
   public static Masked mask(String text, String lang, List<String[]> existing) { return mask(text, lang, existing, false); }
-  /** strictNames — название улицы только с заглавной. Для текста вывески: у неё регистр осмыслен
+  /** sign — текст вывески (снимок). Название улицы только с заглавной: у вывески регистр осмыслен
    *  после unshoutSign (обычные слова строчные, имена с заглавной), и без этого «RODOVIA ESTREITA E
    *  EXTREMAMENTE SINUOSA» уходило в перевод как «Естрейта и чрезвычайно извилистая дорога» — прилагательное
-   *  маскировалось как название дороги. Для речи заглавная не требуется (см. PT[0]). */
-  public static Masked mask(String text, String lang, List<String[]> existing, boolean strictNames) {
-    Pattern[] ps = lang.equals("pt") ? PT : RU; String t = numWordsToDigits(text, lang); List<String[]> slots = new ArrayList<>(existing);
+   *  маскировалось как название дороги. Для речи заглавная не требуется (см. PT[0]). И маски вывески
+   *  (PT_SIGN): номер дома, температура, цифры одним куском. */
+  public static Masked mask(String text, String lang, List<String[]> existing, boolean sign) {
+    Pattern[] ps = lang.equals("pt") ? (sign ? PT_SIGN : PT) : RU; String[] kinds = ps == PT_SIGN ? KIND_SIGN : KIND;
+    String t = numWordsToDigits(text, lang); List<String[]> slots = new ArrayList<>(existing);
     for (int k = 0; k < ps.length; k++) {
       Matcher m = ps[k].matcher(t); StringBuffer sb = new StringBuffer();
       while (m.find()) {
         String ph = ph(slots.size() + 1);
-        if (KIND[k].equals("addr") && m.groupCount() >= 1 && m.group(1) != null) {
+        if (kinds[k].equals("addr") && m.groupCount() >= 1 && m.group(1) != null) {
           String name = addrName(m.group(1));
-          if (name.isEmpty() || (strictNames && !properName(name))) { m.appendReplacement(sb, Matcher.quoteReplacement(m.group())); continue; }
+          if (name.isEmpty() || (sign && !properName(name))) { m.appendReplacement(sb, Matcher.quoteReplacement(m.group())); continue; }
           String head = m.group().substring(0, m.start(1) - m.start());
           String tail = m.group(1).substring(name.length());          // то, что отрезали, возвращаем в текст
-          slots.add(new String[]{ph, name, KIND[k]});
+          slots.add(new String[]{ph, name, kinds[k]});
           m.appendReplacement(sb, Matcher.quoteReplacement(head + ph + tail));
         } else {
-          slots.add(new String[]{ph, m.group(), KIND[k]});
+          slots.add(new String[]{ph, m.group(), kinds[k]});
           m.appendReplacement(sb, Matcher.quoteReplacement(ph));
         }
       }
@@ -175,7 +193,9 @@ public class TextRules {
     String t = translated; List<String> missing = new ArrayList<>();
     for (String[] s : m.slots) {
       String r = render(s[1], s[2], tgt); Pattern p = P("\\b" + s[0] + "\\b");
-      if (p.matcher(t).find()) t = p.matcher(t).replaceFirst(Matcher.quoteReplacement(r)); else missing.add(r);
+      if (p.matcher(t).find()) { t = p.matcher(t).replaceFirst(Matcher.quoteReplacement(r)); continue; }
+      Matcher q = s[0].startsWith("XQ") ? lookalike(s[0]).matcher(t) : null;
+      if (q != null && q.find()) t = q.replaceFirst(Matcher.quoteReplacement(r)); else missing.add(r);
     }
     t = PH_LEFT.matcher(t).replaceAll("").replaceAll("\\s{2,}", " ").trim();
     for (String r : missing) t = t + " " + r;
@@ -184,6 +204,7 @@ public class TextRules {
   static String render(String orig, String kind, String tgt) {
     if (kind.startsWith("name:")) return kind.substring(5);   // имя из списка своих слов — уже на нужном языке
     if (kind.equals("addr")) return Translit.address(orig, tgt);  // адрес не переводим, но пишем алфавитом цели
+    if (kind.equals("no")) { Matcher d = P("\\d+").matcher(orig); return tgt.equals("ru") && d.find() ? "№ " + d.group() : orig; }
     if (!kind.equals("money")) return orig;
     Matcher n = P("\\d+(?:[.,]\\d+)?").matcher(orig); if (!n.find()) return orig; String num = n.group();
     if (tgt.equals("ru")) { if (orig.contains("R$") || orig.matches(".*rea(l|is).*")) return num + " реалов"; if (orig.contains("centavos")) return num + " сентаво"; return orig; }

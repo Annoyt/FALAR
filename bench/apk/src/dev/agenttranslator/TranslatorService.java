@@ -316,6 +316,9 @@ public class TranslatorService extends Service {
             String base = f.getName().substring(0, f.getName().length() - 4);
             StringBuilder pr = new StringBuilder(); for (OcrCore.Para p : pg.paras) pr.append(pr.length() > 0 ? "\n" : "").append(p.text);
             write(new File(f.getParentFile(), base + ".txt"), pg.lines); write(new File(f.getParentFile(), base + ".para"), pr.toString());
+            OcrWords ow = ocrWords();                                     // .fixed — строки после правки слов (сверка с tools/ocr_words.py)
+            if (ow != null) { StringBuilder fx = new StringBuilder(); for (String l : pg.lines.split("\n", -1)) fx.append(fx.length() > 0 ? "\n" : "").append(ow.fix(l, null));
+              write(new File(f.getParentFile(), base + ".fixed"), fx.toString()); }
             all.add(ms); det.add(pg.detMs); rec.add(pg.recMs); load.add(pg.loadMs);
             tsv("ocrbench", base, "" + w, "" + h, "" + pg.boxes, "" + pg.loadMs, "" + pg.detMs, "" + pg.recMs, "" + pg.layoutMs, "" + ms);
           } catch (Throwable e) { log("🧪 снимки: " + f.getName() + " — " + e); }
@@ -323,6 +326,22 @@ public class TranslatorService extends Service {
         log("🧪 снимки: " + all.size() + " · медиана " + med(all) + " мс (модели " + med(load) + ", детектор " + med(det) + ", распознаватель " + med(rec)
             + ") · наибольшее " + (all.isEmpty() ? 0 : Collections.max(all)) + " мс · резидентно " + rss0 + " → до " + rssMax + " МБ → " + path);
       }, "ocrbench").start(); }
+    // Стенд: снимок, лежащий на телефоне, — чтение и перевод без реплики: абзацы «было → стало» в
+    // журнал и <файл>.json рядом со снимком. Для сравнения перевода до и после правки, не трогая разговоры.
+    if (i != null && i.hasExtra("photodry")) { final File f = new File(i.getStringExtra("photodry"));
+      new Thread(() -> {
+        if (ocr == null || !ocr.ready()) { log("🧪 снимок: моделей чтения нет (models/ocr)"); return; }
+        long t0 = System.nanoTime();
+        try {
+          PhotoDone d = photoTranslate(f);
+          if (d == null) return;
+          long ms = (System.nanoTime() - t0) / 1_000_000; photoLog(d, ms);
+          for (int k = 0; k < d.blocks.length(); k++) { org.json.JSONObject b = d.blocks.getJSONObject(k);
+            log("🧪 " + b.getString("src") + " ⇒ " + b.optString("dst", "(как есть)")); }
+          write(new File(f.getPath() + ".json"), new org.json.JSONObject().put("w", d.w).put("h", d.h).put("ms", ms).put("blocks", d.blocks).toString(1));
+        } catch (Throwable e) { log("🧪 снимок: " + e); }
+        finally { busy("live", null, 0, 0); }
+      }, "photodry").start(); }
     // Стенд: снимок, лежащий на телефоне, — весь путь, как после камеры: чтение, перевод, наложение.
     if (i != null && i.hasExtra("photofile") && chats != null && !mod(Modules.OCR)) log("📷 стенд: модуль «Чтение снимков» выключен — снимок не читается");
     else if (i != null && i.hasExtra("photofile") && chats != null) {
@@ -2209,11 +2228,12 @@ public class TranslatorService extends Service {
     worker.submit(() -> processText("pt2ru", t, true, false, 0, 0, "набрано"));
   }
 
-  /** Снимок с текстом — офлайн: распознать (Ocr), перевести абзацами тем же путём, что речь
-   *  (словарь, свои слова, маски), сохранить реплику «📷» со снимком и прямоугольниками абзацев
-   *  и показать перевод поверх фото (PhotoView). Без озвучки: снимок читают глазами — у меню или
-   *  таблички это десятки строк (решение владельца 28.09). В выученное не копится (learn=false).
-   *  jpg — уже повёрнутый по EXIF и уменьшенный до 2048 px снимок в каталоге снимков разговоров. */
+  /** Снимок с текстом — офлайн: распознать (Ocr), поправить слова (OcrWords), перевести абзацами
+   *  тем же путём, что речь (словарь, свои слова, маски), сохранить реплику «📷» со снимком и
+   *  прямоугольниками абзацев и показать перевод поверх фото (PhotoView). Без озвучки: снимок читают
+   *  глазами — у меню или таблички это десятки строк (решение владельца 28.09). В выученное не
+   *  копится (learn=false). jpg — уже повёрнутый по EXIF и уменьшенный до 2048 px снимок в каталоге
+   *  снимков разговоров. */
   public void photoRead(final File jpg) {
     if (jpg == null || !jpg.exists() || ocr == null || !ocr.ready() || !mod(Modules.OCR)) return;
     final long chatId = chats == null ? 0 : chats.current;
@@ -2221,51 +2241,94 @@ public class TranslatorService extends Service {
       long t0 = System.nanoTime();
       busy("live", "читаю снимок…", 0, 0);
       try {
-        android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
-        o.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888;
-        android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeFile(jpg.getAbsolutePath(), o);
-        if (bm == null) { log("📷 снимок не прочитался"); jpg.delete(); return; }
-        int w = bm.getWidth(), h = bm.getHeight(); int[] px = new int[w * h];
-        bm.getPixels(px, 0, w, 0, 0, w, h); bm.recycle();
-        Ocr.Page pg = ocr.read(px, w, h); px = null;
-        long tOcr = (System.nanoTime() - t0) / 1_000_000;
-        String how = "детектор " + pg.detMs + " мс, распознаватель " + pg.recMs + " мс, модели " + pg.loadMs + " мс, рамок " + pg.boxes;
-        if (pg.paras.isEmpty()) {
-          log("📷 текста не нашлось за " + tOcr + " мс (" + w + "×" + h + "; " + how + ")"); hint("📷 на снимке не нашлось текста");
-          tsv("ocr", "" + w, "" + h, "" + pg.boxes, "0", "0", "" + pg.loadMs, "" + pg.detMs, "" + pg.recMs, "" + tOcr);
-          jpg.delete(); return;
-        }
-        org.json.JSONArray blocks = new org.json.JSONArray(); StringBuilder src = new StringBuilder(), dst = new StringBuilder();
-        int done = 0, skipped = 0;
-        for (int i = 0; i < pg.paras.size(); i++) {
-          busy("live", "перевожу снимок…", i, pg.paras.size());
-          OcrCore.Para p = pg.paras.get(i);
-          String ru = null, why = photoSkip(p.text);
-          if (why == null) {
-            String sign = TextRules.unshoutSign(p.text, wd -> words != null && words.isCommon(wd, "pt"));
-            Once r = translateOnce("pt2ru", sign, false, false, true);
-            if (r.skip == null && r.mt != null && !r.mt.trim().isEmpty()) ru = r.mt.trim();
-          }
-          else skipped++;
-          double[] f = p.frame(); org.json.JSONArray fa = new org.json.JSONArray();
-          for (double v : f) fa.put(Math.round(v * 1000) / 1000.0);
-          org.json.JSONObject b = new org.json.JSONObject().put("f", fa).put("src", p.text);
-          if (ru != null) { b.put("dst", ru); done++; dst.append(dst.length() > 0 ? "\n" : "").append(ru); }
-          blocks.put(b); src.append(src.length() > 0 ? "\n" : "").append(p.text);
-        }
+        PhotoDone d = photoTranslate(jpg);
+        if (d == null) { jpg.delete(); return; }
         long at = System.currentTimeMillis();
-        org.json.JSONObject photo = new org.json.JSONObject().put("file", jpg.getName()).put("w", w).put("h", h).put("blocks", blocks);
-        boolean saved = chats != null && chats.addTurn(chatId, Chats.turn("pt2ru", src.toString(), dst.toString(), null, at).put("photo", photo));
+        org.json.JSONObject photo = new org.json.JSONObject().put("file", jpg.getName()).put("w", d.w).put("h", d.h).put("blocks", d.blocks);
+        boolean saved = chats != null && chats.addTurn(chatId, Chats.turn("pt2ru", d.src.toString(), d.dst.toString(), null, at).put("photo", photo));
         long ms = (System.nanoTime() - t0) / 1_000_000;
-        log("📷 OCR за " + tOcr + " мс, с переводом " + ms + " мс (" + w + "×" + h + "; " + how + "): абзацев " + pg.paras.size()
-            + ", переведено " + done + (skipped > 0 ? ", оставлено как есть " + skipped : "") + " · " + pg.lines.replace('\n', ' '));
-        tsv("ocr", "" + w, "" + h, "" + pg.boxes, "" + pg.paras.size(), "" + done, "" + pg.loadMs, "" + pg.detMs, "" + pg.recMs, "" + ms);
+        photoLog(d, ms);
+        tsv("ocr", "" + d.w, "" + d.h, "" + d.pg.boxes, "" + d.pg.paras.size(), "" + d.done, "" + d.pg.loadMs, "" + d.pg.detMs, "" + d.pg.recMs, "" + ms);
         if (!saved) { log("📷 разговор удалили, пока читался снимок — реплике некуда лечь"); jpg.delete(); return; }
         Listener l = listener;
         if (l != null) main.post(() -> { l.onHistory(); l.onPhoto(chatId, at); });
       } catch (Throwable t) { Log.e(TAG, "photo", t); log("📷 не вышло прочитать снимок: " + t); jpg.delete(); }
       finally { busy("live", null, 0, 0); }
     }, "photo").start();
+  }
+
+  /** Прочитанный и переведённый снимок: абзацы с рамками для наложения и то, что идёт в журнал. */
+  static class PhotoDone {
+    final org.json.JSONArray blocks = new org.json.JSONArray(); final StringBuilder src = new StringBuilder(), dst = new StringBuilder();
+    final List<String[]> fixes = new ArrayList<>(); int w, h, done, skipped; long ocrMs; Ocr.Page pg;
+  }
+
+  /** Чтение и перевод снимка — общее у реплики (photoRead) и стенда (photodry). null — текста нет
+   *  (в журнал уже сказано). Абзац сначала правится по словарю (OcrWords): распознаватель теряет
+   *  буквы, а переводчик на искажённом слове выдумывает («камыш» вместо «кармин»); в реплику
+   *  уходит исправленный текст — его и переводили, а подлинник остаётся на самом снимке. */
+  PhotoDone photoTranslate(File jpg) throws Exception {
+    long t0 = System.nanoTime();
+    android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+    o.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888;
+    android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeFile(jpg.getAbsolutePath(), o);
+    if (bm == null) { log("📷 снимок не прочитался"); return null; }
+    PhotoDone d = new PhotoDone();
+    d.w = bm.getWidth(); d.h = bm.getHeight(); int[] px = new int[d.w * d.h];
+    bm.getPixels(px, 0, d.w, 0, 0, d.w, d.h); bm.recycle();
+    Ocr.Page pg = ocr.read(px, d.w, d.h); px = null; d.pg = pg;
+    d.ocrMs = (System.nanoTime() - t0) / 1_000_000;
+    if (pg.paras.isEmpty()) {
+      log("📷 текста не нашлось за " + d.ocrMs + " мс (" + d.w + "×" + d.h + "; " + photoHow(pg) + ")"); hint("📷 на снимке не нашлось текста");
+      tsv("ocr", "" + d.w, "" + d.h, "" + pg.boxes, "0", "0", "" + pg.loadMs, "" + pg.detMs, "" + pg.recMs, "" + d.ocrMs);
+      return null;
+    }
+    OcrWords ow = ocrWords();
+    for (int i = 0; i < pg.paras.size(); i++) {
+      busy("live", "перевожу снимок…", i, pg.paras.size());
+      OcrCore.Para p = pg.paras.get(i);
+      List<String[]> fx = new ArrayList<>();
+      String text = ow == null ? p.text : ow.fix(p.text, fx);
+      String ru = null, why = photoSkip(text);
+      if (why != null) text = p.text;                  // не переводится — показываем как прочитано, без правки
+      else d.fixes.addAll(fx);
+      if (why == null) {
+        String sign = TextRules.unshoutSign(text, wd -> (ow != null && ow.common(wd)) || (words != null && words.isCommon(wd, "pt")));
+        Once r = translateOnce("pt2ru", sign, false, false, true);
+        if (r.skip == null && r.mt != null && !r.mt.trim().isEmpty()) ru = r.mt.trim();
+      }
+      else d.skipped++;
+      double[] f = p.frame(); org.json.JSONArray fa = new org.json.JSONArray();
+      for (double v : f) fa.put(Math.round(v * 1000) / 1000.0);
+      org.json.JSONObject b = new org.json.JSONObject().put("f", fa).put("src", text);
+      if (ru != null) { b.put("dst", ru); d.done++; d.dst.append(d.dst.length() > 0 ? "\n" : "").append(ru); }
+      d.blocks.put(b); d.src.append(d.src.length() > 0 ? "\n" : "").append(text);
+    }
+    return d;
+  }
+  static String photoHow(Ocr.Page pg) { return "детектор " + pg.detMs + " мс, распознаватель " + pg.recMs + " мс, модели " + pg.loadMs + " мс, рамок " + pg.boxes; }
+  void photoLog(PhotoDone d, long ms) {
+    StringBuilder fx = new StringBuilder();
+    for (String[] c : d.fixes) fx.append(fx.length() > 0 ? ", " : "").append(c[0]).append("→").append(c[1]);
+    log("📷 OCR за " + d.ocrMs + " мс, с переводом " + ms + " мс (" + d.w + "×" + d.h + "; " + photoHow(d.pg) + "): абзацев " + d.pg.paras.size()
+        + ", переведено " + d.done + (d.skipped > 0 ? ", оставлено как есть " + d.skipped : "")
+        + (d.fixes.isEmpty() ? "" : " · ✏ " + fx) + " · " + d.pg.lines.replace('\n', ' '));
+  }
+
+  /** Словарь правки слов снимка (assets/ocr_words_pt.txt): грузится один раз, при первом снимке. */
+  private volatile OcrWords ocrWords; private volatile boolean ocrWordsTried;
+  OcrWords ocrWords() {
+    if (ocrWords != null || ocrWordsTried) return ocrWords;
+    synchronized (this) {
+      if (ocrWords == null && !ocrWordsTried) {
+        ocrWordsTried = true; long t = System.nanoTime();
+        try (java.io.InputStream in = getAssets().open("ocr_words_pt.txt")) {
+          ocrWords = OcrWords.load(in);
+          log("📷 словарь правки слов: " + ocrWords.size() + " форм за " + (System.nanoTime() - t) / 1_000_000 + " мс");
+        } catch (Throwable e) { log("📷 словарь правки слов не загрузился — снимки без правки: " + e); }
+      }
+    }
+    return ocrWords;
   }
 
   static long med(List<Long> v) { if (v.isEmpty()) return 0; List<Long> c = new ArrayList<>(v); Collections.sort(c); return c.get(c.size() / 2); }
@@ -2283,7 +2346,12 @@ public class TranslatorService extends Service {
     boolean func = true;
     for (String w : t.trim().split("\\s+")) if (!OcrCore.CONT.contains(w.replaceAll("[^\\p{L}\\p{N}]", "").toLowerCase(Locale.ROOT))) { func = false; break; }
     if (func) return "служебные слова";
-    if (words != null) { double lk = words.looksLike(t, "pt"); if (lk >= 0 && lk < LANG_MIN) return "не португальский"; }
+    // Доля знакомых слов — по словарю снимков (72 тыс. форм), а не по словарю речи (17 тыс.): на
+    // этикетке «espessante», «carboidratos», «corante» — обычные слова, которых в речи не бывает,
+    // и абзац состава уходил в «не португальский». Английский абзац таблички набирает 0,2–0,33.
+    OcrWords ow = ocrWords();
+    double lk = ow != null ? ow.share(t) : words != null ? words.looksLike(t, "pt") : -1;
+    if (lk >= 0 && lk < (ow != null ? OcrWords.LANG_MIN : LANG_MIN)) return "не португальский";
     return null;
   }
 
