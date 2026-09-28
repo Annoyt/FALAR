@@ -28,8 +28,11 @@ public class Speaker {
   public boolean ready = false; public long loadMs = -1;
   public volatile float lastScore = 0;
 
-  public Speaker(File modelsDir) {
+  public Speaker(File modelsDir) { this(modelsDir, true); }
+  /** on — модуль «Отпечаток голоса» (Modules.SPEAKER): выключен — модель не поднимается, ready = false. */
+  public Speaker(File modelsDir, boolean on) {
     dir = modelsDir;
+    if (!on) return;
     File md = new File(modelsDir, "speaker");
     File[] f = md.listFiles((d, n) -> n.endsWith(".onnx"));
     if (f == null || f.length == 0) return;

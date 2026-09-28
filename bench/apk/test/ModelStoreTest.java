@@ -399,37 +399,68 @@ public class ModelStoreTest {
     for (File f : new File[]{rd, ud, bd, cd, md, hd}) del(f);
     srv.hs.stop(0);
 
-    // U: ярус auto — новая возможность докачивается сама и запуск не держит (чтение снимков, 0.24)
-    byte[] udet = rnd(120_000, 31), urec = rnd(90_000, 32), ucore = rnd(50_000, 33);
-    Srv us = new Srv(); us.files.put("ocr/det.onnx", udet); us.files.put("ocr/rec.onnx", urec); us.files.put("core.bin", ucore);
-    String uman = "{\"manifest_version\":1,\"app\":\"0.24.0\",\"files\":[" + file("core.bin", ucore, "core", hf("core.bin")) + ","
-        + file("ocr/det.onnx", udet, "auto", hf("ocr/det.onnx")) + "," + file("ocr/rec.onnx", urec, "auto", hf("ocr/rec.onnx")) + "]}";
+    // U: модули (0.24) — обязательное держит запуск, файлы включённых модулей докачиваются сами,
+    // выключенных не качаются; удаляются только отдельным действием
+    byte[] udet = rnd(120_000, 31), urec = rnd(90_000, 32), ucore = rnd(50_000, 33), uwords = rnd(8_000, 34), ullm = rnd(300_000, 35);
+    byte[] uonnx = rnd(60_000, 36), utok = "x 1\n".getBytes(StandardCharsets.UTF_8);
+    Map<String, byte[]> uz = new LinkedHashMap<>(); uz.put("tts_y/", null); uz.put("tts_y/v.onnx", uonnx); uz.put("tts_y/tokens.txt", utok);
+    byte[] uzip = zip(uz);
+    Srv us = new Srv();
+    us.files.put("ocr/det.onnx", udet); us.files.put("ocr/rec.onnx", urec); us.files.put("core.bin", ucore); us.files.put("words.txt", uwords);
+    us.files.put("llm.gguf", ullm); us.files.put("tts_y.zip", uzip);
+    String uman = "{\"manifest_version\":1,\"app\":\"0.24.0\",\"files\":["
+        + file("core.bin", ucore, "core", hf("core.bin")) + ","
+        + file("words.txt", uwords, "optional", hf("words.txt")).replaceFirst("\\}$", ",\"module\":\"base\"}") + ","
+        + file("ocr/det.onnx", udet, "optional", hf("ocr/det.onnx")).replaceFirst("\\}$", ",\"module\":\"ocr\"}") + ","
+        + file("ocr/rec.onnx", urec, "optional", hf("ocr/rec.onnx")).replaceFirst("\\}$", ",\"module\":\"ocr\"}") + ","
+        + file("llm/m.gguf", ullm, "optional", hf("llm.gguf")).replaceFirst("\\}$", ",\"module\":\"llm\"}") + "],"
+        + "\"archives\":[{\"path\":\"tts_y\",\"kind\":\"zip\",\"size\":" + uzip.length + ",\"sha256\":\"" + sha(uzip) + "\",\"tier\":\"optional\",\"module\":\"tts\",\"source\":" + hf("tts_y.zip")
+        + ",\"unpack_to\":\".\",\"check\":[{\"path\":\"tts_y/v.onnx\",\"sha256\":\"" + sha(uonnx) + "\"},{\"path\":\"tts_y/tokens.txt\",\"sha256\":\"" + sha(utok) + "\"}]}]}";
     File ad = tmpDir("u1"); ad.mkdirs(); Files.write(new File(ad, "core.bin").toPath(), ucore);
     ModelStore u = store(ad, uman, us);
-    ok(u.check("core").complete(), "U1 без файлов auto обязательное на месте — экрана первого запуска нет");
+    eq(u.byPath("core.bin").module + "|" + u.byPath("words.txt").module + "|" + u.byPath("ocr/det.onnx").module + "|" + u.byPath("tts_y").module, "base|base|ocr|tts", "U0 модуль из манифеста; обязательное без поля — base");
+    eq(ModelStore.module(new org.json.JSONObject("{\"tier\":\"optional\"}")), "", "U0 необязательное без поля — ничей модуль");
+    ok(u.check("core").complete(), "U1 обязательное на месте — запуск не держится ничем, кроме него");
     ModelStore.State ust = u.state();
-    eq(ust.coreMissing + ":" + ust.optMissing, "0:0", "U1 ни нехваткой, ни необязательным auto не считается");
-    eq(ust.autoMissing + ":" + ust.autoBytes, "2:" + (udet.length + urec.length), "U1 зато видно, что докачать и сколько");
-    eq(u.autos().size(), 2, "U1 список докачки");
-    eq(u.check("optional").need.size(), 0, "U1 кнопка «необязательное» auto не тянет");
-    ok(u.start(u.autos(), ModelStore.AUTO), "U2 старт докачки");
+    eq(ust.autoMissing + ":" + ust.autoBytes, "1:" + uwords.length, "U1 модули выключены — докачивать только базовое необязательное");
+    eq(ust.optMissing, 4, "U1 файлы выключенных модулей — не нехватка и не докачка");
+    eq(u.autos().size(), 1, "U1 список докачки — только base");
+    eq(u.need(new HashSet<>(Arrays.asList("ocr", "tts"))).size(), 4, "U2 первый запуск со снимками и озвучкой: base, два файла снимков, архив голоса");
+    eq(u.needBytes(new HashSet<>(Arrays.asList("ocr", "tts"))), (long) (uwords.length + udet.length + urec.length + uzip.length), "U2 и сколько это байт — без хэшей");
+    eq(u.needBytes(Collections.emptySet()), (long) uwords.length, "U2 ничего не отмечено — только перевод речи");
+    u.modules = new HashSet<>(Arrays.asList("ocr", "tts")); u.summarize();
+    ust = u.state();
+    eq(ust.autoMissing, 4, "U3 модули включили — их файлы в докачке");
+    eq(ust.optMissing, 1, "U3 уточнитель выключен — его не качаем");
+    ok(u.start(u.autos(), ModelStore.AUTO), "U3 старт докачки");
     ust = waitDone(u);
-    eq(ust.phase + ":" + ust.tier, ModelStore.DONE + ":" + ModelStore.AUTO, "U2 докачано, ярус в состоянии — auto: " + ust.message);
-    eq(shaFile(new File(ad, "ocr/rec.onnx")), sha(urec), "U2 файл на месте и верный");
-    eq(u.state().autoMissing, 0, "U2 докачивать больше нечего");
-    eq(u.autos().size(), 0, "U2 и список пуст");
+    eq(ust.phase + ":" + ust.tier, ModelStore.DONE + ":" + ModelStore.AUTO, "U3 докачано: " + ust.message + " " + ust.errors);
+    ok(u.onPhone("ocr") && u.onPhone("tts") && !u.onPhone("llm"), "U3 снимки и голос на телефоне, уточнителя нет");
+    ok(u.installed("ocr") && u.installed("tts") && !u.installed("llm"), "U3 и сверены");
+    ok(u.installed("cloud") && !u.onPhone("cloud"), "U3 модуль без файлов (облако) — «установлен», но «на телефоне» у него ничего");
+    eq(u.state().autoMissing, 0, "U3 докачивать больше нечего");
+    eq(u.bytes("ocr"), (long) (udet.length + urec.length), "U4 размер модуля по манифесту");
+    eq(u.remove("base"), 0L, "U5 перевод речи не удаляется никогда");
+    ok(new File(ad, "core.bin").exists(), "U5 файл на месте");
+    long freed = u.remove("tts");
+    eq(freed, (long) (uonnx.length + utok.length), "U6 голос удалён распакованным — освобождено по размеру его файлов");
+    ok(!new File(ad, "tts_y").exists(), "U6 опустевший каталог голоса убран");
+    ok(!u.verified.containsKey("tts_y/v.onnx"), "U6 и забыт в кэше сверки");
+    eq(u.remove("ocr"), (long) (udet.length + urec.length), "U7 снимки удалены");
+    ok(!new File(ad, "ocr/det.onnx").exists() && !u.onPhone("ocr"), "U7 файлов нет");
+    eq(u.state().autoMissing, 3, "U7 модули ещё включены — удалённое снова в докачке (удаляют выключенные, это решает сервис)");
     ModelStore.State fs = new ModelStore.State();
-    eq(ModelStore.autoFetchBlock(null, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "U3 нет состояния");
-    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "U3 до проверки не решаем");
+    eq(ModelStore.autoFetchBlock(null, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "U8 нет состояния");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1L << 40, 0), "файлы ещё не проверены", "U8 до проверки не решаем");
     fs.checked = true;
-    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1L << 40, 0), "докачивать нечего", "U3 нечего");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1L << 40, 0), "докачивать нечего", "U8 нечего");
     fs.autoMissing = 2; fs.autoBytes = 1000;
-    eq(ModelStore.autoFetchBlock(fs, true, false, true, 1L << 40, 0), "уже идёт загрузка", "U4 не вмешиваемся в идущую загрузку");
-    eq(ModelStore.autoFetchBlock(fs, false, true, true, 1L << 40, 0), "в этот запуск уже пробовали", "U4 одна попытка на запуск");
-    eq(ModelStore.autoFetchBlock(fs, false, false, false, 1L << 40, 0), "нет подходящей сети", "U4 без разрешённой сети — ждём");
-    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1499, 500), "мало места: нужно ещё 0.0 МБ", "U5 места на байт меньше — нет");
-    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1500, 500), null, "U5 ровно хватает — качаем");
-    eq(ModelStore.autoFetchBlock(fs, false, false, true, -1, 500), null, "U5 место неизвестно — не мешаем");
+    eq(ModelStore.autoFetchBlock(fs, true, false, true, 1L << 40, 0), "уже идёт загрузка", "U9 не вмешиваемся в идущую загрузку");
+    eq(ModelStore.autoFetchBlock(fs, false, true, true, 1L << 40, 0), "в этот запуск уже пробовали", "U9 одна попытка на запуск");
+    eq(ModelStore.autoFetchBlock(fs, false, false, false, 1L << 40, 0), "нет подходящей сети", "U9 без разрешённой сети — ждём");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1499, 500), "мало места: нужно ещё 0.0 МБ", "U10 места на байт меньше — нет");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, 1500, 500), null, "U10 ровно хватает — качаем");
+    eq(ModelStore.autoFetchBlock(fs, false, false, true, -1, 500), null, "U10 место неизвестно — не мешаем");
     us.hs.stop(0); del(ad);
 
     // A: облегчать ли само — без кнопки, по разрешённой сети и с запасом места

@@ -3,8 +3,8 @@
 """Собирает каталог models/ по манифесту: что есть и совпало по sha256 — оставляет, чего нет —
 скачивает из источника (Hugging Face или прямой URL), архивы распаковывает и проверяет.
 
-  python3 tools/models_fetch.py            # обязательное и докачиваемое само (tier=core, auto)
-  python3 tools/models_fetch.py --all      # плюс необязательное: LLM, отпечаток голоса, корпус
+  python3 tools/models_fetch.py            # обязательное и модули по умолчанию: озвучка, снимки, корпус
+  python3 tools/models_fetch.py --all      # плюс уточнитель (LLM), отпечаток голоса и файлы стенда
   python3 tools/models_fetch.py --check    # ничего не качать, только сверить, что лежит
 
 Раскладка на диске та же, что на телефоне (см. device_dir в манифесте), поэтому после этого
@@ -15,6 +15,12 @@ import hashlib, json, os, sys, urllib.request, zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAN = os.path.join(ROOT, "models", "manifest.json")
 OUT = os.path.join(ROOT, "models")
+
+
+# Что качать без --all: обязательное и модули, которые у новой установки отмечены по умолчанию
+# (Modules.defaults без уточнителя — его 1,1 ГБ только по --all).
+USUAL = {"base", "tts", "ocr", "corpus"}
+def usual(e): return e.get("tier") == "core" or e.get("module") in USUAL
 
 def sha256(p):
     h = hashlib.sha256()
@@ -47,7 +53,7 @@ def main():
     m = json.load(open(MAN, encoding="utf-8"))
     bad = 0
     for e in m["files"]:
-        if e["tier"] not in ("core", "auto") and not want_all: continue   # auto приложение докачивает само — зеркалу тоже нужно
+        if not usual(e) and not want_all: continue
         # затравка и корпус лежат в самом репозитории (repo_path), остальное — в models/ под путём устройства
         dst = os.path.join(ROOT, e["repo_path"]) if e.get("repo_path") else os.path.join(OUT, e["path"])
         ok = os.path.exists(dst) and os.path.getsize(dst) == e["size"] and sha256(dst) == e["sha256"]
@@ -57,7 +63,7 @@ def main():
         fetch(src_url(e["source"]), dst, e["size"])
         if sha256(dst) != e["sha256"]: print("  ХЭШ НЕ СОШЁЛСЯ:", e["path"]); os.remove(dst); bad += 1
     for a in m["archives"]:
-        if a["tier"] != "core" and not want_all: continue
+        if not usual(a) and not want_all: continue
         good = all(os.path.exists(os.path.join(OUT, c["path"])) and sha256(os.path.join(OUT, c["path"])) == c["sha256"] for c in a["check"])
         if good: print("  ок  ", a["path"] + "/"); continue
         if check_only: print("  НЕТ ", a["path"] + "/"); bad += 1; continue

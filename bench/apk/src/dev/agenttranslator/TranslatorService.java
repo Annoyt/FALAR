@@ -36,7 +36,9 @@ public class TranslatorService extends Service {
     void onBusy(String what, int done, int total);
     /** Снимок прочитан и переведён: реплика «📷» с меткой at легла в разговор chatId — показать
      *  перевод поверх снимка. */
-    void onPhoto(long chatId, long at); }
+    void onPhoto(long chatId, long at);
+    /** Включённые модули изменились: спрятать или показать их кнопки и пункты. */
+    void onModules(); }
   public class LocalBinder extends Binder { public TranslatorService get() { return TranslatorService.this; } }
   final IBinder binder = new LocalBinder(); final Handler main = new Handler(Looper.getMainLooper());
   final ExecutorService worker = Executors.newSingleThreadExecutor(); volatile Listener listener;
@@ -109,6 +111,10 @@ public class TranslatorService extends Service {
     // Хранилище создаём здесь, а не в фоне: стендовые интенты (models/modelsbase) приходят сразу за onCreate.
     try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
     catch (Throwable t) { Log.e(TAG, "manifest", t); status("Ошибка манифеста моделей: " + t); return; }
+    // Модули: выбор человека; до выбора (новая установка) — по умолчанию под этот телефон.
+    String saved = getSharedPreferences("at", MODE_PRIVATE).getString(PREF_MODULES, null);
+    modules = saved != null ? Modules.parse(saved) : Modules.defaults(totalRam());
+    modulesChosen = saved != null; store.modules = modules;
     worker.submit(this::boot);
   }
   String readAsset(String name) throws java.io.IOException {
@@ -129,11 +135,19 @@ public class TranslatorService extends Service {
           + (p.need.isEmpty() ? "" : ", не хватает " + ModelStore.mb(p.bytes) + " МБ") + " · проверка " + ms + " мс"
           + (store.hashedBytes > 0 ? ", прохэшировано " + ModelStore.mb(store.hashedBytes) + " МБ" : ", по кэшу"));
       tsv("models_check", "" + p.have, "" + p.need.size(), "" + p.bytes, "" + ms, "" + store.hashedBytes);
+      // Обновились с версии без модулей: обязательное на месте, выбора не было — включаем то, что
+      // уже скачано (облако — если есть ключ), экрана выбора не показываем (решение владельца 28.09).
+      if (!modulesChosen && p.need.isEmpty()) {
+        Set<String> inst = new LinkedHashSet<>();
+        for (String m : Modules.CHOICE) if (store.bytes(m) > 0 && store.installed(m)) inst.add(m);
+        setModules(Modules.upgraded(inst, new File(modelsDir, "openrouter.json").exists()), "как было до модулей");
+        store.summarize();                             // мы на рабочем потоке: состояние ниже — уже с модулями
+      }
       // Заменённое уже скачанным и сверенным — убрать до загрузки движков: они возьмут новый путь.
       store.cleanObsolete();
       ModelStore.State st = store.state(); Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
       if (st.upgrade > 0) log("📦 можно облегчить перевод: скачать " + ModelStore.mb(st.upgradeBytes) + " МБ — «Система» → «облегчить перевод»; до тех пор работает прежний путь");
-      if (st.autoMissing > 0) log("📦 чтение снимков докачается само: " + ModelStore.mb(st.autoBytes) + " МБ по разрешённой сети; до тех пор снимок читает облако — по согласию");
+      if (st.autoMissing > 0) log("📦 модулям не хватает " + ModelStore.mb(st.autoBytes) + " МБ: " + whatFetch(store.autos()) + " — докачается само по разрешённой сети");
       if (!p.need.isEmpty()) {
         status("Нужно скачать модели: " + p.need.size() + " файлов, " + ModelStore.mb(p.bytes) + " МБ");
         notify("Нужно скачать модели (" + ModelStore.mb(p.bytes) + " МБ)"); return;
@@ -148,8 +162,10 @@ public class TranslatorService extends Service {
       if (!new File(models, "silero_vad.onnx").exists()) { status("Нет моделей. Залейте их в\n" + models.getAbsolutePath());
         log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
-      eng = new Engine(models, this::log); pb = new Phrasebook(models);
-      spk = new Speaker(models); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
+      Engine.withTts = mod(Modules.TTS);
+      eng = new Engine(models, this::log); pb = new Phrasebook(models, mod(Modules.CORPUS));
+      spk = new Speaker(models, mod(Modules.SPEAKER)); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
+      log("🧩 модули: " + modulesLine());
       // По умолчанию «точнее»: сырой перевод понятен редко, и от облака ждут прежде всего качества.
       cloud.preferQuality = getSharedPreferences("at", MODE_PRIVATE).getBoolean("cloud_quality", true);
       chats = new Chats(getExternalFilesDir(null)); learn = new Learn(chats, models, getExternalFilesDir(null));
@@ -161,10 +177,10 @@ public class TranslatorService extends Service {
       synchronized (history) { if (!history.isEmpty()) { lastLocalAt = history.get(history.size() - 1).at; log("↩ продолжаем разговор: восстановлено реплик " + history.size()); } }
       log("📝 " + words.stats());
       if (pb.pinsWithDigits > 0) log("📌 пинов с числом без маски: " + pb.pinsWithDigits + " — они не срабатывают, перезакрепите их кнопкой «запомнить»");
-      log(cloud.ready ? "☁ «получше» доступно: " + cloud.models.length + " бесплатных моделей"
-                      : "☁ «получше» выключено (нет models/openrouter.json)");
-      log(spk.ready ? "🎤 отпечаток голоса готов за " + spk.loadMs + " мс, профили: " + spk.describe()
-                    : "🎤 модели отпечатка голоса нет (models/speaker/*.onnx) — разделение говорящих выключено");
+      if (mod(Modules.CLOUD)) log(cloud.ready ? "☁ «получше» доступно: " + cloud.models.length + " бесплатных моделей"
+                                               : "☁ облако включено, но ключа нет (models/openrouter.json) — «получше» только уточнителем");
+      if (mod(Modules.SPEAKER)) log(spk.ready ? "🎤 отпечаток голоса готов за " + spk.loadMs + " мс, профили: " + spk.describe()
+                                              : "🎤 модели отпечатка голоса ещё нет — докачается, до тех пор разделение говорящих выключено");
       status("Готово. ASR " + eng.loadAsrMs + " · MT " + eng.loadMtMs + " · TTS " + eng.loadTtsMs + " мс · " + pb.stats());
       android.content.SharedPreferences pr = getSharedPreferences("at", MODE_PRIVATE);
       micGainDb = pr.getFloat("micgain", 0); outGainDb = pr.getFloat("gain", 0);
@@ -271,6 +287,14 @@ public class TranslatorService extends Service {
           log("🧪 пачка: " + n + " фраз за " + (System.nanoTime() - t0) / 1000000 + " мс · резидентно " + Engine.rssMb() + " МБ → " + path + ".out");
         } catch (Throwable e) { log("🧪 пачка оборвалась на " + n + ": " + e); }
       }); }
+    // Стенд: включённые модули — «--es modules tts,ocr» (пусто — только перевод речи);
+    // «--es modules show» — записать в журнал; «--es modules unused-delete» — удалить файлы выключенных.
+    if (i != null && i.hasExtra("modules") && store != null) {
+      String v = i.getStringExtra("modules");
+      if ("show".equals(v)) log("🧩 модули сейчас: [" + Modules.join(modules) + "] · неиспользуемые файлы " + ModelStore.mb(unusedBytes()) + " МБ");
+      else if ("unused-delete".equals(v)) removeUnusedModels();
+      else { Set<String> want = Modules.parse(v); for (String m : Modules.CHOICE) setModule(m, want.contains(m)); }
+    }
     // Стенд: офлайн-чтение набора снимков (bench/ocr) — каталог на телефоне с pNN.jpg. На каждый
     // pNN.txt (строки как на вывеске) и pNN.para (абзацы для перевода), время — в журнал и at.tsv.
     // Сверка с расшифровкой — на столе: tools/ocr_eval.py --got <каталог>.
@@ -444,7 +468,8 @@ public class TranslatorService extends Service {
     // в разных наушниках. Оговорка, которую надо проверить ухом: многие TWS сводят каналы в моно,
     // когда надет один вкладыш, — тогда разведение не сработает.
     // Длинный тон в один канал: короткие фразы на слух не локализуются, а три секунды — да.
-    if (i != null && i.hasExtra("devtest")) {
+    if (i != null && i.hasExtra("devtest") && !voice()) log("🔇 devtest: озвучка выключена или голосов нет");
+    else if (i != null && i.hasExtra("devtest")) {
       new Thread(() -> { try {
         if (eng == null) { log("🔉 движок не готов"); return; }
         split = "device";
@@ -481,7 +506,8 @@ public class TranslatorService extends Service {
         log("🔈 проверка каналов закончена");
       } catch (Throwable t) { log("🔈 ошибка: " + t); } }, "pantest").start();
     }
-    if (i != null && i.hasExtra("eartest")) {
+    if (i != null && i.hasExtra("eartest") && !voice()) log("🔇 eartest: озвучка выключена или голосов нет");
+    else if (i != null && i.hasExtra("eartest")) {
       new Thread(() -> { try {
         if (eng == null) { log("👂 движок не готов"); return; }
         log("👂 проверка ушей, раскладка: " + split + ", усиление выхода " + outGainDb + " дБ");
@@ -496,7 +522,8 @@ public class TranslatorService extends Service {
         log("👂 проверка закончена");
       } catch (Throwable t) { log("👂 ошибка: " + t); } }, "eartest").start();
     }
-    if (i != null && i.hasExtra("bttest")) {
+    if (i != null && i.hasExtra("bttest") && !voice()) log("🔇 bttest: озвучка выключена или голосов нет");
+    else if (i != null && i.hasExtra("bttest")) {
       final String phrase = i.getStringExtra("say") == null
           ? "Это проверка наушников. Слышно ли меня в наушнике, пока микрофон продолжает слушать комнату?"
           : i.getStringExtra("say");
@@ -862,8 +889,124 @@ public class TranslatorService extends Service {
     return r;
   }
 
+  // ---------- модули ----------
+
+  static final String PREF_MODULES = "modules";
+  /** Включённые модули (Modules). Выбор человека при установке или в «Системе» → «Модули». */
+  public volatile Set<String> modules = new LinkedHashSet<>();
+  /** Выбор уже сделан (или взят «как было» у обновившегося); до него — умолчания под телефон. */
+  public volatile boolean modulesChosen = false;
+  public boolean mod(String m) { return modules.contains(m); }
+  /** Облако пригодно: модуль включён и ключ есть. */
+  public boolean cloudReady() { return mod(Modules.CLOUD) && cloud != null && cloud.ready; }
+  /** Голос есть: модуль «Озвучка» включён и голоса подняты. */
+  public boolean voice() { Engine e = eng; return mod(Modules.TTS) && e != null && e.hasTts(); }
+  long totalRam() {
+    try { ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo(); getSystemService(ActivityManager.class).getMemoryInfo(mi); return mi.totalMem; }
+    catch (Throwable t) { return 0; }
+  }
+  String modulesLine() {
+    StringBuilder b = new StringBuilder();
+    for (String m : Modules.CHOICE) if (mod(m)) b.append(b.length() > 0 ? ", " : "").append(Modules.title(m));
+    return b.length() == 0 ? "только перевод речи" : b.toString();
+  }
+  /** Что докачивается — по модулям: «📷 Чтение снимков 17,8 МБ, 🔊 Озвучка перевода 134,8 МБ». */
+  String whatFetch(List<ModelStore.Item> items) {
+    Map<String, Long> by = new LinkedHashMap<>();
+    for (ModelStore.Item it : items) by.merge(it.module, it.size, Long::sum);
+    StringBuilder b = new StringBuilder();
+    for (Map.Entry<String, Long> e : by.entrySet()) b.append(b.length() > 0 ? ", " : "").append(Modules.title(e.getKey())).append(' ').append(ModelStore.mb(e.getValue())).append(" МБ");
+    return b.toString();
+  }
+  void setModules(Set<String> s, String why) {
+    modules = new LinkedHashSet<>(s); store.modules = modules; modulesChosen = true; autoFetchTried = false;
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString(PREF_MODULES, Modules.join(modules)).apply();
+    log("🧩 модули (" + why + "): " + modulesLine());
+    worker.submit(store::summarize);                   // сверка может читать файлы — не на экранном потоке
+  }
+
+  /** Экран первого запуска: выбранные модули — и одной загрузкой обязательное и их файлы. */
+  public void setupModules(Set<String> chosen) {
+    setModules(chosen, "выбор при установке");
+    worker.submit(() -> {                              // план сверяет лежащее — не на экранном потоке
+      List<ModelStore.Item> need = store.need(modules);
+      if (need.isEmpty()) { loadAll(); return; }
+      boolean ok = store.start(need, "core");
+      log(ok ? "⬇ загрузка при установке: " + ModelStore.mb(sizeOf(need)) + " МБ — " + need.size() + " файлов" : "⬇ загрузка уже идёт");
+    });
+  }
+  static long sizeOf(List<ModelStore.Item> l) { long b = 0; for (ModelStore.Item it : l) b += it.size; return b; }
+
+  /** Включить или выключить модуль. Выключение только прячет модуль и отдаёт его память — файлы
+   *  остаются (удаляются отдельно: removeUnusedModels). Включение подключает то, что уже скачано,
+   *  и сразу докачивает недостающее. */
+  public void setModule(String m, boolean on) {
+    if (!Modules.CHOICE.contains(m) || mod(m) == on) return;
+    Set<String> s = new LinkedHashSet<>(modules); if (on) s.add(m); else s.remove(m);
+    setModules(s, (on ? "включён " : "выключен ") + Modules.title(m));
+    worker.submit(() -> {
+      try {
+        if (on) {
+          activate(m);
+          List<ModelStore.Item> a = store.autos();
+          if (!a.isEmpty() && !store.running()) { autoFetchTried = true; log("📦 докачиваю: " + whatFetch(a)); downloadModels(a, ModelStore.AUTO); }
+        } else deactivate(m);
+      } catch (Throwable t) { log("🧩 " + Modules.title(m) + ": " + t); }
+      ModelStore.State st = store.state(); Listener l = listener;
+      if (l != null) main.post(() -> { l.onModels(st); l.onModules(); });
+    });
+  }
+  /** Подключить модуль, чьи файлы уже на месте. Облако и снимки — только проверка mod() на месте. */
+  void activate(String m) {
+    if (eng == null) return;
+    switch (m) {
+      case Modules.TTS: if (!eng.hasTts() && eng.loadTts()) log("🔊 озвучка подключена"); break;
+      case Modules.SPEAKER: if (spk == null || !spk.ready) { spk = new Speaker(modelsDir, true); if (spk.ready) log("🎤 отпечаток голоса подключён: " + spk.describe()); } break;
+      case Modules.CORPUS: if (pb != null && pb.minedCount == 0 && new File(modelsDir, "phrasebook_tatoeba.tsv").exists()) pb.loadMined(new File(modelsDir, "phrasebook_tatoeba.tsv")); break;
+      case Modules.LLM:   // уточнитель на месте — контекст включается, если человек не выключал его сам
+        if (hasLlm() && !contextMode && !getSharedPreferences("at", MODE_PRIVATE).contains("ctx")) { log("🧠 уточнитель на месте — включаю контекст"); setContext(true, false); }
+        else if (hasLlm() && getSharedPreferences("at", MODE_PRIVATE).getBoolean("ctx", false)) setContext(true, false);
+        break;
+      default: break;
+    }
+  }
+  /** Отдать память модуля: голоса, уточнитель, отпечаток голоса, корпус. Выбор человека
+   *  о контексте («ctx») не трогается: включат модуль обратно — вернётся как был. */
+  void deactivate(String m) {
+    switch (m) {
+      case Modules.TTS: sayQ.clear(); synchronized (tts) { if (eng != null) eng.releaseTts(); } log("🔇 озвучка выключена: перевод только на экране"); break;
+      case Modules.LLM: contextMode = false; unloadLlm("модуль выключен"); break;
+      case Modules.SPEAKER: spk = new Speaker(modelsDir, false); autoDir = false; break;
+      case Modules.CORPUS: if (pb != null) pb.dropMined(); break;
+      default: break;
+    }
+  }
+  /** Сколько занимают на телефоне файлы выключенных модулей, байт. */
+  public long unusedBytes() {
+    long b = 0;
+    for (String m : Modules.CHOICE) if (!mod(m)) for (ModelStore.Item it : store.items) if (m.equals(it.module)) b += onDisk(it);
+    return b;
+  }
+  long onDisk(ModelStore.Item it) {
+    if (!it.archive) { File f = new File(modelsDir, it.path); return f.isFile() ? f.length() : 0; }
+    long b = 0; for (String[] c : it.check) { File f = new File(modelsDir, c[0]); if (f.isFile()) b += f.length(); } return b;
+  }
+  /** «Удалить неиспользуемые модели»: файлы выключенных модулей. Отдельной кнопкой, а не при
+   *  выключении — решение владельца 28.09: выключенный модуль включается обратно без загрузки. */
+  public void removeUnusedModels() {
+    worker.submit(() -> {
+      if (store.running()) { log("🧩 идёт загрузка моделей — удаление после неё"); return; }
+      long freed = 0;
+      for (String m : Modules.CHOICE) if (!mod(m)) freed += store.remove(m);
+      log("🧩 удалены модели выключенных модулей: освобождено " + ModelStore.mb(freed) + " МБ");
+      ModelStore.State st = store.state(); Listener l = listener;
+      if (l != null) main.post(() -> { l.onModels(st); l.onModules(); });
+    });
+  }
+
   /** Файл уточнителя на месте. */
   public boolean hasLlm() {
+    if (!mod(Modules.LLM)) return false;                  // модуль выключен — уточнителя для приложения нет
     File[] gg = new File(getExternalFilesDir(null), "models/llm").listFiles((d, n) -> n.endsWith(".gguf"));
     return gg != null && gg.length > 0;
   }
@@ -872,7 +1015,7 @@ public class TranslatorService extends Service {
    *  чтобы «само включилось» не превратилось в «человек включил» и выключение осталось за ним. */
   public void setContext(boolean on, boolean remember) {
     if (remember) getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("ctx", on).apply();
-    if (on && !hasLlm()) { contextMode = false; log("🧠 контекст выключен: уточнителя нет, скачайте его в «Системе» кнопкой необязательного"); return; }
+    if (on && !hasLlm()) { contextMode = false; log(mod(Modules.LLM) ? "🧠 контекст выключен: файла уточнителя ещё нет — он докачивается сам" : "🧠 контекст выключен: модуль «Уточнитель» выключен («Система» → «Модули»)"); return; }
     contextMode = on;
     if (!on) { unloadLlm("контекст выключен"); log("🧠 контекст выключен"); return; }
     log("🧠 контекст включён — уточнитель поднимается на время разбора и уходит через " + LLM_IDLE_MS / 1000 + " с простоя");
@@ -910,6 +1053,7 @@ public class TranslatorService extends Service {
   }
   /** Поднять сервер, если его нет. Только на llmWorker. false — не поднят (нет памяти, файла, ошибка). */
   boolean ensureLlm() {
+    if (!mod(Modules.LLM)) return false;
     if (llm != null && llm.ready) return true;
     if (!roomForLlm()) return false;
     try {
@@ -952,8 +1096,8 @@ public class TranslatorService extends Service {
     sinceLocal++; sinceCloud++;
     if (contextMode && refineEvery > 0 && sinceLocal >= refineEvery) { sinceLocal = 0; kickLocal(); }
     if (cloudEvery > 0 && sinceCloud >= cloudEvery * cloudBackoff) {
-      if (cloud == null || !cloud.ready || !cloudConsent()) {
-        if (!cloudSkipLogged) { cloudSkipLogged = true; log("☁ автоматический пересмотр пропущен: " + (cloud == null || !cloud.ready ? "нет ключа" : "нет согласия на отправку разговора")); }
+      if (!cloudReady() || !cloudConsent()) {
+        if (!cloudSkipLogged) { cloudSkipLogged = true; log("☁ автоматический пересмотр пропущен: " + (!mod(Modules.CLOUD) ? "модуль «Облако» выключен" : !cloudReady() ? "нет ключа" : "нет согласия на отправку разговора")); }
       } else if (!online()) {
         if (!cloudSkipLogged) { cloudSkipLogged = true; log("☁ автоматический пересмотр пропущен: нет сети — догонит, когда сеть вернётся"); }
       } else { cloudSkipLogged = false; sinceCloud = 0; cloudReview(false); }
@@ -1009,7 +1153,7 @@ public class TranslatorService extends Service {
    *  не узнать. Считает бесплатная модель OpenRouter — локальная для этого не нужна, а сеть
    *  здесь необязательна: не вышло, останется имя, введённое руками. */
   public void describeChat(long id) {
-    if (chats == null || cloud == null || !cloud.ready) return;
+    if (chats == null || !cloudReady()) return;
     org.json.JSONObject o = chats.load(id);
     if (o == null) return;
     if (!o.optString("name", "").isEmpty() && o.optBoolean("named", false)) return;   // имя уже задано человеком
@@ -1023,7 +1167,7 @@ public class TranslatorService extends Service {
     StringBuilder b = new StringBuilder();
     for (int k = 0; k < Math.min(t.length(), 14); k++) {
       org.json.JSONObject x = t.optJSONObject(k);
-      if (x == null) continue;
+      if (x == null || x.has("photo")) continue;        // снимок — не диалог, и согласия на его отправку не было
       b.append(x.optString("src", "")).append(" / ").append(x.optString("dst", "")).append('\n');
       if (b.length() > 1500) break;
     }
@@ -1291,9 +1435,10 @@ public class TranslatorService extends Service {
    *  «улучшить сейчас»: есть ключ и сеть — облако; иначе локальный проход при включённом контексте. */
   public String improveMode() {
     if (eng == null) return "движок ещё загружается";        // интент со стенда приходит раньше, чем поднялись модели
-    if (cloud != null && cloud.ready && online()) return "cloud";
+    if (cloudReady() && online()) return "cloud";
     if (contextMode && hasLlm()) return "local";
-    if (cloud == null || !cloud.ready) return "нет ключа OpenRouter, а контекст 🧠 выключен";
+    if (!mod(Modules.CLOUD) && !mod(Modules.LLM)) return "модули «Облако» и «Уточнитель» выключены";
+    if (!cloudReady()) return mod(Modules.CLOUD) ? "нет ключа OpenRouter, а контекст 🧠 выключен" : "контекст 🧠 выключен, а облако — выключенный модуль";
     return "нет сети, а контекст 🧠 выключен";
   }
   public boolean cloudConsent() { return getSharedPreferences("at", MODE_PRIVATE).getBoolean("cloud_consent", false); }
@@ -1352,7 +1497,7 @@ public class TranslatorService extends Service {
    *  завершении — движки, если теперь есть всё обязательное, или подключение необязательного. */
   void onStoreState(ModelStore.State st) {
     Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
-    if (st.busy() && st.total > 0) busy("models", ("upgrade".equals(st.tier) ? "облегчаю перевод" : ModelStore.AUTO.equals(st.tier) ? "докачиваю чтение снимков" : "качаю модели") + " · " + (int) (st.done * 100 / st.total) + " %",
+    if (st.busy() && st.total > 0) busy("models", ("upgrade".equals(st.tier) ? "облегчаю перевод" : ModelStore.AUTO.equals(st.tier) ? "докачиваю модули" : "качаю модели") + " · " + (int) (st.done * 100 / st.total) + " %",
         (int) (st.done * 100 / st.total), 100);
     else if (!st.busy()) busy("models", null, 0, 0);
     long now = System.currentTimeMillis();
@@ -1363,9 +1508,9 @@ public class TranslatorService extends Service {
       if (eng == null) worker.submit(() -> { if (store.check("core").complete()) { status("Модели скачаны, загружаю движки…"); loadAll(); } else status(st.message); });
       else if (ModelStore.DONE.equals(st.phase) && "upgrade".equals(st.tier)) log("📦 перевод станет легче со следующего запуска приложения: память освобождается только вместе с процессом");
       else if (ModelStore.DONE.equals(st.phase) && ModelStore.AUTO.equals(st.tier)) {
-        log("📷 чтение снимков готово: снимок теперь читается на телефоне, без сети");
-        // облегчение перевода могло ждать, пока шла эта загрузка
-        worker.submit(() -> maybeAutoUpgrade(""));
+        log("📦 модули докачаны: " + modulesLine());
+        // подключить пришедшее; облегчение перевода могло ждать, пока шла эта загрузка
+        worker.submit(() -> { reloadOptional(); maybeAutoUpgrade(""); Listener l2 = listener; if (l2 != null) main.post(l2::onModules); });
       }
       else if (ModelStore.DONE.equals(st.phase)) worker.submit(this::reloadOptional);
     }
@@ -1402,8 +1547,9 @@ public class TranslatorService extends Service {
     downloadUpgrade();
   }
   volatile boolean autoFetchTried = false;
-  /** Ярус auto (чтение снимков): докачать самому, как облегчение перевода, — по разрешённой сети,
-   *  при запасе места, раз за запуск. Идёт первым: 18 МБ вместо сотен, и возможность, а не экономия. */
+  /** Файлы включённых модулей, которых нет (обновились — снимки; включили модуль, а сети не было):
+   *  докачать самому, как облегчение перевода, — по разрешённой сети, при запасе места, раз за
+   *  запуск (смена модулей даёт новую попытку). Идёт раньше облегчения: это возможность, а не экономия. */
   synchronized void maybeAutoFetch() {
     ModelStore.State st = store.state();
     String no = ModelStore.autoFetchBlock(st, store.running(), autoFetchTried, netAllowed(), store.usable(), store.spareBytes);
@@ -1412,8 +1558,9 @@ public class TranslatorService extends Service {
       return;
     }
     autoFetchTried = true;
-    log("📦 докачиваю чтение снимков в фоне: " + ModelStore.mb(st.autoBytes) + " МБ");
-    downloadModels(store.autos(), ModelStore.AUTO);
+    List<ModelStore.Item> a = store.autos();
+    log("📦 докачиваю в фоне: " + whatFetch(a));
+    downloadModels(a, ModelStore.AUTO);
   }
   /** «Облегчить перевод»: скачать новые файлы, которые заменяют прежние; прежние удалятся после сверки. */
   public boolean downloadUpgrade() {
@@ -1439,13 +1586,10 @@ public class TranslatorService extends Service {
   void reloadOptional() {
     if (eng == null) return;
     try {
-      if (spk == null || !spk.ready) { spk = new Speaker(modelsDir); if (spk.ready) log("🎤 отпечаток голоса подключён: " + spk.describe()); }
-      if (pb != null && new File(modelsDir, "phrasebook_tatoeba.tsv").exists()) pb.loadMined(new File(modelsDir, "phrasebook_tatoeba.tsv"));
+      for (String m : modules) activate(m);
       if (words != null && new File(modelsDir, "common_words.txt").exists()) { words.loadCommon(); log("📝 " + words.stats()); }
       if (chats != null) learn = new Learn(chats, modelsDir, getExternalFilesDir(null));
       if (new File(modelsDir, "denoiser").isDirectory() && eng.denoiser == null) log("🔇 шумоподавитель скачан — подключится после перезапуска приложения");
-      // Уточнитель только что скачали — включаем, если человек не выключал его сам.
-      if (hasLlm() && !contextMode && !getSharedPreferences("at", MODE_PRIVATE).contains("ctx")) { log("🧠 уточнитель скачан — включаю контекст"); setContext(true, false); }
       status("Готово. " + pb.stats());
     } catch (Throwable t) { log("подключение скачанного: " + t); }
   }
@@ -1614,7 +1758,7 @@ public class TranslatorService extends Service {
    *  идёт разговор с конца в пределах бюджета знаков; номера реплик — по порядку в снимке, а
    *  применяются правки по меткам `at`, потому что за время запроса реплики могли удалиться. */
   void cloudReview(final boolean manual) {
-    if (cloud == null || !cloud.ready) { log("☁ выключено: положите models/openrouter.json с ключом и списком :free-моделей"); return; }
+    if (!cloudReady()) { log(mod(Modules.CLOUD) ? "☁ выключено: нет ключа OpenRouter (models/openrouter.json)" : "☁ модуль «Облако» выключен"); return; }
     if (chats == null || chats.size() == 0) { log("☁ нечего уточнять"); hint("нечего уточнять"); return; }
     if (!cloudConsent()) { log("☁ нет согласия на отправку разговора"); hint("нужно согласие на отправку разговора в облако"); return; }
     if (cloudBusy) { log("☁ запрос уже в работе"); return; }
@@ -1752,7 +1896,9 @@ public class TranslatorService extends Service {
   }
   /** Произнести готовый текст (для «получше»: перевод уже есть, нужен только звук). */
   void speakOut(String tgt, String text) throws Exception {
+    if (!voice()) { hint("🔇 озвучка выключена — «Система» → «Модули»"); return; }
     synchronized (tts) {
+    if (!voice()) return;
     int rate = eng.ttsSampleRate(tgt); ensureTrack(rate);
     final boolean dup = btDuplex(); if (!dup) muteUntil = Long.MAX_VALUE;
     double sec = 0;
@@ -2066,7 +2212,7 @@ public class TranslatorService extends Service {
    *  таблички это десятки строк (решение владельца 28.09). В выученное не копится (learn=false).
    *  jpg — уже повёрнутый по EXIF и уменьшенный до 2048 px снимок в каталоге снимков разговоров. */
   public void photoRead(final File jpg) {
-    if (jpg == null || !jpg.exists() || ocr == null || !ocr.ready()) return;
+    if (jpg == null || !jpg.exists() || ocr == null || !ocr.ready() || !mod(Modules.OCR)) return;
     final long chatId = chats == null ? 0 : chats.current;
     new Thread(() -> {
       long t0 = System.nanoTime();
@@ -2145,7 +2291,7 @@ public class TranslatorService extends Service {
     new Thread(() -> {
       long t0 = System.nanoTime();
       String text = null, how = null;
-      if (allowCloud && cloud != null && cloud.ready) {
+      if (allowCloud && cloudReady()) {
         text = cloud.image(jpeg); how = "облако " + cloud.lastUsed;
       }
       if ((text == null || text.trim().isEmpty()) && !allowCloud) {
@@ -2155,7 +2301,7 @@ public class TranslatorService extends Service {
       long ms = (System.nanoTime() - t0) / 1000000;
       if (text == null || text.trim().isEmpty()) {
         log("📷 текста не нашлось за " + ms + " мс (снимок " + (jpeg.length / 1024) + " КБ)"
-            + (cloud == null || !cloud.ready ? ": офлайн-распознавания нет, ключ OpenRouter не задан" : ": " + cloud.lastError));
+            + (!cloudReady() ? ": офлайн-чтения нет, облако недоступно" : ": " + cloud.lastError));
         return;
       }
       log("📷 " + how + " за " + ms + " мс (снимок " + (jpeg.length / 1024) + " КБ): " + text.replace('\n', ' '));
@@ -2315,7 +2461,7 @@ public class TranslatorService extends Service {
       final long[] first = {0}; double audioS = 0;
       final boolean cacheable = r.cacheable;
       // Снимок не озвучивается: его читают глазами (решение владельца 28.09).
-      if (silent || !here || kind.equals("фото")) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : " · снимок, без озвучки"; }
+      if (silent || !here || kind.equals("фото") || !voice()) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : kind.equals("фото") ? " · снимок, без озвучки" : " · озвучка выключена"; }
       // Пауза до озвучки. Перевод уже готов и уже на экране — ждёт только голос, и ждёт он
       // не таймера, а тишины: пока человек говорит, переводы копятся в очереди и произносятся
       // после того, как он замолчал. Иначе на длинном монологе перевод начинает звучать
@@ -2356,7 +2502,9 @@ public class TranslatorService extends Service {
   final Object tts = new Object();
 
   double speakTurn(String dir, String tgt, String mt, boolean cacheable, long[] first) throws Exception {
+    if (!voice()) return 0;                            // модуль «Озвучка» выключен или голосов ещё нет: перевод на экране
     synchronized (tts) {
+    if (!voice()) return 0;                            // выключили, пока ждали очередь
     int rate = eng.ttsSampleRate(tgt); ensureTrack(rate);
     // В наушник — значит озвучка не попадает в комнату и микрофон можно не глушить:
     // собеседник продолжает говорить, пока в ухе идёт перевод. Замер протечки: −13…+0,1 дБ,

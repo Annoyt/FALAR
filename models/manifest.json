@@ -3,16 +3,16 @@
   "app": "0.23.1",
   "own_repo": "youannoingme/falar-models",
   "device_dir": "Android/data/app.falar/files/models",
-  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, optional — можно не ставить, auto — докачивается само в фоне и запуск не держит (новая возможность: у обновившихся не должно быть экрана первой загрузки). Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
-  "total_core_bytes": 1549468297,
-  "total_optional_bytes": 1188932476,
-  "total_auto_bytes": 17785025,
+  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, остальное — нет. module — модуль приложения (base — перевод речи, нужен всегда; tts — озвучка, ocr — чтение снимков, llm — уточнитель, speaker — отпечаток голоса, corpus — корпус фраз; bench — только для стенда): файлы включённого модуля качаются при установке и докачиваются сами, выключенного — не качаются. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
+  "total_core_bytes": 1414716715,
+  "total_optional_bytes": 1341469083,
   "files": [
     {
       "path": "silero_vad.onnx",
       "size": 643854,
       "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
       "tier": "core",
+      "module": "base",
       "license": "MIT",
       "source": {
         "type": "url",
@@ -24,6 +24,7 @@
       "size": 652184281,
       "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -37,6 +38,7 @@
       "size": 11845275,
       "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -50,6 +52,7 @@
       "size": 6355277,
       "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -63,6 +66,7 @@
       "size": 93939,
       "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -76,6 +80,7 @@
       "size": 152468296,
       "sha256": "a1cd52860a64a443e185ca05dd4574612a97cbe3558860b6898a7a5f17720342",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -103,6 +108,7 @@
       "size": 215739604,
       "sha256": "eb7236ee021efa023d95391dbf0c0bf8f4854b94d39173ead8cf060a6cc1378e",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -118,6 +124,7 @@
       "size": 961044,
       "sha256": "31df866c1c161a561cf7c15f9af3a6a3e0bdd96ba24cc75c33c655db8b5991cc",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -133,6 +140,7 @@
       "size": 2526923,
       "sha256": "8fd0707bc0579f52f5f1bbd8c4bc1313fd17fd33b3217a2788b133ed9d7c7008",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -148,6 +156,7 @@
       "size": 152469319,
       "sha256": "305181b07c0521ccce77ce0f3feac8677f4e7536ad9dcb1bc3657453795f5c2e",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -175,6 +184,7 @@
       "size": 215741655,
       "sha256": "87c0942a7af9393658a6f56cedb336d0d2fa5acbe5284a205f170a0c1d34d886",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -190,6 +200,7 @@
       "size": 1144725,
       "sha256": "1c30e1ff7774181f9090abf633a6fc0206f5464dd94526f8077d77d6af0fdccf",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -205,6 +216,7 @@
       "size": 2526902,
       "sha256": "679de3ab1139def112b69f58b1653b645c0dca87654d259d85645f3539c34f15",
       "tier": "core",
+      "module": "base",
       "license": "CC-BY-4.0",
       "source": {
         "type": "hf",
@@ -220,6 +232,7 @@
       "size": 29596978,
       "sha256": "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b",
       "tier": "optional",
+      "module": "speaker",
       "license": "Apache-2.0",
       "source": {
         "type": "hf",
@@ -234,6 +247,7 @@
       "size": 535638,
       "sha256": "e77603ac0c23dac3227dd2d7135b3a585cbee2679048aecfa886657d3ae1b534",
       "tier": "optional",
+      "module": "bench",
       "license": "see sherpa-onnx release",
       "source": {
         "type": "url",
@@ -246,6 +260,7 @@
       "size": 1133080448,
       "sha256": "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
       "tier": "optional",
+      "module": "llm",
       "license": "Apache-2.0",
       "source": {
         "type": "hf",
@@ -260,6 +275,7 @@
       "size": 15621,
       "sha256": "9ef64c5867dd86e0fb3bccf75b18530ffe16bdde5a73057e6c6139f9b5a64e20",
       "tier": "core",
+      "module": "base",
       "license": "project",
       "source": {
         "type": "hf",
@@ -275,6 +291,7 @@
       "size": 24892621,
       "sha256": "f6115d9232368a201beb8ed1c1f12de27b6a3890d6db83b861414d5cbe4976aa",
       "tier": "optional",
+      "module": "corpus",
       "license": "CC-BY-2.0-FR",
       "source": {
         "type": "hf",
@@ -291,6 +308,7 @@
       "size": 826791,
       "sha256": "8761bb41059cbbdbb879a974839d2fa3b35a75e573984ecd0f13351ea4f970a6",
       "tier": "optional",
+      "module": "base",
       "license": "CC-BY-2.0-FR",
       "source": {
         "type": "hf",
@@ -306,7 +324,8 @@
       "path": "ocr/det.onnx",
       "size": 9880512,
       "sha256": "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
-      "tier": "auto",
+      "tier": "optional",
+      "module": "ocr",
       "license": "Apache-2.0",
       "source": {
         "type": "hf",
@@ -320,7 +339,8 @@
       "path": "ocr/rec.onnx",
       "size": 7904513,
       "sha256": "b20bd37c168a570f583afbc8cd7925603890efbcdc000a59e22c269d160b5f5a",
-      "tier": "auto",
+      "tier": "optional",
+      "module": "ocr",
       "license": "Apache-2.0",
       "source": {
         "type": "url",
@@ -336,7 +356,8 @@
       "kind": "zip",
       "size": 67383016,
       "sha256": "13b0747a3a7e92d4438cdb5922cae72dd8989a6ef4bda06b3a559a7ccf2143a5",
-      "tier": "core",
+      "tier": "optional",
+      "module": "tts",
       "license": "CC0",
       "source": {
         "type": "hf",
@@ -366,7 +387,8 @@
       "kind": "zip",
       "size": 67368566,
       "sha256": "13e9be621ad43657a67338b9925ffc8cbd68821956fca800adbecba71fc277b2",
-      "tier": "core",
+      "tier": "optional",
+      "module": "tts",
       "license": "CC0",
       "source": {
         "type": "hf",

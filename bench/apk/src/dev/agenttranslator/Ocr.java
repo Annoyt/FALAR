@@ -29,7 +29,7 @@ public class Ocr {
 
   public Ocr(File modelsDir) { dir = new File(modelsDir, "ocr"); }
 
-  /** Модели на месте. Проверяется каждый раз, а не при создании: ярус auto докачивает их в фоне
+  /** Модели на месте. Проверяется каждый раз, а не при создании: модуль докачивает их в фоне
    *  уже после запуска. Файл появляется только после сверки хэша (загрузка идёт в .part). */
   public boolean ready() { return new File(dir, "det.onnx").isFile() && new File(dir, "rec.onnx").isFile(); }
 

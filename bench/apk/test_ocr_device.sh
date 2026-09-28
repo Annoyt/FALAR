@@ -3,7 +3,7 @@
 #
 #   bash bench/apk/test_ocr_device.sh [серийный номер]
 #
-# O1 модели чтения докачиваются сами (ярус auto) — как у обновившегося с 0.23: models/ocr на
+# O1 модели чтения докачиваются сами (модуль «Чтение снимков») — как у обновившегося с 0.23: models/ocr на
 #    телефоне удаляется, приложение запускается с локальным источником (tools/models_serve.py через
 #    adb reverse — USB-стенд считается Wi-Fi телефона), ждём «чтение снимков готово».
 # O2 набор bench/ocr (32 снимка вывесок) читается на телефоне (--es ocrbench): вывод сверяется с
@@ -57,6 +57,7 @@ restore() {
       $ADB shell "rm -f $F/photos/$p"; done
   fi
   $ADB shell "rm -f $F/chats/$TID.json; rm -rf $F/ocrbench $F/ocrtest.jpg"
+  [ -n "$RESTORE_MODS" ] && { start_app --es modules "'$MODS'"; sleep 3; say "  модули возвращены: [$MODS]"; }
   say "  тестовый разговор и его снимки удалены · текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
   start_app; rm -rf "$D"
   say; say "итог: PASS $pass, FAIL $fail, пропущено $skip"
@@ -67,6 +68,11 @@ $ADB wait-for-device; free_phone
 for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do $ADB pull "$F/$f" "$SNAP/" >/dev/null 2>&1; done
 LEARN0=$(sha256sum "$SNAP/learned.json" 2>/dev/null | cut -c1-16)
 
+# модуль «Чтение снимков» должен быть включён: если выключен — включаем и в конце возвращаем
+m=$(mark $LOG); start_app --es modules show
+MODS=$(wl "$m" '🧩 модули сейчас' 60 | grep -oE '\[[a-z,]*\]' | tr -d '[]'); say "  модули: [$MODS]"
+printf '%s' "$MODS" | grep -q ocr || { start_app --es modules "'${MODS:+$MODS,}ocr'"; sleep 3; RESTORE_MODS=1; }
+
 say "== O1: модели чтения докачиваются сами — как у обновившегося"
 $ADB shell "am force-stop $PKG"; sleep 1
 $ADB shell "rm -rf $F/models/ocr"
@@ -74,9 +80,9 @@ $ADB reverse tcp:8765 tcp:8765 >/dev/null; serve
 m=$(mark $LOG); t0=$(date +%s); start_app --es modelsbase $BASE
 l=$(wl "$m" '📦 модели' 400); say "  $l"
 printf '%s' "$l" | grep -qE "обязательных на месте ([0-9]+)/\1" && res 0 "O1 без моделей чтения обязательное на месте — экрана первой загрузки нет" || res 1 "O1 обязательного не хватает"
-a=$(wl "$m" 'докачиваю чтение снимков' 200); say "  $a"
+a=$(wl "$m" 'докачиваю в фоне.*Чтение снимков' 200); say "  $a"
 [ -n "$a" ] && res 0 "O1 докачка началась сама" || res 1 "O1 докачка не началась"
-d=$(wl "$m" 'чтение снимков готово' 300); say "  $d  ($(( $(date +%s) - t0 )) с от запуска)"
+d=$(wl "$m" 'модули докачаны' 300); say "  $d  ($(( $(date +%s) - t0 )) с от запуска)"
 [ -n "$d" ] && res 0 "O1 модели на месте, сказано об этом" || res 1 "O1 докачка не закончилась"
 ok=1; for f in det.onnx rec.onnx; do [ "$(size ocr/$f)" = "$(stat -c %s $R/models/ocr/$f)" ] || ok=0; done
 [ $ok = 1 ] && res 0 "O1 оба файла совпали по размеру (хэш сверило приложение)" || res 1 "O1 файлы не те"
@@ -111,7 +117,7 @@ json.dump({"id": tid, "name": "ТЕСТ снимок", "named": True, "saved": t
 EOF
 free_phone; $ADB shell "am force-stop $PKG"; sleep 1; $ADB push "$D/t.json" "$F/chats/$TID.json" >/dev/null 2>&1
 $ADB push $R/bench/ocr/photos/p03.jpg $F/ocrtest.jpg >/dev/null 2>&1
-m=$(mark $LOG); start_app; wl "$m" 'движки загружены|микрофон выключен|📦 модели' 120 >/dev/null; sleep 3
+m=$(mark $LOG); start_app; wl "$m" '🧩 модули:' 150 >/dev/null; sleep 3
 m=$(mark $LOG); start_app --es photofile $F/ocrtest.jpg
 l=$(wl "$m" '📷 OCR за|📷 не вышло|текста не нашлось' 120); say "  $l"
 printf '%s' "$l" | grep -q "📷 OCR за" && res 0 "O3 снимок прочитан и переведён" || res 1 "O3 снимок не прочитан"
