@@ -21,8 +21,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
   Button bRefineEvery, bCloudEvery, bCloudPrefer; ToggleButton tTranslitOther;
   ListView histList;
-  Button bPin, bVoice, bVoice2, bWord, bBetter, bTalk, bSys, bLearn, bAnswer, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bLog;
+  Button bPin, bVoice, bVoice2, bWord, bBetter, bTalk, bSys, bLearn, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bLog;
   TextView logLast;
+  MicButton bMic;
   EditText keyIn; ToggleButton tKnown, tMicSrc; SeekBar sMic, sHold; TextView micLbl, holdLbl;
   View reviewBox; TextView revWord, revRu, revEx, revStat; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart;
   String revCur; boolean revOpen;
@@ -85,7 +86,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     box.addView(setupView = buildSetup());
     mid.addView(box, new LinearLayout.LayoutParams(0, -1, 1f));
     root.addView(mid, new LinearLayout.LayoutParams(-1, 0, 1f));
-    for (Button btn : new Button[]{bMenu, bTalk, bLearn, bSys, bAnswer, bEnd, bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bRefineEvery, bCloudEvery}) style(btn);
+    for (Button btn : new Button[]{bMenu, bTalk, bLearn, bSys, bEnd, bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bRefineEvery, bCloudEvery}) style(btn);
     for (ToggleButton tg : new ToggleButton[]{tCtx, tAuto, tLang, tKnown, tMicSrc, tListenPt, tListenRu, tTranslitOther}) style(tg);
     for (Button cb : new Button[]{bBetter, bPin, bEnd, bModeInput, bModePtt, bModeListen, bFold, bPhoto, bType}) {
       cb.setMaxLines(1); cb.setPadding(6, 22, 6, 22);   // иначе подписи ломались по слогам: «слу/ша/ть»
@@ -123,7 +124,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
 
     // «Говорить» принимает любой язык: направление определяется по сказанному.
-    bAnswer.setOnTouchListener((v, e) -> { pressed(v, e); return ptt(e, "ru2pt"); });
+    // Позицию кнопки ставит удержание, а не нажатость вида: палец, съехавший с кнопки, запись не
+    // останавливает, и пульс не должен гаснуть, пока микрофон ещё пишет.
+    bMic.setOnTouchListener((v, e) -> {
+      boolean r = ptt(e, "ru2pt");
+      if (r) bMic.setActive(e.getAction() == MotionEvent.ACTION_DOWN);
+      return r;
+    });
     CompoundButton.OnCheckedChangeListener lis = (v, on) -> {
       if (svc == null || uiSync) return;
       svc.setListen(tListenPt.isChecked(), tListenRu.isChecked());
@@ -817,8 +824,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     histHint.setPadding(4, 6, 4, 2); histHint.setText("нажмите на реплику — поправить, удалить, перенести");
     v.addView(histHint);
     histList = new ListView(this);
-    histList.setDivider(null);
-    v.addView(histList, new LinearLayout.LayoutParams(-1, 0, 1f));
+    histList.setDivider(null); histList.setClipToPadding(false);
+    // Кнопка удержания плавает над репликами, а не занимает свой ряд: место у текста она не
+    // отнимает, и текст за ней виден. Видна только в режиме удержания (mode).
+    FrameLayout histBox = new FrameLayout(this); histBox.setClipChildren(false);   // ореол шире кнопки
+    histBox.addView(histList, new FrameLayout.LayoutParams(-1, -1));
+    bMic = new MicButton(this); bMic.setEnabled(false);
+    bMic.setContentDescription("Удерживайте и говорите — по-португальски или по-русски");
+    FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(dp(128), dp(128), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+    mp.bottomMargin = dp(10);
+    histBox.addView(bMic, mp);
+    v.addView(histBox, new LinearLayout.LayoutParams(-1, 0, 1f));
 
     // Низ экрана — ряд режимов, над ним панель выбранного. Раньше всё лежало вповалку тремя
     // рядами и съедало место у текста, который и есть главное на этом экране. Режим переключает
@@ -862,15 +878,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     return v;
   }
 
-  /** Удержание. В подписи оба языка: кнопка принимает тот, на котором в неё говорят. */
+  /** Удержание. Сама кнопка плавает над репликами (buildTalk), здесь — подсказка к ней. Кнопка
+   *  зовёт на обоих языках — FALAR и ГОВОРИ по кольцу: принимает тот, на котором в неё говорят. */
   View buildPtt() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL);
-    bAnswer = new Button(this); bAnswer.setText("🎙 удерживать · PT или RU"); bAnswer.setEnabled(false);
-    v.addView(bAnswer, new LinearLayout.LayoutParams(-1, -2));
-    TextView t = new TextView(this); t.setTextSize(11); t.setTextColor(Color.GRAY);
-    t.setText("Направление определяется по сказанному, выбирать язык не нужно");
-    v.addView(t);
-    return v;
+    TextView t = new TextView(this); t.setTextSize(11); t.setTextColor(Color.GRAY); t.setGravity(Gravity.CENTER);
+    t.setPadding(0, 6, 0, 6);
+    t.setText("Удерживайте круг и говорите — язык определится по сказанному");
+    return t;
   }
 
   View buildListen() {
@@ -893,6 +907,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     panelInput.setVisibility(m == 0 ? View.VISIBLE : View.GONE);
     panelPtt.setVisibility(m == 1 ? View.VISIBLE : View.GONE);
     panelListen.setVisibility(m == 2 ? View.VISIBLE : View.GONE);
+    // Пока круг над списком, список дотягивается выше него: последняя реплика не остаётся под кругом.
+    boolean micOn = m == 1 && !folded;
+    bMic.setVisibility(micOn ? View.VISIBLE : View.GONE);
+    histList.setPadding(0, 0, 0, micOn ? dp(138) : 0);
     Button[] bs = {bModeInput, bModePtt, bModeListen};
     for (int k = 0; k < bs.length; k++) bs[k].setTypeface(null, k == m ? Typeface.BOLD : Typeface.NORMAL);
     for (int k = 0; k < bs.length; k++) bs[k].setSelected(k == m && !folded);
@@ -1483,6 +1501,18 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       refreshSetup();
     }
   }
+  /** Стенд: нажатая позиция кнопки удержания без записи — микрофон не открывается, в разговор
+   *  ничего не попадает. Экран держится включённым, пока идёт показ; режим внизу потом прежний. */
+  void micDemo(String kind, String sec) {
+    final int was = modeNow; final boolean wasFolded = folded;
+    show(0); if (folded) fold(false); mode(1);
+    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    long ms = 1000L * (sec == null ? 15 : Integer.parseInt(sec));
+    bMic.demo(kind, ms, () -> {
+      getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+      mode(was); if (wasFolded) fold(true);
+    });
+  }
   boolean enroll(MotionEvent e, String who, String lang) {
     if (svc == null) return false;
     if (e.getAction() == MotionEvent.ACTION_DOWN) { buzz(); svc.enrollStart(who, lang); return true; }
@@ -1496,13 +1526,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) { svc.pttStop(); return true; }
     return false;
   }
-  @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
+  @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
+    if (i.hasExtra("micanim")) { micDemo(i.getStringExtra("micanim"), i.getStringExtra("micsec")); return; }
+    if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
   @Override public void onReady() {
     bPin.setEnabled(true); bBetter.setEnabled(true);
     tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bVoice.setEnabled(true); bVoice2.setEnabled(true); bWord.setEnabled(true);
-    bAnswer.setEnabled(true); bPhoto.setEnabled(true); bType.setEnabled(true);
+    bMic.setEnabled(true); bPhoto.setEnabled(true); bType.setEnabled(true);
     uiSync = true;
     tCtx.setChecked(svc != null && svc.contextMode);
     if (svc != null) { tListenPt.setChecked(svc.listenPt); tListenRu.setChecked(svc.listenRu); }
