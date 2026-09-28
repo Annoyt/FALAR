@@ -78,6 +78,29 @@ public class Engine {
     loadTtsMs = (System.nanoTime() - t) / 1000000; log.log("TTS загружен за " + loadTtsMs + " мс");
   }
   static String p(File d, String n) { return new File(d, n).getAbsolutePath(); }
+
+  /** Отдать модели. Без этого нативная память (распознавание, синтез, VAD, шесть сессий перевода —
+   *  около трёх гигабайт) не возвращалась никогда: сервис останавливался, а процесс оставался в
+   *  памяти кэшированным со всеми моделями, пока его не выгонит система или «очистка памяти».
+   *  Звать только после остановки рабочих потоков: освобождение посреди распознавания — это
+   *  обращение к уже освобождённой памяти и падение в нативном коде. */
+  public volatile boolean released = false;
+  public synchronized void release() {
+    if (released) return;
+    released = true;
+    // Прямые вызовы, а не через отражение: отражение молча проглотило бы метод, которого нет,
+    // и память снова не отдавалась бы — а компилятор такое ловит.
+    try { if (asrPt != null) asrPt.release(); } catch (Throwable ignore) {}
+    try { if (asrMulti != null) asrMulti.release(); } catch (Throwable ignore) {}
+    try { if (asrRu != null) asrRu.release(); } catch (Throwable ignore) {}
+    try { if (ttsRu != null) ttsRu.release(); } catch (Throwable ignore) {}
+    try { if (ttsPt != null) ttsPt.release(); } catch (Throwable ignore) {}
+    try { if (vad != null) vad.release(); } catch (Throwable ignore) {}
+    try { if (denoiser != null) denoiser.release(); } catch (Throwable ignore) {}
+    asrPt = asrMulti = null; asrRu = null; ttsRu = ttsPt = null; vad = null; denoiser = null;
+    for (OrtSession[] ss : mt.values()) for (OrtSession s : ss) try { s.close(); } catch (Throwable ignore) {}
+    mt.clear(); tok.clear();
+  }
   static OfflineRecognizer offline(File d, int threads) {
     OfflineTransducerModelConfig tr = OfflineTransducerModelConfig.builder().setEncoder(p(d, "encoder.int8.onnx")).setDecoder(p(d, "decoder.int8.onnx")).setJoiner(p(d, "joiner.int8.onnx")).build();
     OfflineModelConfig mc = OfflineModelConfig.builder().setTransducer(tr).setTokens(p(d, "tokens.txt")).setNumThreads(threads).setModelType("nemo_transducer").setDebug(false).build();

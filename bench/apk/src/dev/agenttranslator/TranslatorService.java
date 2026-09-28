@@ -46,6 +46,8 @@ public class TranslatorService extends Service {
    *  транскрипции. Микрофон в это время глух — иначе приложение слышит владельца, считает его
    *  собеседником и переводит ему же его фразу обратно. */
   public volatile boolean readingAloud = false;
+  /** Последняя проговорённая вслух португальская фраза и когда закончилась её озвучка. */
+  volatile String spokenPt; volatile long spokenPtEnd;
   /** 0 — слушать всегда, 1 — молчать, пока держат текст, 2 — молчать, пока показана транскрипция.
    *  При 1 и 2 работают ещё два тихих фильтра: своя фраза с экрана и свой голос по-португальски. */
   public volatile int readGuard = 1;
@@ -67,6 +69,8 @@ public class TranslatorService extends Service {
     public volatile boolean dropped;
     Turn(int n, String d, String a, String m, long at) { this.n = n; dir = d; asr = a; mt = m; this.at = at; } }
   public final List<Turn> history = Collections.synchronizedList(new ArrayList<>()); int turnNo = 0;
+  /** Знаков на токен у модели уточнителя — замер при её запуске (Brief). */
+  volatile double llmCpt = Brief.DEFAULT_CHARS_PER_TOKEN;
   public volatile Llm llm; public volatile boolean contextMode = false; final ExecutorService llmWorker = Executors.newSingleThreadExecutor(); volatile boolean refinePending = false, refineRunning = false;
   /** Интервалы разбора контекста, в репликах: 0 — только по кнопке. Локальный — уточнитель 🧠,
    *  облачный — пересмотр всего разговора. Счётчики идут с последнего разбора и сбрасываются
@@ -215,6 +219,18 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("update")) { String u = i.getStringExtra("update");
       if ("check".equals(u)) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("update_check").apply(); checkUpdates(true); }
       else if ("install".equals(u)) installUpdate(); }
+    // Стенд: поднять уточнитель так же, как перед проходом разбора (проверка памяти, замер
+    // токенизатора), и дать ему уйти по простою — без разбора и без касания разговоров.
+    if (i != null && i.hasExtra("llmprobe")) llmWorker.submit(() -> {
+      boolean ok = ensureLlm();
+      log("🧠 проба уточнителя: " + (ok ? "поднят" : "не поднят"));
+      if (ok) { main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); }
+    });
+    if (i != null && i.hasExtra("llmload")) {   // стенд: как сервер держит веса (mmap|none), вступает при следующем запуске уточнителя
+      String m = i.getStringExtra("llmload"); getSharedPreferences("at", MODE_PRIVATE).edit().putString("llm_load", m).apply();
+      log("🧠 режим загрузки уточнителя: " + m + " — перезапускаю его");
+      unloadLlm("сменён режим загрузки");
+    }
     if (i != null && i.hasExtra("readguard")) setReadGuard(Integer.parseInt(i.getStringExtra("readguard")));
     if (i != null && i.hasExtra("reading")) setReadingAloud("1".equals(i.getStringExtra("reading")));
     if (i != null && i.hasExtra("models") && store != null) {
@@ -545,8 +561,41 @@ public class TranslatorService extends Service {
     return START_STICKY;
   }
   @Override public IBinder onBind(Intent i) { return binder; }
+  /** Экран закрыли, микрофон не слушает — через минуту сервис останавливается и отдаёт модели.
+   *  Минута, а не сразу: загрузка обратно занимает около 15 секунд, и вернуться в приложение
+   *  спустя полминуты не должно стоить этого ожидания. Если слушает — работает дальше: это
+   *  переводчик в кармане, и остановить его можно кнопкой «Стоп» в уведомлении. */
+  static final long IDLE_STOP_MS = 60_000, IDLE_STOP_SCREEN_OFF_MS = 600_000;
+  /** Виден ли экран приложения. Держится по onStart/onStop экрана, а не по его уничтожению: с
+   *  Android 12 «назад» на главном экране приложение не закрывает, а сворачивает, и экран не
+   *  уничтожается почти никогда — выгрузка, завязанная на это, не наступала. */
+  volatile boolean uiVisible = false;
+  public void setUiVisible(boolean v) { uiVisible = v; if (v) main.removeCallbacks(idleStop); else scheduleIdleStop(); }
+  final Runnable idleStop = () -> {
+    if (uiVisible || vadMode || (store != null && store.running()) || updateBusy || cloudBusy) return;
+    log("💤 приложение свёрнуто, микрофон выключен — останавливаюсь и отдаю память");
+    tsv("idle_stop");
+    exitAfterStop = true;
+    stopForeground(true); stopSelf();
+  };
+  /** Завершить процесс после остановки. Освобождённые модели распределитель памяти системе не
+   *  возвращает: на Redmi после выгрузки оставалось 186 МБ в памяти и ещё 543 МБ нативной кучи в
+   *  сжатой подкачке, а попросить распределитель отдать их из Java нельзя. Всё состояние уже на
+   *  диске, экрана нет — процессу незачем жить. Только для ухода по бездействию и смахивания, не
+   *  для кнопки «Стоп»: экран в этот момент может быть открыт. */
+  volatile boolean exitAfterStop = false;
+  /** Свернули — минута; погас экран — десять минут: пауза между фразами с погасшим экраном не
+   *  должна стоить пятнадцати секунд перезагрузки моделей. Слушает — не выгружаемся вовсе. */
+  void scheduleIdleStop() {
+    main.removeCallbacks(idleStop);
+    if (uiVisible || vadMode) return;
+    boolean screenOn = true;
+    try { screenOn = getSystemService(PowerManager.class).isInteractive(); } catch (Throwable ignore) {}
+    main.postDelayed(idleStop, screenOn ? IDLE_STOP_MS : IDLE_STOP_SCREEN_OFF_MS);
+  }
   public void setListener(Listener l) {
     listener = l; if (l != null && eng != null) main.post(l::onReady);
+    setUiVisible(l != null);
     // Экран мог подключиться после проверки моделей при старте — отдаём ему итог сразу.
     if (l != null && store != null) { ModelStore.State st = store.state(); main.post(() -> l.onModels(st)); }
     if (l != null) { String u = updateState; main.post(() -> l.onUpdate(u)); }
@@ -566,7 +615,7 @@ public class TranslatorService extends Service {
             : (pt && ru ? "▶ слушаю оба языка, направление по реплике"
                         : "▶ слушаю только " + (pt ? "португальский" : "русский")));
   }
-  public void setVad(boolean on) { vadMode = on;
+  public void setVad(boolean on) { vadMode = on; if (!on) scheduleIdleStop();
     getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("vad", on).apply();   // START_STICKY поднимает сервис с vadMode=false
     if (eng != null) eng.vad.reset();
     if (on && !capturing) { capturing = true; startCapture(); }
@@ -666,6 +715,26 @@ public class TranslatorService extends Service {
     log(on ? "↔ авто-направление по языку профиля: " + (spk == null ? "" : spk.describe()) + ", неопознанный голос → " + (spk == null ? "pt" : spk.fallbackLang())
            : "↔ авто-направление выключено");
   }
+  /** Знаков на токен — на образцах обоих языков, берётся меньшее: русский дробится мельче.
+   *  Бюджет контекста считается от этого числа, а не от догадки. */
+  static final String CPT_PT = "Olha, o carro chegou ontem com um barulho estranho na frente, e quando a gente levantou vimos que a correia dentada estava muito gasta. Se ela arrebentar com o motor ligado, o conserto fica muito mais caro, entao a recomendacao e trocar agora mesmo.";
+  static final String CPT_RU = "Хорошо, я понял про ремень. Скажите, а насколько это срочно? У меня в субботу поездка за город, почти четыреста километров в одну сторону, и мне совсем не хочется, чтобы машина встала посреди трассы.";
+  void measureCpt(Llm l) {
+    try {
+      double pt = Brief.measured(CPT_PT.length(), l.tokens(CPT_PT)), ru = Brief.measured(CPT_RU.length(), l.tokens(CPT_RU));
+      llmCpt = Math.min(pt, ru);
+      log(String.format(Locale.ROOT, "🧠 токенизатор: %.2f знака на токен по-португальски, %.2f по-русски — фон до %d знаков",
+          pt, ru, Math.min(Brief.FRESH_CHARS, Brief.budget(llmCpt, 0, 0, 0))));
+    } catch (Throwable e) { log("🧠 токенизатор не ответил, считаю с запасом: " + e); }
+  }
+  /** Фон для уточнителя: реплики из рабочей истории, кроме разбираемой, на языке исходника,
+   *  от старых к новым. Отбор по бюджету — в Brief. */
+  List<String> backgroundLines(Turn[] h, int idx) {
+    String src = h[idx].dir.substring(0, 2); List<String> r = new ArrayList<>();
+    for (int i = 0; i < h.length; i++) { if (i == idx) continue; String text = h[i].dir.substring(0, 2).equals(src) ? h[i].asr : (h[i].refined != null ? h[i].refined : h[i].mt); if (text != null && !text.isEmpty()) r.add(text); }
+    return r;
+  }
+
   /** Файл уточнителя на месте. */
   public boolean hasLlm() {
     File[] gg = new File(getExternalFilesDir(null), "models/llm").listFiles((d, n) -> n.endsWith(".gguf"));
@@ -676,18 +745,60 @@ public class TranslatorService extends Service {
    *  чтобы «само включилось» не превратилось в «человек включил» и выключение осталось за ним. */
   public void setContext(boolean on, boolean remember) {
     if (remember) getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("ctx", on).apply();
-    contextMode = on; if (!on) { log("🧠 контекст выключен"); return; }
-    if (llm != null && llm.ready) { log("🧠 контекст включён"); return; }
-    llmWorker.submit(() -> { try {
-      File ld = new File(getExternalFilesDir(null), "models/llm"); File[] gg = ld.listFiles((d, n) -> n.endsWith(".gguf")); if (gg == null || gg.length == 0) { log("🧠 контекст выключен: уточнителя нет, скачайте его в «Системе» кнопкой необязательного"); contextMode = false; return; }
+    if (on && !hasLlm()) { contextMode = false; log("🧠 контекст выключен: уточнителя нет, скачайте его в «Системе» кнопкой необязательного"); return; }
+    contextMode = on;
+    if (!on) { unloadLlm("контекст выключен"); log("🧠 контекст выключен"); return; }
+    log("🧠 контекст включён — уточнитель поднимается на время разбора и уходит через " + LLM_IDLE_MS / 1000 + " с простоя");
+  }
+
+  /** Уточнитель по требованию. Держать его постоянно на телефоне с 8 ГБ нельзя: приложение с ним
+   *  занимает 3,6 ГБ, и через 5–35 с после загрузки система каждый раз присылала критический сигнал
+   *  памяти — при загрузке и обычной, и отображением файла (results/2026-09-28-memory.md). Так
+   *  «тихо падали»: система убивала процессы без всякой ошибки. Теперь сервер поднимается перед
+   *  проходом разбора, серия проходов подряд пользуется им же, а через 45 с простоя он выгружается. */
+  static final long LLM_IDLE_MS = 45_000;
+  /** Сколько памяти нужно сверх системного порога, чтобы поднять сервер: 1,25–1,5 ГБ по замеру. */
+  static final long LLM_NEED = 1500L << 20;
+  final Runnable llmIdleUnload = () -> { if (!refineRunning) unloadLlm("простой " + LLM_IDLE_MS / 1000 + " с"); };
+  void unloadLlm(String why) {
+    main.removeCallbacks(llmIdleUnload);
+    Llm l = llm; llm = null;
+    if (l != null) { llmWorker.submit(l::stop); log("🧠 уточнитель выгружен: " + why); tsv("llm_unload", why); }
+  }
+  /** Хватит ли памяти поднять сервер, не загнав телефон в критическое состояние. Цифры системы
+   *  пишутся в журнал при каждом решении: порог выведен из замера, и его нужно видеть. */
+  boolean roomForLlm() {
+    try {
+      ActivityManager am = getSystemService(ActivityManager.class);
+      ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo(); am.getMemoryInfo(mi);
+      long spare = mi.availMem - mi.threshold;
+      boolean ok = !mi.lowMemory && spare > LLM_NEED;
+      tsv("llm_room", "" + (mi.availMem >> 20), "" + (mi.threshold >> 20), mi.lowMemory ? "low" : "", ok ? "ok" : "no");
+      if (!ok) log("🧠 разбор отложен: свободно " + (mi.availMem >> 20) + " МБ при пороге системы " + (mi.threshold >> 20) + " МБ — уточнителю нужно ещё " + (LLM_NEED >> 20) + " МБ сверху");
+      return ok;
+    } catch (Throwable e) { return true; }
+  }
+  /** Поднять сервер, если его нет. Только на llmWorker. false — не поднят (нет памяти, файла, ошибка). */
+  boolean ensureLlm() {
+    if (llm != null && llm.ready) return true;
+    if (!roomForLlm()) return false;
+    try {
+      File ld = new File(getExternalFilesDir(null), "models/llm"); File[] gg = ld.listFiles((d, n) -> n.endsWith(".gguf")); if (gg == null || gg.length == 0) { log("🧠 уточнителя нет — скачайте его в «Системе»"); return false; }
       File pick = gg[0]; for (File f : gg) if (f.getName().toLowerCase().contains("hy-mt")) pick = f;
-      log("🧠 запускаю LLM: " + pick.getName() + " …"); long t = System.nanoTime();
+      List<Integer> stray = Llm.strays();
+      if (!stray.isEmpty()) {
+        for (int pid : stray) android.os.Process.killProcess(pid);
+        log("🧠 убил оставшийся от прошлого запуска llama-server (" + stray.size() + ") — он держал память и порт");
+        Thread.sleep(500);
+      }
+      log("🧠 поднимаю уточнитель: " + pick.getName() + " …"); long t = System.nanoTime();
       Llm l = new Llm(getApplicationInfo().nativeLibraryDir, pick.getAbsolutePath(), new File(getExternalFilesDir(null), "llama-server.log").getAbsolutePath());
-      if (l.start(4)) { llm = l; log("🧠 LLM готов за " + (System.nanoTime() - t) / 1000000 + " мс — уточняю переводы по контексту в фоне"); if (refineEvery > 0) kickLocal(); }
-      // Переключатель не должен оставаться включённым при мёртвом сервере: снаружи это выглядит
-      // как «контекст работает», а на деле не уточняется ничего.
-      else { contextMode = false; log("🧠 LLM не поднялся — контекст выключен, подробности в llama-server.log"); }
-    } catch (Throwable e) { Log.e(TAG, "llm", e); log("🧠 ошибка LLM: " + e); contextMode = false; } });
+      l.loadMode = getSharedPreferences("at", MODE_PRIVATE).getString("llm_load", "mmap");
+      if (!l.start(4)) { log("🧠 уточнитель не поднялся — подробности в llama-server.log"); return false; }
+      llm = l; log("🧠 LLM готов за " + (System.nanoTime() - t) / 1000000 + " мс");
+      measureCpt(l);
+      return true;
+    } catch (Throwable e) { Log.e(TAG, "llm", e); log("🧠 ошибка LLM: " + e); return false; }
   }
   /** Состояние контекста при запуске. Раньше оно нигде не сохранялось, и переключатель каждый
    *  раз начинался выключенным — снаружи это выглядело как «само отключается». Выбор человека
@@ -696,7 +807,7 @@ public class TranslatorService extends Service {
     android.content.SharedPreferences pr = getSharedPreferences("at", MODE_PRIVATE);
     boolean has = hasLlm();
     if (!pr.contains("ctx")) {
-      if (has) { log("🧠 уточнитель на месте — включаю контекст"); setContext(true, false); }
+      if (has) { log("🧠 уточнитель на месте — контекст включён"); setContext(true, false); }
       return;
     }
     boolean want = pr.getBoolean("ctx", false);
@@ -709,7 +820,7 @@ public class TranslatorService extends Service {
    *  штрафа и догонит разговор, когда сеть вернётся: счётчик не сбрасывается. */
   void scheduleRefine() {
     sinceLocal++; sinceCloud++;
-    if (contextMode && llm != null && llm.ready && refineEvery > 0 && sinceLocal >= refineEvery) { sinceLocal = 0; kickLocal(); }
+    if (contextMode && refineEvery > 0 && sinceLocal >= refineEvery) { sinceLocal = 0; kickLocal(); }
     if (cloudEvery > 0 && sinceCloud >= cloudEvery * cloudBackoff) {
       if (cloud == null || !cloud.ready || !cloudConsent()) {
         if (!cloudSkipLogged) { cloudSkipLogged = true; log("☁ автоматический пересмотр пропущен: " + (cloud == null || !cloud.ready ? "нет ключа" : "нет согласия на отправку разговора")); }
@@ -718,7 +829,10 @@ public class TranslatorService extends Service {
       } else { cloudSkipLogged = false; sinceCloud = 0; cloudReview(false); }
     }
   }
-  void kickLocal() { if (llm == null || !llm.ready) return; refinePending = true; if (!refineRunning) llmWorker.submit(this::refineLoop); }
+  void kickLocal() {
+    if (!contextMode) return;
+    refinePending = true; if (!refineRunning) llmWorker.submit(this::refineLoop);   // сервер поднимет сам проход
+  }
   static String langName(String code) { return code.equals("ru") ? "Russian" : "Portuguese (Brazil)"; }
   /** Контекст на языке исходника реплики t: pt-реплики как есть, ru-реплики — их перевод (и наоборот). */
   String background(Turn[] h, int idx, int from, int to) {
@@ -802,7 +916,7 @@ public class TranslatorService extends Service {
    *  а теперь разговор дочитан целиком — видно, о чём шла речь. Идёт в фоне и никуда не спешит;
    *  результат подхватится, когда к этому человеку вернутся. */
   void refineSession(long id) {
-    if (llm == null || !llm.ready) { log("🧠 улучшение разговора " + id + " пропущено: LLM не поднята"); describeChat(id); return; }
+    if (!contextMode || !ensureLlm()) { log("🧠 улучшение разговора " + id + " пропущено: уточнитель не поднят"); describeChat(id); return; }
     org.json.JSONObject o = chats.load(id);
     if (o == null) return;
     org.json.JSONArray t = o.optJSONArray("turns");
@@ -877,7 +991,12 @@ public class TranslatorService extends Service {
    *  (TOPIC/FIX/TERMS), и тогда пары терминов извлекаются офлайн. */
   void refineLoop() {
     refineRunning = true;
-    try { while (refinePending) { refinePending = false;
+    main.removeCallbacks(llmIdleUnload);
+    try {
+      // Памяти нет — проход отложен до следующей реплики. Флаг ожидания снимаем, иначе finally
+      // перезапускал бы проход по кругу, пока память не освободится.
+      if (!ensureLlm()) { refinePending = false; return; }
+      while (refinePending) { refinePending = false;
       Turn[] h; synchronized (history) { h = history.toArray(new Turn[0]); } if (h.length == 0) return;
       final long chatId = chats == null ? 0 : chats.current;   // тема и пары должны лечь в тот разговор, который разбирали
       List<Turn> todo = new ArrayList<>();
@@ -892,16 +1011,33 @@ public class TranslatorService extends Service {
         for (Turn L : todo) {
           int idx = indexOf(h, L); if (idx < 0) continue;
           String tgt = L.dir.substring(3);
-          String bg = (topic.isEmpty() ? "" : "Tema: " + topic + "\n") + background(h, idx, from, h.length);
+          String tm = terms(L.dir, L.asr), tp = topic.isEmpty() ? "" : "Tema: " + topic + "\n";
+          // Бюджет из окна модели: без него длинные реплики переполняли окно, сервер отказывал,
+          // и уточнитель замолкал навсегда. Старое сжато в строку темы, свежее — в пределах бюджета.
+          int budget = Brief.budget(llmCpt, L.asr.length(), tm.length(), tp.length());
+          if (budget < 0) { log("🔁 #" + L.n + " длиннее окна уточнителя (" + L.asr.length() + " знаков) — оставляю перевод как есть"); continue; }
+          List<String> fresh = Brief.fit(backgroundLines(h, idx), Math.min(budget, Brief.FRESH_CHARS));
+          String bg = tp + String.join("\n", fresh);
           long t = System.nanoTime();
-          String out = llm.chat(null, hyPrompt(bg, L.asr, tgt, terms(L.dir, L.asr)), 200).trim();
-          long ms = (System.nanoTime() - t) / 1000000;
-          if (tgt.equals("pt")) out = TextRules.toBrazilian(out);
-          if (applyFix(L, out, Chats.BY_LLM)) { changed++; log("🔁 #" + L.n + " по контексту (" + ms + " мс): " + out); }
-          else log("🔁 #" + L.n + " контекст не изменил перевод (" + ms + " мс)");
+          try {
+            String out = llm.chat(null, hyPrompt(bg, L.asr, tgt, tm), 200).trim();
+            long ms = (System.nanoTime() - t) / 1000000;
+            if (tgt.equals("pt")) out = TextRules.toBrazilian(out);
+            if (applyFix(L, out, Chats.BY_LLM)) { changed++; log("🔁 #" + L.n + " по контексту (" + ms + " мс, фон " + bg.length() + " зн.): " + out); }
+            else log("🔁 #" + L.n + " контекст не изменил перевод (" + ms + " мс, фон " + bg.length() + " зн.)");
+          } catch (Exception e) {
+            // Одна неудачная реплика не обрывает проход: раньше исключение выбрасывало весь цикл,
+            // метка «разобрано до» не сдвигалась, и следующий проход падал на том же месте.
+            log("🔁 #" + L.n + " уточнитель не ответил: " + e.getMessage());
+          }
         }
       } else {
         StringBuilder u = new StringBuilder(); Map<Integer, Turn> byN = new HashMap<>();
+        // Та же защита окна для общей модели: реплики с конца, пока влезают в бюджет.
+        int budget = Math.min(Brief.budget(llmCpt, 0, 0, topic.length() + Cloud.REVIEW_SYS.length()), Brief.FRESH_CHARS * 2);
+        int start = h.length, used = 0;
+        while (start > 0) { Turn x = h[start - 1]; int len = x.asr.length() + (x.refined != null ? x.refined : x.mt).length() + 20; if (used + len > budget && start < h.length) break; used += len; start--; }
+        from = Math.max(from, start);
         for (int i = from; i < h.length; i++) { int n = i - from + 1; byN.put(n, h[i]); u.append(line(n, h[i].dir, null, h[i].asr, h[i].refined != null ? h[i].refined : h[i].mt)); }
         long t = System.nanoTime();
         String out = llm.chat(Cloud.REVIEW_SYS, (topic.isEmpty() ? "" : "Topic so far: " + topic + "\n") + "Transcript:\n" + u, 400);
@@ -925,7 +1061,11 @@ public class TranslatorService extends Service {
       tsv("local_pass", "" + todo.size(), "" + changed, "" + pairs, "" + ms);
       hint("🧠 разбор: реплик " + todo.size() + ", правок " + changed + (hy ? "" : ", пар " + pairs));
     } } catch (Throwable e) { Log.e(TAG, "refine", e); log("🔁 ошибка уточнения: " + e); }
-    finally { refineRunning = false; if (refinePending) llmWorker.submit(this::refineLoop); }   // запрос, пришедший между проверкой и выходом, не теряется
+    finally {
+      refineRunning = false;
+      if (refinePending) llmWorker.submit(this::refineLoop);   // запрос, пришедший между проверкой и выходом, не теряется
+      else if (llm != null) { main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); }
+    }
   }
 
   /** Правка в реплику (по метке), в рабочую историю и в ярус выученного. false — перевод тот же,
@@ -986,7 +1126,7 @@ public class TranslatorService extends Service {
   public String improveMode() {
     if (eng == null) return "движок ещё загружается";        // интент со стенда приходит раньше, чем поднялись модели
     if (cloud != null && cloud.ready && online()) return "cloud";
-    if (contextMode && llm != null && llm.ready) return "local";
+    if (contextMode && hasLlm()) return "local";
     if (cloud == null || !cloud.ready) return "нет ключа OpenRouter, а контекст 🧠 выключен";
     return "нет сети, а контекст 🧠 выключен";
   }
@@ -1649,7 +1789,12 @@ public class TranslatorService extends Service {
    *  Возвращает причину для показа или null. Молча не выбрасываем ничего: сегодня уже видели,
    *  как молчаливое поведение выглядит поломкой. */
   String readSkip(String dir, String asr, String who, String kind) {
-    if (readGuard == 0 || !"pt2ru".equals(dir) || !"asr".equals(kind)) return null;
+    if (!"pt2ru".equals(dir) || !"asr".equals(kind)) return null;
+    // Эхо проверяется при любом положении настройки: это не чтение человеком, а собственный
+    // голос приложения, и переводить его обратно не нужно никогда.
+    if (Heard.echo(asr, spokenPt, System.currentTimeMillis(), spokenPtEnd))
+      return "🔇 пропущено: это эхо моей же озвучки — «" + (spokenPt.length() > 40 ? spokenPt.substring(0, 40) + "…" : spokenPt) + "»";
+    if (readGuard == 0) return null;
     if (Speaker.ME.equals(who))
       return "🔇 пропущено: это ваш голос, а речь португальская — вход от вас всегда русский";
     String shown = fromScreen(asr);
@@ -1916,7 +2061,12 @@ public class TranslatorService extends Service {
       if (cached != null) { if (first != null && first[0] == 0) first[0] = System.nanoTime(); writeOut(cached, cached.length, tgt); audioS = cached.length / (double) rate; }
       else { GeneratedAudio ga = eng.speak(tgt, mt, chunk -> { if (first != null && first[0] == 0) first[0] = System.nanoTime(); writeOut(chunk, chunk.length, tgt); return 1; });
         audioS = ga.getSamples().length / (double) rate; if (cacheable) pb.putAudio(dir, mt, ga.getSamples(), rate); }
-    } finally { if (!dup) muteUntil = System.currentTimeMillis() + (long) (audioS * 1000) + 400; }
+    } finally {
+      if (!dup) muteUntil = System.currentTimeMillis() + (long) (audioS * 1000) + 400;
+      // Что и когда проговорено по-португальски — для отсева эха: хвост озвучки и отражение от стен
+      // доходят до микрофона и после этих 400 мс.
+      if ("pt".equals(tgt)) { spokenPt = mt; spokenPtEnd = System.currentTimeMillis() + (long) (audioS * 1000); }
+    }
     return audioS;
     }
   }
@@ -2171,5 +2321,45 @@ public class TranslatorService extends Service {
     }, "heartbeat").start();
   }
   volatile boolean micSilenced = false;
-  @Override public void onDestroy() { running = false; if (store != null) store.cancel(); if (spkTrack != null) spkTrack.release(); worker.shutdownNow(); llmWorker.shutdownNow(); cloudWorker.shutdownNow(); fileLog.shutdownNow(); if (llm != null) llm.stop(); if (wl != null && wl.isHeld()) wl.release(); if (track != null) track.release(); super.onDestroy(); }
+  /** Приложение смахнули из недавних — человек его закрыл. Переводчик, который после этого
+   *  продолжает слушать комнату и держать три гигабайта, ведёт себя не так, как от него ждут. */
+  @Override public void onTaskRemoved(Intent rootIntent) {
+    log("✖ приложение закрыто — останавливаюсь и отдаю память");
+    exitAfterStop = true;
+    stopSelf();
+    super.onTaskRemoved(rootIntent);
+  }
+  /** Система просит памяти. Уточнитель — самое крупное и необязательное: 1,1 ГБ отдельным
+   *  процессом. Выгружаем его; включённый контекст поднимет его снова при следующем разборе. */
+  @Override public void onTrimMemory(int level) {
+    super.onTrimMemory(level);
+    // Каждый сигнал — в машинный журнал: если приложение потом «упадёт втихую», там будет видно,
+    // что система к этому вела. На Redmi сигнал «памяти мало» пришёл в ту же секунду, как
+    // поднялся уточнитель: приложение вместе с ним занимает около четырёх гигабайт.
+    tsv("trim", "" + level);
+    // Выгружаем только когда система вот-вот начнёт убивать процессы (или мы уже в фоне): на
+    // «памяти маловато» выгрузка означала бы поднимать и ронять уточнитель по кругу. UI_HIDDEN —
+    // это просто свёрнутый экран, не нехватка памяти.
+    boolean critical = level == TRIM_MEMORY_RUNNING_CRITICAL || level >= TRIM_MEMORY_BACKGROUND;
+    if (critical && llm != null) unloadLlm("памяти критически мало (уровень " + level + "), подниму при следующем разборе");
+  }
+  @Override public void onDestroy() {
+    running = false; main.removeCallbacks(idleStop);
+    if (store != null) store.cancel();
+    if (spkTrack != null) spkTrack.release();
+    worker.shutdownNow(); llmWorker.shutdownNow(); cloudWorker.shutdownNow();
+    // Модели освобождаем после того, как рабочие потоки вышли: иначе распознавание, идущее в эту
+    // секунду, обратится к уже освобождённой нативной памяти.
+    try { worker.awaitTermination(3, TimeUnit.SECONDS); } catch (InterruptedException ignore) {}
+    if (llm != null) llm.stop();
+    for (int pid : Llm.strays()) android.os.Process.killProcess(pid);
+    if (eng != null) eng.release();
+    if (spk != null) spk.release();
+    if (wl != null && wl.isHeld()) wl.release();
+    if (track != null) track.release();
+    fileLog.shutdown();   // не shutdownNow: последние строки журнала («останавливаюсь…») должны успеть записаться
+    try { fileLog.awaitTermination(2, TimeUnit.SECONDS); } catch (InterruptedException ignore) {}
+    super.onDestroy();
+    if (exitAfterStop) android.os.Process.killProcess(android.os.Process.myPid());
+  }
 }

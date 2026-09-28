@@ -1367,7 +1367,32 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // выглядело как «интент не работает».
     if (getIntent().getExtras() != null) i.putExtras(getIntent().getExtras());
     i.putExtra("fromUi", true);      // обычный запуск: сервис сбросит стендовые режимы
-    startForegroundService(i); bindService(new Intent(this, TranslatorService.class), conn, Context.BIND_AUTO_CREATE);
+    startForegroundService(i); bindSvc();
+  }
+  /** Связь с сервисом — только пока экран виден. Сервис, к которому кто-то подключён, не
+   *  останавливается даже по собственной команде, а на Android 12+ экран после «назад» не
+   *  уничтожается: связь держалась бы вечно, и сервис никогда не отдавал бы память. */
+  boolean bound = false;
+  void bindSvc() { if (!bound) { bound = bindService(new Intent(this, TranslatorService.class), conn, Context.BIND_AUTO_CREATE); } }
+  void unbindSvc() {
+    if (!bound) return;
+    if (svc != null) { svc.setListener(null); }
+    try { unbindService(conn); } catch (Throwable ignore) {}
+    bound = false; svc = null;
+  }
+  @Override protected void onStart() {
+    super.onStart();
+    // Первый старт делает startSvc() из onCreate и уже привязан; повторный запуск здесь сбросил
+    // бы стендовые флаги первого (например, беззвучный режим прогона записей). Только возвращение.
+    if (!svcStarted || bound) return;
+    // Сервис мог уйти сам, пока экран был свёрнут: поднимаем его снова, и именно запущенным, а не
+    // только привязанным, — иначе слушать в кармане после сворачивания он не сможет.
+    startForegroundService(new Intent(this, TranslatorService.class).putExtra("fromUi", true));
+    bindSvc();
+  }
+  @Override protected void onStop() {
+    unbindSvc();
+    super.onStop();
   }
   /** Спрашиваем по имени, а не по первому ответу: когда микрофон уже разрешён и запрашиваются
    *  одни уведомления, отказ от них не должен мешать приложению запуститься. */
@@ -1595,5 +1620,5 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     smallRu.setText(ru);
     refreshBetter();
   }
-  @Override protected void onDestroy() { if (svc != null) { svc.setListener(null); unbindService(conn); } super.onDestroy(); }
+  @Override protected void onDestroy() { unbindSvc(); super.onDestroy(); }
 }

@@ -93,6 +93,8 @@ public class Speaker {
   }
 
   public boolean has(String name) { return ready && prof.containsKey(name); }
+  /** Отдать модель отпечатка: без этого она оставалась в нативной памяти после остановки сервиса. */
+  public synchronized void release() { ready = false; if (ex != null) try { ex.release(); } catch (Throwable ignore) {} ex = null; }
   /** Забыть все голоса. Профиль — слепок конкретного человека, и оставлять его навсегда
    *  без способа стереть нельзя. */
   public synchronized int forget() { int n = prof.size(); prof.clear(); save(); return n; }
