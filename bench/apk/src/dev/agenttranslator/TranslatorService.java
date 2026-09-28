@@ -137,6 +137,7 @@ public class TranslatorService extends Service {
     try {
       if (!new File(models, "silero_vad.onnx").exists()) { status("Нет моделей. Залейте их в\n" + models.getAbsolutePath());
         log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
+      Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
       eng = new Engine(models, this::log); pb = new Phrasebook(models);
       spk = new Speaker(models); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
       chats = new Chats(getExternalFilesDir(null)); learn = new Learn(chats, models, getExternalFilesDir(null));
@@ -236,6 +237,13 @@ public class TranslatorService extends Service {
       log("🧠 проба уточнителя: " + (ok ? "поднят" : "не поднят"));
       if (ok) { main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); }
     });
+    // Стенд: способ загрузки перевода для замера памяти («off» — как всегда); вступает при следующем запуске.
+    if (i != null && i.hasExtra("mtvariant")) { String v = i.getStringExtra("mtvariant"); v = v == null || "off".equals(v) ? "" : v;
+      getSharedPreferences("at", MODE_PRIVATE).edit().putString("mt_variant", v).apply(); log("🧪 стенд: перевод грузится как «" + (v.isEmpty() ? "обычно" : v) + "» со следующего запуска"); }
+    if (i != null && i.hasExtra("rss")) {
+      android.os.Debug.MemoryInfo mi = new android.os.Debug.MemoryInfo(); android.os.Debug.getMemoryInfo(mi);
+      log("🧪 память: резидентно " + Engine.rssMb() + " МБ · PSS " + (mi.getTotalPss() >> 10) + " МБ · нативная куча " + (android.os.Debug.getNativeHeapAllocatedSize() >> 20) + " МБ");
+    }
     if (i != null && i.hasExtra("llmneed")) {
       try { llmNeed = Long.parseLong(i.getStringExtra("llmneed").trim()) << 20; log("🧠 стенд: уточнителю нужно " + (llmNeed >> 20) + " МБ сверх порога системы (до перезапуска)"); }
       catch (RuntimeException e) { log("🧠 стенд: llmneed — число мегабайт, а пришло «" + i.getStringExtra("llmneed") + "»"); }

@@ -36,11 +36,22 @@ public class Engine {
   public String asrName = "";
   OrtEnvironment env; final Map<String, OrtSession[]> mt = new HashMap<>(); final Map<String, SpmTokenizer> tok = new HashMap<>();
   public long loadAsrMs, loadMtMs, loadTtsMs;
+  /** Стенд: как грузить перевод, чтобы сравнить память на телефоне при холодном старте.
+   *  "" — как всегда; "noprepack" — без упаковки весов ORT; "noarena" — без арены и шаблонов памяти. */
+  public static volatile String mtVariant = "";
+
+  /** Резидентная память процесса, МБ: по ней видно, сколько стоит каждая часть при загрузке. */
+  public static long rssMb() {
+    try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader("/proc/self/statm"))) {
+      String[] f = r.readLine().trim().split("\\s+");
+      return Long.parseLong(f[1]) * android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE) >> 20;
+    } catch (Throwable e) { return -1; }
+  }
 
   public Engine(File modelsDir, Log log) throws Exception {
     this.m = modelsDir; this.log = log;
     System.loadLibrary("onnxruntime_sherpa"); System.loadLibrary("sherpa-onnx-jni");
-    long t = System.nanoTime();
+    long t = System.nanoTime(), r0 = rssMb();
     File multi = new File(m, "asr_multi");
     if (new File(multi, "encoder.int8.onnx").exists()) {      // parakeet: одна модель на оба языка, вдвое меньше ошибок
       asrMulti = offline(multi, 4); asrName = "parakeet";
@@ -63,19 +74,23 @@ public class Engine {
               OfflineSpeechDenoiserGtcrnModelConfig.builder().setModel(dnf[0].getAbsolutePath()).build())
           .setNumThreads(2).setDebug(false).build()).build());
     }
-    loadAsrMs = (System.nanoTime() - t) / 1000000; log.log("ASR+VAD загружены за " + loadAsrMs + " мс (" + asrName + (denoiser != null ? ", шумоподавитель есть" : "") + ")");
-    t = System.nanoTime();
+    loadAsrMs = (System.nanoTime() - t) / 1000000; log.log("ASR+VAD загружены за " + loadAsrMs + " мс (" + asrName + (denoiser != null ? ", шумоподавитель есть" : "") + ") · +" + (rssMb() - r0) + " МБ резидентно");
+    t = System.nanoTime(); long rss0 = rssMb();
     env = OrtEnvironment.getEnvironment();
+    String v = mtVariant == null ? "" : mtVariant;
     for (String d : new String[]{"pt2ru", "ru2pt"}) {
       File md = new File(m, "mt/" + d);
       OrtSession.SessionOptions so = new OrtSession.SessionOptions(); so.setIntraOpNumThreads(4); so.setInterOpNumThreads(1);
+      if (v.equals("noprepack")) so.addConfigEntry("session.disable_prepacking", "1");
+      if (v.equals("noarena")) { so.setCPUArenaAllocator(false); so.setMemoryPatternOptimization(false); }
       mt.put(d, new OrtSession[]{env.createSession(p(md, "encoder_model.onnx"), so), env.createSession(p(md, "decoder_model.onnx"), so), env.createSession(p(md, "decoder_with_past_model.onnx"), so)});
       tok.put(d, new SpmTokenizer(p(md, d + "_source_pieces.tsv"), p(md, d + "_vocab.json")));
     }
-    loadMtMs = (System.nanoTime() - t) / 1000000; log.log("MT загружен за " + loadMtMs + " мс");
-    t = System.nanoTime();
+    loadMtMs = (System.nanoTime() - t) / 1000000; long rss1 = rssMb();
+    log.log("MT загружен за " + loadMtMs + " мс · +" + (rss1 - rss0) + " МБ резидентно, всего " + rss1 + " МБ" + (v.isEmpty() ? "" : " · стенд: " + v));
+    t = System.nanoTime(); long r2 = rssMb();
     ttsRu = tts(new File(m, "tts_ru"), "ru_RU-dmitri-medium.onnx"); ttsPt = tts(new File(m, "tts_pt"), "pt_BR-faber-medium.onnx");
-    loadTtsMs = (System.nanoTime() - t) / 1000000; log.log("TTS загружен за " + loadTtsMs + " мс");
+    loadTtsMs = (System.nanoTime() - t) / 1000000; log.log("TTS загружен за " + loadTtsMs + " мс · +" + (rssMb() - r2) + " МБ резидентно");
   }
   static String p(File d, String n) { return new File(d, n).getAbsolutePath(); }
 
