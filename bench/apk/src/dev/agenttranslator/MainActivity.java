@@ -21,8 +21,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
   Button bRefineEvery, bCloudEvery, bCloudPrefer; ToggleButton tTranslitOther;
   ListView histList;
-  Button bPin, bVoice, bVoice2, bWord, bBetter, bTalk, bSys, bLearn, bAnswer, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bLog;
+  Button bPin, bVoice, bVoice2, bWord, bBetter, bTalk, bSys, bLearn, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bLog;
   TextView logLast;
+  MicButton bMic;
   EditText keyIn; ToggleButton tKnown, tMicSrc; SeekBar sMic, sHold; TextView micLbl, holdLbl;
   View reviewBox; TextView revWord, revRu, revEx, revStat; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart;
   String revCur; boolean revOpen;
@@ -40,7 +41,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   Button bSetupMic, bSetupDl, bSetupStop, bModelsStop, bModelsVerify, bModelsUp; ToggleButton tSetupAny, tAnyNet;
   /** Модули: переключатели в «Системе» и на экране первого запуска; контейнеры их настроек. */
   final java.util.Map<String, CheckBox> modChecks = new java.util.HashMap<>(), setupChecks = new java.util.HashMap<>();
-  LinearLayout ttsBox, cloudBox; Button bUnused, bKeyHelp, bKeyDrop; boolean setupSynced = false;
+  LinearLayout ttsBox, cloudBox, modBox; Button bUnused, bKeyHelp, bKeyDrop, bModules; boolean setupSynced = false;
   ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint; ScrollView bigScroll;
   TextView updLbl; Button bUpdate, bUpdateGo;
   /** Экран показывает состояние сервиса галочками, а setChecked дёргает обработчик так же, как
@@ -88,7 +89,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     box.addView(setupView = buildSetup());
     mid.addView(box, new LinearLayout.LayoutParams(0, -1, 1f));
     root.addView(mid, new LinearLayout.LayoutParams(-1, 0, 1f));
-    for (Button btn : new Button[]{bMenu, bTalk, bLearn, bSys, bAnswer, bEnd, bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bRefineEvery, bCloudEvery}) style(btn);
+    for (Button btn : new Button[]{bMenu, bTalk, bLearn, bSys, bEnd, bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bRefineEvery, bCloudEvery}) style(btn);
     for (ToggleButton tg : new ToggleButton[]{tCtx, tAuto, tLang, tKnown, tMicSrc, tListenPt, tListenRu, tTranslitOther}) style(tg);
     for (Button cb : new Button[]{bBetter, bPin, bEnd, bModeInput, bModePtt, bModeListen, bFold, bPhoto, bType}) {
       cb.setMaxLines(1); cb.setPadding(6, 22, 6, 22);   // иначе подписи ломались по слогам: «слу/ша/ть»
@@ -126,7 +127,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
 
     // «Говорить» принимает любой язык: направление определяется по сказанному.
-    bAnswer.setOnTouchListener((v, e) -> { pressed(v, e); return ptt(e, "ru2pt"); });
+    // Позицию кнопки ставит удержание, а не нажатость вида: палец, съехавший с кнопки, запись не
+    // останавливает, и кольцо не должно замирать, пока микрофон ещё пишет.
+    bMic.setOnTouchListener((v, e) -> {
+      boolean r = ptt(e, "ru2pt");
+      if (r) bMic.setActive(e.getAction() == MotionEvent.ACTION_DOWN);
+      return r;
+    });
     CompoundButton.OnCheckedChangeListener lis = (v, on) -> {
       if (svc == null || uiSync) return;
       svc.setListen(tListenPt.isChecked(), tListenRu.isChecked());
@@ -889,13 +896,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     return v;
   }
 
-  /** Удержание. В подписи оба языка: кнопка принимает тот, на котором в неё говорят. */
+  /** Удержание. Кнопка зовёт на обоих языках — FALAR и ГОВОРИ по кольцу: она принимает тот,
+   *  на котором в неё говорят. */
   View buildPtt() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL);
-    bAnswer = new Button(this); bAnswer.setText("🎙 удерживать · PT или RU"); bAnswer.setEnabled(false);
-    v.addView(bAnswer, new LinearLayout.LayoutParams(-1, -2));
-    TextView t = new TextView(this); t.setTextSize(11); t.setTextColor(Color.GRAY);
-    t.setText("Направление определяется по сказанному, выбирать язык не нужно");
+    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setGravity(Gravity.CENTER_HORIZONTAL);
+    bMic = new MicButton(this); bMic.setEnabled(false);
+    bMic.setContentDescription("Удерживайте и говорите — по-португальски или по-русски");
+    v.addView(bMic, new LinearLayout.LayoutParams(dp(128), dp(128)));
+    TextView t = new TextView(this); t.setTextSize(11); t.setTextColor(Color.GRAY); t.setGravity(Gravity.CENTER);
+    t.setText("Удерживайте и говорите — направление определится по сказанному");
     v.addView(t);
     return v;
   }
@@ -1300,10 +1309,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bUpdateGo.setOnClickListener(vv -> { if (svc != null) svc.installUpdate(); });
     // Модули: что приложение делает на этом телефоне. Выключенный модуль спрятан и не держит
     // память; его файлы остаются — удаляются отдельной кнопкой (решение владельца 28.09).
-    TextView mh = new TextView(this); mh.setTextSize(15); mh.setTypeface(null, Typeface.BOLD); mh.setPadding(0, 20, 0, 4); mh.setText("Модули"); v.addView(mh);
+    // Список спрятан за кнопкой и свёрнут по умолчанию, как журнал (владелец, 29.09): модули
+    // выбирают редко, а «Система» и без них длинная. Свёрнутая кнопка показывает, сколько включено.
+    bModules = new Button(this); bModules.setTextSize(13); style(bModules); v.addView(bModules);
+    modBox = new LinearLayout(this); modBox.setOrientation(LinearLayout.VERTICAL); v.addView(modBox);
+    bModules.setOnClickListener(vv -> showModules(modBox.getVisibility() != View.VISIBLE));
     for (String m : Modules.CHOICE) {
-      CheckBox cb = new CheckBox(this); cb.setTextSize(15); cb.setText(Modules.title(m)); v.addView(cb); modChecks.put(m, cb);
-      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(Color.GRAY); w.setPadding(dp(32), 0, 0, dp(6)); w.setText(Modules.what(m)); v.addView(w);
+      CheckBox cb = new CheckBox(this); cb.setTextSize(15); cb.setText(Modules.title(m)); modBox.addView(cb); modChecks.put(m, cb);
+      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(Color.GRAY); w.setPadding(dp(32), 0, 0, dp(6)); w.setText(Modules.what(m)); modBox.addView(w);
       cb.setOnCheckedChangeListener((vv, on) -> {
         if (uiSync || svc == null) return;
         if (on && svc.store != null && svc.store.bytes(m) > 0 && !svc.store.onPhone(m))
@@ -1312,8 +1325,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         svc.setModule(m, on); applyModules();
       });
     }
-    bUnused = new Button(this); bUnused.setTextSize(13); bUnused.setText("удалить неиспользуемые модели"); style(bUnused); v.addView(bUnused);
+    bUnused = new Button(this); bUnused.setTextSize(13); bUnused.setText("удалить неиспользуемые модели"); style(bUnused); modBox.addView(bUnused);
     bUnused.setOnClickListener(vv -> unusedDialog());
+    showModules(prefs.getBoolean("mods_open", false));
     TextView ml = new TextView(this); ml.setTextSize(13); ml.setTextColor(Color.GRAY);
     ml.setText("Вход: чувствительность и источник"); v.addView(ml);
     // Ползунок показывает то, что сервис применяет на самом деле. Раньше он всегда рисовал +0 дБ,
@@ -1652,6 +1666,18 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       refreshSetup();
     }
   }
+  /** Стенд: нажатая позиция кнопки удержания без записи — микрофон не открывается, в разговор
+   *  ничего не попадает. Экран держится включённым, пока идёт показ; режим внизу потом прежний. */
+  void micDemo(String kind, String sec) {
+    final int was = modeNow; final boolean wasFolded = folded;
+    show(0); if (folded) fold(false); mode(1);
+    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    long ms = 1000L * (sec == null ? 15 : Integer.parseInt(sec));
+    bMic.demo(kind, ms, () -> {
+      getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+      mode(was); if (wasFolded) fold(true);
+    });
+  }
   boolean enroll(MotionEvent e, String who, String lang) {
     if (svc == null) return false;
     if (e.getAction() == MotionEvent.ACTION_DOWN) { buzz(); svc.enrollStart(who, lang); return true; }
@@ -1665,13 +1691,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) { svc.pttStop(); return true; }
     return false;
   }
-  @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
+  @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
+    if (i.hasExtra("micanim")) { micDemo(i.getStringExtra("micanim"), i.getStringExtra("micsec")); return; }
+    if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
   @Override public void onReady() {
     bPin.setEnabled(true); bBetter.setEnabled(true);
     tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bVoice.setEnabled(true); bVoice2.setEnabled(true); bWord.setEnabled(true);
-    bAnswer.setEnabled(true); bPhoto.setEnabled(true); bType.setEnabled(true);
+    bMic.setEnabled(true); bPhoto.setEnabled(true); bType.setEnabled(true);
     uiSync = true;
     tCtx.setChecked(svc != null && svc.contextMode);
     if (svc != null) { tListenPt.setChecked(svc.listenPt); tListenRu.setChecked(svc.listenRu); }
@@ -1747,8 +1775,23 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     refreshModules(); refreshBetter();
   }
 
+  /** Модули под кнопкой: развернуть — переключатели и «удалить неиспользуемые», свернуть — одна строка. */
+  void showModules(boolean open) {
+    if (modBox == null) return;
+    prefs.edit().putBoolean("mods_open", open).apply();
+    modBox.setVisibility(open ? View.VISIBLE : View.GONE);
+    refreshModulesButton();
+  }
+  void refreshModulesButton() {
+    if (bModules == null) return;
+    boolean open = modBox != null && modBox.getVisibility() == View.VISIBLE;
+    String on = svc == null ? "" : " · включено " + svc.modules.size() + " из " + Modules.CHOICE.size();
+    bModules.setText("🧩 модули" + on + (open ? " · свернуть" : " · развернуть"));
+  }
+
   /** Переключатели модулей: состояние, размер, скачано ли. Только по размеру файлов — без хэшей. */
   void refreshModules() {
+    refreshModulesButton();
     if (svc == null || svc.store == null || modChecks.isEmpty()) return;
     uiSync = true;
     for (String m : Modules.CHOICE) {
