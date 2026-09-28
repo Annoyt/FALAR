@@ -56,6 +56,32 @@ public class OcrWordsTest {
         "A19 обычное слово — известное, не имя и не только из словаря переводчика");
     ok(w.fix("saturadas satuadas", null).equals("saturadas saturadas") && w.fix("aicionados", null).equals("adicionados"), "A20 пропуск буквы в середине слова");
 
+    // --- границы порогов на маленьких словарях (мутационное тестирование нашло их непроверенными)
+    OcrWords s = of("está 9000", "esta 5116", "saúde 3", "maçã 2", "pé 630", "grato 20", "gato 20", "manto 10", "matos 10",
+        "vinagre 26", "cozinha 40", "na 5000", "casa 30", "velha 30", "cava 29", "leira 29", "máximo 50", "água 2406", "linha 12 E");
+    eq(s.fix("ésta", null), "está", "T1 из форм с теми же буквами берётся самая частая (строки вразнобой — пересортировка)");
+    eq(of("está 9000", "esta 5116", "vinagre 26").fix("ésta esta", null), "está esta", "T1 строки уже по порядку — без пересортировки");
+    eq(of("esta 5116", "está 9000").fix("ésta", null), "está", "T1 одна форма без ударений, частоты вразнобой — пересортировка");
+    eq(s.fix("saude maca pe", null), "saúde maca pe", "T2 ударения: частота 3 — да, 2 — нет; слово из двух букв не правится");
+    eq(s.fix("Maximo", null), "Máximo", "T3 слово с заглавной: частота ровно 50 — годится");
+    eq(of("máximo 49").fix("Maximo", null), "Maximo", "T3 49 — уже нет");
+    eq(s.fix("gto", null), "gto", "T4 пропущенную букву у слова из трёх букв не ищем");
+    eq(of("grato 20").fix("gato", null), "grato", "T4 у слова из четырёх — ищем");
+    eq(s.fix("mato", null), "manto", "T5 два кандидата одной частоты — первый по алфавиту («manto» < «matos»)");
+    eq(of("manto 5", "matos 10").fix("mato", null), "matos", "T5 разной частоты — более частый");
+    eq(s.fix("vinnagre viinagre", null), "vinnagre vinagre", "T6 сдвоенная согласная не выкидывается, гласная — да");
+    eq(s.fix("nacozinha cozinhana", null), "na cozinha cozinha na", "T7 служебное слово из двух букв — и первой частью, и последней");
+    eq(s.fix("CASAVELHA CAVALEIRA", null), "CASA VELHA CAVALEIRA", "T8 части 30·30 = 30² — разбивается, 29·29 — нет");
+    eq(of("casa 30", "velha 9").fix("casavelha", null), "casavelha", "T8 часть реже 10 раз — не часть");
+    eq(of("linha 30", "casa 30", "line 100 E").fix("linecasa", null), "linecasa", "T8 английское слово — не часть разбивки");
+    ok(s.common("AGUA") && !s.common("LINHA") && s.share("vinagre xyz") == 0.5 && s.share("vinagre") == -2 && s.share("vinagre ab") == -2,
+        "T9 обычное слово — и без ударений; доля — от двух слов из трёх букв и больше");
+    eq(of("smato 10", "matoa 5").fix("mato", null), "smato", "T10 более частый кандидат, найденный первым, не вытесняется редким, хоть тот и раньше по алфавиту");
+    eq(of("there 100 E", "fazer 40").fix("thre faer", null), "thre fazer", "T11 английское слово в замену не идёт; буква «z» тоже вставляется");
+    eq(of("vinagre 26", "", "sem-частоты", "casa x", "água 2406").fix("vnagre agua", null), "vinagre água", "T12 битые строки словаря пропускаются");
+    eq(of("casa 30", "da 3000", "costa 40", "dacosta 20").fix("CASADACOSTA", null), "CASA DA COSTA", "T13 три части вероятнее двух (30·3000·40/150 > 30·20)");
+    eq(of("casa 30", "da 3000", "costa 40", "dacosta 2000").fix("CASADACOSTA", null), "CASA DACOSTA", "T13 две части вероятнее трёх (30·2000 > 24 000)");
+
     // --- B: настоящий словарь
     if (words != null && words.exists()) {
       OcrWords r;
