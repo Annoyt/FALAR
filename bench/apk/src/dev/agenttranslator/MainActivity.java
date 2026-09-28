@@ -19,7 +19,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   TextView status, logView, smallRu, hint, keyState, voiceState, voiceMsg;
   /** Крупный текст словами: под каждым словом транскрипция для чтения вслух. */
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
-  Button bRefineEvery, bCloudEvery; ToggleButton tTranslitOther;
+  Button bRefineEvery, bCloudEvery, bCloudPrefer; ToggleButton tTranslitOther;
   ListView histList;
   Button bPin, bVoice, bVoice2, bWord, bBetter, bTalk, bSys, bLearn, bAnswer, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bLog;
   TextView logLast;
@@ -301,6 +301,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (bRefineEvery == null || svc == null) return;
     bRefineEvery.setText("🧠 разбор контекста: " + (svc.refineEvery == 0 ? "по кнопке" : "каждые " + svc.refineEvery + (svc.refineEvery == 1 ? " реплику" : " реплик")));
     bCloudEvery.setText("☁ пересмотр в облаке: " + (svc.cloudEvery == 0 ? "по кнопке" : "каждые " + svc.cloudEvery + " реплик"));
+    if (bCloudPrefer != null) bCloudPrefer.setText(svc.cloudQuality() ? "☁ облако: точнее — сначала крупные модели, ответ дольше"
+                                                                      : "☁ облако: быстрее — сначала те, что отвечают быстро");
   }
 
   /** «Память разговора» — по касанию строки с названием: что уточнитель знает о разговоре сверх
@@ -1266,6 +1268,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (next > 0 && !svc.cloudConsent()) consentDialog(() -> { svc.setCloudEvery(next); refreshIntervals(); });
       else { svc.setCloudEvery(next); refreshIntervals(); }
     });
+    // Что важнее облаку: быстрый ответ или точный. «Точнее» ставит вперёд крупные модели — ответ
+    // приходит за полминуты, зато правок и деталей в памяти больше.
+    bCloudPrefer = new Button(this); bCloudPrefer.setTextSize(13); bCloudPrefer.setText("☁ облако выбирает"); style(bCloudPrefer); v.addView(bCloudPrefer);
+    bCloudPrefer.setOnClickListener(vv -> { if (svc == null) return; svc.setCloudQuality(!svc.cloudQuality()); refreshIntervals(); });
     tTranslitOther = new ToggleButton(this);
     tTranslitOther.setTextOn("транскрипция и для реплик собеседника: ВКЛ"); tTranslitOther.setTextOff("транскрипция и для реплик собеседника: выкл");
     tTranslitOther.setChecked(prefs.getBoolean("translit_other", false)); v.addView(tTranslitOther);
@@ -1395,7 +1401,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       rows[i + 1] = b.toString();
     }
     new android.app.AlertDialog.Builder(this)
-        .setTitle("Куда пойдёт запрос")
+        .setTitle("Куда пойдёт запрос · " + (c.preferQuality ? "точнее" : "быстрее"))
         .setItems(rows, (d, w) -> {
           c.choose(w == 0 ? "" : ord[w - 1]);
           onLog(w == 0 ? "☁ маршрут авто → " + c.next() : "☁ закреплена модель " + c.next());

@@ -146,6 +146,8 @@ public class TranslatorService extends Service {
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
       eng = new Engine(models, this::log); pb = new Phrasebook(models);
       spk = new Speaker(models); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
+      // По умолчанию «точнее»: сырой перевод понятен редко, и от облака ждут прежде всего качества.
+      cloud.preferQuality = getSharedPreferences("at", MODE_PRIVATE).getBoolean("cloud_quality", true);
       chats = new Chats(getExternalFilesDir(null)); learn = new Learn(chats, models, getExternalFilesDir(null));
       // Рабочая история — из текущего разговора. Раньше после запуска она была пустой, и уточнитель
       // видел только реплики, сказанные после перезапуска, — а процесс теперь завершается через
@@ -560,6 +562,19 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("edittrans")) { final String[] p = i.getStringExtra("edittrans").split("\\|", 3); if (p.length >= 2) worker.submit(() -> fixTranslation(Integer.parseInt(p[0].trim()), p[1], p.length > 2 && p[2].contains("pin"))); }
     // Стенд: память разговора, как будто вписанная человеком; «off» — вернуть её автоматике.
     if (i != null && i.hasExtra("memo")) { String m = i.getStringExtra("memo"); setMemoByUser(m == null || "off".equals(m) ? "" : m.replace("\\n", " ")); }
+    // Стенд: режим облака и порядок моделей в обоих режимах — с подсчётами, без ключа.
+    if (i != null && i.hasExtra("cloudprefer")) setCloudQuality("quality".equals(i.getStringExtra("cloudprefer")));
+    if (i != null && i.hasExtra("cloudroute") && cloud != null && cloud.ready) {
+      boolean was = cloud.preferQuality;
+      for (boolean q : new boolean[]{false, true}) {
+        cloud.preferQuality = q; String[] o = cloud.order(); StringBuilder b = new StringBuilder();
+        for (int k = 0; k < Math.min(8, o.length); k++) { Cloud.M m = cloud.metaOf(o[k]);
+          b.append("\n   ").append(k + 1).append(". ").append(o[k].replace(":free", "")).append(" · ответов ").append(m.ok).append(", отказов ").append(m.fail)
+           .append(m.ms > 0 ? String.format(Locale.ROOT, ", %.1f с", m.ms / 1000.0) : "").append(Cloud.sizeB(o[k]) > 0 ? String.format(Locale.ROOT, " · %.0f млрд", Cloud.sizeB(o[k])) : ""); }
+        log("☁ порядок «" + (q ? "точнее" : "быстрее") + "» из " + o.length + ":" + b);
+      }
+      cloud.preferQuality = was;
+    }
     if (i != null && i.hasExtra("clearterms")) { int n = chats == null ? 0 : chats.clearTerms(); log("🗑 подсказки разговора убраны: " + n); }
     if (i != null && i.hasExtra("translit")) { StringBuilder b = new StringBuilder(); for (String w : i.getStringExtra("translit").split("\\s+")) b.append(w).append('=').append(Translit.say(w)).append(' '); log("🔤 " + b.toString().trim()); }
     if (i != null && i.hasExtra("soak")) {
@@ -1246,6 +1261,14 @@ public class TranslatorService extends Service {
   public void setRefineEvery(int n) {
     refineEvery = Math.max(0, n); getSharedPreferences("at", MODE_PRIVATE).edit().putInt("refine_every", refineEvery).apply();
     log("🧠 разбор контекста: " + (refineEvery == 0 ? "только по кнопке" : "каждые " + refineEvery + " реплик"));
+  }
+  public boolean cloudQuality() { return cloud != null && cloud.preferQuality; }
+  /** «Облако: быстрее / точнее» — порядок, в котором перебираются бесплатные модели (Cloud.score). */
+  public void setCloudQuality(boolean on) {
+    getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("cloud_quality", on).apply();
+    if (cloud == null) return;
+    cloud.preferQuality = on;
+    log("☁ облако: " + (on ? "точнее — сначала крупные модели" : "быстрее — сначала быстрые") + (cloud.ready ? ", первой пойдёт " + cloud.next().replace(":free", "") : ""));
   }
   public void setCloudEvery(int n) {
     cloudEvery = Math.max(0, n); cloudBackoff = 1; cloudSkipLogged = false; getSharedPreferences("at", MODE_PRIVATE).edit().putInt("cloud_every", cloudEvery).apply();

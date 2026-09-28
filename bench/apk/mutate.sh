@@ -5,6 +5,7 @@
 # но его поведение на этом месте не проверяют. Процент убитых честнее покрытия строк.
 #   bash bench/apk/mutate.sh                 # все чистые классы
 #   bash bench/apk/mutate.sh Brief,Heard     # только эти
+#   bash bench/apk/mutate.sh Cloud           # порядок облачных моделей (сеть и файл ключа исключены)
 # Отчёт: bench/apk/out/pit/index.html. Нужные jar-файлы — в tools/pit (не в git), качаются сами.
 set -e
 A=$(cd "$(dirname "$0")" && pwd); R=$A/../..; P=$R/tools/pit; J=$R/tools/json.jar
@@ -26,7 +27,7 @@ JU=$P/junit-platform-console-standalone-1.11.4.jar
 # Компилируем все наборы: обёртка SuitesTest ссылается на каждый. Ограничиваем только то, что мутируется.
 SRC=""; for t in Brief Heard Updates ModelStore Chats Memo WordList Pressure; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
 SRC="$SRC $A/src/dev/agenttranslator/Phrasebook.java $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java"
-SRC="$SRC $A/src/dev/agenttranslator/Cloud.java"      # ради Cloud.Review; заглушки Android — только для сборки
+SRC="$SRC $A/src/dev/agenttranslator/Cloud.java $A/test/CloudTest.java"      # ради Cloud.Review и порядка моделей; заглушки Android — только для сборки
 javac --release 11 -nowarn -g -cp "$J:$JU:$R/tools/android.jar" -d "$C" $SRC $A/test/SuitesTest.java
 CP=$(ls $P/pitest*.jar $P/commons-*.jar | paste -sd:):$JU
 java -cp "$CP" org.pitest.mutationtest.commandline.MutationCoverageReport \
@@ -34,4 +35,5 @@ java -cp "$CP" org.pitest.mutationtest.commandline.MutationCoverageReport \
   --targetTests dev.agenttranslator.SuitesTest --sourceDirs "$A/src" \
   --outputFormats HTML,CSV --timestampedReports=false --threads 4 --timeoutConst 8000 \
   --jvmArgs "-Dfalar.common=$R/data/common_words.txt" \
+  --excludedMethods "sweep,call,fetchAll,configure,refreshCaps,save,title,better,review,image,keyId,keyTail,Cloud" \
   --mutators STRONGER 2>&1 | grep -E "^>>|Generated|Killed|mutations|test strength|Line Coverage|ERROR|Exception" | grep -v "^\s*$" || true

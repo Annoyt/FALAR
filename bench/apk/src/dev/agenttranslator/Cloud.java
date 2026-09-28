@@ -36,6 +36,9 @@ public class Cloud {
   public volatile String lastError = "";
   /** Закреплённая вручную модель. Пусто — маршрутизация автоматическая; это обычный режим. */
   public volatile String pick = "";
+  /** Что важнее при выборе модели: скорость ответа (false) или качество (true). Выбирает человек
+   *  в «Системе»: когда важен точный перевод, можно ждать и полминуты. */
+  public volatile boolean preferQuality = false;
   /** Кто ответил в последний раз: без этого нельзя узнать, чья это работа. */
   public volatile String lastUsed = "";
   /** Что известно про каждую модель: что она о себе сообщила и как вела себя у нас. */
@@ -153,21 +156,65 @@ public class Cloud {
    *
    *  Вход с картинками намеренно не штрафуется: по ответу OpenRouter картинки принимает и
    *  `ling-3.0-flash-vl`, и рядовая `nex-n2.5-mini` — признак стал общим и ничего не различает. */
-  double score(M m, boolean img) {
+  double score(M m, boolean img) { return preferQuality ? qualityScore(m, img) : fastScore(m, img); }
+  /** Надёжность: доля ответов в нужном формате с поправкой на малое число попыток —
+   *  (ответов + 1) / (попыток + 2). Новая модель начинает с половины. Раньше отказы штрафовались
+   *  дважды — долей и числом, — и 6 отказов из 40 (85 % успеха, 4 с) проигрывали 0 из 48 за 12 с
+   *  даже в «быстрее»: быстрая модель не выбиралась никогда. */
+  static double reliability(int ok, int fail) { return (ok + 1.0) / (ok + fail + 2.0); }
+  /** Не переводчики: модели модерации отвечают «safe» за доли секунды и только тратят попытку. */
+  static final Set<String> UNUSABLE = new HashSet<>(Arrays.asList("safety", "guard", "moderation"));
+  static boolean unusable(String id) {
+    String s = id.toLowerCase(Locale.ROOT); int c = s.indexOf(':'); if (c > 0) s = s.substring(0, c);
+    for (String w : s.split("[^a-z0-9]+")) if (UNUSABLE.contains(w)) return true;
+    return false;
+  }
+  double fastScore(M m, boolean img) {
     double s = 0;
     if (m.capsKnown && !m.textOut) return -100;        // не отдаёт текст — не наш случай вовсе
+    if (unusable(m.id)) s -= 50;
     if (!m.priceOk) s -= 10;                           // цена не подтверждена: в хвост, отправлять всё равно нельзя
     if (domainish(m.id)) s -= 1.0;
-    int ok = m.ok(img), fail = m.fail(img), n = ok + fail;
-    if (n > 0) {
-      s += 4.0 * ok / n;                               // доля успехов — уже наблюдение, а не догадка
-      s -= Math.min(2.0, fail * 0.5);
-    }
+    s += 4.0 * reliability(m.ok(img), m.fail(img));    // доля успехов — уже наблюдение, а не догадка
     // Время весит заметно: человек ждёт ответа. Замер на устройстве — 3,5 с у одной модели против
     // 16,6 с у другой; при прежнем слабом штрафе побеждала медленная, и это было видно на глаз.
     long ms = m.ms(img);
     if (ms > 0) s -= Math.min(3.0, ms / 5000.0);
     return s;
+  }
+
+  /** «Точнее»: вперёд крупные модели, время почти не весит. Надёжность та же, что в «быстрее»: модель,
+   *  которая отвечает не в том формате, бесполезна при любом размере. Размер — по имени, это правило,
+   *  а не замер: OpenRouter размера отдельным полем не сообщает, а в именах он есть почти у всех
+   *  («…-550b-a55b», «…-235b-a22b», «…-24b-instruct»). */
+  double qualityScore(M m, boolean img) {
+    double s = 0;
+    if (m.capsKnown && !m.textOut) return -100;
+    if (unusable(m.id)) s -= 50;
+    if (!m.priceOk) s -= 10;
+    if (domainish(m.id)) s -= 1.0;
+    s += 4.0 * reliability(m.ok(img), m.fail(img));
+    double b = sizeB(m.id);
+    s += b > 0 ? Math.max(0, Math.min(3.0, Math.log10(b))) : 1.5;   // 10 млрд → 1, 100 → 2, 1000 → 3; не указан — середина
+    if (light(m.id)) s -= 1.0;                                        // облегчённые ветки: mini, nano, flash, lite…
+    long ms = m.ms(img);
+    if (ms > 0) s -= Math.min(0.5, ms / 60000.0);                     // полминуты ответа — только −0,25
+    return s;
+  }
+  /** Размер в миллиардах параметров по имени: «nemotron-3-ultra-550b-a55b» → 550 (полный, а не
+   *  активный «a55b»), «llama-3.3-70b» → 70; номер версии («3.3») размером не считается. 0 — не указан. */
+  static double sizeB(String id) {
+    String s = id.toLowerCase(Locale.ROOT); int c = s.indexOf(':'); if (c > 0) s = s.substring(0, c);
+    java.util.regex.Matcher m = SIZE.matcher(s); double best = 0;
+    while (m.find()) best = Math.max(best, Double.parseDouble(m.group(1)));
+    return best;
+  }
+  static final java.util.regex.Pattern SIZE = java.util.regex.Pattern.compile("(?<![a-z0-9.])(\\d+(?:\\.\\d+)?)b(?![a-z0-9])");
+  static final String[] LIGHT = {"mini", "nano", "tiny", "lite", "flash", "small", "air", "micro"};
+  static boolean light(String id) {
+    String s = id.toLowerCase(Locale.ROOT); int c = s.indexOf(':'); if (c > 0) s = s.substring(0, c);
+    for (String w : s.split("[^a-z0-9]+")) for (String l : LIGHT) if (w.equals(l)) return true;
+    return false;
   }
 
   /** Порядок обхода. Закреплённая руками идёт первой; дальше — по оценке. Остальные остаются
