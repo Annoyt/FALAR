@@ -277,6 +277,13 @@ public class OcrCoreTest {
         "M16 рамка без текста в строки не идёт");
     List<String> ord = OcrCore.lines(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 100, 100, 120, "низ"), item(50, 0, 150, 20, "верх"))))).lines().collect(java.util.stream.Collectors.toList());
     ok(ord.equals(Arrays.asList("верх", "низ")), "M16 строки сверху вниз, хотя нижняя начинается левее: " + ord);
+    // M16 строки внутри блока — по высоте, а не по порядку создания: нижняя строка абзаца
+    // начинается левее и создаётся первой; без упорядочения абзац рвался на два блока
+    List<String> para2 = paras(OcrCore.layout(new ArrayList<>(Arrays.asList(item(50, 0, 150, 20, "Rodovia estreita e"), item(0, 25, 150, 45, "extremamente sinuosa")))));
+    ok(para2.equals(Collections.singletonList("Rodovia estreita e extremamente sinuosa")), "M16 абзац, где нижняя строка левее, — одним куском: " + para2);
+    // M17 блоки — по верхнему краю: высокий блок, начатый выше, идёт первым, хотя его середина ниже
+    List<String> hiTop = texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 15, 100, 25, "fino"), item(0, 2, 100, 42, "ALTO")))));
+    ok(hiTop.equals(Arrays.asList("ALTO", "fino")), "M17 блоки упорядочены по верхнему краю: " + hiTop);
     // M17 границы блоков
     ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(0, 30, 100, 60, "Bbb")))).size() == 1, "M17 кегль в 1,5 раза — один блок");
     ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(0, 30, 100, 61, "Bbb")))).size() == 2, "M17 больше чем в 1,5 раза — разные блоки");
