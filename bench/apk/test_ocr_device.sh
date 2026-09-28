@@ -102,7 +102,21 @@ else
   w=$(printf '%s' "$e" | grep -oE 'слова [0-9.]+%' | head -1 | grep -oE '[0-9.]+')
   awk -v w="$w" 'BEGIN{exit !(w+0 >= 90)}' && res 0 "O2 слов прочитано $w % (на столе 93,3 %)" || res 1 "O2 слов прочитано ${w:-?} %"
   same=$(printf '%s' "$e" | grep -oE 'строка в строку [0-9]+' | grep -oE '[0-9]+')
-  [ "${same:-0}" -ge 28 ] && res 0 "O2 с эталоном стола строка в строку совпали $same из 32" || res 1 "O2 с эталоном совпали ${same:-0} из 32"
+  say "  (JPEG телефон декодирует своим декодером — пиксели чуть иные, чем у эталона; совпало $same из 32)"
+  # те же пиксели, что у эталона: PNG, раскодированный на столе тем же декодером, что эталон
+  $ADB shell "rm -rf $F/ocrbench; mkdir -p $F/ocrbench"; mkdir -p $D/png $D/gotp
+  $PY -c "
+import sys, glob, os
+from PIL import Image, ImageOps
+for p in sorted(glob.glob('$R/bench/ocr/photos/*.jpg')):
+    ImageOps.exif_transpose(Image.open(p)).convert('RGB').save('$D/png/' + os.path.basename(p)[:-4] + '.png')"
+  $ADB push $D/png/*.png $F/ocrbench/ >/dev/null 2>&1
+  m=$(mark $LOG); start_app --es ocrbench $F/ocrbench
+  l=$(wl "$m" '🧪 снимки:' 900); say "  $l"
+  for f in $(sh "ls $F/ocrbench | grep -E '\.(txt|para)$'"); do $ADB pull "$F/ocrbench/$f" "$D/gotp/" >/dev/null 2>&1; done
+  e2=$($PY $R/tools/ocr_eval.py --got $D/gotp --ref $R/bench/ocr/runs/ref 2>&1); say "  $(printf '%s' "$e2" | sed 's/^/  /')"
+  same=$(printf '%s' "$e2" | grep -oE 'строка в строку [0-9]+' | grep -oE '[0-9]+')
+  [ "${same:-0}" -ge 28 ] && res 0 "O2 на тех же пикселях с эталоном стола строка в строку совпали $same из 32" || res 1 "O2 на тех же пикселях с эталоном совпали ${same:-0} из 32"
   sh "tail -n +$((mt+1)) $TSV" | awk -F'\t' '$2=="ocrbench"{print $3"\t"$4"x"$5"\tрамок "$6"\tмодели "$7"\tдетектор "$8"\tраспознаватель "$9"\tвсего "$11" мс"}' > $D/times.tsv
   say "  время по снимкам (худшие пять):"; sort -t$'\t' -k7 -V $D/times.tsv | tail -5 | sed 's/^/    /'
 fi
@@ -135,6 +149,7 @@ EOF
   pf=$(printf '%s' "$j" | awk '{print $1}')
   [ "$(sh "ls $F/photos/$pf 2>/dev/null")" != "" ] && res 0 "O3 снимок лежит в каталоге снимков приложения" || res 1 "O3 файла снимка нет"
   printf '%s' "$j" | grep -qi "дорог" && res 0 "O3 перевод по смыслу: «$(printf '%s' "$j" | cut -d'|' -f2 | cut -c1-80)»" || res 1 "O3 перевод: $j"
+  printf '%s' "$j" | grep -qi "естрейт" && res 1 "O3 прилагательное принято за название дороги («Естрейта»)" || res 0 "O3 «ESTREITA» переведено, а не транслитерировано"
 fi
 since=$(sh "tail -n +$((m+1)) $LOG")
 printf '%s' "$since" | grep -qE "🔊|озвуч" && res 1 "O3 снимок озвучивался" || res 0 "O3 без озвучки"

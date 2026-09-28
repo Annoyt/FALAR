@@ -301,8 +301,9 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("ocrbench")) { final String path = i.getStringExtra("ocrbench");
       new Thread(() -> {
         if (ocr == null || !ocr.ready()) { log("🧪 снимки: моделей чтения нет (models/ocr)"); return; }
-        File[] fs = new File(path).listFiles((d, n) -> n.toLowerCase(Locale.ROOT).endsWith(".jpg"));
-        if (fs == null || fs.length == 0) { log("🧪 снимки: в " + path + " нет .jpg"); return; }
+        // .png — те же пиксели, что у эталона на столе (без разницы декодеров JPEG)
+        File[] fs = new File(path).listFiles((d, n) -> n.toLowerCase(Locale.ROOT).endsWith(".jpg") || n.toLowerCase(Locale.ROOT).endsWith(".png"));
+        if (fs == null || fs.length == 0) { log("🧪 снимки: в " + path + " нет .jpg и .png"); return; }
         Arrays.sort(fs); List<Long> all = new ArrayList<>(), det = new ArrayList<>(), rec = new ArrayList<>(), load = new ArrayList<>();
         long rss0 = Engine.rssMb(), rssMax = rss0;
         for (File f : fs) {
@@ -964,8 +965,9 @@ public class TranslatorService extends Service {
       case Modules.SPEAKER: if (spk == null || !spk.ready) { spk = new Speaker(modelsDir, true); if (spk.ready) log("🎤 отпечаток голоса подключён: " + spk.describe()); } break;
       case Modules.CORPUS: if (pb != null && pb.minedCount == 0 && new File(modelsDir, "phrasebook_tatoeba.tsv").exists()) pb.loadMined(new File(modelsDir, "phrasebook_tatoeba.tsv")); break;
       case Modules.LLM:   // уточнитель на месте — контекст включается, если человек не выключал его сам
-        if (hasLlm() && !contextMode && !getSharedPreferences("at", MODE_PRIVATE).contains("ctx")) { log("🧠 уточнитель на месте — включаю контекст"); setContext(true, false); }
-        else if (hasLlm() && getSharedPreferences("at", MODE_PRIVATE).getBoolean("ctx", false)) setContext(true, false);
+        if (contextMode || !hasLlm()) break;           // уже включён — второй строки в журнале не нужно
+        if (!getSharedPreferences("at", MODE_PRIVATE).contains("ctx")) { log("🧠 уточнитель на месте — включаю контекст"); setContext(true, false); }
+        else if (getSharedPreferences("at", MODE_PRIVATE).getBoolean("ctx", false)) setContext(true, false);
         break;
       default: break;
     }
@@ -2238,7 +2240,11 @@ public class TranslatorService extends Service {
           busy("live", "перевожу снимок…", i, pg.paras.size());
           OcrCore.Para p = pg.paras.get(i);
           String ru = null, why = photoSkip(p.text);
-          if (why == null) { Once r = translateOnce("pt2ru", unshout(p.text), false, false, false); if (r.skip == null && r.mt != null && !r.mt.trim().isEmpty()) ru = r.mt.trim(); }
+          if (why == null) {
+            String sign = TextRules.unshoutSign(p.text, wd -> words != null && words.isCommon(wd, "pt"));
+            Once r = translateOnce("pt2ru", sign, false, false, true);
+            if (r.skip == null && r.mt != null && !r.mt.trim().isEmpty()) ru = r.mt.trim();
+          }
           else skipped++;
           double[] f = p.frame(); org.json.JSONArray fa = new org.json.JSONArray();
           for (double v : f) fa.put(Math.round(v * 1000) / 1000.0);
@@ -2365,10 +2371,12 @@ public class TranslatorService extends Service {
    *
    *  gate — отбивать ли реплику, не похожую на ожидаемый язык. Для микрофона да: туда попадает
    *  чужая речь из комнаты. Для набранного и снятого — нет: это попросили перевести явно. */
-  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate) throws Exception { return translateOnce(dirIn, asrIn, auto, gate, true); }
-  /** learn — копить ли фразу в выученное (learned.json). Для снимка нет: текст вывески не сказан
-   *  в разговоре, и его повторы портили бы и быстрый путь, и частоты. */
-  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate, boolean learn) throws Exception {
+  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate) throws Exception { return translateOnce(dirIn, asrIn, auto, gate, false); }
+  /** sign — текст вывески (снимок): в выученное не копится — он не сказан в разговоре, и его
+   *  повторы портили бы и быстрый путь, и частоты; название улицы — только с заглавной
+   *  (TextRules.mask strictNames: регистр у вывески осмыслен после unshoutSign). */
+  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate, boolean sign) throws Exception {
+    boolean learn = !sign;
     Once r = new Once();
     String dir = dirIn, asr = asrIn;
     String src = dir.substring(0, 2), tgt = dir.substring(3);
@@ -2387,7 +2395,7 @@ public class TranslatorService extends Service {
     WordList.Result wr = words == null ? null : words.apply(asr, src, tgt, r.slots, r.whits);
     String pre = wr == null ? asr : wr.masked;
     if (wr != null) asr = wr.readable;                                   // дальше везде — исправленный текст // свои слова — раньше адресного шаблона
-    TextRules.Masked mk = TextRules.mask(pre, src, r.slots);              // §6 ярус 3: числа/цены/адреса в плейсхолдеры
+    TextRules.Masked mk = TextRules.mask(pre, src, r.slots, sign);        // §6 ярус 3: числа/цены/адреса в плейсхолдеры
     r.slots = mk.slots; r.asr = asr; r.maskedSrc = mk.text;
     if (words != null) {                                                  // parakeet многоязычный и сам решает, что услышал
       double lk = words.looksLike(mk.text, src);

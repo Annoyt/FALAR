@@ -18,6 +18,7 @@ public class OcrCoreTest {
   static boolean near(double a, double b, double eps) { return Math.abs(a - b) <= eps; }
 
   static double[] box(double... v) { return v; }
+  static boolean nearBox(double[] a, double[] b, double eps) { if (a.length != b.length) return false; for (int i = 0; i < a.length; i++) if (!near(a[i], b[i], eps)) return false; return true; }
   static OcrCore.Item item(double x0, double y0, double x1, double y1, String t) {
     return new OcrCore.Item(new double[]{x0, y0, x1, y0, x1, y1, x0, y1}, t);
   }
@@ -159,6 +160,176 @@ public class OcrCoreTest {
     ok(((gc[2] >> 16) & 255) - ((gc[0] >> 16) & 255) > 60 && ((gc[3] >> 16) & 255) - ((gc[1] >> 16) & 255) > 60,
         "K3 свет вдоль вывески меняется — левые четверти темнее правых, заливка пойдёт градиентом");
     ok(gc[4] == 0xFF000000 || gc[4] == 0xFFFFFFFF, "K4 без контраста внутри — чёрный или белый текст");
+
+    // --- M: границы и точные значения (мутационное тестирование нашло места, где тесты код
+    //     исполняли, но поведение не проверяли) ---
+    // M1 точная рамка: полоса 20×5 точек, расширение на d, пересчёт в снимок ×2
+    float[] pm1 = new float[60 * 30]; for (int y = 5; y <= 9; y++) for (int x = 10; x <= 29; x++) pm1[y * 60 + x] = 0.9f;
+    List<double[]> b1 = OcrCore.boxes(pm1, 60, 30, 120, 60);
+    double d1 = 19 * 4 * (double) OcrCore.UNCLIP / (2 * 23);
+    ok(b1.size() == 1 && nearBox(b1.get(0), box(2 * (10 - d1), 2 * (5 - d1), 2 * (29 + d1), 2 * (5 - d1), 2 * (29 + d1), 2 * (9 + d1), 2 * (10 - d1), 2 * (9 + d1)), 1e-6),
+        "M1 рамка полосы точно: охват по крайним точкам, расширение на d = S·1,4/(2P), ×2 в снимок: " + (b1.isEmpty() ? "нет" : Arrays.toString(b1.get(0))));
+    // M2 у края снимка рамка прижимается к краю, а не уходит за него
+    float[] pm2 = new float[60 * 30];
+    for (int y = 0; y <= 3; y++) for (int x = 0; x <= 9; x++) pm2[y * 60 + x] = 0.9f;
+    for (int y = 26; y <= 29; y++) for (int x = 50; x <= 59; x++) pm2[y * 60 + x] = 0.9f;
+    List<double[]> b2 = OcrCore.boxes(pm2, 60, 30, 60, 30); double d2 = 9 * 3 * (double) OcrCore.UNCLIP / (2 * 12);
+    ok(b2.size() == 2 && nearBox(b2.get(0), box(0, 0, 9 + d2, 0, 9 + d2, 3 + d2, 0, 3 + d2), 1e-6)
+        && nearBox(b2.get(1), box(50 - d2, 26 - d2, 60, 26 - d2, 60, 30, 50 - d2, 30), 1e-6), "M2 рамки у краёв прижаты к 0 и к размеру снимка");
+    // M3 соседство не переходит через конец строки карты
+    float[] pm3 = new float[20 * 10];
+    for (int y = 2; y <= 5; y++) for (int x = 16; x <= 19; x++) pm3[y * 20 + x] = 0.9f;
+    for (int y = 3; y <= 6; y++) for (int x = 0; x <= 3; x++) pm3[y * 20 + x] = 0.9f;
+    ok(OcrCore.boxes(pm3, 20, 10, 20, 10).size() == 2, "M3 пятно у правого края и пятно у левого края следующей строки — разные области");
+    // M4 порог: точка ровно на пороге — не текст; рамка ровно на пороге уверенности — текст
+    float[] pm4 = new float[60 * 30];
+    for (int y = 9; y <= 15; y++) for (int x = 19; x <= 40; x++) pm4[y * 60 + x] = OcrCore.THRESH;
+    for (int y = 10; y <= 14; y++) for (int x = 20; x <= 39; x++) pm4[y * 60 + x] = 0.9f;
+    List<double[]> b4 = OcrCore.boxes(pm4, 60, 30, 60, 30); double d4 = 19 * 4 * (double) OcrCore.UNCLIP / (2 * 23);
+    ok(b4.size() == 1 && nearBox(b4.get(0), box(20 - d4, 10 - d4, 39 + d4, 10 - d4, 39 + d4, 14 + d4, 20 - d4, 14 + d4), 1e-6), "M4 кайма ровно на пороге 0,2 в область не входит");
+    float[] pm5 = new float[60 * 30]; for (int y = 5; y <= 9; y++) for (int x = 10; x <= 29; x++) pm5[y * 60 + x] = OcrCore.BOX_THRESH;
+    ok(OcrCore.boxes(pm5, 60, 30, 60, 30).size() == 1, "M4 средняя уверенность ровно 0,45 — строка остаётся");
+    // M5 наименьшая сторона: 2 — шум, 3 — строка
+    float[] pm6 = new float[60 * 30];
+    for (int y = 2; y <= 4; y++) for (int x = 5; x <= 30; x++) pm6[y * 60 + x] = 0.9f;
+    for (int y = 12; y <= 15; y++) for (int x = 5; x <= 30; x++) pm6[y * 60 + x] = 0.9f;
+    List<double[]> b6 = OcrCore.boxes(pm6, 60, 30, 60, 30);
+    ok(b6.size() == 1 && b6.get(0)[1] > 8, "M5 полоса в 3 точки высотой (сторона 2) отброшена, в 4 точки (сторона 3) — строка");
+    float[] pm7 = new float[20 * 20]; for (int k = 0; k < 6; k++) pm7[(2 + k) * 20 + 2 + k] = 0.9f;
+    ok(OcrCore.boxes(pm7, 20, 20, 20, 20).isEmpty(), "M5 диагональ в одну точку толщиной — не строка (отрезок нулевой ширины)");
+    // M6 выпуклая оболочка: только углы, без внутренних и лежащих на сторонах точек
+    List<double[]> hp = new ArrayList<>(Arrays.asList(new double[]{5, 5}, new double[]{10, 10}, new double[]{0, 5}, new double[]{5, 0}, new double[]{0, 0},
+        new double[]{10, 5}, new double[]{3, 7}, new double[]{0, 10}, new double[]{5, 10}, new double[]{10, 0}, new double[]{0, 3}));
+    List<String> hv = new ArrayList<>(); for (double[] q : OcrCore.hull(hp)) hv.add((int) q[0] + "," + (int) q[1]); Collections.sort(hv);
+    ok(hv.equals(Arrays.asList("0,0", "0,10", "10,0", "10,10")), "M6 оболочка квадрата с точками внутри и на сторонах — четыре угла: " + hv);
+    // M7 три точки не на одной прямой — настоящий прямоугольник, а не отрезок
+    double c30 = Math.cos(Math.toRadians(30)), s30 = Math.sin(Math.toRadians(30));
+    double[] tri = OcrCore.minAreaRect(Arrays.asList(new double[]{0, 0}, new double[]{10 * c30, 10 * s30}, new double[]{-s30, c30}));
+    double[] ts = OcrCore.sides(tri); double tmin = Math.min(ts[0], ts[1]), tmax = Math.max(ts[0], ts[1]);
+    ok(near(tmin, 1, 1e-9) && near(tmax, 10, 1e-9), "M7 узкий треугольник под 30° — прямоугольник 10×1: " + tmin + "×" + tmax);
+    // M8 порядок углов у повёрнутой рамки
+    double[] rb = OcrCore.orderBox(box(10 * c30 - s30, 10 * s30 + c30, 0, 0, -s30, c30, 10 * c30, 10 * s30));
+    ok(nearBox(rb, box(0, 0, 10 * c30, 10 * s30, 10 * c30 - s30, 10 * s30 + c30, -s30, c30), 1e-12), "M8 повёрнутая рамка: левый верх, правый верх, правый низ, левый низ");
+    // M9 средняя уверенность: рамка вне карты и рамка без центров пикселей — 0, не NaN
+    float[] one = new float[4 * 4]; Arrays.fill(one, 1f);
+    ok(OcrCore.polyMean(one, 4, 4, box(-10, -10, -5, -10, -5, -5, -10, -5)) == 0, "M9 рамка целиком вне карты — 0");
+    ok(OcrCore.polyMean(one, 4, 4, box(0.2, 0.2, 0.8, 0.2, 0.8, 0.8, 0.2, 0.8)) == 0, "M9 рамка между центрами пикселей — 0");
+    ok(near(OcrCore.polyMean(one, 4, 4, box(-2, -2, 3, -2, 3, 3, -2, 3)), 1, 1e-12), "M9 рамка частью за краем — среднее по тому, что внутри");
+    float[] half = new float[4 * 4]; for (int y = 0; y < 4; y++) for (int x = 0; x < 2; x++) half[y * 4 + x] = 1f;
+    ok(near(OcrCore.polyMean(half, 4, 4, box(0, 0, 3, 0, 3, 3, 0, 3)), 0.5, 1e-12), "M9 половина рамки — текст: 0,5");
+    // M10 расширение повёрнутой рамки — точно
+    double[] rr0 = box(0, 0, 10 * c30, 10 * s30, 10 * c30 - s30, 10 * s30 + c30, -s30, c30);
+    double[] rx = OcrCore.expand(rr0, 1);
+    double cxx = (rr0[0] + rr0[2] + rr0[4] + rr0[6]) / 4, cyy = (rr0[1] + rr0[3] + rr0[5] + rr0[7]) / 4;
+    double[] want = OcrCore.orderBox(box(cxx - c30 * 6 + s30 * 1.5, cyy - s30 * 6 - c30 * 1.5, cxx + c30 * 6 + s30 * 1.5, cyy + s30 * 6 - c30 * 1.5,
+        cxx + c30 * 6 - s30 * 1.5, cyy + s30 * 6 + c30 * 1.5, cxx - c30 * 6 - s30 * 1.5, cyy - s30 * 6 + c30 * 1.5));
+    ok(nearBox(rx, want, 1e-9), "M10 повёрнутая рамка 10×1, расширение на 1 — 12×3 с тем же центром и углом");
+    // M11 вырез по дробной рамке и по повёрнутой — точно по билинейной выборке линейной картинки
+    int[] lin = new int[10 * 6];
+    for (int y = 0; y < 6; y++) for (int x = 0; x < 10; x++) lin[y * 10 + x] = 0xFF000000 | ((20 * x + y) << 16) | ((10 + x) << 8) | (5 * y);
+    int[] cw = new int[2]; int[] c1 = OcrCore.crop(lin, 10, 6, box(2.5, 1, 6.5, 1, 6.5, 4, 2.5, 4), cw); boolean cok = cw[0] == 4 && cw[1] == 3;
+    for (int v = 0; v < 3 && cok; v++) for (int u = 0; u < 4 && cok; u++) cok = c1[v * 4 + u] == (0xFF000000 | ((51 + 20 * u + v) << 16) | ((13 + u) << 8) | (5 + 5 * v));
+    ok(cok, "M11 вырез 4×3 со сдвигом на полпикселя — значения билинейной выборки");
+    int[] c2 = OcrCore.crop(lin, 10, 6, box(2, 1, 6, 3, 5, 5, 1, 3), cw); boolean rok = cw[0] == 4 && cw[1] == 2;
+    for (int v = 0; v < 2 && rok; v++) for (int u = 0; u < 4 && rok; u++) {
+      double X = 2 + (u + 0.5) * 1.0 + (v + 0.5) * -0.5 - 0.5, Y = 1 + (u + 0.5) * 0.5 + (v + 0.5) * 1.0 - 0.5;
+      rok = c2[v * 4 + u] == (0xFF000000 | ((int) (20 * X + Y + 0.5) << 16) | ((int) (10 + X + 0.5) << 8) | (int) (5 * Y + 0.5));
+    }
+    ok(rok, "M11 вырез по рамке под углом — по её сторонам, а не по осям");
+    OcrCore.crop(lin, 10, 6, box(1, 1, 3, 1, 3, 4, 1, 4), cw);
+    ok(cw[0] == 3 && cw[1] == 2, "M11 рамка 2×3 (высота ровно в 1,5 ширины) — уже вертикальная надпись, повёрнута");
+    // M12 выборка: дробная точка и выход за край — край
+    ok(OcrCore.sample(lin, 10, 6, 1.25, 2.5) == (0xFF000000 | (28 << 16) | (11 << 8) | 13), "M12 выборка в дробной точке: 27,5 → 28, 11,25 → 11, 12,5 → 13");
+    ok(OcrCore.sample(lin, 10, 6, -3, -3) == lin[0] && OcrCore.sample(lin, 10, 6, 100, 100) == lin[59], "M12 за краем — ближайший край");
+    // M13 вход распознавателя: все три плоскости BGR, строка и столбец, добивка
+    int[] col3 = new int[4 * 2]; Arrays.fill(col3, 0xFF000000 | (200 << 16) | (100 << 8) | 50);
+    float[] xr3 = new float[3 * 48 * 320]; OcrCore.recInput(col3, 4, 2, xr3, 0, 320);
+    int pl = 48 * 320, at = 47 * 320 + 95, pad = 47 * 320 + 96;
+    ok(near(xr3[at], (50 / 255f - 0.5f) / 0.5f, 1e-5) && near(xr3[pl + at], (100 / 255f - 0.5f) / 0.5f, 1e-5) && near(xr3[2 * pl + at], (200 / 255f - 0.5f) / 0.5f, 1e-5),
+        "M13 синий, зелёный, красный — по своим плоскостям до последней строки и столбца");
+    ok(xr3[pad] == 0f && xr3[pl + pad] == 0f && xr3[2 * pl + pad] == 0f, "M13 справа добивка нулями во всех плоскостях");
+    // M14 CTC: ничья — меньший номер, знак вне словаря — без текста, пусто — уверенность 0
+    String[] ch3 = {"", "a", "b"};
+    float[] tie = {0f, 0.5f, 0.5f, 0f, 0f}; float[] sc3 = new float[1];
+    ok(OcrCore.ctc(tie, 0, 1, 5, ch3, sc3).equals("a"), "M14 равные вероятности — первый класс");
+    float[] beyond = {0f, 0f, 0f, 0f, 0.9f, 0f, 0.6f, 0f, 0f, 0f};
+    ok(OcrCore.ctc(beyond, 0, 2, 5, ch3, sc3).equals("a") && near(sc3[0], 0.75, 1e-6), "M14 класс за словарём — без знака, но в уверенности считается");
+    float[] blank = {0.9f, 0.1f, 0f, 0.8f, 0.2f, 0f};
+    ok(OcrCore.ctc(blank, 0, 2, 3, ch3, sc3).isEmpty() && sc3[0] == 0f, "M14 одни пустые — пусто, уверенность 0");
+    float[] pair = {0f, 0.6f, 0f, 0f, 0f, 0.8f};
+    ok(OcrCore.ctc(pair, 0, 2, 3, ch3, sc3).equals("ab") && near(sc3[0], 0.7, 1e-6), "M14 уверенность — среднее оставленных знаков");
+    ok(OcrCore.ctc(pair, 3, 1, 3, ch3, null).equals("b"), "M14 сдвиг в пачке и без счёта уверенности");
+    ok(OcrCore.dict("a\nb", 3).length == 3, "M15 классов столько же, сколько знаков с пустым, — пробел не добавляется");
+    // M16 границы сборки строк (высота рамок 20)
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), item(123.9, 0, 200, 20, "B"))))).size() == 1, "M16 просвет 23,9 < 1,2 высоты — одна строка");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), item(124, 0, 200, 20, "B"))))).size() == 2, "M16 просвет ровно 1,2 высоты — уже колонка");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), item(90.1, 0, 200, 20, "B"))))).size() == 1, "M16 наезд 9,9 < полувысоты — одна строка");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), item(90, 0, 200, 20, "B"))))).size() == 2, "M16 наезд ровно в полвысоты — разные");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), item(102, 9.9, 200, 29.9, "B"))))).size() == 1, "M16 сдвиг по вертикали 9,9 — одна строка");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), item(102, 10, 200, 30, "B"))))).size() == 2, "M16 сдвиг ровно в полвысоты — разные строки");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 5, 100, 15, "A"), item(101, 0, 200, 20, "B"))))).size() == 1, "M16 кегль вдвое больше — ещё одна строка");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 5, 100, 15, "A"), item(101, -0.5, 200, 20.5, "B"))))).size() == 2, "M16 кегль больше чем вдвое — разные");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), slanted(102, 0, 40, 20, 14.8, "B"))))).size() == 1, "M16 наклон 14,8° — одна строка");
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), slanted(102, 0, 40, 20, 15.2, "B"))))).size() == 2, "M16 наклон 15,2° — разные");
+    List<String> close = texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "A"), item(1, 16, 101, 36, "C"), item(103, 7, 150, 27, "B")))));
+    ok(close.equals(Arrays.asList("A B", "C")), "M16 рамка между двумя строками — к той, чья средняя линия ближе: " + close);
+    ok(texts(OcrCore.layout(new ArrayList<>(Arrays.asList(new OcrCore.Item(box(0, 0, 50, 0, 50, 20, 0, 20), "   "), item(60, 0, 100, 20, "A"))))).equals(Collections.singletonList("A")),
+        "M16 рамка без текста в строки не идёт");
+    List<String> ord = OcrCore.lines(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 100, 100, 120, "низ"), item(50, 0, 150, 20, "верх"))))).lines().collect(java.util.stream.Collectors.toList());
+    ok(ord.equals(Arrays.asList("верх", "низ")), "M16 строки сверху вниз, хотя нижняя начинается левее: " + ord);
+    // M17 границы блоков
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(0, 30, 100, 60, "Bbb")))).size() == 1, "M17 кегль в 1,5 раза — один блок");
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(0, 30, 100, 61, "Bbb")))).size() == 2, "M17 больше чем в 1,5 раза — разные блоки");
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa de"), item(0, 22, 100, 72, "Bbb")))).size() == 1, "M17 после служебного слова — и в 2,5 раза");
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa de"), item(0, 22, 100, 73, "Bbb")))).size() == 2, "M17 но не больше");
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(0, 35.9, 100, 55.9, "Bbb")))).size() == 1, "M17 шаг 35,9 < 1,8 высоты — один блок");
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(0, 36, 100, 56, "Bbb")))).size() == 2, "M17 шаг ровно 1,8 высоты — разные");
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(100, 25, 200, 45, "Bbb")))).size() == 2, "M17 строки встык по горизонтали, без перекрытия — разные блоки");
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(99, 25, 200, 45, "Bbb")))).size() == 1, "M17 перекрытие в точку — один блок");
+    List<List<OcrCore.Row>> once = OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Esq"), item(150, 0, 250, 20, "Dir"), item(0, 25, 250, 45, "largo"))));
+    ok(OcrCore.lines(once).split("largo", -1).length == 2, "M17 строка под двумя колонками попадает в один блок, а не в оба");
+    // M18 колонки: перестановка только при перекрытии по высоте больше 0,3 и если левая не заходит
+    // за левый край правой больше чем на 1. Левая — крупным кеглем (41 против 20): иначе рамки
+    // собрались бы в одну строку или один блок, и переставлять было бы нечего.
+    List<String> sw = texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(300, 0, 400, 20, "Dir"), item(0, 13.9, 300, 54.9, "Esq")))));
+    ok(sw.equals(Arrays.asList("Esq", "Dir")), "M18 перекрытие по высоте 6,1 из 20 — левая колонка первой: " + sw);
+    List<String> ns = texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(300, 0, 400, 20, "Dir"), item(0, 14, 300, 55, "Esq")))));
+    ok(ns.equals(Arrays.asList("Dir", "Esq")), "M18 перекрытие ровно 0,3 высоты — порядок сверху вниз: " + ns);
+    List<String> e1 = texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(300, 0, 400, 20, "Dir"), item(0, 1, 301, 42, "Esq")))));
+    ok(e1.equals(Arrays.asList("Esq", "Dir")), "M18 левая заходит за край правой на 1 — ещё колонка: " + e1);
+    List<String> e2 = texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(300, 0, 400, 20, "Dir"), item(0, 1, 302, 42, "Esq")))));
+    ok(e2.equals(Arrays.asList("Dir", "Esq")), "M18 заходит на 2 — уже не колонка: " + e2);
+    List<String> three = texts(OcrCore.layout(new ArrayList<>(Arrays.asList(item(600, 0, 700, 20, "C"), item(300, 2, 400, 22, "B"), item(0, 4, 100, 24, "A")))));
+    ok(three.equals(Arrays.asList("A", "B", "C")), "M18 три колонки, выше та, что правее, — слева направо за несколько проходов: " + three);
+    // M19 абзацы: где склейки нет
+    List<String> pz = new ArrayList<>();
+    List<OcrCore.Row> prs = new ArrayList<>();
+    for (String t : new String[]{"Tel. 3244-", "4445", "-", "abc", "Proibido fumar.", "e beber", "Aberto das 9 às 17:", "sábados"}) { OcrCore.Row r = new OcrCore.Row(); r.items.add(item(0, 0, 10, 10, t)); r.close(); prs.add(r); }
+    for (OcrCore.Para pp : OcrCore.paragraphs(prs)) pz.add(pp.text);
+    ok(pz.equals(Arrays.asList("Tel. 3244-", "4445", "- abc", "Proibido fumar.", "e beber", "Aberto das 9 às 17:", "sábados")),
+        "M19 перенос после цифры — не перенос; точка и двоеточие фразу заканчивают, даже если дальше строчная: " + pz);
+    // M20 цвета: четверти по сторонам рамки, в том числе у повёрнутой; рамка вне снимка; тёмный фон
+    int R = 0xFFFF0000, G = 0xFF00FF00, B = 0xFF0000FF, Y = 0xFFFFFF00;
+    int[] q4 = new int[40 * 40];
+    for (int y = 0; y < 40; y++) for (int x = 0; x < 40; x++) q4[y * 40 + x] = x < 20 ? (y < 20 ? R : G) : (y < 20 ? B : Y);
+    int[] qc = OcrCore.colors(q4, 40, 40, new double[]{20, 20, 1, 0, 16, 8});
+    ok(qc[0] == R && qc[1] == G && qc[2] == B && qc[3] == Y, "M20 четверти: лево-верх, лево-низ, право-верх, право-низ");
+    int[] qr = OcrCore.colors(q4, 40, 40, new double[]{20, 20, 0, 1, 16, 8});
+    ok(qr[0] == B && qr[1] == R && qr[2] == Y && qr[3] == G, "M20 рамка повёрнута на 90° — четверти по её сторонам, а не по осям снимка");
+    int[] out = OcrCore.colors(q4, 40, 40, new double[]{500, 500, 1, 0, 16, 8});
+    ok(out[0] == 0xFFFFFFFF && out[3] == 0xFFFFFFFF && out[4] == 0xFF000000, "M20 рамка вне снимка — белый фон, чёрный текст");
+    int[] dark = new int[40 * 40]; Arrays.fill(dark, 0xFF282828);
+    for (int y = 17; y < 23; y++) for (int x = 13; x < 27; x += 2) dark[y * 40 + x] = 0xFF3C3C3C;
+    ok(OcrCore.colors(dark, 40, 40, new double[]{20, 20, 1, 0, 16, 8})[4] == 0xFFFFFFFF, "M20 тёмная вывеска, текст почти не отличается — белым");
+    int[] ink = new int[40 * 40]; Arrays.fill(ink, 0xFFC8C8C8);
+    for (int y = 16; y <= 24; y++) for (int x = 12; x <= 28; x++) ink[y * 40 + x] = (x % 4 == 0) ? 0xFF102040 : 0xFFFFFFFF;
+    ok(OcrCore.colors(ink, 40, 40, new double[]{20, 20, 1, 0, 16, 8})[4] == 0xFF102040, "M20 цвет текста — самая отличная от фона четверть пикселей внутри");
+    // M21 медиана и квантиль
+    int[] h2 = new int[256]; h2[1] = 1; h2[3] = 1;
+    int[] h3 = new int[256]; h3[1] = 1; h3[2] = 1; h3[9] = 1;
+    int[] h1 = new int[256]; h1[7] = 1;
+    ok(OcrCore.median(h2, 2) == 2 && OcrCore.median(h3, 3) == 2 && OcrCore.median(h1, 1) == 7, "M21 медиана: чётное — среднее двух, нечётное — середина, одно — оно");
+    ok(near(OcrCore.quantile(new double[]{0, 10, 20, 30}, 0.75), 22.5, 1e-12) && OcrCore.quantile(new double[]{5}, 0.75) == 5, "M21 квантиль с интерполяцией, как np.quantile");
 
     // --- G: сверка с эталоном ---
     int done = 0;

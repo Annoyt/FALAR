@@ -56,6 +56,39 @@ public class TextRules {
     "какая", "какой", "рядом", "около", "потом", "затем", "тоже", "уже", "надо", "нужно",
     "сразу", "скоро", "сейчас", "сегодня", "завтра", "вчера", "возле", "напротив", "дом", "номер"));
   /** Обрезает имя улицы на первом служебном слове; пустой результат — адреса нет. */
+  /** Первое значимое слово названия — с заглавной («das Flores» → Flores). */
+  static boolean properName(String name) {
+    for (String w : name.trim().split("\\s+")) {
+      if (w.matches("(?i)d[aeo]s?")) continue;
+      return !w.isEmpty() && Character.isUpperCase(w.codePointAt(0));
+    }
+    return false;
+  }
+
+  /** Вывеска прописными → текст, на котором учили переводчик: обычное слово языка — строчными,
+   *  необычное (имя, название) — с заглавной, короткое служебное («DE», «E») — строчными, первое
+   *  слово — с заглавной. Прежний unshout делал с заглавной каждое слово длиннее трёх букв, и
+   *  переводчик и правило адресов принимали прилагательные за имена. Слова не целиком прописные
+   *  и короткие не служебные («CEP», «RG») не трогаются. common — «обычное ли слово» (WordList). */
+  public static String unshoutSign(String s, java.util.function.Predicate<String> common) {
+    StringBuilder b = new StringBuilder(s.length()); boolean first = true;
+    for (String w : s.split("(?<=\\s)|(?=\\s)")) {
+      String core = w.replaceAll("[^\\p{L}]", "");
+      boolean caps = !core.isEmpty() && core.equals(core.toUpperCase(Locale.ROOT)) && !core.equals(core.toLowerCase(Locale.ROOT));
+      String low = core.toLowerCase(Locale.ROOT);
+      // короткое: служебное («DE», «E») или обычное трёхбуквенное («RUA») — строчными;
+      // остальное короткое («CEP», «RG», «BR») — аббревиатура, как есть
+      if (caps && (core.length() > 3 || OcrCore.CONT.contains(low) || (core.length() == 3 && common.test(low)))) {
+        int i = 0; while (i < w.length() && !Character.isLetter(w.charAt(i))) i++;
+        String rest = w.substring(i).toLowerCase(Locale.ROOT);
+        boolean cap = first || (core.length() > 3 && !common.test(low));
+        b.append(w, 0, i).append(cap && !rest.isEmpty() ? Character.toUpperCase(rest.charAt(0)) + rest.substring(1) : rest);
+      } else b.append(w);
+      if (!core.isEmpty()) first = false;
+    }
+    return b.toString();
+  }
+
   static String addrName(String name) {
     StringBuilder b = new StringBuilder();
     for (String w : name.trim().split("\\s+")) {
@@ -110,7 +143,12 @@ public class TextRules {
   static String key(String tok) { String t = tok.trim(); if (t.isEmpty()) return null; String k = t.toLowerCase(Locale.ROOT).replaceAll("[.,!?;:]+$", ""); return k.isEmpty() ? null : k; }
   public static Masked mask(String text, String lang) { return mask(text, lang, new ArrayList<String[]>()); }
   /** Нумерация слотов продолжается с уже занятых — список своих слов проходит раньше и занимает первые. */
-  public static Masked mask(String text, String lang, List<String[]> existing) {
+  public static Masked mask(String text, String lang, List<String[]> existing) { return mask(text, lang, existing, false); }
+  /** strictNames — название улицы только с заглавной. Для текста вывески: у неё регистр осмыслен
+   *  после unshoutSign (обычные слова строчные, имена с заглавной), и без этого «RODOVIA ESTREITA E
+   *  EXTREMAMENTE SINUOSA» уходило в перевод как «Естрейта и чрезвычайно извилистая дорога» — прилагательное
+   *  маскировалось как название дороги. Для речи заглавная не требуется (см. PT[0]). */
+  public static Masked mask(String text, String lang, List<String[]> existing, boolean strictNames) {
     Pattern[] ps = lang.equals("pt") ? PT : RU; String t = numWordsToDigits(text, lang); List<String[]> slots = new ArrayList<>(existing);
     for (int k = 0; k < ps.length; k++) {
       Matcher m = ps[k].matcher(t); StringBuffer sb = new StringBuffer();
@@ -118,7 +156,7 @@ public class TextRules {
         String ph = ph(slots.size() + 1);
         if (KIND[k].equals("addr") && m.groupCount() >= 1 && m.group(1) != null) {
           String name = addrName(m.group(1));
-          if (name.isEmpty()) { m.appendReplacement(sb, Matcher.quoteReplacement(m.group())); continue; }
+          if (name.isEmpty() || (strictNames && !properName(name))) { m.appendReplacement(sb, Matcher.quoteReplacement(m.group())); continue; }
           String head = m.group().substring(0, m.start(1) - m.start());
           String tail = m.group(1).substring(name.length());          // то, что отрезали, возвращаем в текст
           slots.add(new String[]{ph, name, KIND[k]});

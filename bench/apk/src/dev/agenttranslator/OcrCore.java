@@ -128,10 +128,9 @@ public final class OcrCore {
       double[] sd = sides(box);
       if (Math.min(sd[0], sd[1]) < 3) continue;
       if (polyMean(prob, pw, ph, box) < BOX_THRESH) continue;
-      double d = sd[0] * sd[1] * UNCLIP / (2 * (sd[0] + sd[1]));
-      box = expand(box, d);
-      sd = sides(box);
-      if (Math.min(sd[0], sd[1]) < 5) continue;
+      // Расширение на d (unclip для прямоугольника). Проверку «сторона после расширения < 5» из
+      // PaddleOCR здесь не ставим: при стороне от 3 и UNCLIP 1,4 расширенная сторона не меньше 5,1.
+      box = expand(box, sd[0] * sd[1] * UNCLIP / (2 * (sd[0] + sd[1])));
       for (int k = 0; k < 4; k++) {
         box[2 * k] = clamp(box[2 * k] * w / pw, 0, w);
         box[2 * k + 1] = clamp(box[2 * k + 1] * h / ph, 0, h);
@@ -143,13 +142,15 @@ public final class OcrCore {
 
   static double clamp(double v, double lo, double hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-  /** Прямоугольник наименьшей площади вокруг точек: выпуклая оболочка и перебор её рёбер. */
+  /** Прямоугольник наименьшей площади вокруг точек: выпуклая оболочка и перебор её рёбер. Точки
+   *  на одной прямой — отрезок нулевой ширины (как cv2.minAreaRect): такая область не текст, и
+   *  по размеру её отбросит разбор. Прежний охват по осям делал из диагонали в четыре точки
+   *  квадрат 3×3, и он проходил как строка. */
   static double[] minAreaRect(List<double[]> pts) {
     List<double[]> hull = hull(pts);
     if (hull.size() < 3) {
-      double x0 = Double.MAX_VALUE, y0 = Double.MAX_VALUE, x1 = -Double.MAX_VALUE, y1 = -Double.MAX_VALUE;
-      for (double[] p : pts) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
-      return orderBox(new double[]{x0, y0, x1, y0, x1, y1, x0, y1});
+      double[] a = hull.get(0), b = hull.get(hull.size() - 1);
+      return orderBox(new double[]{a[0], a[1], b[0], b[1], b[0], b[1], a[0], a[1]});
     }
     double best = Double.MAX_VALUE, bc = 1, bs = 0, bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
     for (int i = 0; i < hull.size(); i++) {
@@ -174,7 +175,7 @@ public final class OcrCore {
     List<double[]> p = new ArrayList<>(pts);
     p.sort((a, b) -> a[0] != b[0] ? Double.compare(a[0], b[0]) : Double.compare(a[1], b[1]));
     List<double[]> u = new ArrayList<>();
-    if (p.size() < 3) return p;
+    if (p.size() < 3) return p;                     // крайние по порядку — первая и последняя
     double[][] h = new double[2 * p.size()][]; int k = 0;
     for (double[] q : p) { while (k >= 2 && cross(h[k - 2], h[k - 1], q) <= 0) k--; h[k++] = q; }
     for (int i = p.size() - 2, t = k + 1; i >= 0; i--) { double[] q = p.get(i); while (k >= t && cross(h[k - 2], h[k - 1], q) <= 0) k--; h[k++] = q; }
@@ -373,8 +374,8 @@ public final class OcrCore {
   static final Pattern END = Pattern.compile("[.!?:;]$");
 
   static String lastWord(String s) {
-    String[] w = s.trim().split("\\s+");
-    return w.length == 0 ? "" : NON_WORD.matcher(w[w.length - 1].toLowerCase(Locale.ROOT)).replaceAll("");
+    String[] w = s.trim().split("\\s+");                  // всегда хотя бы один элемент
+    return NON_WORD.matcher(w[w.length - 1].toLowerCase(Locale.ROOT)).replaceAll("");
   }
 
   /** Рамки → блоки строк (tools/ocr_ref.py: layout — там же объяснение порогов).
@@ -450,7 +451,7 @@ public final class OcrCore {
           texts.set(k, prev.substring(0, prev.length() - 1) + t); rows.get(k).add(r); continue;
         }
         if (!END.matcher(prev).find() && (prev.endsWith(",") || CONT.contains(lastWord(prev))
-            || (!t.isEmpty() && Character.isLowerCase(t.charAt(0))))) {
+            || Character.isLowerCase(t.charAt(0)))) {          // текст строки не пустой: пустые рамки отсеяны в layout
           texts.set(k, prev + " " + t); rows.get(k).add(r); continue;
         }
       }

@@ -85,9 +85,9 @@ def min_area_rect(pts):
     from scipy.spatial import ConvexHull
     pts = np.asarray(pts, np.float64)
     if len(pts) < 3 or np.linalg.matrix_rank(pts - pts[0]) < 2:
-        x0, y0 = pts.min(0); x1, y1 = pts.max(0)
-        box = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
-        return order_box(box)
+        # на одной прямой — отрезок нулевой ширины (как cv2.minAreaRect), как в OcrCore.minAreaRect
+        o = sorted(map(tuple, pts)); a, b = np.array(o[0]), np.array(o[-1])
+        return order_box(np.array([a, b, b, a]))
     hull = pts[ConvexHull(pts).vertices]
     best = None
     for i in range(len(hull)):
@@ -173,9 +173,7 @@ class Det:
                 continue
             bw, bh = sides(box)
             d = bw * bh * self.p['unclip'] / (2 * (bw + bh))
-            box = expand(box, d)
-            if min(sides(box)) < 5:
-                continue
+            box = expand(box, d)                  # сторона после расширения ≥ 5,1 сама (см. OcrCore.boxes)
             box[:, 0] = np.clip(box[:, 0] * w / rw, 0, w); box[:, 1] = np.clip(box[:, 1] * h / rh, 0, h)
             boxes.append(box)
         return boxes, (rw, rh)

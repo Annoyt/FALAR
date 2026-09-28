@@ -40,7 +40,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   Button bSetupMic, bSetupDl, bSetupStop, bModelsStop, bModelsVerify, bModelsUp; ToggleButton tSetupAny, tAnyNet;
   /** Модули: переключатели в «Системе» и на экране первого запуска; контейнеры их настроек. */
   final java.util.Map<String, CheckBox> modChecks = new java.util.HashMap<>(), setupChecks = new java.util.HashMap<>();
-  LinearLayout ttsBox, cloudBox; Button bUnused; boolean setupSynced = false;
+  LinearLayout ttsBox, cloudBox; Button bUnused, bKeyHelp, bKeyDrop; boolean setupSynced = false;
   ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint; ScrollView bigScroll;
   TextView updLbl; Button bUpdate, bUpdateGo;
   /** Экран показывает состояние сервиса галочками, а setChecked дёргает обработчик так же, как
@@ -177,11 +177,24 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bKey.setOnClickListener(v -> {
       if (svc == null) return;
       final String k = keyIn.getText().toString().trim();
-      keyState.setText(k.isEmpty() ? "убираю ключ…" : "проверяю ключ у OpenRouter…");
+      // Пустое поле — ничего не делаем. Раньше «сохранить» с пустым полем стирал сохранённый ключ:
+      // поле после сохранения очищается, и второе нажатие молча убирало рабочий ключ (владелец, 29.09).
+      if (k.isEmpty()) { refreshKey("поле пустое — сохранённый ключ не тронут; ключ — кнопкой «как получить ключ»"); return; }
+      keyState.setText("проверяю ключ у OpenRouter…");
       bKey.setEnabled(false);
       // Сервис сам пишет итог в журнал, второй раз не дублируем.
       new Thread(() -> { final String r = svc.setCloudKey(k);
         runOnUiThread(() -> { keyIn.setText(""); bKey.setEnabled(true); refreshKey(r); }); }).start();
+    });
+    bKeyHelp.setOnClickListener(v -> keyHelpDialog());
+    bKeyDrop.setOnClickListener(v -> {
+      if (svc == null) return;
+      new android.app.AlertDialog.Builder(this).setTitle("Убрать ключ OpenRouter?")
+          .setMessage("Облако перестанет работать: «получше» облаком, пересмотр разговора и названия разговоров. "
+                    + "Ключ на сайте OpenRouter останется — его можно вставить снова.")
+          .setPositiveButton("убрать", (d, w) -> new Thread(() -> { final String r = svc.setCloudKey("");
+              runOnUiThread(() -> refreshKey(r)); }).start())
+          .setNegativeButton("отмена", null).show();
     });
     bClear.setOnClickListener(v -> {
       if (svc == null || svc.pb == null) return;
@@ -1352,9 +1365,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bVoices = new Button(this); bVoices.setText("🎤 голоса и авто-направление →"); v.addView(bVoices);
     cloudBox = new LinearLayout(this); cloudBox.setOrientation(LinearLayout.VERTICAL); v.addView(cloudBox);   // прячется без модуля «Облако»
     TextView kl = new TextView(this); kl.setTextSize(13); kl.setTextColor(Color.GRAY);
-    kl.setText("Ключ OpenRouter — только бесплатные модели; нужен для названий разговоров и кнопки «получше». "
-             + "Пустое поле и «сохранить» — ключ убрать.");
+    kl.setText("Ключ OpenRouter — только бесплатные модели; нужен для названий разговоров и кнопки «получше».");
     cloudBox.addView(kl);
+    LinearLayout rowKH = new LinearLayout(this); rowKH.setOrientation(LinearLayout.HORIZONTAL);
+    bKeyHelp = new Button(this); bKeyHelp.setText("как получить ключ"); bKeyHelp.setTextSize(13); style(bKeyHelp);
+    rowKH.addView(bKeyHelp, new LinearLayout.LayoutParams(0, -2, 1f));
+    bKeyDrop = new Button(this); bKeyDrop.setText("убрать ключ"); bKeyDrop.setTextSize(13); style(bKeyDrop); bKeyDrop.setVisibility(View.GONE);
+    rowKH.addView(bKeyDrop, new LinearLayout.LayoutParams(-2, -2));
+    cloudBox.addView(rowKH);
     LinearLayout rowK = new LinearLayout(this); rowK.setOrientation(LinearLayout.HORIZONTAL);
     keyIn = new EditText(this); keyIn.setHint("sk-or-…"); keyIn.setSingleLine(true); keyIn.setTextSize(14);
     rowK.addView(keyIn, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -1504,6 +1522,31 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
     keyState.setText(note == null ? base : base + "\n" + note);
     if (bModels != null) bModels.setEnabled(c != null && c.modelCount() > 0);
+    if (bKeyDrop != null) bKeyDrop.setVisibility(id.isEmpty() ? View.GONE : View.VISIBLE);
+  }
+
+  /** Как получить ключ OpenRouter и что даёт пополнение. Лимиты — по справке OpenRouter на
+   *  29.09.2026: бесплатные модели — 20 запросов в минуту и 50 в сутки; после покупки кредитов
+   *  на $10 и больше (за всё время) — 1000 в сутки, навсегда. Falar ходит только к моделям с
+   *  нулевой ценой (Cloud: суффикс :free и max_price 0 в каждом запросе), так что пополнение
+   *  поднимает лимит, а не тратится. */
+  void keyHelpDialog() {
+    TextView t = new TextView(this); t.setTextSize(15); t.setPadding(48, 24, 48, 8);
+    t.setText("1. Зарегистрируйтесь на openrouter.ai — можно через Google.\n"
+        + "2. Откройте «Keys» и нажмите «Create Key». Лимит расходов ключа можно поставить 0,01 $: "
+        + "Falar ходит только к бесплатным моделям, лимит лишь страхует.\n"
+        + "3. Скопируйте ключ (sk-or-…), вставьте в поле и нажмите «сохранить».\n\n"
+        + "Бесплатно: до 50 запросов в сутки и 20 в минуту. Один ключ можно дать нескольким людям, "
+        + "но лимит у них общий — вдвоём-втроём его хватает на пересмотр разговоров, но не с запасом.\n\n"
+        + "Если один раз пополнить счёт на 10 $ (с комиссией около 11 $), бесплатных запросов станет "
+        + "1000 в сутки — в 20 раз больше, и насовсем, даже когда деньги на счёте кончатся. Отказов «превышен лимит» "
+        + "станет намного меньше, и облако будет отвечать почти всегда. Деньги Falar при этом не тратит.");
+    new android.app.AlertDialog.Builder(this).setTitle("Ключ OpenRouter").setView(t)
+        .setPositiveButton("открыть openrouter.ai", (d, w) -> {
+          try { startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://openrouter.ai/keys"))); }
+          catch (Exception e) { onLog("не открылось: " + e); }
+        })
+        .setNegativeButton("закрыть", null).show();
   }
 
   /** Список моделей в том порядке, в котором их будет пробовать маршрутизация, с причиной порядка.

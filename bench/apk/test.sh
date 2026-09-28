@@ -10,6 +10,7 @@
 #   Pressure   — когда выгружать уточнитель по сигналу памяти: пик от подъёма пережидаем;
 #   Cloud      — порядок облачных моделей: «быстрее» и «точнее», размер по имени;
 #   Modules    — модули: по умолчанию под телефон, «как было» у обновившегося, какие кнопки есть;
+#   TextRules  — текст вывески: регистр прописного текста, название улицы только с заглавной;
 #   OcrCore    — офлайн-чтение снимка без моделей: рамки, вырез, строки и абзацы, цвета наложения;
 #                со сверкой с эталоном tools/ocr_ref.py, если он собран (tools/ocr_golden.py).
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
@@ -31,7 +32,7 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/WordList.java $A/test/WordListTest.java \
   $A/src/dev/agenttranslator/Pressure.java $A/test/PressureTest.java $A/test/CloudTest.java \
   $A/src/dev/agenttranslator/OcrCore.java $A/test/OcrCoreTest.java \
-  $A/src/dev/agenttranslator/Modules.java $A/test/ModulesTest.java
+  $A/src/dev/agenttranslator/Modules.java $A/test/ModulesTest.java $A/test/TextRulesTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -44,4 +45,5 @@ java -cp "$OUT:$J" dev.agenttranslator.PressureTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.CloudTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.OcrCoreTest "$R/bench/ocr/runs/golden" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ModulesTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.TextRulesTest || fail=1
 exit $fail
