@@ -260,6 +260,12 @@ public final class OcrCore {
     return new Strip(ux, uy, nx, ny, cx, cy, q, S, T, d, smin - d, smax + d, sx, sy, sag, crowded);
   }
 
+  /** Ось цилиндра на строке (в длине дуги): вершина параболы, если она внутри строки, иначе середина. */
+  static double axis(Strip st, double[] ss, double[] arc) {
+    if (st.q2 != 0) { double sv = -st.q1 / (2 * st.q2) * st.S; if (ss[0] < sv && sv < ss[ss.length - 1]) return interp(sv, ss, arc); }
+    return arc[arc.length - 1] / 2;
+  }
+
   /** np.interp для одной точки. */
   static double interp(double x, double[] xp, double[] fp) {
     int last = xp.length - 1;
@@ -270,18 +276,31 @@ public final class OcrCore {
     return (fp[lo + 1] - fp[lo]) / (xp[lo + 1] - xp[lo]) * (x - xp[lo]) + fp[lo];
   }
 
-  /** Вырез полосы: по длине дуги средней линии, поперёк — по её нормали, высота T + 2d. */
-  public static int[] cropStrip(int[] argb, int w, int h, Strip st, int[] outWH) {
+  /** Растяжение полосы к краям, как у надписи на цилиндре: буквы у краёв бутылки сжаты по ширине.
+   *  Ось — вершина параболы строки (или середина), радиус — STRETCH от наибольшего расстояния до
+   *  оси: край строки на 34°, там растяжение в 1,2 раза (tools/ocr_ref.py: STRETCH — там и замер). */
+  public static final double STRETCH = 1.8;
+
+  /** Вырез полосы: по длине дуги средней линии, поперёк — по её нормали, высота T + 2d, с растяжением. */
+  public static int[] cropStrip(int[] argb, int w, int h, Strip st, int[] outWH) { return cropStrip(argb, w, h, st, STRETCH, outWH); }
+  /** rho ≤ 0 — без растяжения. */
+  public static int[] cropStrip(int[] argb, int w, int h, Strip st, double rho, int[] outWH) {
     double step = (st.s1 - st.s0) / (ARC_N - 1); double[] ss = new double[ARC_N], arc = new double[ARC_N];
     for (int i = 0; i < ARC_N - 1; i++) ss[i] = st.s0 + i * step;
     ss[ARC_N - 1] = st.s1;
     double prev = Math.sqrt(1 + st.sl(ss[0]) * st.sl(ss[0]));
     for (int i = 1; i < ARC_N; i++) { double cur = Math.sqrt(1 + st.sl(ss[i]) * st.sl(ss[i])); arc[i] = arc[i - 1] + (cur + prev) / 2 * (ss[i] - ss[i - 1]); prev = cur; }
-    double sig = (st.sx + st.sy) / 2, half = st.T / 2 + st.d;
-    int cw = Math.max(1, (int) (arc[ARC_N - 1] * sig)), ch = Math.max(1, (int) ((st.T + 2 * st.d) * sig));
+    double sig = (st.sx + st.sy) / 2, half = st.T / 2 + st.d, end = arc[ARC_N - 1], a0 = 0, R = 0, l0 = 0;
+    int cw, ch = Math.max(1, (int) ((st.T + 2 * st.d) * sig));
+    if (rho > 0) {                                           // столбец выреза — равный шаг по окружности цилиндра
+      a0 = axis(st, ss, arc); R = rho * Math.max(a0, end - a0);
+      l0 = R * Math.asin(-a0 / R); double l1 = R * Math.asin((end - a0) / R);
+      cw = Math.max(1, (int) ((l1 - l0) * sig));
+    } else cw = Math.max(1, (int) (end * sig));
     int[] out = new int[cw * ch];
     for (int x = 0; x < cw; x++) {
-      double s = interp((x + 0.5) / sig, arc, ss), c = st.cv(s), g = st.sl(s), nrm = Math.sqrt(1 + g * g), nu = -g / nrm, nn = 1 / nrm;
+      double p = rho > 0 ? a0 + R * Math.sin((l0 + (x + 0.5) / sig) / R) : (x + 0.5) / sig;
+      double s = interp(p, arc, ss), c = st.cv(s), g = st.sl(s), nrm = Math.sqrt(1 + g * g), nu = -g / nrm, nn = 1 / nrm;
       for (int y = 0; y < ch; y++) {
         double o = (y + 0.5) / sig - half, a = s + o * nu, bb = c + o * nn;
         double X = (st.cx + a * st.ux + bb * st.nx) * st.sx - 0.5, Y = (st.cy + a * st.uy + bb * st.ny) * st.sy - 0.5;

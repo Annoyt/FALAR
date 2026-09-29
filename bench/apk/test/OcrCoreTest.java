@@ -212,6 +212,13 @@ public class OcrCoreTest {
     for (int y = 20; y <= 31; y++) { hook[y * SW + 90] = 0.9f; hook[y * SW + 101] = 0.9f; }
     for (int x = 90; x <= 101; x++) hook[31 * SW + x] = 0.9f;
     ok(OcrCore.boxes(hook, SW, SH, SW, SH).isEmpty(), "S6 короткая дуга с полупустым прямоугольником — не строка, как раньше");
+    {                                                          // растяжение к краям: у прямой строки ось посередине
+      int[] im2 = new int[SW * SH]; Arrays.fill(im2, 0xFFFFFFFF); int[] w0 = new int[2], w1 = new int[2];
+      OcrCore.cropStrip(im2, SW, SH, tws.get(0), 0, w0); int[] px1 = OcrCore.cropStrip(im2, SW, SH, tws.get(0), w1);
+      double want = OcrCore.STRETCH * Math.asin(1 / OcrCore.STRETCH);
+      ok(Math.abs((double) w1[0] / w0[0] - want) < 0.02 && w1[1] == w0[1] && px1.length == w1[0] * w1[1],
+          "S10 полоса с растяжением шире в ρ·asin(1/ρ) = " + String.format("%.3f", want) + " раза: " + w1[0] + " против " + w0[0] + ", высота та же");
+    }
     float[] apart = new float[SW * SH];
     for (int x = 20; x <= 180; x++) { for (int y = 10; y <= 16; y++) apart[y * SW + x] = 0.9f; for (int y = 40; y <= 46; y++) apart[y * SW + x] = 0.9f; }
     List<OcrCore.Strip> as = new ArrayList<>(); OcrCore.boxes(apart, SW, SH, SW, SH, as);

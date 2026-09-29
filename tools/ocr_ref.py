@@ -212,6 +212,12 @@ SAG_MIN = 0.5       # прогиб дуги от хорды — от полов�
 INTRUDE = 0.02      # чужих пикселей области в расширенном прямоугольнике — от 2 % своих: строки тесные
 LONG = 3.0          # полоса — только строке длиннее трёх её высот
 ARC_N = 2048        # точек на таблицу длины дуги
+# Растяжение полосы к краям, как у надписи на цилиндре: буквы у краёв бутылки сжаты по ширине.
+# Ось — вершина параболы строки (или середина), радиус — STRETCH от наибольшего расстояния до оси:
+# край строки на 34°, растяжение там в 1,2 раза. Замер (снимки ×2048, один поток): этикетки 84,1 →
+# 84,7 % слов («cammim» → «carmim»), вывески 93,5 → 93,6, цилиндр ∩ 88,7 → 89,0, ∪ 88,3 → 88,8.
+# 1,6 давало на этикетках 85,6 %, но цилиндр ∩ терял 0,6; 2,0 — ∩ −0,4.
+STRETCH = 1.8
 
 
 def intrusion(lab, k, box):
@@ -304,8 +310,10 @@ def interp1(x, xp, fp):
     return (fp[j + 1] - fp[j]) / (xp[j + 1] - xp[j]) * (x - xp[j]) + fp[j]
 
 
-def crop_strip(img, st):
-    """Вырез полосы: по длине дуги средней линии, поперёк — по её нормали, высота T + 2d."""
+def crop_strip(img, st, rho=STRETCH):
+    """Вырез полосы: по длине дуги средней линии, поперёк — по её нормали, высота T + 2d.
+    rho — растяжение к краям, как у надписи на цилиндре: ось — вершина параболы (или середина
+    строки), радиус — rho от наибольшего расстояния до оси; None — без растяжения."""
     q, S = st['q'], st['S']
     def cv(s):
         z = s / S
@@ -320,18 +328,39 @@ def crop_strip(img, st):
         gi = sl(ss[i]); cur = math.sqrt(1 + gi * gi)
         arc.append(arc[-1] + (cur + prev) / 2 * (ss[i] - ss[i - 1])); prev = cur
     sig = (st['sx'] + st['sy']) / 2
-    Wc = max(1, int(arc[-1] * sig)); Hc = max(1, int((st['T'] + 2 * st['d']) * sig))
+    Hc = max(1, int((st['T'] + 2 * st['d']) * sig))
+    if rho is None:
+        Wc = max(1, int(arc[-1] * sig))
+        pos = lambda x: (x + 0.5) / sig                      # noqa: E731
+    else:
+        a0 = axis_of(st, ss, arc); R = rho * max(a0, arc[-1] - a0)
+        l0 = R * math.asin(-a0 / R); l1 = R * math.asin((arc[-1] - a0) / R)
+        Wc = max(1, int((l1 - l0) * sig))
+        pos = lambda x: a0 + R * math.sin((l0 + (x + 0.5) / sig) / R)   # noqa: E731
+    Wc = int(Wc)
     half = st['T'] / 2 + st['d']
     u, nv, c0 = st['u'], st['n'], st['c0']
     X = np.empty((Hc, Wc)); Y = np.empty((Hc, Wc))
     off = (np.arange(Hc) + 0.5) / sig - half            # поэлементно — те же действия, что в OcrCore
     for x in range(Wc):
-        s = interp1((x + 0.5) / sig, arc, ss)
+        s = interp1(pos(x), arc, ss)
         c = cv(s); g = sl(s); nrm = math.sqrt(1 + g * g); Nu = -g / nrm; Nn = 1 / nrm
         a = s + off * Nu; b = c + off * Nn
         X[:, x] = (c0[0] + a * u[0] + b * nv[0]) * st['sx'] - 0.5
         Y[:, x] = (c0[1] + a * u[1] + b * nv[1]) * st['sy'] - 0.5
     return bilinear(img, X, Y)
+
+
+def axis_of(st, ss, arc):
+    """Ось цилиндра на строке (в длине дуги): вершина параболы, если она внутри строки, иначе
+    середина. Ось у любой строки, а не только у изогнутой, — на тех же четырёх наборах чуть лучше:
+    у тесной строки этикетки небольшой изгиб тоже показывает, где середина бутылки."""
+    q, S = st['q'], st['S']
+    if q[2] != 0:
+        sv = -q[1] / (2 * q[2]) * S
+        if ss[0] < sv < ss[-1]:
+            return interp1(sv, ss, arc)
+    return arc[-1] / 2
 
 
 def crop_line(img, box, st):
