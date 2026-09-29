@@ -29,8 +29,12 @@ PATCH поднимается, когда сборка кладётся в `apk/`
 ## Установка
 ```bash
 bench/apk/build.sh                                   # javac + D8 + aapt2 + zipalign + apksigner (debug-ключ)
-tools/platform-tools/adb install -r -g bench/apk/Falar.apk
+tools/platform-tools/adb install --no-incremental -r -g bench/apk/Falar.apk
 ```
+**Только `--no-incremental`.** По умолчанию adb ставит «по частям» (incremental), и данные прежней
+такой установки остаются на телефоне до перезагрузки: около 0,4 ГБ за каждую переустановку. На
+Redmi 29.09.2026 место упало с 2,0 ГБ до 300 МБ за четыре установки, перезагрузка вернула 22 ГБ —
+накопилось за недели. Обычная переустановка той же сборки заняла 1 МБ.
 С 0.21 модели приложение качает само при первом запуске по манифесту, вшитому в APK
 (`assets/models_manifest.json` — копия `models/manifest.json`). Для стенда по-прежнему можно залить
 готовое зеркало: `python3 tools/models_fetch.py --all && bench/apk/push_models.sh` — приложение
