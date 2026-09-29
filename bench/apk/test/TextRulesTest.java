@@ -78,8 +78,9 @@ public class TextRulesTest {
 
     // Адрес этикетки: переводчик выдумывал «Руа Аугуста Коста, 1.001 - Гора Альто»
     TextRules.Masked ad = TextRules.mask("ICPA CEPÊRA LTDA. Av. Lindolpho Augusto da Costa, 1.001 - Monte Alto-", "pt", new ArrayList<>(), true);
-    eq(TextRules.unmask(ad.text, ad, "ru"), "ICPA CEPÊRA ООО. проспект Линдолфу Аугусту да Коста, 1.001 - Монти-Алту,",
-        "D1 адрес целиком своей подстановкой: проспект, имена кириллицей, город через дефис, штат на следующей строке — после запятой, LTDA — ООО (" + ad.text + ")");
+    eq(TextRules.unmask(ad.text, ad, "ru"), "ООО «ICPA CEPÊRA». проспект Линдолфу Аугусту да Коста, 1.001 - Монти-Алту,",
+        "D1 адрес целиком своей подстановкой: проспект, имена кириллицей, город через дефис, штат на следующей строке — после запятой (" + ad.text + ")");
+    ok(!TextRules.hasWords(ad.text), "D1 от строки не осталось слов — переводчику она не отдаётся: " + ad.text);
     TextRules.Masked ct = TextRules.mask("Fábrica em Monte Alto-SP e loja em São Paulo / SP", "pt", new ArrayList<>(), true);
     eq(TextRules.unmask(ct.text, ct, "ru"), "Fábrica em Монти-Алту (Сан-Паулу) e loja em Сан-Паулу", "D2 город со штатом — штат в скобках, одноимённый — один раз");
     TextRules.Masked rj = TextRules.mask("Rio de Janeiro/RJ · Brasília - DF · São José dos Campos-SP", "pt", new ArrayList<>(), true);
@@ -89,6 +90,25 @@ public class TextRulesTest {
     ok(sg.slots.isEmpty(), "D3 «Segunda-» в конце строки без «- » или «, » перед ним — не город");
     TextRules.Masked sp3 = TextRules.mask("Onde fica a Av. Paulista?", "pt", new ArrayList<>(), false);
     ok(sp3.slots.size() == 1 && sp3.slots.get(0)[1].equals("Paulista") && sp3.text.startsWith("Onde fica a Av. XQ1"), "D4 речь: родовое слово видно переводчику, как раньше: " + sp3.text);
+
+    // Название фирмы: переводчик писал «ICPA CEPÊRA» то «Икпа Сепера», то «Икпа Цепера» — после
+    // unshoutSign он видел «Icpa Cepêra» и читал как слова
+    Set<String> common2 = new HashSet<>(Arrays.asList("produzido", "por", "fabricado", "distribuído", "e", "indústria", "brasileira", "alimentos"));
+    java.util.function.Predicate<String> c2 = common2::contains;
+    eq(TextRules.unshoutSign("ICPA CEPÊRA LTDA. Av. Lindolpho", c2), "ICPA CEPÊRA LTDA. Av. Lindolpho", "F1 название фирмы — как на этикетке");
+    eq(TextRules.unshoutSign("PRODUZIDO POR: ICPA CEPÊRA LTDA.", c2), "Produzido por: ICPA CEPÊRA LTDA.", "F2 вокруг фирмы — как раньше");
+    String caps = TextRules.unshoutSign("FABRICADO E DISTRIBUÍDO POR CEPÊRA ALIMENTOS LTDA", c2);
+    eq(caps, "Fabricado e distribuído por CEPÊRA ALIMENTOS LTDA", "F3 «POR» — не часть названия");
+    TextRules.Masked fc = TextRules.mask(caps, "pt", new ArrayList<>(), true);
+    eq(TextRules.unmask(fc.text, fc, "ru"), "Fabricado e distribuído por ООО «CEPÊRA ALIMENTOS»", "F3 фирма — подстановкой: " + fc.text);
+    TextRules.Masked fn = TextRules.mask("Fabricado por Nestlé Brasil Ltda. e 3M do Brasil Ltda", "pt", new ArrayList<>(), true);
+    eq(TextRules.unmask(fn.text, fn, "ru"), "Fabricado por ООО «Nestlé Brasil». e ООО «3M do Brasil»", "F4 имя с ударением, цифрой и связкой: " + fn.text);
+    TextRules.Masked fs = TextRules.mask("BRF S.A. · JBS S/A · Silva EIRELI", "pt", new ArrayList<>(), true);
+    eq(TextRules.unmask(fs.text, fs, "ru"), "АО «BRF» · АО «JBS» · Silva EIRELI", "F5 S.A. и S/A — АО, EIRELI — как есть: " + fs.text);
+    TextRules.Masked fl = TextRules.mask("LTDA. Av. Paulista, 1000", "pt", new ArrayList<>(), true);
+    ok(TextRules.unmask(fl.text, fl, "ru").startsWith("ООО. проспект Паулиста"), "F6 LTDA без названия — сокращением, как раньше: " + TextRules.unmask(fl.text, fl, "ru"));
+    ok(TextRules.mask("Fabricado por Nestlé Brasil Ltda.", "pt", new ArrayList<>(), false).slots.isEmpty(), "F7 речь: фирмы не маскируются");
+    ok(TextRules.mask("PIMENTA CARIBENHA · Tampa Dosadora", "pt", new ArrayList<>(), true).slots.isEmpty(), "F8 без формы собственности — не фирма");
 
     System.out.println(fails == 0 ? "TextRules: " + checks + " проверок, все прошли" : "TextRules: провалов " + fails + " из " + checks);
     return fails;

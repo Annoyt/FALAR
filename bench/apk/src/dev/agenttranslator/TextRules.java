@@ -57,8 +57,18 @@ public class TextRules {
     for (int i = 0; i < st.length; i += 2) STATE_RU.put(st[i], st[i + 1]);
   }
   static final String STATES = String.join("|", STATE_RU.keySet());
+  /** Название фирмы — слова с заглавной (или прописными) перед формой собственности: «ICPA CEPÊRA LTDA»,
+   *  «Nestlé Brasil Ltda», «3M do Brasil Ltda», «BRF S.A.», «JBS S/A». Переводчик писал его то «Икпа
+   *  Сепера», то «Икпа Цепера»; по-русски иностранную фирму оставляют латиницей: «ООО «ICPA CEPÊRA»».
+   *  «por», «para», «pela», «pelo» перед названием в него не входят («FABRICADO POR CEPÊRA LTDA»),
+   *  плейсхолдер своих слов — тоже. */
+  static final String FIRM_WORD = "(?!(?i:por|para|pela|pelo)(?![\\p{L}\\p{N}]))(?!XQ\\d)\\p{N}*\\p{Lu}[\\p{L}\\p{N}]*(?:[-'&][\\p{L}\\p{N}]+)*";
+  static final Pattern FIRM = P("(?<![\\p{L}\\p{N}])" + FIRM_WORD + "(?:[^\\S\\n]+(?:(?:(?i:d[aeo]s?|e)|&)[^\\S\\n]+)?" + FIRM_WORD + "){0,6}"
+      + "[^\\S\\n]+(?:(?i:ltda)(?![\\p{L}\\p{N}])|S\\.[^\\S\\n]?A\\.|S/A(?![\\p{L}\\p{N}])|(?i:eireli)(?![\\p{L}\\p{N}]))"),
+      FIRM_FORM = P("[^\\S\\n]+((?i:ltda)|S\\.[^\\S\\n]?A\\.|S/A|(?i:eireli))$");
   static final Pattern[] PT_SIGN = { PT[0], PT[1], PT[2],
     P("(?i)\\bn\\.?[º°]\\s?\\d+"),
+    FIRM,
     P("(?i)\\b(?:CNPJ|CPF|CEP|SAC|LTDA)\\b"),
     // город вместе с кодом штата через дефис или дробь («Monte Alto-SP», «São Paulo/SP») или, после
     // «- » и «, » адреса, с дефисом в конце строки, когда код штата ушёл на следующую («…, 1.001 -
@@ -70,7 +80,7 @@ public class TextRules {
     // цифры одним куском, в том числе с точками тысяч: «62.162.243/0003-45»
     P("\\b\\d+(?:[.,]\\d+)*(?:[ /-]\\d+(?:[.,]\\d+)*)+\\b"),
     PT[3] };
-  static final String[] KIND_SIGN = {"addr", "money", "time", "no", "abbr", "city", "abbr", "num", "num", "num"};
+  static final String[] KIND_SIGN = {"addr", "money", "time", "no", "firm", "abbr", "city", "abbr", "num", "num", "num"};
   static final Pattern WORD2 = P("\\p{L}{2,}");
   /** Плейсхолдер слота. «N1» не годится: замер на самой модели показал, что в ru→pt она съедает
    *  букву и оставляет «1» (выживает 1 раз из 6), из-за чего слот теряется и уезжает в конец фразы.
@@ -115,8 +125,15 @@ public class TextRules {
    *  и короткие не служебные («CEP», «RG») не трогаются. common — «обычное ли слово» (WordList). */
   public static String unshoutSign(String s, java.util.function.Predicate<String> common) {
     StringBuilder b = new StringBuilder(s.length()); boolean first = true;
+    // название фирмы остаётся как на этикетке: «ICPA CEPÊRA LTDA» иначе стало бы «Icpa Cepêra Ltda»
+    List<int[]> firms = new ArrayList<>(); Matcher fm = FIRM.matcher(s);
+    while (fm.find()) firms.add(new int[]{fm.start(), fm.end()});
+    int at = 0;
     for (String w : s.split("(?<=\\s)|(?=\\s)")) {
+      int from = at; at += w.length();
+      boolean firm = false; for (int[] f : firms) if (from < f[1] && at > f[0]) firm = true;   // «LTDA.» — со знаком
       String core = w.replaceAll("[^\\p{L}]", "");
+      if (firm) { b.append(w); if (!core.isEmpty()) first = false; continue; }
       boolean caps = !core.isEmpty() && core.equals(core.toUpperCase(Locale.ROOT)) && !core.equals(core.toLowerCase(Locale.ROOT));
       String low = core.toLowerCase(Locale.ROOT);
       // короткое: служебное («DE», «E») или обычное трёхбуквенное («RUA») — строчными;
@@ -251,6 +268,16 @@ public class TextRules {
     String c = cityName(m.group(1)), st = m.group(2) == null ? null : STATE_RU.get(m.group(2));
     return st == null ? c + "," : st.equals(c) ? c : c + " (" + st + ")";
   }
+  /** Фирма по-русски: форма собственности впереди, название латиницей в кавычках, как на этикетке.
+   *  LTDA — «ООО», S.A. и S/A — «АО»; у EIRELI русского соответствия нет — как есть. */
+  static String firmRu(String s) {
+    Matcher m = FIRM_FORM.matcher(s);
+    if (!m.find()) return s;
+    String name = s.substring(0, m.start()), f = m.group(1).toUpperCase(Locale.ROOT);
+    if (f.equals("LTDA")) return "ООО «" + name + "»";
+    if (f.startsWith("S")) return "АО «" + name + "»";
+    return s;
+  }
   static String cityName(String s) { return CITY_RU.getOrDefault(s, Translit.ptToRu(s).replaceAll("\\s+", "-")); }
 
   static String render(String orig, String kind, String tgt) {
@@ -258,6 +285,7 @@ public class TextRules {
     if (kind.equals("addr")) return Translit.address(orig, tgt);  // адрес не переводим, но пишем алфавитом цели
     if (kind.equals("no")) { Matcher d = P("\\d+").matcher(orig); return tgt.equals("ru") && d.find() ? "№ " + d.group() : orig; }
     if (kind.equals("city")) return tgt.equals("ru") ? cityRu(orig) : orig;
+    if (kind.equals("firm")) return tgt.equals("ru") ? firmRu(orig) : orig;
     if (kind.equals("abbr")) {
       if (!tgt.equals("ru")) return orig;
       String k = orig.toUpperCase(Locale.ROOT), r = ABBR_RU.get(k);
