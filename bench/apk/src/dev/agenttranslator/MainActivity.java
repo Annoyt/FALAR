@@ -1037,6 +1037,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
 
   static final String K_PHOTO_URI = "photo_uri", K_PENDING = "photo_pending", K_CLOUD_PHOTO = "cloud_photo", K_PENDING_CLOUD = "photo_pending_cloud";
+
+  /** Снимок с камеры камера пишет в общую галерею: без FileProvider (его нет без AndroidX) ей больше
+   *  некуда. Копия для разговора — у нас (savePhoto), и в галерее снимок оставаться не должен: он
+   *  там виден всем приложениям и не удаляется вместе с репликой, а договорились хранить снимки в
+   *  приложении. Удаляется только своя запись (photoUri) — снимок, выбранный из галереи, не трогаем.
+   *  Если снимок не скопировался, запись остаётся: его можно выбрать из галереи ещё раз. */
+  void dropCapture(android.net.Uri u) {
+    if (u == null || photoUri == null || !u.equals(photoUri)) return;
+    try { getContentResolver().delete(u, null, null); } catch (Throwable t) { onLog("📷 снимок камеры в галерее не удалился: " + t); }
+    photoUri = null;
+  }
   /** Снимок пришёл раньше, чем поднялся сервис с движками: прочитаем в onReady. */
   android.net.Uri pendingPhoto; boolean pendingCloud;
 
@@ -1050,7 +1061,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   @Override protected void onActivityResult(int req, int res, Intent data) {
     super.onActivityResult(req, res, data);
     if (req != REQ_PHOTO) return;
-    if (res != RESULT_OK) { if (res != RESULT_CANCELED) onLog("📷 камера вернула отказ (" + res + ")"); return; }
+    if (res != RESULT_OK) {                          // пустая запись, заведённая под снимок, в галерее не нужна
+      if (res != RESULT_CANCELED) onLog("📷 камера вернула отказ (" + res + ")");
+      dropCapture(photoUri); return;
+    }
     final android.net.Uri u = data != null && data.getData() != null ? data.getData() : photoUri;
     if (u == null) { onLog("📷 снимок не вернулся: камера не отдала файл"); return; }
     if (svc == null || svc.eng == null) {
@@ -1074,10 +1088,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     new Thread(() -> {
       if (offline) {                         // офлайн — без спроса: наружу ничего не уходит
         final java.io.File f = svc.chats == null ? null : savePhoto(u, svc.chats.photos());
+        if (f != null) dropCapture(u);
         runOnUiThread(() -> { if (f == null) onLog("📷 снимок не прочитался"); else svc.photoRead(f); });
         return;
       }
       final byte[] jpeg = jpegOf(u);
+      if (jpeg != null) dropCapture(u);
       runOnUiThread(() -> {
         if (jpeg == null) { onLog("📷 снимок не прочитался"); return; }
         // Облако — третья сторона. Спрашиваем каждый раз: на снимке может быть чужая переписка,
