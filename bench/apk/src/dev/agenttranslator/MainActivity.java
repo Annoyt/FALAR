@@ -1824,6 +1824,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
   @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
     if (i.hasExtra("micanim")) { micDemo(i.getStringExtra("micanim"), i.getStringExtra("micsec")); return; }
+    // Стенд: перерисовать окно целиком. Перерисовка обычно частичная — только то, что сдвинулось, —
+    // и вылезшее за свои границы видно не всегда: проверка прокрутки (test_scroll_device.sh) один
+    // раз прошла на сборке с ошибкой. Целиком — вылезшее видно всегда.
+    if (i.hasExtra("redraw")) { getWindow().getDecorView().invalidate(); return; }
     if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
