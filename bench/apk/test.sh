@@ -8,6 +8,8 @@
 #   Memo       — память разговора: кто говорит (по грамматике исходников), ключевые детали, потолок;
 #   WordList   — свои слова: искажённое имя находится, обычное слово («sábado») именем не подменяется;
 #   Pressure   — когда выгружать уточнитель по сигналу памяти: пик от подъёма пережидаем;
+#   Gain       — чувствительность микрофона: ограничитель держит потолок и форму волны, срез — нет;
+#   Hearing    — как слышно фразу: перегруз главнее тишины и шума, пороги, цифра в строке;
 #   Cloud      — порядок облачных моделей: «быстрее» и «точнее», размер по имени.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
 #   bash bench/apk/test.sh
@@ -26,7 +28,9 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java $A/test/ChatsTest.java \
   $A/src/dev/agenttranslator/Memo.java $A/src/dev/agenttranslator/Cloud.java $A/test/MemoTest.java \
   $A/src/dev/agenttranslator/WordList.java $A/test/WordListTest.java \
-  $A/src/dev/agenttranslator/Pressure.java $A/test/PressureTest.java $A/test/CloudTest.java
+  $A/src/dev/agenttranslator/Pressure.java $A/test/PressureTest.java \
+  $A/src/dev/agenttranslator/Gain.java $A/test/GainTest.java $A/test/CloudTest.java \
+  $A/src/dev/agenttranslator/Hearing.java $A/test/HearingTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -36,5 +40,7 @@ java -cp "$OUT:$J" dev.agenttranslator.ChatsTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.MemoTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WordListTest "$R/data/common_words.txt" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.PressureTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.GainTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.HearingTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.CloudTest || fail=1
 exit $fail

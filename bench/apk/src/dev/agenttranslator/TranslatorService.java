@@ -33,7 +33,9 @@ public class TranslatorService extends Service {
     void onUpdate(String state);
     /** Что приложение делает прямо сейчас: «перевожу…», «уточняю перевод» — для полосы на экране
      *  разговора. what == null — ничего; total > 0 — сделано done из total, иначе без хода. */
-    void onBusy(String what, int done, int total); }
+    void onBusy(String what, int done, int total);
+    /** Как слышно последнюю фразу — удержания или прослушивания: строка под кнопками. */
+    void onHearing(Hearing h); }
   public class LocalBinder extends Binder { public TranslatorService get() { return TranslatorService.this; } }
   final IBinder binder = new LocalBinder(); final Handler main = new Handler(Looper.getMainLooper());
   final ExecutorService worker = Executors.newSingleThreadExecutor(); volatile Listener listener;
@@ -65,6 +67,37 @@ public class TranslatorService extends Service {
   /** Что слушаем. Микрофон открыт только пока включена хотя бы одна кнопка или идёт удержание:
    *  фоновое прослушивание без спроса — это и лишний расход, и запись чужих разговоров. */
   public volatile boolean listenPt = false, listenRu = false; volatile boolean probing = false; volatile boolean keepWarm = true; volatile int padMs = 0; volatile double outGainDb = 0, micGainDb = 0; volatile String split = "off"; int trackCh = 1; AudioTrack spkTrack; int spkRate = 0; volatile AudioDeviceInfo capRouted = null; final List<float[]> rawBuf = new ArrayList<>();
+  /** Чувствительность прослушивания. Ставится в потоке нарезки, а не при захвате: там она
+   *  одинаково ложится на живой микрофон и на подачу записи (feedwav), и её можно проверять на
+   *  записях комнаты. Удержанию — своя, на всю фразу при отпускании (pttStop). */
+  final Gain gainListen = new Gain(16000);
+  /** Стенд: false — прежний срез по ±0,99 вместо ограничителя (--es limiter 0); gainTest —
+   *  чувствительность на прогон (--es micgaintest), главнее настройки и в неё не пишется. Отдельным
+   *  полем, потому что после подъёма движков micGainDb перечитывается из настроек и затёр бы её. */
+  volatile boolean limiterOn = true; volatile double gainTest = Double.NaN;
+  /** Автоматическая чувствительность — по умолчанию. По замеру на записях комнаты
+   *  (results/2026-09-29-mic-gain.md) и нарезка, и распознавание лучше всего при речи около
+   *  −24 dBFS; громче и тише — хуже в обе стороны, и одна ручка не подходит разом тихому и обычному
+   *  собеседнику: +24 дБ спасают тихого (WER 56 → 15 %) и портят обычного (16 → 28 %).
+   *  Прослушивание: после каждой фразы усиление сдвигается к нужному на AUTO_STEP пути и
+   *  запоминается: очень тихую речь (−48 dBFS) VAD не слышит вовсе, и сессия, начатая с нуля,
+   *  теряла первые восемь фраз, пока не поймала одну. Удержание: фраза есть целиком, и усиление
+   *  считается по ней самой. */
+  static final double TARGET_DB = -24, AUTO_MIN = -12, AUTO_MAX = 24, AUTO_STEP = 0.7;
+  volatile boolean micAuto = true; volatile double autoDb = 0;
+  double micGain() { double t = gainTest; return !Double.isNaN(t) ? t : micAuto ? autoDb : micGainDb; }
+  boolean autoOn() { return micAuto && Double.isNaN(gainTest); }
+  static double clampAuto(double db) { return Math.max(AUTO_MIN, Math.min(AUTO_MAX, db)); }
+  void saveAuto() { getSharedPreferences("at", MODE_PRIVATE).edit().putFloat("micautodb", (float) autoDb).apply(); }
+  /** Уровень входа для полосы на экране, dBFS после усиления: пик кадров с плавным спадом
+   *  (1,5 дБ за кадр 32 мс), чтобы опрос 5–10 раз в секунду видел всплески, а не случайный кадр.
+   *  levelOver — вход в кадре упёрся в край шкалы ещё до усиления. */
+  volatile float levelDb = -120; volatile boolean levelOver = false; volatile long levelAt = 0;
+  /** Как слышно последнюю фразу. */
+  volatile Hearing hearing = null;
+  /** Как слышно последнюю фразу, для журнала at.tsv: речь и фон по самой фразе, доли отсчётов —
+   *  перегруз входа, работа ограничителя, срез. */
+  volatile double segGainDb = 0, segSpeechDb = Double.NaN, segFloorDb = Double.NaN, segOverPct = 0, segLimPct = 0, segCutPct = 0;
   final List<float[]> pttBuf = new ArrayList<>(); String pttDir = "pt2ru"; AudioTrack track; int trackRate = 0; Thread capThread;
   PowerManager.WakeLock wl; volatile String lastDir, lastSrc, lastDst, lastLine = "";
   public static class Turn { public final int n; public final String dir, asr, mt; public final long at; public volatile String refined;
@@ -163,7 +196,9 @@ public class TranslatorService extends Service {
                     : "🎤 модели отпечатка голоса нет (models/speaker/*.onnx) — разделение говорящих выключено");
       status("Готово. ASR " + eng.loadAsrMs + " · MT " + eng.loadMtMs + " · TTS " + eng.loadTtsMs + " мс · " + pb.stats());
       android.content.SharedPreferences pr = getSharedPreferences("at", MODE_PRIVATE);
-      micGainDb = pr.getFloat("micgain", 0); outGainDb = pr.getFloat("gain", 0);
+      micGainDb = pr.getFloat("micgain", 0); outGainDb = pr.getFloat("gain", 0); micAuto = pr.getBoolean("micauto", true);
+      autoDb = clampAuto(pr.getFloat("micautodb", 0));
+      log("🎚 чувствительность: " + (micAuto ? String.format(Locale.ROOT, "авто, сейчас %+.1f дБ", autoDb) : "вручную, " + micGainDb + " дБ"));
       micSource = pr.getString("micsrc", "builtin");
       holdMs = pr.getInt("hold", 1500);
       refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
@@ -523,6 +558,17 @@ public class TranslatorService extends Service {
       log("🔊 усиление: выход " + outGainDb + " дБ · микрофон " + micGainDb + " дБ · уши: " + split);
       tsv("gaincfg", "" + outGainDb, "" + micGainDb, split);
     }
+    // Стенд: чувствительность на время прогона — в настройки не пишется и живёт до перезапуска;
+    // limiter=0 — прежний срез по ±0,99. Нужны для перебора на записях комнаты.
+    if (i != null && i.hasExtra("micauto")) {
+      micAuto = "1".equals(i.getStringExtra("micauto"));
+      getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("micauto", micAuto).apply();
+      log("🎚 чувствительность: " + (micAuto ? "авто, речь к " + (int) TARGET_DB + " dBFS" : "вручную, " + micGainDb + " дБ"));
+    }
+    if (i != null && i.hasExtra("micautodb")) { autoDb = clampAuto(Double.parseDouble(i.getStringExtra("micautodb"))); saveAuto(); log(String.format(Locale.ROOT, "🎚 авто-чувствительность: %+.1f дБ", autoDb)); }
+    if (i != null && i.hasExtra("micgaintest")) { gainTest = Double.parseDouble(i.getStringExtra("micgaintest")); log("🎚 чувствительность на прогон: " + gainTest + " дБ"); }
+    if (i != null && i.hasExtra("limiter")) { limiterOn = !"0".equals(i.getStringExtra("limiter")); log("🎚 " + (limiterOn ? "ограничитель" : "прежний срез по ±0,99")); }
+    if (i != null && (i.hasExtra("micgaintest") || i.hasExtra("limiter"))) tsv("gaintest", "" + micGain(), limiterOn ? "limit" : "cut");
     if (i != null && i.hasExtra("warm")) { keepWarm = "1".equals(i.getStringExtra("warm")); log(keepWarm ? "🔥 подогрев вывода включён" : "🔥 подогрев выключен"); }
     if (i != null && i.hasExtra("duplex")) { duplex = "1".equals(i.getStringExtra("duplex")); log(duplex ? "🎧 дуплекс: микрофон не глушим при выводе в наушник" : "🎧 дуплекс выключен"); }
     if (i != null && i.hasExtra("pad")) { padMs = Integer.parseInt(i.getStringExtra("pad")); log("🔇 тишина перед распознаванием: " + padMs + " мс"); }
@@ -727,10 +773,30 @@ public class TranslatorService extends Service {
       long t = System.nanoTime(); boolean ok = spk != null && spk.enroll(who, lang, all, 16000);
       log(ok ? "🎤 профиль «" + who + "» (" + lang + ") записан: " + String.format("%.1f", all.length / 16000.0) + " с за " + (System.nanoTime() - t) / 1000000 + " мс · " + spk.describe()
              : "🎤 не записалось: нужно хотя бы секунду речи" + (spk == null || !spk.ready ? " и модель в models/speaker/" : "")); }); return; }
+    // Чувствительность с ограничителем — на всю фразу разом, тем же Gain, что у прослушивания;
+    // в авто — ровно столько, чтобы речь этой фразы легла на TARGET_DB.
+    final Gain g = new Gain(16000); g.limit = limiterOn;
+    if (autoOn()) { double sp = Gain.speechFloor(all)[0]; g.db = Double.isNaN(sp) ? 0 : clampAuto(TARGET_DB - sp); } else g.db = micGain();
+    final Gain.Stats st = new Gain.Stats(); g.apply(all, all.length, st);
     // Удержание всегда определяет язык по сказанному. Раньше здесь вызывался вариант, берущий
     // режим из полей: при выключенных кнопках слушания autoLang=false, направление оставалось
     // ru2pt, и сказанное по-португальски отбивал языковой фильтр — «не похоже на русский».
-    worker.submit(() -> process(d, all, 16000, true));
+    worker.submit(() -> { hear(Gain.speechFloor(all), st, g.db); segDb = db(rms(all, all.length)); segNoiseDb = segFloorDb; process(d, all, 16000, true); });
+  }
+
+  /** Полосе уровня во время удержания: уровень кадра с учётом усиления и перегруз входа. */
+  void level(float[] c, int n, double gainDb) {
+    float peak = 0; for (int k = 0; k < n; k++) peak = Math.max(peak, Math.abs(c[k]));
+    levelDb = (float) Math.max(Math.min(0, db(rms(c, n)) + gainDb), levelDb - 1.5); levelOver = peak >= Gain.OVER; levelAt = System.currentTimeMillis();
+  }
+
+  /** Как слышно фразу: речь и фон по ней самой (sf — Gain.speechFloor), перегруз входа и работа
+   *  ограничителя — в журнал at.tsv и строкой на экран. */
+  void hear(double[] sf, Gain.Stats st, double gainDb) {
+    segGainDb = gainDb; segSpeechDb = sf[0]; segFloorDb = sf[1];
+    segOverPct = st.overPct(); segLimPct = st.limitedPct(); segCutPct = st.cutPct();
+    final Hearing h = Hearing.of(sf[0], sf[1], segOverPct, gainDb, autoOn()); hearing = h;
+    Listener l = listener; if (l != null) main.post(() -> l.onHearing(h));
   }
   volatile String pttFixed = null; volatile boolean pttAuto = true;
   static final String ENROLL = "enroll";
@@ -1818,17 +1884,16 @@ public class TranslatorService extends Service {
             String dst = getExternalFilesDir(null).getAbsolutePath() + "/raw.wav";   // только files/: подкаталог от adb приложению не читается
             try { new DenoisedAudio(all, 16000).save(dst); log("💾 сырой поток сохранён: " + dst); tsv("raw_end", dst, "" + all.length); } catch (Throwable e) { log("💾 " + e); } }
         }
-        // Удержание: чувствительность из настроек действует и здесь, иначе поднятый вход работал
-        // бы только для прослушивания, а на кнопку «говорить» не влиял. Запись голосового
-        // профиля — исключение: слепок снимается с голоса как он есть, без усиления.
-        if (recording) { float[] c = Arrays.copyOf(win, n);
-          if (micGainDb != 0 && !ENROLL.equals(pttDir)) { double mg = Math.pow(10, micGainDb / 20.0); for (int k = 0; k < n; k++) c[k] = clip(c[k] * mg); }
+        // Удержание копит звук как есть: чувствительность с ограничителем ставится на всю фразу
+        // при отпускании (pttStop). Запись голосового профиля — без усиления вовсе: слепок
+        // снимается с голоса как он есть. Полосе на экране — уровень кадра с учётом усиления.
+        if (recording) { float[] c = Arrays.copyOf(win, n); level(c, n, ENROLL.equals(pttDir) || autoOn() ? 0 : micGain());
           synchronized (pttBuf) { pttBuf.add(c); } continue; }
         // Здесь только копия и очередь: всё тяжёлое — в отдельном потоке, иначе кольцевой буфер
         // микрофона переполняется и звук теряется молча.
         // Во время подачи записи микрофон в очередь не пускаем: иначе в замер подмешивается
         // живая комната и повтор перестаёт быть повтором.
-        if (micGainDb != 0) { double mg = Math.pow(10, micGainDb / 20.0); for (int k = 0; k < n; k++) win[k] = clip(win[k] * mg); }
+        // Чувствительность — в потоке нарезки (startVad), здесь звук идёт как есть.
         if (vadMode && !feeding && eng != null && !readingAloud && System.currentTimeMillis() > muteUntil)
           if (!capQ.offer(n == win.length ? win.clone() : Arrays.copyOf(win, n))) framesDropped++;
       }
@@ -1872,6 +1937,8 @@ public class TranslatorService extends Service {
     vadThread = new Thread(() -> {
       ArrayDeque<float[]> pre = new ArrayDeque<>();
       List<float[]> seg = new ArrayList<>();
+      // Счётчики входа по кадрам — рядом с самими кадрами: после усиления исходного звука уже нет.
+      ArrayDeque<Gain.Stats> preSt = new ArrayDeque<>(); List<Gain.Stats> segSt = new ArrayList<>();
       boolean inSpeech = false; int silent = 0, voiced = 0;
       while (running) {
         if (probing) { try { Thread.sleep(20); } catch (InterruptedException e) { return; } continue; }
@@ -1879,7 +1946,15 @@ public class TranslatorService extends Service {
         try { win = capQ.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException e) { return; }
         if (win == null || eng == null) continue;
         vadSamples += win.length;
+        Gain.Stats fs = new Gain.Stats();
+        // Оценка фона — после усиления. Сменилось усиление (авто после фразы) — сдвигаем и её:
+        // вверх она ползёт нарочно медленно, и после прибавки на 10 дБ порог по энергии минуту
+        // считался бы от фона, заниженного на те же 10 дБ.
+        double gNow = micGain();
+        if (gNow != gainListen.db && noiseRms > 0) noiseRms *= Math.pow(10, (gNow - gainListen.db) / 20);
+        gainListen.db = gNow; gainListen.limit = limiterOn; gainListen.apply(win, win.length, fs);
         double frame = rms(win, win.length);
+        levelDb = (float) Math.max(db(frame), levelDb - 1.5); levelOver = fs.over > 0; levelAt = System.currentTimeMillis();
         eng.vad.acceptWaveform(win);
         boolean sp = eng.vad.isSpeechDetected();
         while (!eng.vad.empty()) eng.vad.pop();          // внутренняя сборка sherpa не используется
@@ -1899,12 +1974,12 @@ public class TranslatorService extends Service {
         if (speech) lastSpeechAt = System.currentTimeMillis();   // отсюда отсчитывается пауза до озвучки
 
         if (!inSpeech) {
-          pre.addLast(win);
-          while (pre.size() > Math.max(1, preRollMs / FRAME_MS)) pre.removeFirst();
-          if (speech) { inSpeech = true; seg.clear(); seg.addAll(pre); pre.clear(); voiced = 1; silent = 0; }
+          pre.addLast(win); preSt.addLast(fs);
+          while (pre.size() > Math.max(1, preRollMs / FRAME_MS)) { pre.removeFirst(); preSt.removeFirst(); }
+          if (speech) { inSpeech = true; seg.clear(); seg.addAll(pre); pre.clear(); segSt.clear(); segSt.addAll(preSt); preSt.clear(); voiced = 1; silent = 0; }
           continue;
         }
-        seg.add(win);
+        seg.add(win); segSt.add(fs);
         if (speech) { voiced++; silent = 0; } else silent++;
         boolean quiet = silent * FRAME_MS >= hangMs;      // выдержка только здесь, у sherpa её нет
         boolean tooLong = seg.size() * FRAME_MS >= maxSpeechMs;
@@ -1917,10 +1992,15 @@ public class TranslatorService extends Service {
           for (int k = 0; k < keep; k++) { float[] c = seg.get(k); System.arraycopy(c, 0, out, o, c.length); o += c.length; }
           final double nz = noiseRms; final long at = System.currentTimeMillis();
           if (dumpSegs != null) try { new DenoisedAudio(out, 16000).save(new File(dumpSegs, "seg_" + at + ".wav").getAbsolutePath()); } catch (Throwable e) {}
-          final long pos = vadSamples;
-          worker.submit(() -> { segNoiseDb = nz == 0 ? Double.NaN : db(nz); segDb = db(rms(out, out.length)); segAt = at; segPos = pos; route(out); });
+          final long pos = vadSamples; final Gain.Stats st = new Gain.Stats(); final double gdb = gainListen.db;
+          for (int k = 0; k < keep; k++) st.add(segSt.get(k));
+          // Авто сдвигается здесь, в момент нарезки, а не в очереди распознавания: иначе следующая
+          // фраза шла бы ещё со старым усилением, а при подаче записи ×4 — несколько фраз.
+          final double[] sf = Gain.speechFloor(out);
+          if (autoOn() && !Double.isNaN(sf[0])) { autoDb += AUTO_STEP * (clampAuto(TARGET_DB - (sf[0] - gdb)) - autoDb); saveAuto(); }
+          worker.submit(() -> { segNoiseDb = nz == 0 ? Double.NaN : db(nz); segDb = db(rms(out, out.length)); segAt = at; segPos = pos; hear(sf, st, gdb); route(out); });
         }
-        inSpeech = false; seg.clear(); silent = 0; voiced = 0;
+        inSpeech = false; seg.clear(); segSt.clear(); silent = 0; voiced = 0;
       }
     }, "vad"); vadThread.start();
   }
@@ -2279,11 +2359,13 @@ public class TranslatorService extends Service {
 
   /** Одна строка на сегмент: текст, уровень, фон, SNR — чтобы прогон через воздух считался по числам, а не по логу. */
   void tsvSeg(String kind, String dir, String asr, String mt, String tag, double durMs, long asrMs, long mtMs) {
-    tsv(kind, dir, asr, mt, tag, f1(durMs), f1(segDb), f1(segNoiseDb), f1(segDb - segNoiseDb), "" + segAt, "" + asrMs, "" + mtMs, "" + segPos);
+    tsv(kind, dir, asr, mt, tag, f1(durMs), f1(segDb), f1(segNoiseDb), f1(segDb - segNoiseDb), "" + segAt, "" + asrMs, "" + mtMs, "" + segPos,
+        f1(segGainDb), f1(segSpeechDb), f1(segFloorDb), f3(segOverPct), f3(segLimPct), f3(segCutPct));
   }
   static double rms(float[] s, int n) { double a = 0; for (int k = 0; k < n; k++) a += s[k] * (double) s[k]; return Math.sqrt(a / Math.max(1, n)); }
   static double db(double x) { return 20 * Math.log10(Math.max(1e-9, x)); }
   static String f1(double x) { return Double.isNaN(x) ? "" : String.format(Locale.ROOT, "%.1f", x); }
+  static String f3(double x) { return Double.isNaN(x) ? "" : String.format(Locale.ROOT, "%.3f", x); }
 
   /** Роль «говорящего»: гонит эталоны в динамик с нормировкой по громкости и паузами.
    *  Уровень выравнивается здесь, а не в исходных файлах, чтобы корпус остался тем же,
