@@ -2387,6 +2387,9 @@ public class TranslatorService extends Service {
       return null;
     }
     OcrWords ow = ocrWords();
+    java.util.function.Predicate<String> known = wd -> ow != null && ow.known(wd);
+    List<String> all = new ArrayList<>(); for (OcrCore.Para p : pg.paras) all.add(p.text);
+    Set<String> brands = TextRules.brands(all, known);                  // марки по сайту, почте, ®, названию фирмы
     for (int i = 0; i < pg.paras.size(); i++) {
       busy("live", "перевожу снимок…", i, pg.paras.size());
       OcrCore.Para p = pg.paras.get(i);
@@ -2398,12 +2401,21 @@ public class TranslatorService extends Service {
       if (why != null) text = p.text;                  // не переводится — показываем как прочитано, без правки
       else d.fixes.addAll(fx);
       if (why == null) {
-        String sign = TextRules.unshoutSign(text, wd -> (ow != null && ow.common(wd)) || (words != null && words.isCommon(wd, "pt")));
-        Once r = translateOnce("pt2ru", sign, false, false, true);
-        if (r.skip == null && r.mt != null && !r.mt.trim().isEmpty()) ru = r.mt.trim();
-        if (ru != null && ru.equals(text.trim())) ru = null;          // перевод тот же, что снимок («L:117126 16:26») — рисовать нечего
+        String sign = TextRules.unshoutSign(text, wd -> (ow != null && ow.common(wd)) || (words != null && words.isCommon(wd, "pt")), brands);
+        // Вывеска из одного слова — марка, если оно из марок снимка или похоже на марку, а переводчик
+        // его лишь переписал кириллицей («Rommanel» → «Ромманель»): тогда оно остаётся как на снимке.
+        // Своё слово с переводом из списка важнее.
+        String one = TextRules.oneWord(sign);
+        boolean mine = one != null && words != null && !words.apply(sign, "pt", "ru", new ArrayList<>(), new ArrayList<>(), true).masked.equals(sign);
+        if (one != null && !mine && brands.contains(OcrWords.plain(one))) why = "марка";
+        else {
+          Once r = translateOnce("pt2ru", sign, false, false, true, brands);
+          if (r.skip == null && r.mt != null && !r.mt.trim().isEmpty()) ru = r.mt.trim();
+          if (ru != null && ru.equals(text.trim())) ru = null;        // перевод тот же, что снимок («L:117126 16:26») — рисовать нечего
+          if (ru != null && one != null && r.whits.isEmpty() && TextRules.brandLike(one, known) && TextRules.transliterated(one, ru)) { ru = null; why = "марка"; }
+        }
       }
-      else d.skipped++;
+      if (why != null) d.skipped++;
       double[] f = p.frame(); org.json.JSONArray fa = new org.json.JSONArray();
       for (double v : f) fa.put(Math.round(v * 1000) / 1000.0);
       org.json.JSONObject b = new org.json.JSONObject().put("f", fa).put("src", text);
@@ -2450,6 +2462,8 @@ public class TranslatorService extends Service {
   String photoSkip(String t) {
     String letters = t.replaceAll("[^\\p{L}]", "");
     if (letters.length() < 2) return "без букв";
+    // адрес сайта или почты переводчик дополнял выдумкой: «2019 Cepera.com. Все права защищены.»
+    if (OcrCore.webby(t)) return "адрес сайта или почты";
     boolean func = true;
     for (String w : t.trim().split("\\s+")) if (!OcrCore.CONT.contains(w.replaceAll("[^\\p{L}\\p{N}]", "").toLowerCase(Locale.ROOT))) { func = false; break; }
     if (func) return "служебные слова";
@@ -2551,7 +2565,9 @@ public class TranslatorService extends Service {
   /** sign — текст вывески (снимок): в выученное не копится — он не сказан в разговоре, и его
    *  повторы портили бы и быстрый путь, и частоты; название улицы — только с заглавной
    *  (TextRules.mask strictNames: регистр у вывески осмыслен после unshoutSign). */
-  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate, boolean sign) throws Exception {
+  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate, boolean sign) throws Exception { return translateOnce(dirIn, asrIn, auto, gate, sign, null); }
+  /** brands — марки снимка (TextRules.brands): у вывески их слова переводчику не показываются. */
+  Once translateOnce(String dirIn, String asrIn, boolean auto, boolean gate, boolean sign, Set<String> brands) throws Exception {
     boolean learn = !sign;
     Once r = new Once();
     String dir = dirIn, asr = asrIn;
@@ -2571,7 +2587,7 @@ public class TranslatorService extends Service {
     WordList.Result wr = words == null ? null : words.apply(asr, src, tgt, r.slots, r.whits, sign);   // снимок — только точно
     String pre = wr == null ? asr : wr.masked;
     if (wr != null) asr = wr.readable;                                   // дальше везде — исправленный текст // свои слова — раньше адресного шаблона
-    TextRules.Masked mk = TextRules.mask(pre, src, r.slots, sign);        // §6 ярус 3: числа/цены/адреса в плейсхолдеры
+    TextRules.Masked mk = TextRules.mask(pre, src, r.slots, sign, brands); // §6 ярус 3: числа/цены/адреса в плейсхолдеры
     r.slots = mk.slots; r.asr = asr; r.maskedSrc = mk.text;
     if (words != null) {                                                  // parakeet многоязычный и сам решает, что услышал
       double lk = words.looksLike(mk.text, src);

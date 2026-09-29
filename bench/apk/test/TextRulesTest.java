@@ -110,6 +110,34 @@ public class TextRulesTest {
     ok(TextRules.mask("Fabricado por Nestlé Brasil Ltda.", "pt", new ArrayList<>(), false).slots.isEmpty(), "F7 речь: фирмы не маскируются");
     ok(TextRules.mask("PIMENTA CARIBENHA · Tampa Dosadora", "pt", new ArrayList<>(), true).slots.isEmpty(), "F8 без формы собственности — не фирма");
 
+    // Марка: переводчик писал её кириллицей по-разному или «переводил» («Сепера», «Ромманель»)
+    Set<String> dict = new HashSet<>(Arrays.asList("molho", "de", "pimenta", "picante", "garoto", "com", "contato", "sauce"));
+    java.util.function.Predicate<String> kn = dict::contains;
+    Set<String> br = TextRules.brands(Arrays.asList("ICPA CEPÊRA LTDA. Av. Lindolpho", "0800-7703480 /dac@cepera.com.br", "www.cepera.com.br",
+        "Contato: fulano@gmail.com", "Tabasco® Pepper Sauce", "Molho CEPÊRA"), kn);
+    eq(new TreeSet<>(br), new TreeSet<>(Arrays.asList("cepera", "icpa", "tabasco")), "B1 марки снимка: сайт и почта (не gmail), ®, незнакомые слова названия фирмы");
+    TextRules.Masked bm = TextRules.mask("Molho de pimenta CEPÊRA picante", "pt", new ArrayList<>(), true, br);
+    ok(bm.slots.size() == 1 && bm.slots.get(0)[1].equals("CEPÊRA") && TextRules.unmask(bm.text, bm, "ru").equals("Molho de pimenta CEPÊRA picante"),
+        "B2 марка в строке — как на снимке, переводчику не показывается: " + bm.text);
+    eq(TextRules.unshoutSign("MOLHO CEPÊRA", w -> dict.contains(w), br), "Molho CEPÊRA", "B3 регистр марки не меняется");
+    TextRules.Masked bw = TextRules.mask("SAC: sac@cepera.com.br · www.cepera.com.br · CEPÊRA.", "pt", new ArrayList<>(), true, br);
+    ok(bw.text.contains("sac@cepera.com.br") && bw.text.contains("www.cepera.com.br") && !bw.text.contains("CEPÊRA"),
+        "B2 в адресе сайта и почты марка не маскируется, в конце фразы перед точкой — да: " + bw.text);
+    eq(TextRules.unmask(bw.text, bw, "ru"), "служба поддержки: sac@cepera.com.br · www.cepera.com.br · CEPÊRA.", "B2 и «sac» в адресе почты — не сокращение");
+    eq(TextRules.oneWord("Rommanel"), "Rommanel", "B4 одно слово");
+    eq(TextRules.oneWord("CEPÊRA 21°"), "CEPÊRA", "B4 одно слово и число");
+    ok(TextRules.oneWord("Lava-jato") == null && TextRules.oneWord("Tampa Dosadora") == null && TextRules.oneWord("8") == null, "B4 два слова или ни одного — не одно");
+    ok(TextRules.brandLike("Rommanel", kn) && TextRules.brandLike("CEPÊRA", kn), "B5 похоже на марку");
+    ok(!TextRules.brandLike("Borracharia", kn) && !TextRules.brandLike("Plastificação", kn) && !TextRules.brandLike("Armarinho", kn)
+        && !TextRules.brandLike("Dosadora", kn) && !TextRules.brandLike("Garoto", kn) && !TextRules.brandLike("Pet", kn) && !TextRules.brandLike("rommanel", kn),
+        "B5 обычное слово вывески (суффикс), знакомое, короткое, строчное — не марка");
+    // пары — ответы переводчика на телефоне (пачка mtbatch, 29.09.2026)
+    ok(TextRules.transliterated("Rommanel", "Ромманель") && TextRules.transliterated("Cepêra", "Сепера") && TextRules.transliterated("Knorr", "Норр"),
+        "B6 переводчик лишь переписал кириллицей");
+    ok(!TextRules.transliterated("Bomboniere", "Бомбонье") && !TextRules.transliterated("Pancakes", "Блинчики") && !TextRules.transliterated("Lava-jato", "Автомойка")
+        && !TextRules.transliterated("Autopeças", "Автозапчасти") && !TextRules.transliterated("Drogasil", "Дрожжевой"),
+        "B6 настоящий перевод (или выдумка) — не транскрипция");
+
     System.out.println(fails == 0 ? "TextRules: " + checks + " проверок, все прошли" : "TextRules: провалов " + fails + " из " + checks);
     return fails;
   }

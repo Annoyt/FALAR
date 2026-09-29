@@ -123,6 +123,21 @@ public class OcrWordsTest {
       ok(n > 500 && bad == 0, "C1 правка и доля слов совпали с tools/ocr_words.py: " + (n - bad) + " из " + n + " строк");
     } else System.out.println("  (часть C пропущена: нет bench/ocr/runs/golden/words.tsv — .venv/bin/python tools/ocr_words.py golden)");
 
+    // --- D: марка (TextRules.brandLike и transliterated) на словах с ответами переводчика с телефона
+    File bw = words == null ? null : new File(words.getAbsoluteFile().getParentFile().getParentFile(), "bench/ocr/brand_words.tsv");
+    if (bw != null && bw.exists() && words.exists()) {
+      OcrWords r = load(words); Map<String, int[]> n = new TreeMap<>(); List<String> kept = new ArrayList<>();
+      for (String line : Files.readAllLines(bw.toPath(), StandardCharsets.UTF_8)) {
+        String[] p = line.split("\t"); if (line.startsWith("#") || p.length < 3) continue;
+        boolean keep = TextRules.brandLike(p[1], r::known) && TextRules.transliterated(p[1], p[2]);
+        n.computeIfAbsent(p[0], k -> new int[2])[keep ? 0 : 1]++;
+        if (keep && p[0].equals("shop")) kept.add(p[1]);
+      }
+      ok(n.containsKey("brand") && n.get("brand")[0] == 27 && n.get("brand")[1] == 6, "D1 марки: 27 из 33 — как на снимке");
+      ok(kept.equals(Arrays.asList("Hortifruti", "Habanero", "Ardidômetro", "Petshop", "Marmitex")),
+          "D2 из слов вывесок как на снимке — только те, что переводчик лишь переписал кириллицей: " + kept);
+    } else System.out.println("  (часть D пропущена: нет bench/ocr/brand_words.tsv)");
+
     System.out.println(fails == 0 ? "OcrWords: " + checks + " проверок, все прошли" : "OcrWords: провалов " + fails + " из " + checks);
     return fails;
   }

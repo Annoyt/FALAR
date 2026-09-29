@@ -66,10 +66,65 @@ public class TextRules {
   static final Pattern FIRM = P("(?<![\\p{L}\\p{N}])" + FIRM_WORD + "(?:[^\\S\\n]+(?:(?:(?i:d[aeo]s?|e)|&)[^\\S\\n]+)?" + FIRM_WORD + "){0,6}"
       + "[^\\S\\n]+(?:(?i:ltda)(?![\\p{L}\\p{N}])|S\\.[^\\S\\n]?A\\.|S/A(?![\\p{L}\\p{N}])|(?i:eireli)(?![\\p{L}\\p{N}]))"),
       FIRM_FORM = P("[^\\S\\n]+((?i:ltda)|S\\.[^\\S\\n]?A\\.|S/A|(?i:eireli))$");
+  /** Марка снимка по прямым признакам: имя сайта или почты («www.cepera.com.br», «sac@cepera.com.br»
+   *  → cepera), слово перед ® или ™, незнакомое словарю слово в названии фирмы («ICPA CEPÊRA LTDA» →
+   *  icpa, cepera). Такое слово в других строках того же снимка переводчику не показывается. */
+  static final Pattern DOMAIN = P("(?i)(?:www\\.|https?://(?:www\\.)?|@)([a-z0-9][a-z0-9-]{2,})\\.(?:com|net|org|ind|art|br)(?![a-z0-9])"),
+      MARKED = P("(\\p{L}[\\p{L}\\p{N}'-]*)[^\\S\\n]?(?:®|™|\\((?:R|TM)\\))"),
+      WORD_ANY = P("(?<![\\p{L}\\p{N}])\\p{L}[\\p{L}\\p{N}]*(?![\\p{L}\\p{N}])"),
+      // слово марки, но не часть адреса сайта или почты: «www.XQ1.com.br» переводчик превращал в
+      // «2019 cepera.com.ua. Все права защищены.»
+      BRAND_WORD = P("(?<![\\p{L}\\p{N}.@/])\\p{L}[\\p{L}\\p{N}]*(?![\\p{L}\\p{N}@]|\\.[\\p{L}\\p{N}])");
+  static final Set<String> MAIL = new HashSet<>(Arrays.asList("gmail", "hotmail", "outlook", "yahoo", "uol", "bol", "terra",
+      "live", "icloud", "msn", "globo", "instagram", "facebook", "whatsapp", "gov", "mail"));
+  public static Set<String> brands(List<String> texts, java.util.function.Predicate<String> known) {
+    Set<String> out = new HashSet<>();
+    for (String t : texts) {
+      Matcher m = DOMAIN.matcher(t);
+      while (m.find()) { String d = m.group(1).toLowerCase(Locale.ROOT); if (!MAIL.contains(d)) out.add(d); }
+      m = MARKED.matcher(t);
+      while (m.find()) out.add(OcrWords.plain(m.group(1)));
+      m = FIRM.matcher(t);
+      while (m.find()) {
+        Matcher f = FIRM_FORM.matcher(m.group()); String name = f.find() ? m.group().substring(0, f.start()) : m.group();
+        for (String w : name.split("[^\\p{L}\\p{N}]+")) if (w.length() >= 3 && !known.test(w.toLowerCase(Locale.ROOT))) out.add(OcrWords.plain(w));
+      }
+    }
+    return out;
+  }
+  /** Единственное слово строки (от двух букв) или null: абзац-вывеска из одного слова («Rommanel», «CEPÊRA 21°»). */
+  public static String oneWord(String t) {
+    Matcher m = WORD_ANY.matcher(t); String one = null;
+    while (m.find()) { if (m.group().length() < 2) continue; if (one != null) return null; one = m.group(); }
+    return one;
+  }
+  /** Обычные слова вывесок узнаются по суффиксу: Borracharia, Hamburgueria, Plastificação, Armarinho,
+   *  Dosadora — словарь их не знает, а переводчик знает. У марок таких окончаний почти нет. */
+  static final Pattern WORDISH = P("(?i)(?:aria|eria|ção|ções|inho|inha|inhos|inhas|eiro|eira|eiros|eiras|dor|dora|dores|doras"
+      + "|mento|mentos|agem|agens|ista|istas|ável|ível|dade|dades|ense|ico|ica|icos|icas)$");
+  /** Похоже на марку: от четырёх букв, с заглавной, словарю незнакомо, без суффикса обычного слова. */
+  public static boolean brandLike(String w, java.util.function.Predicate<String> known) {
+    return w.length() >= 4 && Character.isUpperCase(w.charAt(0)) && !known.test(w.toLowerCase(Locale.ROOT)) && !WORDISH.matcher(w).find();
+  }
+  /** Перевод — только транскрипция слова: переводчик его не знает и переписал кириллицей («Rommanel» →
+   *  «Ромманель», «Cepêra» → «Сепера»). Порог — замер на телефоне: у 28 марок из 33 сходство с
+   *  Translit 0,75 и выше, у настоящих переводов незнакомых слов вывесок — не выше 0,70 («Бомбонье»),
+   *  у «Автомойка», «Блинчики», «Автозапчасти» — 0,11–0,42 (results/2026-09-28-ocr.md). */
+  static final double BRAND_SIM = 0.75;
+  public static boolean transliterated(String w, String ru) {
+    String a = cyr(Translit.ptToRu(w)), b = cyr(ru); int m = Math.max(a.length(), b.length());
+    return m > 0 && !b.isEmpty() && 1.0 - Phrasebook.lev(a, b) / (double) m >= BRAND_SIM;
+  }
+  /** Кириллица для сравнения: строчные, е/э, и/й, без мягкого знака, сдвоенные — одной. */
+  static String cyr(String s) {
+    String t = s.toLowerCase(Locale.ROOT).replace('ё', 'е').replace('э', 'е').replace('й', 'и').replaceAll("[ьъ]", "").replaceAll("[^а-я]", "");
+    return t.replaceAll("(.)\\1+", "$1");
+  }
   static final Pattern[] PT_SIGN = { PT[0], PT[1], PT[2],
     P("(?i)\\bn\\.?[º°]\\s?\\d+"),
     FIRM,
-    P("(?i)\\b(?:CNPJ|CPF|CEP|SAC|LTDA)\\b"),
+    // не внутри адреса почты и сайта: «sac@cepera.com.br» не «служба поддержки@cepera.com.br»
+    P("(?i)(?<![\\p{L}\\p{N}.@])(?:CNPJ|CPF|CEP|SAC|LTDA)(?![\\p{L}\\p{N}@]|\\.[\\p{L}\\p{N}])"),
     // город вместе с кодом штата через дефис или дробь («Monte Alto-SP», «São Paulo/SP») или, после
     // «- » и «, » адреса, с дефисом в конце строки, когда код штата ушёл на следующую («…, 1.001 -
     // Monte Alto-»); просто «Segunda-» в конце строки — не город. Как пишется — cityRu
@@ -123,7 +178,9 @@ public class TextRules {
    *  слово — с заглавной. Прежний unshout делал с заглавной каждое слово длиннее трёх букв, и
    *  переводчик и правило адресов принимали прилагательные за имена. Слова не целиком прописные
    *  и короткие не служебные («CEP», «RG») не трогаются. common — «обычное ли слово» (WordList). */
-  public static String unshoutSign(String s, java.util.function.Predicate<String> common) {
+  public static String unshoutSign(String s, java.util.function.Predicate<String> common) { return unshoutSign(s, common, null); }
+  /** keep — марки снимка (brands): их слова остаются как на снимке, «CEPÊRA» не становится «Cepêra». */
+  public static String unshoutSign(String s, java.util.function.Predicate<String> common, Set<String> keep) {
     StringBuilder b = new StringBuilder(s.length()); boolean first = true;
     // название фирмы остаётся как на этикетке: «ICPA CEPÊRA LTDA» иначе стало бы «Icpa Cepêra Ltda»
     List<int[]> firms = new ArrayList<>(); Matcher fm = FIRM.matcher(s);
@@ -133,7 +190,7 @@ public class TextRules {
       int from = at; at += w.length();
       boolean firm = false; for (int[] f : firms) if (from < f[1] && at > f[0]) firm = true;   // «LTDA.» — со знаком
       String core = w.replaceAll("[^\\p{L}]", "");
-      if (firm) { b.append(w); if (!core.isEmpty()) first = false; continue; }
+      if (firm || (keep != null && !core.isEmpty() && keep.contains(OcrWords.plain(core)))) { b.append(w); if (!core.isEmpty()) first = false; continue; }
       boolean caps = !core.isEmpty() && core.equals(core.toUpperCase(Locale.ROOT)) && !core.equals(core.toLowerCase(Locale.ROOT));
       String low = core.toLowerCase(Locale.ROOT);
       // короткое: служебное («DE», «E») или обычное трёхбуквенное («RUA») — строчными;
@@ -209,7 +266,9 @@ public class TextRules {
    *  EXTREMAMENTE SINUOSA» уходило в перевод как «Естрейта и чрезвычайно извилистая дорога» — прилагательное
    *  маскировалось как название дороги. Для речи заглавная не требуется (см. PT[0]). И маски вывески
    *  (PT_SIGN): номер дома, температура, цифры одним куском. */
-  public static Masked mask(String text, String lang, List<String[]> existing, boolean sign) {
+  public static Masked mask(String text, String lang, List<String[]> existing, boolean sign) { return mask(text, lang, existing, sign, null); }
+  /** brands — марки снимка (TextRules.brands): их слова в тексте вывески — как на снимке, переводчику не показываются. */
+  public static Masked mask(String text, String lang, List<String[]> existing, boolean sign, Set<String> brands) {
     Pattern[] ps = lang.equals("pt") ? (sign ? PT_SIGN : PT) : RU; String[] kinds = ps == PT_SIGN ? KIND_SIGN : KIND;
     String t = numWordsToDigits(text, lang); List<String[]> slots = new ArrayList<>(existing);
     for (int k = 0; k < ps.length; k++) {
@@ -230,6 +289,15 @@ public class TextRules {
           slots.add(new String[]{ph, m.group(), kinds[k]});
           m.appendReplacement(sb, Matcher.quoteReplacement(ph));
         }
+      }
+      m.appendTail(sb); t = sb.toString();
+    }
+    if (sign && brands != null && !brands.isEmpty()) {               // марка снимка — как на снимке
+      Matcher m = BRAND_WORD.matcher(t); StringBuffer sb = new StringBuffer();
+      while (m.find()) {
+        if (!brands.contains(OcrWords.plain(m.group()))) { m.appendReplacement(sb, Matcher.quoteReplacement(m.group())); continue; }
+        String ph = ph(slots.size() + 1); slots.add(new String[]{ph, m.group(), "brand"});
+        m.appendReplacement(sb, Matcher.quoteReplacement(ph));
       }
       m.appendTail(sb); t = sb.toString();
     }
