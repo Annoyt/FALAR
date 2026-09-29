@@ -31,6 +31,18 @@ public class HearingTest {
     ok(Hearing.of(q - 3, -80, 0, 6, false).text.contains("прибавьте"), "H8 тихо вручную — прибавить чувствительность");
     ok(Hearing.of(q - 3, -80, 0, 24, false).text.contains("ближе к микрофону"), "H8 тихо на +24 — прибавлять уже некуда");
     ok(Hearing.of(q - 3, -80, 0, 24, true).text.contains("ближе к микрофону"), "H8 тихо в авто — ближе");
+    // H9: как слышно сейчас, 0…1 — цвет кнопки и полоски.
+    ok(Hearing.quality(-24, 26) == 1, "H9 речь −24 dBFS на 26 дБ над фоном — зелёный (1)");
+    ok(Hearing.quality(-48, 30) == 0, "H9 речь −48 dBFS — красный (0): тут WER был 56 %");
+    ok(Hearing.quality(-24, 10) == 0, "H9 запас 10 дБ — красный (0)");
+    ok(Math.abs(Hearing.quality(-37, 30) - 0.5) < 1e-9, "H9 −37 dBFS — середина шкалы");
+    ok(Math.abs(Hearing.quality(-24, 17.5) - 0.5) < 1e-9, "H9 запас 17,5 дБ (медиана шумной записи) — середина шкалы");
+    ok(Hearing.quality(-30, 12) == Math.min((-30 + 48) / 22.0, (12 - 10) / 15.0), "H9 берётся худшее из двух");
+    ok(Hearing.quality(Double.NaN, 20) == 0 && Hearing.quality(-24, Double.NaN) == 0, "H9 нет речи — красный, без исключения");
+    boolean mono = true;
+    for (double lv = -60; lv <= 0; lv += 1) for (double sn = 0; sn <= 40; sn += 1)
+      if (Hearing.quality(lv + 1, sn) < Hearing.quality(lv, sn) || Hearing.quality(lv, sn + 1) < Hearing.quality(lv, sn)) mono = false;
+    ok(mono, "H9 громче и чище — никогда не краснее");
     Hearing g = h(-22, -48, 0), s = h(-22, -30, 0);
     ok(g.text.contains("26"), "H5 в строке — запас в децибелах: " + g.text);
     ok(s.text.contains("8"), "H5 и у «шумно» тоже: " + s.text);
