@@ -582,6 +582,12 @@ def barcode(t):
 WEB = re.compile(r'(?i)^(?:www\.|https?://)\S+$|^\S+@\S+\.\S+$')
 
 
+def is_caps(t):
+    """Все буквы строки прописные (и буквы есть)."""
+    letters = [c for c in t if c.isalpha()]
+    return bool(letters) and all(c.isupper() for c in letters)
+
+
 def webby(t):
     """Строка — адрес сайта или почты. Со строчной буквы, но не продолжение фразы: «WhatsApp: 11 93067-3220»
     + «www.cepera.com.br» переводчик превращал в «Все права защищены»."""
@@ -601,7 +607,13 @@ def paragraphs(block):
             prev, rows = out[-1]
             last = re.sub(r'[^\w]', '', prev.split()[-1].lower()) if prev.split() else ''
             if prev.endswith('-') and len(prev) > 1 and prev[-2].isalpha():
-                out[-1] = (prev[:-1] + t, rows + [r]); continue
+                # перенос слова: продолжение со строчной («infor-» / «mação») или вся строка
+                # прописными («BO-» / «LAS»). После строки обычного текста прописное продолжение —
+                # уже новое поле, а дефис настоящий: «Monte Alto-» / «SP /CNPJ: …» склеивалось
+                # в «Monte AltoSP» и переводилось «Гора АльтоСП».
+                if t[:1].islower() or is_caps(prev):
+                    out[-1] = (prev[:-1] + t, rows + [r]); continue
+                out.append((t, [r])); continue
             if barcode(prev) or barcode(t) or webby(prev) or webby(t):
                 pass
             elif not re.search(r'[.!?:;]$', prev) and (prev.endswith(',') or last in CONT or t[:1].islower()

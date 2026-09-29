@@ -197,6 +197,14 @@ public class OcrCoreTest {
     ok(OcrCore.webby(" https://cepera.com.br ") && OcrCore.webby("WWW.CEPERA.COM.BR") && !OcrCore.webby("www") && !OcrCore.webby("pimenta @ 5 reais"),
         "Q6 адрес — строка целиком: www., http(s):// или почта");
 
+    rows.clear();
+    for (String t : new String[]{"Augusto da Costa, 1.001 - Monte Alto-", "SP / CNPJ: 62.162.243/0003-45", "Mais infor-", "mações no site", "PROIBIDO JOGAR BO-", "LAS"}) {
+      OcrCore.Row r = new OcrCore.Row(); r.items.add(item(0, 0, 10, 10, t)); r.close(); rows.add(r);
+    }
+    pt.clear(); for (OcrCore.Para pp : OcrCore.paragraphs(rows)) pt.add(pp.text);
+    ok(pt.equals(Arrays.asList("Augusto da Costa, 1.001 - Monte Alto-", "SP / CNPJ: 62.162.243/0003-45", "Mais informações no site", "PROIBIDO JOGAR BOLAS")),
+        "Q7 перенос слова — со строчной или прописными целиком; «Monte Alto-» / «SP /CNPJ» — настоящий дефис и новое поле: " + pt);
+
     // --- S: изогнутые и тесные строки — полоса вдоль средней линии ---
     int SW = 200, SH = 70; float[] curved = new float[SW * SH];
     for (int x = 20; x <= 180; x++) { double c = 20 + 0.004 * (x - 100) * (x - 100); for (int y = 0; y < SH; y++) if (Math.abs(y - c) <= 3) curved[y * SW + x] = 0.9f; }

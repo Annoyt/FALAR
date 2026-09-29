@@ -665,6 +665,12 @@ public final class OcrCore {
   static final Pattern WEB = Pattern.compile("(?i)^(?:www\\.|https?://)\\S+$|^\\S+@\\S+\\.\\S+$");
   /** Строка — адрес сайта или почты. Со строчной буквы, но не продолжение фразы: «WhatsApp: 11 93067-3220»
    *  + «www.cepera.com.br» переводчик превращал в «Все права защищены». */
+  /** Все буквы строки прописные (и буквы есть). */
+  static boolean isCaps(String t) {
+    boolean any = false;
+    for (int i = 0; i < t.length(); i++) { char c = t.charAt(i); if (Character.isLetter(c)) { any = true; if (!Character.isUpperCase(c)) return false; } }
+    return any;
+  }
   static boolean webby(String t) { return WEB.matcher(t.trim()).find(); }
   static int count(String s, char c) { int n = 0; for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++; return n; }
 
@@ -680,7 +686,11 @@ public final class OcrCore {
       if (!texts.isEmpty()) {
         int k = texts.size() - 1; String prev = texts.get(k);
         if (prev.endsWith("-") && prev.length() > 1 && Character.isLetter(prev.charAt(prev.length() - 2))) {
-          texts.set(k, prev.substring(0, prev.length() - 1) + t); rows.get(k).add(r); continue;
+          // перенос слова: продолжение со строчной или вся строка прописными («BO-» / «LAS»); после
+          // строки обычного текста прописное продолжение — новое поле с настоящим дефисом
+          // («Monte Alto-» / «SP /CNPJ: …» → было «Monte AltoSP», «Гора АльтоСП»)
+          if (Character.isLowerCase(t.charAt(0)) || isCaps(prev)) { texts.set(k, prev.substring(0, prev.length() - 1) + t); rows.get(k).add(r); continue; }
+          texts.add(t); List<Row> l = new ArrayList<>(); l.add(r); rows.add(l); continue;
         }
         if (!barcode(prev) && !barcode(t) && !webby(prev) && !webby(t) && !END.matcher(prev).find() && (prev.endsWith(",") || CONT.contains(lastWord(prev))
             || Character.isLowerCase(t.charAt(0))            // текст строки не пустой: пустые рамки отсеяны в layout
