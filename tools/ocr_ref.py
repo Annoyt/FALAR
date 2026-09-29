@@ -442,6 +442,46 @@ CONT = set('e de da do das dos a o as os com em no na nos nas num numa para por 
            'santa santo dom dona rio porto belo nova novo'.split())
 
 
+# Колонки. Две колонки текста, стоящие близко (передняя этикетка соуса), склеивались в строки
+# через просвет: «Sabor Extra Picante» + «INDÚSTRIA BRASILEIRA.» → «Вкусная бразильская
+# промышленность». Ширина просвета их не отличает — расширенные рамки колонок там почти касаются
+# (от −0,1 до 0,45 высоты), как и слова одной строки. Отличает повторение: просвет колонок стоит на
+# одной вертикали в нескольких строках подряд, а случайный просвет внутри строки — нет.
+# На наборе вывесок так же разделились заголовок и подзаголовок плаката («CORONAVÍRUS O que você
+# precisa»): CER строк 4,30 → 3,50 %, слова те же.
+COL_ALIGN = 0.5     # середины просветов — ближе полувысоты строки
+COL_NEAR = 3.0      # и строки не дальше трёх высот друг от друга
+# Блок: строки должны перекрываться хотя бы на четверть более узкой. Рамки соседних колонок
+# заходят друг на друга на несколько пикселей, и по «любому перекрытию» строка левой колонки
+# приставала к блоку правой — порядок чтения путался.
+BLOCK_OV = 0.25
+
+
+def split_columns(rows):
+    """Строки, склеенные через просвет колонок, — режутся по нему. Просвет — граница колонок, если в
+    другой строке неподалёку есть просвет на той же вертикали."""
+    gaps = []
+    for ri, row in enumerate(rows):
+        for k in range(len(row) - 1):
+            a, b = row[k], row[k + 1]
+            gaps.append((ri, k, (a['R'][0] + b['L'][0]) / 2, (a['c'][1] + b['c'][1]) / 2, max(a['h'], b['h'])))
+    cut = set()
+    for ri, k, x, y, h in gaps:
+        for rj, _, xj, yj, hj in gaps:
+            hh = max(h, hj)
+            if rj != ri and abs(x - xj) < COL_ALIGN * hh and abs(y - yj) < COL_NEAR * hh:
+                cut.add((ri, k)); break
+    out = []
+    for ri, row in enumerate(rows):
+        cur = [row[0]]
+        for k in range(1, len(row)):
+            if (ri, k - 1) in cut:
+                out.append(cur); cur = []
+            cur.append(row[k])
+        out.append(cur)
+    return out
+
+
 def layout(boxes, texts, min_score=0.5):
     """Рамки -> блоки -> строки. Возвращает список блоков, блок — список строк (текст, как на вывеске).
 
@@ -482,6 +522,7 @@ def layout(boxes, texts, min_score=0.5):
             best.append(it)
         else:
             rows.append([it])
+    rows = split_columns(rows)
     rs = []
     for row in rows:
         pts = np.concatenate([it['b'] for it in row])
@@ -505,7 +546,7 @@ def layout(boxes, texts, min_score=0.5):
             # «HORÁRIO DE» мелко, «FUNCIONAMENTO» крупно
             words = p['text'].split()
             cont = bool(words) and re.sub(r'[^\w]', '', words[-1].lower()) in CONT
-            if ov <= 0 or max(p['h'], r['h']) > (2.5 if cont else 1.5) * min(p['h'], r['h']):
+            if ov <= BLOCK_OV * min(p['x1'] - p['x0'], r['x1'] - r['x0']) or max(p['h'], r['h']) > (2.5 if cont else 1.5) * min(p['h'], r['h']):
                 continue
             xm = (max(p['x0'], r['x0']) + min(p['x1'], r['x1'])) / 2
             dy = y_at(r, xm) - y_at(p, xm)
@@ -538,12 +579,21 @@ def barcode(t):
     return not re.search(r'[^\W\d_]', t) and bool(re.search(r'\d(?:[ \'’"]?\d){7,}', t))
 
 
+WEB = re.compile(r'(?i)^(?:www\.|https?://)\S+$|^\S+@\S+\.\S+$')
+
+
+def webby(t):
+    """Строка — адрес сайта или почты. Со строчной буквы, но не продолжение фразы: «WhatsApp: 11 93067-3220»
+    + «www.cepera.com.br» переводчик превращал в «Все права защищены»."""
+    return bool(WEB.match(t.strip()))
+
+
 def paragraphs(block):
     """Строки блока -> фразы для перевода. Склеиваем, только когда обрыв очевиден: перенос со
     знаком «-», запятая в конце, строка кончается служебным словом («… ESTREITA E»), открытой
     скобкой или тире («(5°C - / 10°C)») или следующая начинается со строчной. Иначе строка —
     отдельная фраза: у вывески строки чаще самостоятельны (часы работы, цены, список
-    направлений), и склейка их портила бы. Цифры штрихкода не склеиваются ни с чем."""
+    направлений), и склейка их портила бы. Цифры штрихкода, адрес сайта и почты не склеиваются ни с чем."""
     out = []                                   # [(текст, [строки блока])]
     for r in block:
         t = r['text']
@@ -552,7 +602,7 @@ def paragraphs(block):
             last = re.sub(r'[^\w]', '', prev.split()[-1].lower()) if prev.split() else ''
             if prev.endswith('-') and len(prev) > 1 and prev[-2].isalpha():
                 out[-1] = (prev[:-1] + t, rows + [r]); continue
-            if barcode(prev) or barcode(t):
+            if barcode(prev) or barcode(t) or webby(prev) or webby(t):
                 pass
             elif not re.search(r'[.!?:;]$', prev) and (prev.endswith(',') or last in CONT or t[:1].islower()
                                                      or prev.count('(') > prev.count(')')

@@ -582,6 +582,7 @@ public final class OcrCore {
       if (best == null) { best = new Row(); rows.add(best); }
       best.items.add(it);
     }
+    rows = splitColumns(rows);
     for (Row r : rows) r.close();
     rows.sort(Comparator.comparingDouble(r -> r.cy));
     List<List<Row>> blocks = new ArrayList<>();
@@ -591,7 +592,7 @@ public final class OcrCore {
         List<Row> bl = blocks.get(i); Row p = bl.get(bl.size() - 1);
         double ov = Math.min(p.x1, r.x1) - Math.max(p.x0, r.x0);
         boolean cont = CONT.contains(lastWord(p.text));
-        if (ov <= 0 || Math.max(p.h, r.h) > (cont ? 2.5 : 1.5) * Math.min(p.h, r.h)) continue;
+        if (ov <= BLOCK_OV * Math.min(p.x1 - p.x0, r.x1 - r.x0) || Math.max(p.h, r.h) > (cont ? 2.5 : 1.5) * Math.min(p.h, r.h)) continue;
         double xm = (Math.max(p.x0, r.x0) + Math.min(p.x1, r.x1)) / 2, dy = r.yAt(xm) - p.yAt(xm);
         if (0 < dy && dy < 1.8 * Math.max(p.h, r.h)) { bl.add(r); placed = true; }
       }
@@ -610,6 +611,44 @@ public final class OcrCore {
     return blocks;
   }
 
+  /** Колонки (tools/ocr_ref.py: split_columns — там и замер). Две колонки текста, стоящие близко
+   *  (передняя этикетка соуса), склеивались в строки через просвет: «Sabor Extra Picante» +
+   *  «INDÚSTRIA BRASILEIRA.» → «Вкусная бразильская промышленность». Ширина просвета их не отличает:
+   *  расширенные рамки колонок там почти касаются, как и слова одной строки. Отличает повторение —
+   *  просвет колонок стоит на одной вертикали в нескольких строках подряд. BLOCK_OV — строки блока
+   *  должны перекрываться хотя бы на четверть более узкой: рамки соседних колонок заходят друг на
+   *  друга на несколько пикселей, и строка левой колонки приставала к блоку правой. */
+  static final double COL_ALIGN = 0.5, COL_NEAR = 3.0, BLOCK_OV = 0.25;
+
+  /** Строки, склеенные через просвет колонок, режутся по нему: просвет — граница колонок, если в
+   *  другой строке неподалёку есть просвет на той же вертикали. */
+  static List<Row> splitColumns(List<Row> rows) {
+    List<double[]> gaps = new ArrayList<>();                 // строка, после какой рамки, x, y, высота
+    for (int ri = 0; ri < rows.size(); ri++) {
+      List<Item> r = rows.get(ri).items;
+      for (int k = 0; k + 1 < r.size(); k++) {
+        Item a = r.get(k), b = r.get(k + 1);
+        gaps.add(new double[]{ri, k, (a.rx + b.lx) / 2, (a.cy + b.cy) / 2, Math.max(a.h, b.h)});
+      }
+    }
+    Set<Long> cut = new HashSet<>();
+    for (double[] g : gaps)
+      for (double[] o : gaps) {
+        double hh = Math.max(g[4], o[4]);
+        if (o[0] != g[0] && Math.abs(g[2] - o[2]) < COL_ALIGN * hh && Math.abs(g[3] - o[3]) < COL_NEAR * hh) { cut.add(((long) g[0] << 32) | (long) g[1]); break; }
+      }
+    List<Row> out = new ArrayList<>();
+    for (int ri = 0; ri < rows.size(); ri++) {
+      List<Item> r = rows.get(ri).items; Row cur = new Row(); cur.items.add(r.get(0));
+      for (int k = 1; k < r.size(); k++) {
+        if (cut.contains(((long) ri << 32) | (long) (k - 1))) { out.add(cur); cur = new Row(); }
+        cur.items.add(r.get(k));
+      }
+      out.add(cur);
+    }
+    return out;
+  }
+
   /** Охват блока: x0, x1, верх, низ (верх и низ — по середине строк ± полвысоты). */
   static double[] ext(List<Row> bl) {
     double x0 = Double.MAX_VALUE, x1 = -Double.MAX_VALUE, y0 = Double.MAX_VALUE, y1 = -Double.MAX_VALUE;
@@ -623,13 +662,17 @@ public final class OcrCore {
    *  распознаватель ставит пробел или кавычку («"896025'804067"» на смазанном снимке). Телефон
    *  «3242-3300» и цены под это не подходят. */
   static boolean barcode(String t) { return !LETTER.matcher(t).find() && DIGITS8.matcher(t).find(); }
+  static final Pattern WEB = Pattern.compile("(?i)^(?:www\\.|https?://)\\S+$|^\\S+@\\S+\\.\\S+$");
+  /** Строка — адрес сайта или почты. Со строчной буквы, но не продолжение фразы: «WhatsApp: 11 93067-3220»
+   *  + «www.cepera.com.br» переводчик превращал в «Все права защищены». */
+  static boolean webby(String t) { return WEB.matcher(t.trim()).find(); }
   static int count(String s, char c) { int n = 0; for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++; return n; }
 
   /** Строки блока → фразы для перевода. Склеиваем, только когда обрыв очевиден: перенос со
    *  знаком «-», запятая в конце, строка кончается служебным словом («… ESTREITA E»), открытой
    *  скобкой или тире («(5°C - / 10°C)») или следующая начинается со строчной. Иначе строка —
    *  отдельная фраза: у вывески строки чаще самостоятельны (часы работы, цены, список
-   *  направлений), и склейка их портила бы. Цифры штрихкода не склеиваются ни с чем. */
+   *  направлений), и склейка их портила бы. Цифры штрихкода, адрес сайта и почты не склеиваются ни с чем. */
   public static List<Para> paragraphs(List<Row> block) {
     List<String> texts = new ArrayList<>(); List<List<Row>> rows = new ArrayList<>();
     for (Row r : block) {
@@ -639,7 +682,7 @@ public final class OcrCore {
         if (prev.endsWith("-") && prev.length() > 1 && Character.isLetter(prev.charAt(prev.length() - 2))) {
           texts.set(k, prev.substring(0, prev.length() - 1) + t); rows.get(k).add(r); continue;
         }
-        if (!barcode(prev) && !barcode(t) && !END.matcher(prev).find() && (prev.endsWith(",") || CONT.contains(lastWord(prev))
+        if (!barcode(prev) && !barcode(t) && !webby(prev) && !webby(t) && !END.matcher(prev).find() && (prev.endsWith(",") || CONT.contains(lastWord(prev))
             || Character.isLowerCase(t.charAt(0))            // текст строки не пустой: пустые рамки отсеяны в layout
             || count(prev, '(') > count(prev, ')') || DASH_END.matcher(prev).find())) {
           texts.set(k, prev + " " + t); rows.get(k).add(r); continue;

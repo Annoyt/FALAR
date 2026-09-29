@@ -165,6 +165,38 @@ public class OcrCoreTest {
     double[] f = para.frame();
     ok(near(f[0], 105, 1e-9) && near(f[1], 20, 1e-9) && near(f[4], 190, 1e-9) && near(f[5], 20, 1e-9), "L9 прямоугольник абзаца — по его рамкам");
 
+    // --- Q: колонки, стоящие вплотную (передняя этикетка соуса) ---
+    List<OcrCore.Item> cols2 = new ArrayList<>();
+    String[][] lr = {{"Pimenta Habanero", "Augusto da Costa, 1.001"}, {"Sabor Extra Picante", "INDÚSTRIA BRASILEIRA."}, {"Não contém glúten", "Atendimento ao consumidor:"}};
+    for (int k = 0; k < 3; k++) { cols2.add(item(10, 10 + 26 * k, 200, 30 + 26 * k, lr[k][0])); cols2.add(item(204, 10 + 26 * k, 420, 30 + 26 * k, lr[k][1])); }
+    List<List<OcrCore.Row>> qb = OcrCore.layout(cols2);
+    ok(texts(qb).size() == 6 && !texts(qb).contains("Sabor Extra Picante INDÚSTRIA BRASILEIRA."),
+        "Q1 просвет в 4 px на одной вертикали в трёх строках — граница колонок, строки не склеиваются: " + texts(qb));
+    ok(qb.size() == 2 && texts(Collections.singletonList(qb.get(0))).equals(Arrays.asList("Pimenta Habanero", "Sabor Extra Picante", "Não contém glúten")),
+        "Q1 левая колонка — свой блок, правая — свой, и левая читается первой: " + texts(qb));
+    List<OcrCore.Item> qone = new ArrayList<>(Arrays.asList(item(10, 10, 110, 30, "Adulto"), item(118, 10, 200, 30, "R$ 25,00"), item(10, 60, 300, 80, "Crianças até 5 anos não pagam")));
+    ok(texts(OcrCore.layout(qone)).get(0).equals("Adulto R$ 25,00"), "Q2 просвет в одной строке без пары в соседних — строка остаётся целой");
+    List<OcrCore.Item> qfar = new ArrayList<>(Arrays.asList(item(10, 10, 110, 30, "Adulto"), item(118, 10, 200, 30, "R$ 25,00"),
+        item(10, 110, 110, 130, "Criança"), item(118, 110, 200, 130, "R$ 12,50")));
+    ok(texts(OcrCore.layout(qfar)).contains("Adulto R$ 25,00"), "Q3 такой же просвет, но строка через пять высот — не колонка");
+    List<OcrCore.Item> qshift = new ArrayList<>(Arrays.asList(item(10, 10, 110, 30, "Horário de"), item(118, 10, 200, 30, "atendimento"),
+        item(10, 36, 160, 56, "Segunda a"), item(168, 36, 260, 56, "sexta")));
+    ok(texts(OcrCore.layout(qshift)).equals(Arrays.asList("Horário de atendimento", "Segunda a sexta")), "Q4 просветы не на одной вертикали (x 114 и 164) — строки целые");
+    List<OcrCore.Item> qtouch = new ArrayList<>(Arrays.asList(item(10, 10, 205, 30, "Sabor Extra Picante"), item(200, 40, 420, 60, "INDÚSTRIA BRASILEIRA.")));
+    ok(OcrCore.layout(qtouch).size() == 2, "Q5 строки, заходящие друг на друга на 5 px из 195, — разные блоки");
+    List<OcrCore.Item> qunder = new ArrayList<>(Arrays.asList(item(10, 10, 300, 30, "30 dias. Após o uso, feche a"), item(10, 36, 80, 56, "tampa.")));
+    ok(OcrCore.layout(qunder).size() == 1, "Q5 короткая строка под длинной (перекрыта целиком) — тот же блок");
+
+    rows.clear();
+    for (String t : new String[]{"WhatsApp: 11 93067-3220", "www.cepera.com.br", "Atendimento:", "dac@cepera.com.br", "e mais"}) {
+      OcrCore.Row r = new OcrCore.Row(); r.items.add(item(0, 0, 10, 10, t)); r.close(); rows.add(r);
+    }
+    pt.clear(); for (OcrCore.Para pp : OcrCore.paragraphs(rows)) pt.add(pp.text);
+    ok(pt.equals(Arrays.asList("WhatsApp: 11 93067-3220", "www.cepera.com.br", "Atendimento:", "dac@cepera.com.br", "e mais")),
+        "Q6 адрес сайта и почты — не продолжение фразы, хоть и со строчной: " + pt);
+    ok(OcrCore.webby(" https://cepera.com.br ") && OcrCore.webby("WWW.CEPERA.COM.BR") && !OcrCore.webby("www") && !OcrCore.webby("pimenta @ 5 reais"),
+        "Q6 адрес — строка целиком: www., http(s):// или почта");
+
     // --- S: изогнутые и тесные строки — полоса вдоль средней линии ---
     int SW = 200, SH = 70; float[] curved = new float[SW * SH];
     for (int x = 20; x <= 180; x++) { double c = 20 + 0.004 * (x - 100) * (x - 100); for (int y = 0; y < SH; y++) if (Math.abs(y - c) <= 3) curved[y * SW + x] = 0.9f; }
@@ -381,7 +413,9 @@ public class OcrCoreTest {
     ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(0, 35.9, 100, 55.9, "Bbb")))).size() == 1, "M17 шаг 35,9 < 1,8 высоты — один блок");
     ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(0, 36, 100, 56, "Bbb")))).size() == 2, "M17 шаг ровно 1,8 высоты — разные");
     ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(100, 25, 200, 45, "Bbb")))).size() == 2, "M17 строки встык по горизонтали, без перекрытия — разные блоки");
-    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(99, 25, 200, 45, "Bbb")))).size() == 1, "M17 перекрытие в точку — один блок");
+    ok(OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(75, 25, 200, 45, "Bbb")))).size() == 2
+        && OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Aaa"), item(74, 25, 200, 45, "Bbb")))).size() == 1,
+        "M17 перекрытие ровно в четверть более узкой строки — разные блоки, чуть больше — один");
     List<List<OcrCore.Row>> once = OcrCore.layout(new ArrayList<>(Arrays.asList(item(0, 0, 100, 20, "Esq"), item(150, 0, 250, 20, "Dir"), item(0, 25, 250, 45, "largo"))));
     ok(OcrCore.lines(once).split("largo", -1).length == 2, "M17 строка под двумя колонками попадает в один блок, а не в оба");
     // M18 колонки: перестановка только при перекрытии по высоте больше 0,3 и если левая не заходит
