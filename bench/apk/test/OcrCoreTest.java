@@ -446,7 +446,9 @@ public class OcrCoreTest {
       for (int c = 0; c < 3; c++) diff = Math.max(diff, Math.abs(((c0[i] >> (16 - 8 * c)) & 255) - ec.getInt(3 * i + c)));
     ok(ec.length() == 3 * c0.length && diff <= 1, "G4 " + id + ": вырез первой строки совпадает (до единицы яркости: " + diff + ")");
     // полосы изогнутых и тесных строк: те же строки и те же параметры, что у эталона
-    JSONArray es = m.getJSONArray("strips"); boolean sameSet = st.size() == es.length(); double mq = 0; int ns = 0;
+    JSONArray es = m.optJSONArray("strips");
+    if (es == null) { ok(false, "G9 " + id + ": эталон старого формата, без полос — пересоберите: .venv/bin/python tools/ocr_cylinder.py && .venv/bin/python tools/ocr_golden.py"); return; }
+    boolean sameSet = st.size() == es.length(); double mq = 0; int ns = 0;
     for (int i = 0; sameSet && i < st.size(); i++) {
       OcrCore.Strip a = st.get(i); boolean isNull = es.isNull(i);
       if ((a == null) != isNull) { sameSet = false; break; }
