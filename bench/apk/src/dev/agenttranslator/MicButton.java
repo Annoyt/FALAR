@@ -54,17 +54,31 @@ public class MicButton extends FrameLayout {
    *  каждый второй кадр, на 120 Гц каждый четвёртый. Время берётся из кадра, а не из часов:
    *  шаг ровно кратен кадру и не дрожит. */
   boolean ticking = false; long tickFrom = -1, tickLast = 0;
+  /** Голос: пока идёт уровень входа (setLevel), кольцо следует за ним — видно, слышит ли
+   *  микрофон; без уровня (стенд) — ровный пульс. Уровень сглажен и округлён до 1/64: в ровной
+   *  тишине свойства не меняются, и кадров нет. */
+  volatile float levelK = 0; volatile long levelAt = 0; float shownK = -1;
   final Choreographer.FrameCallback tick = new Choreographer.FrameCallback() {
     @Override public void doFrame(long ns) {
       if (!ticking) return;
       if (tickFrom < 0) tickFrom = ns;
       if (ns - tickLast >= STEP_NS) {
         tickLast = ns;
-        pulse(pulseIn.getInterpolation((ns - tickFrom) / 1_000_000L % PULSE_MS / (float) PULSE_MS));
+        if (android.os.SystemClock.uptimeMillis() - levelAt < 500) {
+          float k = shownK < 0 ? levelK : shownK + (levelK - shownK) * 0.4f;
+          shownK = k; voice(Math.round(k * 64) / 64f);
+        } else pulse(pulseIn.getInterpolation((ns - tickFrom) / 1_000_000L % PULSE_MS / (float) PULSE_MS));
       }
       Choreographer.getInstance().postFrameCallback(this);
     }
   };
+
+  /** Уровень входа, dBFS после чувствительности: −55 — кольцо у края круга, −15 и громче —
+   *  раздуто целиком. over — вход упёрся в край шкалы: кольцо красное. */
+  public void setLevel(float db, boolean over) {
+    levelK = Math.max(0, Math.min(1, (db + 55) / 40)); levelAt = android.os.SystemClock.uptimeMillis();
+    halo.setOver(over);
+  }
 
   public MicButton(Context c) {
     super(c);
@@ -128,6 +142,12 @@ public class MicButton extends FrameLayout {
     anim.setDuration(ms); anim.setInterpolator(in); anim.setRepeatCount(ValueAnimator.INFINITE); anim.start();
   }
 
+  /** Шаг голоса: k от 0 до 1 — кольцо от края круга наружу, от бледного к яркому. */
+  void voice(float k) {
+    float g = 1 + (HALO_GROW - 1) * k;
+    halo.setScaleX(g); halo.setScaleY(g); halo.setAlpha(0.35f + 0.65f * k);
+  }
+
   /** Шаг пульса: k от 0 до 1 — кольцо от края круга наружу, от яркого к пустому. */
   void pulse(float k) {
     float g = 1 + (HALO_GROW - 1) * k;
@@ -138,7 +158,7 @@ public class MicButton extends FrameLayout {
   void stop() {
     if (anim != null) { anim.cancel(); anim = null; }
     if (ticking) { ticking = false; Choreographer.getInstance().removeFrameCallback(tick); }
-    halo.setVisibility(INVISIBLE); pulse(0);
+    halo.setVisibility(INVISIBLE); pulse(0); shownK = -1; levelAt = 0; halo.setOver(false);
     if (ring.angle != 0) { ring.angle = 0; ring.invalidate(); }
   }
 
@@ -215,7 +235,9 @@ public class MicButton extends FrameLayout {
    *  диск красил бы его мятой. */
   final class Halo extends View {
     final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+    boolean over = false;
     Halo(Context c) { super(c); p.setColor(MINT); p.setAlpha(0xC0); p.setStyle(Paint.Style.STROKE); setVisibility(INVISIBLE); }
+    void setOver(boolean on) { if (on == over) return; over = on; p.setColor(on ? 0xFFE53935 : MINT); p.setAlpha(0xC0); invalidate(); }
     @Override public boolean hasOverlappingRendering() { return false; }
     @Override protected void onDraw(Canvas cv) {
       float cx = getWidth() / 2f, cy = getHeight() / 2f, r = Math.min(cx, cy);

@@ -24,7 +24,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   Button bPin, bVoice, bVoice2, bWord, bBetter, bTalk, bSys, bLearn, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bLog;
   TextView logLast;
   MicButton bMic;
-  EditText keyIn; ToggleButton tKnown, tMicSrc; SeekBar sMic, sHold; TextView micLbl, holdLbl;
+  /** Как слышно: строка под кнопками слушания (с полоской уровня) и под кнопкой удержания. */
+  HearingView hearListen, hearPtt;
+  static final String LISTEN_HINT = "Обе вместе — направление по языку каждой реплики. Микрофон открыт, только пока включено.",
+      PTT_HINT = "Удерживайте круг и говорите — язык определится по сказанному";
+  final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+  boolean meterOn = false, resumed = false;
+  EditText keyIn; ToggleButton tKnown, tMicSrc; SeekBar sMic, sHold; TextView micLbl, holdLbl; CheckBox cMicAuto;
   View reviewBox; TextView revWord, revRu, revEx, revStat; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart;
   String revCur; boolean revOpen;
   ToggleButton tCtx, tAuto, tLang, tListenPt, tListenRu;
@@ -140,7 +146,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // останавливает, и пульс не должен гаснуть, пока микрофон ещё пишет.
     bMic.setOnTouchListener((v, e) -> {
       boolean r = ptt(e, "ru2pt");
-      if (r) bMic.setActive(e.getAction() == MotionEvent.ACTION_DOWN);
+      if (r) { bMic.setActive(e.getAction() == MotionEvent.ACTION_DOWN); meter(); }
       return r;
     });
     CompoundButton.OnCheckedChangeListener lis = (v, on) -> {
@@ -645,6 +651,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     talkView.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
     learnView.setVisibility(tab == 1 ? View.VISIBLE : View.GONE);
     sysView.setVisibility(tab == 2 ? View.VISIBLE : View.GONE);
+    if (tab == 2) micLabel();
     voiceView.setVisibility(tab == 3 ? View.VISIBLE : View.GONE);
     if (setupView != null) setupView.setVisibility(tab == 4 ? View.VISIBLE : View.GONE);
     if (tabsRow != null) tabsRow.setVisibility(tab == 4 ? View.GONE : View.VISIBLE);
@@ -917,10 +924,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Удержание. Сама кнопка плавает над репликами (buildTalk), здесь — подсказка к ней. Кнопка
    *  зовёт на обоих языках — FALAR и ГОВОРИ по кольцу: принимает тот, на котором в неё говорят. */
   View buildPtt() {
-    TextView t = new TextView(this); t.setTextSize(11); t.setTextColor(Color.GRAY); t.setGravity(Gravity.CENTER);
-    t.setPadding(0, 6, 0, 6);
-    t.setText("Удерживайте круг и говорите — язык определится по сказанному");
-    return t;
+    hearPtt = new HearingView(this); hearPtt.setLine(PTT_HINT, Color.GRAY);
+    return hearPtt;
   }
 
   View buildListen() {
@@ -931,9 +936,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     row.addView(tListenPt, new LinearLayout.LayoutParams(0, -2, 1f));
     row.addView(tListenRu, new LinearLayout.LayoutParams(0, -2, 1f));
     v.addView(row);
-    TextView t = new TextView(this); t.setTextSize(11); t.setTextColor(Color.GRAY);
-    t.setText("Обе вместе — направление по языку каждой реплики. Микрофон открыт, только пока включено.");
-    v.addView(t);
+    hearListen = new HearingView(this); hearListen.setLine(LISTEN_HINT, Color.GRAY);
+    v.addView(hearListen);
     return v;
   }
 
@@ -961,10 +965,37 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
 
   /** Слушание отмечается прямо на кнопке режима: его видно и когда открыт другой режим. */
+  /** Подпись чувствительности: в авто — сколько она сейчас, вручную — положение ползунка. */
+  void micLabel() {
+    if (micLbl == null) return;
+    micLbl.setText(cMicAuto.isChecked()
+        ? "Чувствительность микрофона: авто" + (svc == null ? "" : String.format(java.util.Locale.ROOT, ", сейчас %+.0f дБ", svc.autoDb))
+        : "Чувствительность микрофона: +" + sMic.getProgress() + " дБ");
+  }
+
   void markListen() {
     boolean on = svc != null && (svc.listenPt || svc.listenRu);
     bModeListen.setText(on ? "👂 слушаю ▶" : "👂 слушать");
+    hearListen.setBar(on);
+    Hearing h = svc == null ? null : svc.hearing;
+    if (!on) hearListen.setLine(LISTEN_HINT, Color.GRAY);
+    else if (h == null) hearListen.setLine("слушаю — как слышно, будет видно после первой фразы", Color.GRAY);
+    meter();
   }
+
+  /** Опрос уровня входа: 5 раз в секунду, пока слушаем и строка видна, 10 — пока держат кнопку
+   *  (кольцо следует за голосом). Сам останавливается, когда ни того, ни другого, или экран ушёл. */
+  final Runnable meterTick = new Runnable() { public void run() {
+    boolean listening = svc != null && (svc.listenPt || svc.listenRu), holding = svc != null && svc.recording;
+    if (!resumed || (!listening && !holding)) { meterOn = false; return; }
+    if (holding) bMic.setLevel(svc.levelDb, svc.levelOver);
+    else if (modeNow == 2 && !folded) {
+      double nz = svc.noiseRms;
+      hearListen.setLevel(svc.levelDb, nz > 0 ? (float) TranslatorService.db(nz) : Float.NaN, svc.levelOver);
+    }
+    ui.postDelayed(this, holding ? 100 : 200);
+  }};
+  void meter() { if (!meterOn && resumed) { meterOn = true; ui.post(meterTick); } }
 
   static final int REQ_PHOTO = 7;
   android.net.Uri photoUri;
@@ -1131,6 +1162,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     d.show();
   }
 
+  /** Как слышно последнюю фразу — в строке под кнопками того режима, в котором она сказана. */
+  @Override public void onHearing(Hearing h) {
+    if (h == null || hearPtt == null) return;
+    hearPtt.setLine(h.text, h.color());
+    if (svc != null && (svc.listenPt || svc.listenRu)) hearListen.setLine(h.text, h.color());
+  }
   @Override public void onPhoto(long chatId, long at) {
     if (isFinishing() || isDestroyed() || svc == null || svc.chats == null || svc.chats.current != chatId) return;
     showLastTurn();
@@ -1375,11 +1412,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Ползунок показывает то, что сервис применяет на самом деле. Раньше он всегда рисовал +0 дБ,
     // а работало сохранённое значение — настройка врала о собственном состоянии.
     int mg = (int) prefs.getFloat("micgain", 0);
-    micLbl = new TextView(this); micLbl.setTextSize(13);
-    micLbl.setText("Чувствительность микрофона: +" + mg + " дБ"); v.addView(micLbl);
-    sMic = new SeekBar(this); sMic.setMax(24); sMic.setProgress(mg); v.addView(sMic);   // 0…+24 дБ
+    micLbl = new TextView(this); micLbl.setTextSize(13); v.addView(micLbl);
+    // Авто по умолчанию: одна ручка не подходит разом тихому и обычному собеседнику — +24 дБ
+    // спасают тихого и портят обычного (results/2026-09-29-mic-gain.md). Ручная остаётся.
+    cMicAuto = new CheckBox(this); cMicAuto.setText("авто — подстраивать под голос (речь к −24 dBFS)");
+    cMicAuto.setTextSize(13); cMicAuto.setChecked(prefs.getBoolean("micauto", true)); v.addView(cMicAuto);
+    sMic = new SeekBar(this); sMic.setMax(24); sMic.setProgress(mg); sMic.setEnabled(!cMicAuto.isChecked()); v.addView(sMic);   // 0…+24 дБ
+    micLabel();
+    cMicAuto.setOnCheckedChangeListener((b, on) -> {
+      sMic.setEnabled(!on); micLabel();
+      if (svc != null) startService(new Intent(this, TranslatorService.class).putExtra("micauto", on ? "1" : "0"));
+    });
     sMic.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-      public void onProgressChanged(SeekBar sb, int p, boolean u) { micLbl.setText("Чувствительность микрофона: +" + p + " дБ"); }
+      public void onProgressChanged(SeekBar sb, int p, boolean u) { micLabel(); }
       public void onStartTrackingTouch(SeekBar sb) {}
       public void onStopTrackingTouch(SeekBar sb) { if (svc != null) startService(new Intent(MainActivity.this, TranslatorService.class)
           .putExtra("micgain", String.valueOf(sb.getProgress()))); }
@@ -1697,11 +1742,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  «молчать, пока видна транскрипция» иначе приложение осталось бы глухим в кармане. */
   @Override protected void onPause() {
     super.onPause();
+    resumed = false;
     holdingRead = false;
     if (svc != null) svc.setReadingAloud(false);
   }
   @Override protected void onResume() {
     super.onResume();
+    resumed = true; meter();
     syncGuard();
     if (setupView != null && setupView.getVisibility() == View.VISIBLE) {   // вернулись из настроек приложения
       if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { micForever = false; startSvc(); }
@@ -1712,13 +1759,31 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  ничего не попадает. Экран держится включённым, пока идёт показ; режим внизу потом прежний. */
   void micDemo(String kind, String sec) {
     final int was = modeNow; final boolean wasFolded = folded;
-    show(0); if (folded) fold(false); mode(1);
-    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     long ms = 1000L * (sec == null ? 15 : Integer.parseInt(sec));
+    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    show(0); if (folded) fold(false);
+    if ("meter".equals(kind)) { meterDemo(ms, was, wasFolded); return; }
+    mode(1);
     bMic.demo(kind, ms, () -> {
       getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
       mode(was); if (wasFolded) fold(true);
     });
+  }
+  /** Стенд: полоска «как слышно» под кнопками слушания с уровнем, похожим на речь, — тем же
+   *  опросом 5 раз в секунду, но без микрофона. Цена полоски на экране (measure_mic_anim.sh). */
+  void meterDemo(long ms, int was, boolean wasFolded) {
+    mode(2); hearListen.setBar(true); hearListen.setLine("стенд: полоска уровня", Color.GRAY);
+    final long end = android.os.SystemClock.uptimeMillis() + ms; final java.util.Random rnd = new java.util.Random(7);
+    ui.post(new Runnable() { float lv = -50; public void run() {
+      if (android.os.SystemClock.uptimeMillis() >= end) {
+        hearListen.setBar(false); hearListen.setLine(LISTEN_HINT, Color.GRAY);
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        mode(was); if (wasFolded) fold(true); markListen(); return;
+      }
+      lv = Math.max(-55, Math.min(-12, lv + (float) rnd.nextGaussian() * 6));   // слоги то громче, то тише
+      hearListen.setLevel(lv, -48, false);
+      ui.postDelayed(this, 200);
+    }});
   }
   boolean enroll(MotionEvent e, String who, String lang) {
     if (svc == null) return false;
