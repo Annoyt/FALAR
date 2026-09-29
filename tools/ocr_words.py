@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Правка слов снимка перед переводом: словарь португальских форм data/ocr_words_pt.txt.
+"""Правка слов снимка перед переводом: словарь португальских форм data/ocr_words_pt.txt.gz.
 
 Распознаватель строк теряет узкие буквы и ударения («vnagre», «camim», «aicionados», «días»),
 а переводчик на таком слове выдумывает: «краситель камыш» вместо «кармин», «смузи» вместо
@@ -20,15 +20,17 @@
 (чаще с заглавной не в начале предложения), плюс целые слова словаря переводчика с частотой 0:
 они «известны» и не правятся, но сами в замену не идут.
 
-  .venv/bin/python tools/ocr_words.py build     # data/ocr_words_pt.txt из data/tatoeba/raw
+  .venv/bin/python tools/ocr_words.py build     # data/ocr_words_pt.txt.gz из data/tatoeba/raw
   .venv/bin/python tools/ocr_words.py eval      # набор bench/ocr: слова до и после, каждая правка
   .venv/bin/python tools/ocr_words.py golden    # эталон для OcrWordsTest
   echo 'Ingredientes: vnagre' | .venv/bin/python tools/ocr_words.py fix
 """
-import bz2, collections, os, re, sys, unicodedata
+import bz2, collections, gzip, io, os, re, sys, unicodedata
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(R, 'data', 'ocr_words_pt.txt')
+# Сжат: 72 тыс. строк текстом раздували каждую разницу с main до 78 тыс. строк, а сравнивать
+# по строкам производный файл незачем. gzip без имени и времени — пересборка даёт те же байты.
+OUT = os.path.join(R, 'data', 'ocr_words_pt.txt.gz')
 RAW = os.path.join(R, 'data', 'tatoeba', 'raw', 'por_sentences_detailed.tsv.bz2')
 PIECES = os.path.join(R, 'models', 'mt', 'pt2ru', 'pt2ru_source_pieces.tsv')
 RUN = os.path.join(R, 'bench', 'ocr', 'runs', 'ref')
@@ -107,10 +109,10 @@ def build():
     for w in typos:
         del words[w]
     rows = sorted(words.items(), key=lambda kv: (plain(kv[0]), -kv[1][0], kv[0]))
-    with open(OUT, 'w', encoding='utf-8') as f:
-        for w, (c, name) in rows:
-            fl = ('N' if name else '') + ('E' if w in ENGLISH else '')
-            f.write(f'{w} {c}{" " + fl if fl else ""}\n')
+    text = ''.join(f'{w} {c}{" " + fl if fl else ""}\n'
+                   for w, (c, name) in rows for fl in [('N' if name else '') + ('E' if w in ENGLISH else '')])
+    with open(OUT, 'wb') as raw, gzip.GzipFile(filename='', mode='wb', fileobj=raw, compresslevel=9, mtime=0) as f:
+        f.write(text.encode('utf-8'))
     print(f'{OUT}: {len(rows)} форм ({extra} только из словаря переводчика, {len(typos)} опечаток без ударений убрано), '
           f'имён {sum(1 for _, (c, n) in rows if n)}, {os.path.getsize(OUT) // 1024} КБ')
 
@@ -118,7 +120,8 @@ def build():
 class Words:
     def __init__(self, path=OUT):
         self.freq, self.names, self.english, self.idx = {}, set(), set(), {}
-        for line in open(path, encoding='utf-8'):
+        src = gzip.open(path, 'rt', encoding='utf-8') if path.endswith('.gz') else open(path, encoding='utf-8')
+        for line in src:
             p = line.split()
             if len(p) < 2:
                 continue

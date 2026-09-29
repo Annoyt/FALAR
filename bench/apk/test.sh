@@ -53,7 +53,7 @@ java -cp "$OUT:$J" dev.agenttranslator.GainTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HearingTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.CloudTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.OcrCoreTest "$R/bench/ocr/runs/golden" || fail=1
-java -cp "$OUT:$J" dev.agenttranslator.OcrWordsTest "$R/data/ocr_words_pt.txt" "$R/bench/ocr/runs/golden" || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.OcrWordsTest "$R/data/ocr_words_pt.txt.gz" "$R/bench/ocr/runs/golden" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ModulesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.TextRulesTest || fail=1
 exit $fail

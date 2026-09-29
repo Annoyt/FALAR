@@ -2421,14 +2421,14 @@ public class TranslatorService extends Service {
         + (d.fixes.isEmpty() ? "" : " · ✏ " + fx) + " · " + d.pg.lines.replace('\n', ' '));
   }
 
-  /** Словарь правки слов снимка (assets/ocr_words_pt.txt): грузится один раз, при первом снимке. */
+  /** Словарь правки слов снимка (assets/ocr_words_pt.txt.gz, сжат gzip): грузится один раз, при первом снимке. */
   private volatile OcrWords ocrWords; private volatile boolean ocrWordsTried;
   OcrWords ocrWords() {
     if (ocrWords != null || ocrWordsTried) return ocrWords;
     synchronized (this) {
       if (ocrWords == null && !ocrWordsTried) {
         ocrWordsTried = true; long t = System.nanoTime();
-        try (java.io.InputStream in = getAssets().open("ocr_words_pt.txt")) {
+        try (java.io.InputStream in = new java.util.zip.GZIPInputStream(getAssets().open("ocr_words_pt.txt.gz"))) {
           ocrWords = OcrWords.load(in);
           log("📷 словарь правки слов: " + ocrWords.size() + " форм за " + (System.nanoTime() - t) / 1_000_000 + " мс");
         } catch (Throwable e) { log("📷 словарь правки слов не загрузился — снимки без правки: " + e); }

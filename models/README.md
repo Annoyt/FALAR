@@ -48,7 +48,7 @@ Q4_K_M, silero и GTCRN на устройстве совпадают с опуб
 
 Не из этого каталога, но тоже уезжает: `data/tatoeba/phrasebook_tatoeba.tsv` (24 МБ),
 `data/common_words.txt` (816 КБ), `bench/apk/phrasebook_seed.json`. Внутри самого APK, а не
-загрузкой: `data/ocr_words_pt.txt` (845 КБ) — словарь правки слов снимка, все формы португальской
+загрузкой: `data/ocr_words_pt.txt.gz` (280 КБ, сжат gzip) — словарь правки слов снимка, все формы португальской
 части Tatoeba (CC-BY 2.0 FR) и целые слова словаря переводчика; собирается `tools/ocr_words.py build`.
 
 ## Что остаётся только на телефоне

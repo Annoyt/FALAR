@@ -37,6 +37,6 @@ java -cp "$CP" org.pitest.mutationtest.commandline.MutationCoverageReport \
   --classPath "$C,$J,$JU" --reportDir "$OUT" --targetClasses "$TARGETS" \
   --targetTests dev.agenttranslator.SuitesTest --sourceDirs "$A/src" \
   --outputFormats HTML,CSV --timestampedReports=false --threads 4 --timeoutConst 8000 \
-  --jvmArgs "-Dfalar.common=$R/data/common_words.txt,-Dfalar.ocrwords=$R/data/ocr_words_pt.txt,-Dfalar.golden=${GOLDEN:-/нет}" \
+  --jvmArgs "-Dfalar.common=$R/data/common_words.txt,-Dfalar.ocrwords=$R/data/ocr_words_pt.txt.gz,-Dfalar.golden=${GOLDEN:-/нет}" \
   --excludedMethods "sweep,call,fetchAll,configure,refreshCaps,save,title,better,review,image,keyId,keyTail,Cloud" \
   --mutators STRONGER 2>&1 | grep -E "^>>|Generated|Killed|mutations|test strength|Line Coverage|ERROR|Exception" | grep -v "^\s*$" || true

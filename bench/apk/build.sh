@@ -22,10 +22,10 @@ for e in m["files"]:
     if h != e["sha256"] or os.path.getsize(p) != e["size"]: sys.exit(f"{e['repo_path']} разошёлся с манифестом ({e['path']})")
 PY
 mkdir -p $OUT/assets && cp $R/models/manifest.json $OUT/assets/models_manifest.json
-# Словарь правки слов снимка (OcrWords): 72 тыс. португальских форм, 845 КБ, в APK сжат до ~300 КБ.
+# Словарь правки слов снимка (OcrWords): 72 тыс. португальских форм, сжатых gzip (280 КБ).
 # Лежит в APK, а не среди моделей: он часть кода чтения, меняется вместе с ним и качать его отдельно
 # незачем. Пересборка — tools/ocr_words.py build.
-cp $R/data/ocr_words_pt.txt $OUT/assets/ocr_words_pt.txt
+cp $R/data/ocr_words_pt.txt.gz $OUT/assets/ocr_words_pt.txt.gz
 aapt2 link -o $OUT/base.apk --manifest $A/AndroidManifest.xml -I "$AJ" --java $OUT/gen -A $OUT/assets --min-sdk-version 28 --target-sdk-version 33 $OUT/res.zip
 javac --release 11 -nowarn -cp "$AJ:$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/*.java $A/sherpa-java-api/*.java $OUT/gen/app/falar/R.java
 # Код выхода D8 не терять: раньше его вывод шёл через grep с «|| true», и когда 28.09.2026 на

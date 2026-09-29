@@ -9,13 +9,17 @@ import java.util.*;
  *  слипшиеся слова, — и что остаётся как есть: имена, английский, слова с заменой буквы. Набор
  *  появился после этикетки соуса, где переводчик получил «vnagre», «camim», «aicionados» и
  *  выдал «камыш» и «смузи». Части: A — маленький словарь здесь же; B — настоящий словарь
- *  (data/ocr_words_pt.txt); C — сверка с эталоном tools/ocr_words.py строка в строку
+ *  (data/ocr_words_pt.txt.gz); C — сверка с эталоном tools/ocr_words.py строка в строку
  *  (bench/ocr/runs/golden/words.tsv, собирается tools/ocr_words.py golden). Запуск: bash bench/apk/test.sh. */
 public class OcrWordsTest {
   static int fails = 0, checks = 0;
   static void ok(boolean c, String what) { checks++; if (!c) { fails++; System.out.println("  ПРОВАЛ: " + what); } }
   static void eq(Object a, Object b, String what) { ok(Objects.equals(a, b), what + ": «" + a + "» ≠ «" + b + "»"); }
 
+  /** Словарь из файла; .gz — сжатый, как в APK. */
+  static OcrWords load(File f) throws IOException {
+    try (InputStream in = f.getName().endsWith(".gz") ? new java.util.zip.GZIPInputStream(new FileInputStream(f)) : new FileInputStream(f)) { return OcrWords.load(in); }
+  }
   static OcrWords of(String... lines) throws IOException {
     return OcrWords.load(new ByteArrayInputStream(String.join("\n", lines).getBytes(StandardCharsets.UTF_8)));
   }
@@ -85,7 +89,7 @@ public class OcrWordsTest {
     // --- B: настоящий словарь
     if (words != null && words.exists()) {
       OcrWords r;
-      try (InputStream in = new FileInputStream(words)) { r = OcrWords.load(in); }
+      r = load(words);
       ok(r.size() > 70000, "B0 словарь загружен: " + r.size() + " форм");
       eq(r.fix("Ingredientes: Áagua, pimenta, vnagre, espessante goma xantana e corante natural camim.", null),
           "Ingredientes: Água, pimenta, vinagre, espessante goma xantana e corante natural carmim.",
@@ -101,13 +105,13 @@ public class OcrWordsTest {
       ok(r.share("the port, the gateway to Brazil, most of the people passed through here") < OcrWords.LANG_MIN
           && r.share("Ingredientes: Áagua, pimenta abanera vnagre, espessante goma xantana e corante natural camim.") >= OcrWords.LANG_MIN,
           "B6 английский абзац — ниже порога языка, искажённый состав — выше");
-    } else System.out.println("  (часть B пропущена: нет data/ocr_words_pt.txt — .venv/bin/python tools/ocr_words.py build)");
+    } else System.out.println("  (часть B пропущена: нет data/ocr_words_pt.txt.gz — .venv/bin/python tools/ocr_words.py build)");
 
     // --- C: сверка с эталоном на столе
     File g = golden == null ? null : new File(golden, "words.tsv");
     if (g != null && g.exists() && words != null && words.exists()) {
       OcrWords r;
-      try (InputStream in = new FileInputStream(words)) { r = OcrWords.load(in); }
+      r = load(words);
       int n = 0, bad = 0;
       for (String line : Files.readAllLines(g.toPath(), StandardCharsets.UTF_8)) {
         String[] p = line.split("\t", -1); if (p.length < 3) continue; n++;
