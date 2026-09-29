@@ -2392,7 +2392,9 @@ public class TranslatorService extends Service {
       OcrCore.Para p = pg.paras.get(i);
       List<String[]> fx = new ArrayList<>();
       String text = ow == null ? p.text : ow.fix(p.text, fx);
-      String ru = null, why = photoSkip(text);
+      // Абзац, который распознаватель сам прочитал неуверенно, — каша («Porções por ombalad m •
+      // or:o: 1lm»): её перевод закрыл бы собой настоящий текст на снимке. Такой остаётся как есть.
+      String ru = null, why = p.score() < OcrCore.CONF_MIN ? "плохо прочитано" : photoSkip(text);
       if (why != null) text = p.text;                  // не переводится — показываем как прочитано, без правки
       else d.fixes.addAll(fx);
       if (why == null) {
@@ -2409,7 +2411,8 @@ public class TranslatorService extends Service {
     }
     return d;
   }
-  static String photoHow(Ocr.Page pg) { return "детектор " + pg.detMs + " мс, распознаватель " + pg.recMs + " мс, модели " + pg.loadMs + " мс, рамок " + pg.boxes; }
+  static String photoHow(Ocr.Page pg) { return "детектор " + pg.detMs + " мс, распознаватель " + pg.recMs + " мс, модели " + pg.loadMs + " мс, рамок " + pg.boxes
+      + (pg.strips > 0 ? " (из них полосой " + pg.strips + ")" : ""); }
   void photoLog(PhotoDone d, long ms) {
     StringBuilder fx = new StringBuilder();
     for (String[] c : d.fixes) fx.append(fx.length() > 0 ? ", " : "").append(c[0]).append("→").append(c[1]);

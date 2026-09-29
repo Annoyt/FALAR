@@ -24,6 +24,9 @@ public final class OcrCore {
   public static final int DET_MAX = 960, REC_H = 48, REC_MIN_W = 320, REC_MAX_W = 3200, REC_BATCH = 6;
   /** Строки с уверенностью ниже — шум с фона. */
   public static final float MIN_SCORE = 0.5f;
+  /** Абзац с уверенностью ниже не переводится: на наборе вывесок строки ниже 0,82 — почти только
+   *  мусор («VINTID», «ARMREO NMERBEREG»), первая верная — «Presidencial» с 0,825. */
+  public static final double CONF_MIN = 0.80;
   static final float[] MEAN = {0.485f, 0.456f, 0.406f}, STD = {0.229f, 0.224f, 0.225f};
 
   // ---------- пересчёт размера ----------
@@ -98,20 +101,20 @@ public final class OcrCore {
 
   /** Рамки строк на карте вероятностей pw×ph, в координатах снимка w×h. Рамка — 8 чисел:
    *  левая верхняя, правая верхняя, правая нижняя, левая нижняя (x, y). */
-  public static List<double[]> boxes(float[] prob, int pw, int ph, int w, int h) {
+  public static List<double[]> boxes(float[] prob, int pw, int ph, int w, int h) { return boxes(prob, pw, ph, w, h, null); }
+
+  /** То же и полосы изогнутых и тесных строк (strips, по одной на рамку, null — вырез рамкой).
+   *  Области размечаются целиком до разбора: тесноту строки считают по соседним областям, в том
+   *  числе ещё не разобранным (как ndimage.label в эталоне). */
+  public static List<double[]> boxes(float[] prob, int pw, int ph, int w, int h, List<Strip> strips) {
     List<double[]> out = new ArrayList<>();
-    int[] lab = new int[pw * ph]; int[] stack = new int[pw * ph]; int n = 0;
+    int[] lab = new int[pw * ph], pix = new int[pw * ph], stack = new int[pw * ph]; int n = 0, np = 0;
+    List<int[]> comp = new ArrayList<>();                                   // [начало в pix, число пикселей]
     for (int start = 0; start < pw * ph; start++) {
       if (lab[start] != 0 || !(prob[start] > THRESH)) continue;
-      n++;
-      // по строкам: крайние левая и правая точки — выпуклой оболочке остальные не нужны
-      int y0 = start / pw, y1 = y0; int[] mn = new int[ph], mx = new int[ph];
-      Arrays.fill(mn, Integer.MAX_VALUE); Arrays.fill(mx, -1);
-      int sp = 0, count = 0; stack[sp++] = start; lab[start] = n;
+      n++; int first = np, sp = 0; stack[sp++] = start; lab[start] = n;
       while (sp > 0) {
-        int p = stack[--sp]; int px = p % pw, py = p / pw; count++;
-        if (px < mn[py]) mn[py] = px; if (px > mx[py]) mx[py] = px;
-        if (py < y0) y0 = py; if (py > y1) y1 = py;
+        int p = stack[--sp]; int px = p % pw, py = p / pw; pix[np++] = p;
         for (int dy = -1; dy <= 1; dy++) {
           int qy = py + dy; if (qy < 0 || qy >= ph) continue;
           for (int dx = -1; dx <= 1; dx++) {
@@ -121,23 +124,171 @@ public final class OcrCore {
           }
         }
       }
+      comp.add(new int[]{first, np - first});
+    }
+    int[] mn = new int[ph], mx = new int[ph]; Arrays.fill(mn, Integer.MAX_VALUE); Arrays.fill(mx, -1);
+    for (int k = 1; k <= n; k++) {
+      int first = comp.get(k - 1)[0], count = comp.get(k - 1)[1];
       if (count < 4) continue;
+      // по строкам: крайние левая и правая точки — выпуклой оболочке остальные не нужны
+      int y0 = ph, y1 = -1;
+      for (int i = first; i < first + count; i++) {
+        int px = pix[i] % pw, py = pix[i] / pw;
+        if (px < mn[py]) mn[py] = px; if (px > mx[py]) mx[py] = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+      }
       List<double[]> pts = new ArrayList<>();
       for (int y = y0; y <= y1; y++) if (mx[y] >= 0) { pts.add(new double[]{mn[y], y}); if (mx[y] != mn[y]) pts.add(new double[]{mx[y], y}); }
+      for (int y = y0; y <= y1; y++) { mn[y] = Integer.MAX_VALUE; mx[y] = -1; }
       double[] box = minAreaRect(pts);
       double[] sd = sides(box);
       if (Math.min(sd[0], sd[1]) < 3) continue;
-      if (polyMean(prob, pw, ph, box) < BOX_THRESH) continue;
+      // Сильно изогнутая строка занимает свой прямоугольник меньше чем наполовину, и средняя по нему
+      // уверенность проходила ниже порога — строка пропадала целиком (этикетка на бутылке, снятая
+      // вплотную). Тогда судим по самой области (как score_mode «slow» у PaddleOCR), а оставляем,
+      // только если она и правда дуга, — вырез ей тогда полосой.
+      boolean weak = polyMean(prob, pw, ph, box) < BOX_THRESH;
+      if (weak) { double sum = 0; for (int i = first; i < first + count; i++) sum += prob[pix[i]]; if (sum / count < BOX_THRESH) continue; }
       // Расширение на d (unclip для прямоугольника). Проверку «сторона после расширения < 5» из
       // PaddleOCR здесь не ставим: при стороне от 3 и UNCLIP 1,4 расширенная сторона не меньше 5,1.
-      box = expand(box, sd[0] * sd[1] * UNCLIP / (2 * (sd[0] + sd[1])));
-      for (int k = 0; k < 4; k++) {
-        box[2 * k] = clamp(box[2 * k] * w / pw, 0, w);
-        box[2 * k + 1] = clamp(box[2 * k + 1] * h / ph, 0, h);
+      double[] eb = expand(box, sd[0] * sd[1] * UNCLIP / (2 * (sd[0] + sd[1])));
+      Strip st = strips != null || weak ? stripOf(pix, first, count, pw, box, eb, lab, k, (double) w / pw, (double) h / ph) : null;
+      if (weak && (st == null || st.sag < SAG_MIN * st.T)) continue;
+      if (strips != null) strips.add(st);
+      for (int j = 0; j < 4; j++) {
+        eb[2 * j] = clamp(eb[2 * j] * w / pw, 0, w);
+        eb[2 * j + 1] = clamp(eb[2 * j + 1] * h / ph, 0, h);
       }
-      out.add(box);
+      out.add(eb);
     }
     return out;
+  }
+
+  // ---------- изогнутые и тесные строки ----------
+
+  /** Рамка строки — прямоугольник: у изогнутой строки (этикетка на бутылке) текст в нём гуляет
+   *  вверх-вниз, а у тесных строк в вырез залезают соседние сверху и снизу. Таким строкам вырез —
+   *  полоса вдоль средней линии области детектора, толщиной строки (tools/ocr_ref.py: strip_of).
+   *  На двух снимках этикетки это 71 → 86 % слов; на наборе вывесок с просторными строками полоса
+   *  у всех строк теряла 0,9 пункта, поэтому только там, где она нужна. */
+  static final double SAG_MIN = 0.5, INTRUDE = 0.02, LONG = 3.0; static final int ARC_N = 2048;
+
+  /** Полоса: средняя линия в координатах карты — c0 + s·u + c(s)·n, c(s) — парабола от s/S; T —
+   *  толщина строки, d — расширение (unclip), s0..s1 — длина вместе с расширением; sx, sy — пересчёт
+   *  карты в снимок. */
+  public static final class Strip {
+    final double ux, uy, nx, ny, cx, cy, q0, q1, q2, S, T, d, s0, s1, sx, sy; public final double sag; public final boolean crowded;
+    Strip(double ux, double uy, double nx, double ny, double cx, double cy, double[] q, double S, double T, double d,
+          double s0, double s1, double sx, double sy, double sag, boolean crowded) {
+      this.ux = ux; this.uy = uy; this.nx = nx; this.ny = ny; this.cx = cx; this.cy = cy; q0 = q[0]; q1 = q[1]; q2 = q[2];
+      this.S = S; this.T = T; this.d = d; this.s0 = s0; this.s1 = s1; this.sx = sx; this.sy = sy; this.sag = sag; this.crowded = crowded;
+    }
+    double cv(double s) { double z = s / S; return (q2 * z + q1) * z + q0; }
+    double sl(double s) { return (2 * q2 * (s / S) + q1) / S; }
+  }
+
+  /** Сколько пикселей других областей внутри четырёхугольника (растр по центрам, как polyMean). */
+  static int intrusion(int[] lab, int pw, int ph, int k, double[] b) {
+    double mnx = Math.min(Math.min(b[0], b[2]), Math.min(b[4], b[6])), mxx = Math.max(Math.max(b[0], b[2]), Math.max(b[4], b[6]));
+    double mny = Math.min(Math.min(b[1], b[3]), Math.min(b[5], b[7])), mxy = Math.max(Math.max(b[1], b[3]), Math.max(b[5], b[7]));
+    int x0 = Math.max(0, (int) Math.floor(mnx)), x1 = Math.min(pw - 1, (int) Math.ceil(mxx));
+    int y0 = Math.max(0, (int) Math.floor(mny)), y1 = Math.min(ph - 1, (int) Math.ceil(mxy));
+    int cnt = 0;
+    for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) {
+      int l = lab[y * pw + x]; if (l == 0 || l == k) continue;
+      boolean in = true;
+      for (int j = 0; j < 4 && in; j++) {
+        double px = b[2 * j], py = b[2 * j + 1], qx = b[2 * ((j + 1) % 4)], qy = b[2 * ((j + 1) % 4) + 1];
+        if ((qx - px) * (y - py) - (qy - py) * (x - px) < -1e-6) in = false;
+      }
+      if (in) cnt++;
+    }
+    return cnt;
+  }
+
+  /** 3×3 методом Гаусса с выбором главного — тем же порядком действий, что solve3 в эталоне. */
+  static double[] solve3(double[][] A, double[] b) {
+    double[][] M = new double[3][4];
+    for (int i = 0; i < 3; i++) { System.arraycopy(A[i], 0, M[i], 0, 3); M[i][3] = b[i]; }
+    for (int c = 0; c < 3; c++) {
+      int piv = c; for (int r = c + 1; r < 3; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+      double[] t = M[c]; M[c] = M[piv]; M[piv] = t;
+      if (Math.abs(M[c][c]) < 1e-12) return null;
+      for (int r = c + 1; r < 3; r++) { double f = M[r][c] / M[c][c]; for (int j = c; j < 4; j++) M[r][j] -= f * M[c][j]; }
+    }
+    double[] x = new double[3];
+    for (int r = 2; r >= 0; r--) { double acc = M[r][3]; for (int j = r + 1; j < 3; j++) acc -= M[r][j] * x[j]; x[r] = acc / M[r][r]; }
+    return x;
+  }
+
+  /** Полоса для изогнутой или тесной строки, null — вырезать рамкой. box — прямоугольник
+   *  области до расширения, eb — после (в координатах карты). */
+  static Strip stripOf(int[] pix, int first, int count, int pw, double[] box, double[] eb, int[] lab, int k, double sx, double sy) {
+    double[] sd = sides(box); double w = sd[0], h = sd[1];
+    if (w < LONG * h) return null;
+    double ux = (box[2] - box[0]) / w, uy = (box[3] - box[1]) / w, nx = (box[6] - box[0]) / h, ny = (box[7] - box[1]) / h;
+    double cx = (box[0] + box[2] + box[4] + box[6]) / 4, cy = (box[1] + box[3] + box[5] + box[7]) / 4;
+    double[] s = new double[count], t = new double[count]; double smin = Double.MAX_VALUE, smax = -Double.MAX_VALUE;
+    int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE; int[] si = new int[count];
+    for (int i = 0; i < count; i++) {
+      double rx = pix[first + i] % pw - cx, ry = pix[first + i] / pw - cy;
+      s[i] = rx * ux + ry * uy; t[i] = rx * nx + ry * ny;
+      si[i] = (int) Math.rint(s[i]); lo = Math.min(lo, si[i]); hi = Math.max(hi, si[i]);
+      smin = Math.min(smin, s[i]); smax = Math.max(smax, s[i]);
+    }
+    int nb = hi - lo + 1; double[] tmin = new double[nb], tmax = new double[nb]; int[] cnt = new int[nb];
+    Arrays.fill(tmin, Double.POSITIVE_INFINITY); Arrays.fill(tmax, Double.NEGATIVE_INFINITY);
+    for (int i = 0; i < count; i++) { int j = si[i] - lo; tmin[j] = Math.min(tmin[j], t[i]); tmax[j] = Math.max(tmax[j], t[i]); cnt[j]++; }
+    int used = 0; for (int c : cnt) if (c > 0) used++;
+    if (used < 3) return null;
+    double[] th = new double[used]; int m = 0;
+    for (int j = 0; j < nb; j++) if (cnt[j] > 0) th[m++] = tmax[j] - tmin[j] + 1;
+    Arrays.sort(th);
+    double T = used % 2 == 1 ? th[used / 2] : (th[used / 2 - 1] + th[used / 2]) / 2;
+    double S = Math.max(Math.max(Math.abs(smin), Math.abs(smax)), 1.0);
+    double[][] A = new double[3][3]; double[] b = new double[3];
+    for (int j = 0; j < nb; j++) {
+      if (cnt[j] == 0) continue;
+      double z = (j + lo) / S, c = (tmin[j] + tmax[j]) / 2, ww = cnt[j]; double[] v = {1.0, z, z * z};
+      for (int a = 0; a < 3; a++) { b[a] += ww * c * v[a]; for (int e = 0; e < 3; e++) A[a][e] += ww * v[a] * v[e]; }
+    }
+    double[] q = solve3(A, b);
+    if (q == null) return null;
+    double dz = (smax - smin) / S, sag = Math.abs(q[2]) * dz * dz / 4;
+    boolean crowded = intrusion(lab, pw, lab.length / pw, k, eb) >= INTRUDE * count;
+    if (sag < SAG_MIN * T && !crowded) return null;
+    double L = smax - smin + 1, d = L * T * UNCLIP / (2 * (L + T));
+    return new Strip(ux, uy, nx, ny, cx, cy, q, S, T, d, smin - d, smax + d, sx, sy, sag, crowded);
+  }
+
+  /** np.interp для одной точки. */
+  static double interp(double x, double[] xp, double[] fp) {
+    int last = xp.length - 1;
+    if (x <= xp[0]) return fp[0];
+    if (x >= xp[last]) return fp[last];
+    int lo = 0, hi = last;                                  // последний j с xp[j] <= x
+    while (hi - lo > 1) { int mid = (lo + hi) >>> 1; if (xp[mid] <= x) lo = mid; else hi = mid; }
+    return (fp[lo + 1] - fp[lo]) / (xp[lo + 1] - xp[lo]) * (x - xp[lo]) + fp[lo];
+  }
+
+  /** Вырез полосы: по длине дуги средней линии, поперёк — по её нормали, высота T + 2d. */
+  public static int[] cropStrip(int[] argb, int w, int h, Strip st, int[] outWH) {
+    double step = (st.s1 - st.s0) / (ARC_N - 1); double[] ss = new double[ARC_N], arc = new double[ARC_N];
+    for (int i = 0; i < ARC_N - 1; i++) ss[i] = st.s0 + i * step;
+    ss[ARC_N - 1] = st.s1;
+    double prev = Math.sqrt(1 + st.sl(ss[0]) * st.sl(ss[0]));
+    for (int i = 1; i < ARC_N; i++) { double cur = Math.sqrt(1 + st.sl(ss[i]) * st.sl(ss[i])); arc[i] = arc[i - 1] + (cur + prev) / 2 * (ss[i] - ss[i - 1]); prev = cur; }
+    double sig = (st.sx + st.sy) / 2, half = st.T / 2 + st.d;
+    int cw = Math.max(1, (int) (arc[ARC_N - 1] * sig)), ch = Math.max(1, (int) ((st.T + 2 * st.d) * sig));
+    int[] out = new int[cw * ch];
+    for (int x = 0; x < cw; x++) {
+      double s = interp((x + 0.5) / sig, arc, ss), c = st.cv(s), g = st.sl(s), nrm = Math.sqrt(1 + g * g), nu = -g / nrm, nn = 1 / nrm;
+      for (int y = 0; y < ch; y++) {
+        double o = (y + 0.5) / sig - half, a = s + o * nu, bb = c + o * nn;
+        double X = (st.cx + a * st.ux + bb * st.nx) * st.sx - 0.5, Y = (st.cy + a * st.uy + bb * st.ny) * st.sy - 0.5;
+        out[y * cw + x] = sample(argb, w, h, X, Y);
+      }
+    }
+    outWH[0] = cw; outWH[1] = ch; return out;
   }
 
   static double clamp(double v, double lo, double hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -316,11 +467,12 @@ public final class OcrCore {
 
   // ---------- строки, блоки, абзацы ----------
 
-  /** Рамка с распознанным текстом. */
+  /** Рамка с распознанным текстом и уверенностью распознавателя. */
   public static final class Item {
-    public final double[] b; public final String t; final double lx, ly, rx, ry, ux, uy, h, cx, cy;
-    public Item(double[] b, String t) {
-      this.b = b; this.t = t.trim();
+    public final double[] b; public final String t; public final double score; final double lx, ly, rx, ry, ux, uy, h, cx, cy;
+    public Item(double[] b, String t) { this(b, t, 1.0); }
+    public Item(double[] b, String t, double score) {
+      this.b = b; this.t = t.trim(); this.score = score;
       lx = (b[0] + b[6]) / 2; ly = (b[1] + b[7]) / 2; rx = (b[2] + b[4]) / 2; ry = (b[3] + b[5]) / 2;
       double dx = rx - lx, dy = ry - ly, n = Math.hypot(dx, dy);
       ux = n > 1e-6 ? dx / n : 1; uy = n > 1e-6 ? dy / n : 0;
@@ -350,6 +502,13 @@ public final class OcrCore {
   public static final class Para {
     public final String text; public final List<Row> rows;
     Para(String t, List<Row> r) { text = t; rows = r; }
+    /** Уверенность абзаца: средняя уверенность распознавателя по его рамкам с весом длины текста
+     *  (tools/ocr_ref.py: para_conf). Ниже CONF_MIN абзац не переводится. */
+    public double score() {
+      long n = 0; double acc = 0;
+      for (Row r : rows) for (Item it : r.items) { n += it.t.length(); acc += it.t.length() * it.score; }
+      return n == 0 ? 0 : acc / n;
+    }
     public double[] frame() {
       double ux = rows.get(0).ux, uy = rows.get(0).uy, nx = -uy, ny = ux;
       double a0 = Double.MAX_VALUE, a1 = -Double.MAX_VALUE, b0 = Double.MAX_VALUE, b1 = -Double.MAX_VALUE;

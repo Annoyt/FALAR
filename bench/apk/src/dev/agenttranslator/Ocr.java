@@ -37,7 +37,7 @@ public class Ocr {
   public static final class Page {
     public final List<OcrCore.Para> paras = new ArrayList<>();
     public String lines = "";
-    public int boxes;
+    public int boxes, strips;
     public long loadMs, detMs, recMs, layoutMs;
   }
 
@@ -58,12 +58,18 @@ public class Ocr {
              OrtSession.Result r = det.run(Collections.singletonMap("x", x))) {
           FloatBuffer fb = ((OnnxTensor) r.get(0)).getFloatBuffer(); prob = new float[fb.remaining()]; fb.get(prob);
         }
-        List<double[]> boxes = OcrCore.boxes(prob, pw, ph, w, h); pg.boxes = boxes.size();
+        List<OcrCore.Strip> strips = new ArrayList<>();
+        List<double[]> boxes = OcrCore.boxes(prob, pw, ph, w, h, strips); pg.boxes = boxes.size();
+        for (OcrCore.Strip st : strips) if (st != null) pg.strips++;
         long t2 = System.nanoTime(); pg.detMs = (t2 - t1) / 1_000_000;
         // распознаватель: строки пачками по отношению сторон
         String meta = rec.getMetadata().getCustomMetadata().get("character");
         List<int[]> crops = new ArrayList<>(), shapes = new ArrayList<>();
-        for (double[] b : boxes) { int[] s = new int[2]; crops.add(OcrCore.crop(argb, w, h, b, s)); shapes.add(s); }
+        // изогнутая или тесная строка — полосой вдоль её средней линии, остальные — рамкой
+        for (int i = 0; i < boxes.size(); i++) {
+          int[] s = new int[2]; OcrCore.Strip st = strips.get(i);
+          crops.add(st != null ? OcrCore.cropStrip(argb, w, h, st, s) : OcrCore.crop(argb, w, h, boxes.get(i), s)); shapes.add(s);
+        }
         Integer[] order = OcrCore.recOrder(shapes);
         String[] texts = new String[boxes.size()]; float[] scores = new float[boxes.size()]; String[] chars = null;
         for (int b0 = 0; b0 < order.length; b0 += OcrCore.REC_BATCH) {
@@ -85,7 +91,7 @@ public class Ocr {
         long t3 = System.nanoTime(); pg.recMs = (t3 - t2) / 1_000_000;
         List<OcrCore.Item> items = new ArrayList<>();
         for (int i = 0; i < boxes.size(); i++)
-          if (scores[i] >= OcrCore.MIN_SCORE && texts[i] != null && !texts[i].trim().isEmpty()) items.add(new OcrCore.Item(boxes.get(i), texts[i]));
+          if (scores[i] >= OcrCore.MIN_SCORE && texts[i] != null && !texts[i].trim().isEmpty()) items.add(new OcrCore.Item(boxes.get(i), texts[i], scores[i]));
         List<List<OcrCore.Row>> blocks = OcrCore.layout(items);
         for (List<OcrCore.Row> bl : blocks) pg.paras.addAll(OcrCore.paragraphs(bl));
         pg.lines = OcrCore.lines(blocks);

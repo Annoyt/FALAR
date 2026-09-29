@@ -160,7 +160,7 @@ class Det:
         x = ((x - MEAN) / STD).transpose(2, 0, 1)[None]
         prob = self.s.run(None, {'x': np.ascontiguousarray(x, np.float32)})[0][0, 0]
         lab, n = ndimage.label(prob > self.p['thresh'], structure=np.ones((3, 3), int))
-        boxes = []
+        boxes, self.strips = [], []
         for sl, k in zip(ndimage.find_objects(lab), range(1, n + 1)):
             ys, xs = np.nonzero(lab[sl] == k)
             if len(xs) < 4:
@@ -169,13 +169,21 @@ class Det:
             box = min_area_rect(pts)
             if min(sides(box)) < 3:
                 continue
-            if poly_mean(prob, box) < self.p['box_thresh']:
+            # Сильно изогнутая строка занимает свой прямоугольник меньше чем наполовину, и средняя по
+            # нему уверенность ниже порога — строка пропадала целиком. Тогда судим по самой области
+            # (как score_mode «slow» у PaddleOCR) и оставляем, только если она и правда дуга.
+            weak = poly_mean(prob, box) < self.p['box_thresh']
+            if weak and float(prob[pts[:, 1], pts[:, 0]].astype(np.float64).mean()) < self.p['box_thresh']:
                 continue
             bw, bh = sides(box)
             d = bw * bh * self.p['unclip'] / (2 * (bw + bh))
-            box = expand(box, d)                  # сторона после расширения ≥ 5,1 сама (см. OcrCore.boxes)
-            box[:, 0] = np.clip(box[:, 0] * w / rw, 0, w); box[:, 1] = np.clip(box[:, 1] * h / rh, 0, h)
-            boxes.append(box)
+            ebox = expand(box, d)                 # сторона после расширения ≥ 5,1 сама (см. OcrCore.boxes)
+            st = strip_of(pts, box, ebox, lab, k, self.p['unclip'], w / rw, h / rh)
+            if weak and (st is None or st['sag'] < SAG_MIN * st['T']):
+                continue
+            self.strips.append(st)
+            ebox[:, 0] = np.clip(ebox[:, 0] * w / rw, 0, w); ebox[:, 1] = np.clip(ebox[:, 1] * h / rh, 0, h)
+            boxes.append(ebox)
         return boxes, (rw, rh)
 
 
@@ -193,6 +201,141 @@ def crop(img, box):
     if h / w >= 1.5:
         out = np.rot90(out)
     return out
+
+
+# Изогнутые и тесные строки. Рамка строки — прямоугольник: у изогнутой строки (этикетка на
+# бутылке) текст в нём гуляет вверх-вниз, а у тесных строк в вырез залезают соседние сверху и
+# снизу. Таким строкам вырез — полоса вдоль средней линии области детектора, толщиной строки.
+# На двух снимках этикетки это 71 → 86 % слов; на наборе вывесок с просторными строками полоса
+# вместо прямоугольника у всех строк теряла 0,9 пункта, поэтому только там, где она нужна.
+SAG_MIN = 0.5       # прогиб дуги от хорды — от половины толщины строки: строка изогнута
+INTRUDE = 0.02      # чужих пикселей области в расширенном прямоугольнике — от 2 % своих: строки тесные
+LONG = 3.0          # полоса — только строке длиннее трёх её высот
+ARC_N = 2048        # точек на таблицу длины дуги
+
+
+def intrusion(lab, k, box):
+    """Сколько пикселей других областей внутри четырёхугольника (растр по центрам, как poly_mean)."""
+    H, W = lab.shape
+    x0 = max(0, int(math.floor(box[:, 0].min()))); x1 = min(W - 1, int(math.ceil(box[:, 0].max())))
+    y0 = max(0, int(math.floor(box[:, 1].min()))); y1 = min(H - 1, int(math.ceil(box[:, 1].max())))
+    if x1 < x0 or y1 < y0:
+        return 0
+    ys, xs = np.mgrid[y0:y1 + 1, x0:x1 + 1]
+    inside = np.ones(xs.shape, bool)
+    for i in range(4):
+        p, q = box[i], box[(i + 1) % 4]
+        inside &= (q[0] - p[0]) * (ys - p[1]) - (q[1] - p[1]) * (xs - p[0]) >= -1e-6
+    sub = lab[y0:y1 + 1, x0:x1 + 1]
+    return int(((sub != 0) & (sub != k) & inside).sum())
+
+
+def solve3(A, b):
+    """3×3 методом Гаусса с выбором главного — тем же порядком действий, что в OcrCore.solve3."""
+    M = [list(map(float, A[i])) + [float(b[i])] for i in range(3)]
+    for c in range(3):
+        piv = max(range(c, 3), key=lambda r: abs(M[r][c]))
+        M[c], M[piv] = M[piv], M[c]
+        if abs(M[c][c]) < 1e-12:
+            return None
+        for r in range(c + 1, 3):
+            f = M[r][c] / M[c][c]
+            for j in range(c, 4):
+                M[r][j] -= f * M[c][j]
+    x = [0.0] * 3
+    for r in (2, 1, 0):
+        acc = M[r][3]
+        for j in range(r + 1, 3):
+            acc -= M[r][j] * x[j]
+        x[r] = acc / M[r][r]
+    return x
+
+
+def strip_of(pts, box, ebox, lab, k, unclip, sx, sy):
+    """Полоса для изогнутой или тесной строки (None — вырезать прямоугольником, как раньше).
+    Средняя линия — парабола по серединам области поперёк строки (шаг — пиксель карты), толщина —
+    медиана её высоты; всё в координатах карты детектора, sx, sy — пересчёт в снимок."""
+    w, h = sides(box)
+    if w < LONG * h:
+        return None
+    u = (box[1] - box[0]) / w; nv = (box[3] - box[0]) / h; c0 = box.mean(0)
+    rx = pts[:, 0] - c0[0]; ry = pts[:, 1] - c0[1]
+    s = rx * u[0] + ry * u[1]; t = rx * nv[0] + ry * nv[1]
+    si = np.rint(s).astype(int)
+    lo = si.min(); nb = si.max() - lo + 1
+    tmin = np.full(nb, np.inf); tmax = np.full(nb, -np.inf); cnt = np.zeros(nb)
+    np.minimum.at(tmin, si - lo, t); np.maximum.at(tmax, si - lo, t); np.add.at(cnt, si - lo, 1)
+    ok = cnt > 0
+    if ok.sum() < 3:
+        return None
+    ks = np.nonzero(ok)[0] + lo
+    th = tmax[ok] - tmin[ok] + 1; mid = (tmin[ok] + tmax[ok]) / 2; wt = cnt[ok]
+    T = float(np.median(th))
+    smin, smax = float(s.min()), float(s.max())
+    S = max(abs(smin), abs(smax), 1.0)
+    A = [[0.0] * 3 for _ in range(3)]; b = [0.0] * 3
+    for kk, c, ww in zip(ks, mid, wt):
+        z = kk / S; v = (1.0, z, z * z)
+        for i in range(3):
+            b[i] += ww * c * v[i]
+            for j in range(3):
+                A[i][j] += ww * v[i] * v[j]
+    q = solve3(A, b)
+    if q is None:
+        return None
+    dz = (smax - smin) / S
+    sag = abs(q[2]) * dz * dz / 4
+    crowded = intrusion(lab, k, ebox) >= INTRUDE * len(pts)
+    if sag < SAG_MIN * T and not crowded:
+        return None
+    L = smax - smin + 1
+    d = L * T * unclip / (2 * (L + T))
+    return dict(u=u, n=nv, c0=c0, q=q, S=S, T=T, d=d, s0=smin - d, s1=smax + d, sx=sx, sy=sy,
+                sag=sag, crowded=crowded)
+
+
+def interp1(x, xp, fp):
+    """np.interp для одной точки (так же в OcrCore.interp)."""
+    if x <= xp[0]:
+        return fp[0]
+    if x >= xp[-1]:
+        return fp[-1]
+    j = int(np.searchsorted(xp, x, side='right')) - 1
+    return (fp[j + 1] - fp[j]) / (xp[j + 1] - xp[j]) * (x - xp[j]) + fp[j]
+
+
+def crop_strip(img, st):
+    """Вырез полосы: по длине дуги средней линии, поперёк — по её нормали, высота T + 2d."""
+    q, S = st['q'], st['S']
+    def cv(s):
+        z = s / S
+        return (q[2] * z + q[1]) * z + q[0]
+    def sl(s):
+        return (2 * q[2] * (s / S) + q[1]) / S
+    step = (st['s1'] - st['s0']) / (ARC_N - 1)
+    ss = [st['s0'] + i * step for i in range(ARC_N - 1)] + [st['s1']]
+    arc = [0.0]
+    g0 = sl(ss[0]); prev = math.sqrt(1 + g0 * g0)
+    for i in range(1, ARC_N):
+        gi = sl(ss[i]); cur = math.sqrt(1 + gi * gi)
+        arc.append(arc[-1] + (cur + prev) / 2 * (ss[i] - ss[i - 1])); prev = cur
+    sig = (st['sx'] + st['sy']) / 2
+    Wc = max(1, int(arc[-1] * sig)); Hc = max(1, int((st['T'] + 2 * st['d']) * sig))
+    half = st['T'] / 2 + st['d']
+    u, nv, c0 = st['u'], st['n'], st['c0']
+    X = np.empty((Hc, Wc)); Y = np.empty((Hc, Wc))
+    off = (np.arange(Hc) + 0.5) / sig - half            # поэлементно — те же действия, что в OcrCore
+    for x in range(Wc):
+        s = interp1((x + 0.5) / sig, arc, ss)
+        c = cv(s); g = sl(s); nrm = math.sqrt(1 + g * g); Nu = -g / nrm; Nn = 1 / nrm
+        a = s + off * Nu; b = c + off * Nn
+        X[:, x] = (c0[0] + a * u[0] + b * nv[0]) * st['sx'] - 0.5
+        Y[:, x] = (c0[1] + a * u[1] + b * nv[1]) * st['sy'] - 0.5
+    return bilinear(img, X, Y)
+
+
+def crop_line(img, box, st):
+    return crop_strip(img, st) if st is not None else crop(img, box)
 
 
 def bilinear(img, X, Y):
@@ -289,7 +432,7 @@ def layout(boxes, texts, min_score=0.5):
         if s < min_score or not t.strip():
             continue
         L, R, u, h = geom(b)
-        items.append(dict(b=b, t=t.strip(), L=L, R=R, u=u, h=h, c=(L + R) / 2))
+        items.append(dict(b=b, t=t.strip(), s=float(s), L=L, R=R, u=u, h=h, c=(L + R) / 2))
     items.sort(key=lambda it: it['L'][0])
     rows = []
     for it in items:
@@ -316,7 +459,7 @@ def layout(boxes, texts, min_score=0.5):
         h = float(np.mean([it['h'] for it in row]))
         c = np.mean([it['c'] for it in row], 0); u = row[0]['u']
         rs.append(dict(text=' '.join(it['t'] for it in row), x0=float(pts[:, 0].min()), x1=float(pts[:, 0].max()),
-                       c=c, u=u, h=h, boxes=[it['b'] for it in row]))
+                       c=c, u=u, h=h, boxes=[it['b'] for it in row], scores=[(len(it['t']), it['s']) for it in row]))
     rs.sort(key=lambda r: r['c'][1])
 
     def y_at(r, x):
@@ -390,6 +533,15 @@ def paragraphs(block):
     return out
 
 
+CONF_MIN = 0.80    # абзац с уверенностью ниже не переводится: ниже 0,82 на наборе — почти только мусор
+
+
+def para_conf(rows):
+    """Уверенность абзаца: средняя уверенность распознавателя по его рамкам, с весом длины текста."""
+    n = sum(l for r in rows for l, _ in r['scores'])
+    return sum(l * sc for r in rows for l, sc in r['scores']) / n if n else 0.0
+
+
 def lines_of(boxes, texts, min_score=0.5):
     """Строки как на вывеске, по порядку чтения (для сверки с расшифровкой)."""
     return '\n'.join(r['text'] for bl in layout(boxes, texts, min_score) for r in bl)
@@ -411,7 +563,7 @@ class Ocr:
         t0 = time.time()
         boxes, _ = self.det.run(img)
         t1 = time.time()
-        texts = self.rec.run([crop(img, b) for b in boxes]) if boxes else []
+        texts = self.rec.run([crop_line(img, b, st) for b, st in zip(boxes, self.det.strips)]) if boxes else []
         t2 = time.time()
         self.last = (boxes, texts)
         return lines_of(boxes, texts), {'det_ms': (t1 - t0) * 1000, 'rec_ms': (t2 - t1) * 1000, 'boxes': len(boxes)}

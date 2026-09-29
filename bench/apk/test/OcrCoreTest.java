@@ -165,6 +165,59 @@ public class OcrCoreTest {
     double[] f = para.frame();
     ok(near(f[0], 105, 1e-9) && near(f[1], 20, 1e-9) && near(f[4], 190, 1e-9) && near(f[5], 20, 1e-9), "L9 прямоугольник абзаца — по его рамкам");
 
+    // --- S: изогнутые и тесные строки — полоса вдоль средней линии ---
+    int SW = 200, SH = 70; float[] curved = new float[SW * SH];
+    for (int x = 20; x <= 180; x++) { double c = 20 + 0.004 * (x - 100) * (x - 100); for (int y = 0; y < SH; y++) if (Math.abs(y - c) <= 3) curved[y * SW + x] = 0.9f; }
+    List<OcrCore.Strip> cs = new ArrayList<>(); List<double[]> cb = OcrCore.boxes(curved, SW, SH, 2 * SW, 2 * SH, cs);
+    OcrCore.Strip s1 = cs.isEmpty() ? null : cs.get(0);
+    ok(cb.size() == 1 && s1 != null && !s1.crowded && s1.sag > 20 && Math.abs(s1.T - 7) <= 1,
+        "S1 дуга с прогибом 25 при толщине 7 — полоса: " + (s1 == null ? "нет" : "прогиб " + String.format("%.1f", s1.sag) + ", толщина " + s1.T));
+    ok(OcrCore.polyMean(curved, SW, SH, OcrCore.minAreaRect(Arrays.asList(new double[]{20, 45.6}, new double[]{180, 45.6}, new double[]{100, 17}, new double[]{100, 23}))) < OcrCore.BOX_THRESH
+        && OcrCore.boxes(curved, SW, SH, SW, SH).size() == 1,
+        "S1 её прямоугольник заполнен меньше чем наполовину — раньше строка отбрасывалась, теперь остаётся");
+    float[] blob = new float[SW * SH];                           // не дуга, а редкое пятно — отбрасывается, как раньше
+    for (int x = 20; x <= 180; x += 2) for (int y = 20; y <= 40; y += 2) blob[y * SW + x] = 0.9f;
+    for (int x = 20; x <= 180; x++) blob[30 * SW + x] = 0.9f;
+    for (int y = 20; y <= 40; y++) for (int x = 20; x <= 180; x += 2) blob[y * SW + x] = Math.max(blob[y * SW + x], 0.25f);
+    ok(OcrCore.boxes(blob, SW, SH, SW, SH).isEmpty(), "S1 редкая область без дуги с низкой средней — по-прежнему не строка");
+    if (s1 != null) {                                           // снимок ×2: тёмная дуга на белом
+      int[] im = new int[4 * SW * SH]; for (int y = 0; y < 2 * SH; y++) for (int x = 0; x < 2 * SW; x++) {
+        double c = 20 + 0.004 * (x / 2.0 - 100) * (x / 2.0 - 100); im[y * 2 * SW + x] = Math.abs(y / 2.0 - c) <= 3 ? 0xFF000000 : 0xFFFFFFFF; }
+      int[] swh = new int[2]; int[] sp = OcrCore.cropStrip(im, 2 * SW, 2 * SH, s1, swh);
+      int cw2 = swh[0], ch2 = swh[1], mid = 0, top = 0, scols = 0;
+      for (int x = cw2 / 8; x < cw2 - cw2 / 8; x++) { scols++; if ((sp[(ch2 / 2) * cw2 + x] & 255) < 64) mid++; if ((sp[x] & 255) > 192) top++; }
+      ok(cw2 > 2 * 160 && mid >= 0.95 * scols && top >= 0.95 * scols,
+          "S2 вырез полосы — дуга выпрямлена: середина тёмная на " + mid + "/" + scols + ", верх светлый на " + top + "/" + scols + " (" + cw2 + "×" + ch2 + ")");
+      int[] rwh = new int[2]; int[] rp = OcrCore.crop(im, 2 * SW, 2 * SH, cb.get(0), rwh); int rmid = 0;
+      for (int x = rwh[0] / 8; x < rwh[0] - rwh[0] / 8; x++) if ((rp[(rwh[1] / 2) * rwh[0] + x] & 255) < 64) rmid++;
+      ok(rmid < 0.6 * scols, "S2 рамкой та же дуга по середине выреза тёмная лишь местами: " + rmid + "/" + scols);
+    }
+    float[] sflat = new float[SW * SH]; for (int y = 27; y <= 33; y++) for (int x = 20; x <= 180; x++) sflat[y * SW + x] = 0.9f;
+    List<OcrCore.Strip> fs = new ArrayList<>(); OcrCore.boxes(sflat, SW, SH, SW, SH, fs);
+    ok(fs.size() == 1 && fs.get(0) == null, "S3 прямая строка без соседей — рамкой, как раньше");
+    float[] stwo = new float[SW * SH];
+    for (int x = 20; x <= 180; x++) { for (int y = 17; y <= 23; y++) stwo[y * SW + x] = 0.9f; for (int y = 25; y <= 31; y++) stwo[y * SW + x] = 0.9f; }
+    List<OcrCore.Strip> tws = new ArrayList<>(); OcrCore.boxes(stwo, SW, SH, SW, SH, tws);
+    ok(tws.size() == 2 && tws.get(0) != null && tws.get(1) != null && tws.get(0).crowded && tws.get(1).crowded && tws.get(0).sag < 0.5,
+        "S4 две прямые строки через пустой ряд — тесные, обе полосой (сосед ниже ещё не разобран — разметка целиком)");
+    float[] apart = new float[SW * SH];
+    for (int x = 20; x <= 180; x++) { for (int y = 10; y <= 16; y++) apart[y * SW + x] = 0.9f; for (int y = 40; y <= 46; y++) apart[y * SW + x] = 0.9f; }
+    List<OcrCore.Strip> as = new ArrayList<>(); OcrCore.boxes(apart, SW, SH, SW, SH, as);
+    ok(as.size() == 2 && as.get(0) == null && as.get(1) == null, "S5 строки с просторным интервалом — рамкой");
+    float[] shortc = new float[SW * SH];
+    for (int x = 95; x <= 110; x++) { double c = 30 + 0.04 * (x - 102) * (x - 102); for (int y = 0; y < SH; y++) if (Math.abs(y - c) <= 3) shortc[y * SW + x] = 0.9f; }
+    List<OcrCore.Strip> ss = new ArrayList<>(); OcrCore.boxes(shortc, SW, SH, SW, SH, ss);
+    ok(ss.size() == 1 && ss.get(0) == null, "S6 короткая область (длина меньше трёх высот) — рамкой, хоть и изогнута");
+    double[] sol = OcrCore.solve3(new double[][]{{0, 2, 1}, {1, 1, 1}, {2, 1, 0}}, new double[]{5, 4, 4});
+    ok(sol != null && near(sol[0], 1, 1e-12) && near(sol[1], 2, 1e-12) && near(sol[2], 1, 1e-12)
+        && OcrCore.solve3(new double[][]{{1, 2, 3}, {2, 4, 6}, {1, 1, 1}}, new double[]{1, 2, 3}) == null, "S7 система 3×3: с перестановкой строк; вырожденная — null");
+    double[] xp = {0, 1, 3}, fp = {10, 20, 40};
+    ok(OcrCore.interp(-1, xp, fp) == 10 && OcrCore.interp(0.5, xp, fp) == 15 && OcrCore.interp(2, xp, fp) == 30 && OcrCore.interp(1, xp, fp) == 20
+        && OcrCore.interp(9, xp, fp) == 40, "S8 линейная интерполяция как np.interp: края — крайние значения");
+    OcrCore.Row pr = new OcrCore.Row(); pr.items.add(new OcrCore.Item(box(0, 0, 10, 0, 10, 5, 0, 5), "abcd", 0.9)); pr.items.add(new OcrCore.Item(box(12, 0, 20, 0, 20, 5, 12, 5), "ab", 0.6)); pr.close();
+    OcrCore.Para spp = OcrCore.paragraphs(Collections.singletonList(pr)).get(0);
+    ok(near(spp.score(), (4 * 0.9 + 2 * 0.6) / 6, 1e-12) && OcrCore.CONF_MIN == 0.80, "S9 уверенность абзаца — средняя с весом длины текста; порог перевода 0,80");
+
     // --- K: цвета наложения ---
     int W = 60, H = 40; int[] sign = new int[W * H]; Arrays.fill(sign, 0xFF2040C0);
     for (int y = 16; y < 24; y++) for (int x = 12; x < 48; x += 3) sign[y * W + x] = 0xFFFFFFFF;
@@ -381,7 +434,8 @@ public class OcrCoreTest {
     float[] din = OcrCore.detInput(argb, w, h, pw, ph), pin = f32(new File(d, "det_in.f32")); double md = 0;
     for (int i = 0; i < din.length; i++) md = Math.max(md, Math.abs(din[i] - pin[i]));
     ok(din.length == pin.length && md < 2e-3, "G2 " + id + ": вход детектора совпадает с эталоном (наибольшее расхождение " + String.format("%.1e", md) + ")");
-    List<double[]> bx = OcrCore.boxes(f32(new File(d, "prob.f32")), pw, ph, w, h);
+    List<OcrCore.Strip> st = new ArrayList<>();
+    List<double[]> bx = OcrCore.boxes(f32(new File(d, "prob.f32")), pw, ph, w, h, st);
     JSONArray eb = m.getJSONArray("boxes"); double mb = 0; boolean cnt = bx.size() == eb.length();
     for (int i = 0; cnt && i < bx.size(); i++) for (int k = 0; k < 8; k++) mb = Math.max(mb, Math.abs(bx.get(i)[k] - eb.getJSONArray(i).getDouble(k)));
     ok(cnt && mb < 1e-3, "G3 " + id + ": рамки строк как в эталоне (" + bx.size() + " против " + eb.length() + ", расхождение " + String.format("%.1e", mb) + " px)");
@@ -391,8 +445,29 @@ public class OcrCoreTest {
     for (int i = 0; i < c0.length && 3 * i + 2 < ec.length(); i++)
       for (int c = 0; c < 3; c++) diff = Math.max(diff, Math.abs(((c0[i] >> (16 - 8 * c)) & 255) - ec.getInt(3 * i + c)));
     ok(ec.length() == 3 * c0.length && diff <= 1, "G4 " + id + ": вырез первой строки совпадает (до единицы яркости: " + diff + ")");
+    // полосы изогнутых и тесных строк: те же строки и те же параметры, что у эталона
+    JSONArray es = m.getJSONArray("strips"); boolean sameSet = st.size() == es.length(); double mq = 0; int ns = 0;
+    for (int i = 0; sameSet && i < st.size(); i++) {
+      OcrCore.Strip a = st.get(i); boolean isNull = es.isNull(i);
+      if ((a == null) != isNull) { sameSet = false; break; }
+      if (a == null) continue;
+      ns++; JSONObject e = es.getJSONObject(i); JSONArray q = e.getJSONArray("q");
+      mq = Math.max(mq, Math.max(Math.abs(a.q0 - q.getDouble(0)), Math.max(Math.abs(a.q1 - q.getDouble(1)), Math.abs(a.q2 - q.getDouble(2)))));
+      mq = Math.max(mq, Math.max(Math.abs(a.T - e.getDouble("T")), Math.max(Math.abs(a.d - e.getDouble("d")), Math.abs(a.s1 - e.getDouble("s1")))));
+      if (a.crowded != e.getBoolean("crowded")) sameSet = false;
+    }
+    ok(sameSet && mq < 1e-6, "G9 " + id + ": полосы изогнутых и тесных строк как у эталона (" + ns + ", расхождение " + String.format("%.1e", mq) + ")");
+    if (!m.isNull("strip0")) {
+      JSONObject s0 = m.getJSONObject("strip0"); int[] swh = new int[2];
+      int[] sc = OcrCore.cropStrip(argb, w, h, st.get(s0.getInt("k")), swh);
+      JSONArray px = s0.getJSONArray("px"); int sdiff = 0, over = 0;
+      for (int i = 0; i < sc.length && 3 * i + 2 < px.length(); i++)
+        for (int c = 0; c < 3; c++) { int dd = Math.abs(((sc[i] >> (16 - 8 * c)) & 255) - px.getInt(3 * i + c)); sdiff = Math.max(sdiff, dd); if (dd > 1) over++; }
+      ok(swh[0] == s0.getInt("w") && swh[1] == s0.getInt("h") && px.length() == 3 * sc.length && sdiff <= 1,
+          "G10 " + id + ": вырез первой полосы " + swh[0] + "×" + swh[1] + " совпадает (до единицы яркости: " + sdiff + ")");
+    }
     List<int[]> shapes = new ArrayList<>(); List<int[]> crops = new ArrayList<>();
-    for (double[] b : bx) { int[] s = new int[2]; crops.add(OcrCore.crop(argb, w, h, b, s)); shapes.add(s); }
+    for (int i = 0; i < bx.size(); i++) { int[] s = new int[2]; crops.add(st.get(i) != null ? OcrCore.cropStrip(argb, w, h, st.get(i), s) : OcrCore.crop(argb, w, h, bx.get(i), s)); shapes.add(s); }
     Integer[] ord = OcrCore.recOrder(shapes); int n = Math.min(OcrCore.REC_BATCH, ord.length);
     List<int[]> first = new ArrayList<>(); for (int j = 0; j < n; j++) first.add(shapes.get(ord[j]));
     int W = OcrCore.recWidth(first);
@@ -405,11 +480,16 @@ public class OcrCoreTest {
     List<OcrCore.Item> items = new ArrayList<>(); JSONArray tx = m.getJSONArray("texts");
     for (int i = 0; i < bx.size(); i++) {
       JSONArray t = tx.getJSONArray(i);
-      if (t.getDouble(1) >= OcrCore.MIN_SCORE && !t.getString(0).trim().isEmpty()) items.add(new OcrCore.Item(bx.get(i), t.getString(0)));
+      if (t.getDouble(1) >= OcrCore.MIN_SCORE && !t.getString(0).trim().isEmpty()) items.add(new OcrCore.Item(bx.get(i), t.getString(0), t.getDouble(1)));
     }
     List<List<OcrCore.Row>> blocks = OcrCore.layout(items);
     ok(OcrCore.lines(blocks).equals(m.getString("lines")), "G7 " + id + ": строки и их порядок как в эталоне");
     ok(String.join("\n", paras(blocks)).equals(m.getString("text")), "G8 " + id + ": абзацы для перевода как в эталоне");
+    JSONArray ecf = m.getJSONArray("conf"); List<Double> cf = new ArrayList<>();
+    for (List<OcrCore.Row> bl : blocks) for (OcrCore.Para p : OcrCore.paragraphs(bl)) cf.add(p.score());
+    double mc = cf.size() == ecf.length() ? 0 : 1;
+    for (int i = 0; i < Math.min(cf.size(), ecf.length()); i++) mc = Math.max(mc, Math.abs(cf.get(i) - ecf.getDouble(i)));
+    ok(mc < 1e-9, "G11 " + id + ": уверенность абзацев как у эталона");
   }
 
   public static void main(String[] a) throws Exception { System.exit(run(a.length > 0 ? new File(a[0]) : null) == 0 ? 0 : 1); }
