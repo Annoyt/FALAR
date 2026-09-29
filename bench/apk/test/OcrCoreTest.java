@@ -200,6 +200,18 @@ public class OcrCoreTest {
     List<OcrCore.Strip> tws = new ArrayList<>(); OcrCore.boxes(stwo, SW, SH, SW, SH, tws);
     ok(tws.size() == 2 && tws.get(0) != null && tws.get(1) != null && tws.get(0).crowded && tws.get(1).crowded && tws.get(0).sag < 0.5,
         "S4 две прямые строки через пустой ряд — тесные, обе полосой (сосед ниже ещё не разобран — разметка целиком)");
+    float[] even = new float[SW * SH];                         // 160 столбцов: полуцелые s, по два столбца в ячейке, ячеек чётное число
+    for (int x = 20; x <= 179; x++) { for (int y = 17; y <= 23; y++) even[y * SW + x] = 0.9f; for (int y = 25; y <= 31; y++) even[y * SW + x] = 0.9f; }
+    List<OcrCore.Strip> evs = new ArrayList<>(); OcrCore.boxes(even, SW, SH, SW, SH, evs);
+    ok(evs.size() == 2 && evs.get(0) != null && evs.get(0).T == 7 && tws.get(0).T == 7,
+        "S4 толщина — медиана высот и при чётном, и при нечётном числе ячеек: 7");
+    float[] pale = new float[SW * SH];                         // та же дуга, но бледная: и по самой области ниже порога
+    for (int i = 0; i < curved.length; i++) pale[i] = curved[i] > 0 ? 0.3f : 0;
+    ok(OcrCore.boxes(pale, SW, SH, SW, SH).isEmpty(), "S1 бледная дуга (0,3 < 0,45 и по области) — не строка");
+    float[] hook = new float[SW * SH];                         // «U» 12×12 из линий в пиксель: прямоугольник пуст на три четверти, полосы у короткой нет
+    for (int y = 20; y <= 31; y++) { hook[y * SW + 90] = 0.9f; hook[y * SW + 101] = 0.9f; }
+    for (int x = 90; x <= 101; x++) hook[31 * SW + x] = 0.9f;
+    ok(OcrCore.boxes(hook, SW, SH, SW, SH).isEmpty(), "S6 короткая дуга с полупустым прямоугольником — не строка, как раньше");
     float[] apart = new float[SW * SH];
     for (int x = 20; x <= 180; x++) { for (int y = 10; y <= 16; y++) apart[y * SW + x] = 0.9f; for (int y = 40; y <= 46; y++) apart[y * SW + x] = 0.9f; }
     List<OcrCore.Strip> as = new ArrayList<>(); OcrCore.boxes(apart, SW, SH, SW, SH, as);
