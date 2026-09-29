@@ -839,7 +839,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bMic = new MicButton(this); bMic.setEnabled(false);
     bMic.setContentDescription("Удерживайте и говорите — по-португальски или по-русски");
     FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(dp(128), dp(128), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-    mp.bottomMargin = dp(10);
+    mp.bottomMargin = dp(44);                     // свечение расходится на 40 dp за край кнопки — не резать его краем списка
     histBox.addView(bMic, mp);
     v.addView(histBox, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -914,7 +914,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Пока круг над списком, список дотягивается выше него: последняя реплика не остаётся под кругом.
     boolean micOn = m == 1 && !folded;
     bMic.setVisibility(micOn ? View.VISIBLE : View.GONE);
-    histList.setPadding(0, 0, 0, micOn ? dp(138) : 0);
+    histList.setPadding(0, 0, 0, micOn ? dp(172) : 0);
     Button[] bs = {bModeInput, bModePtt, bModeListen};
     for (int k = 0; k < bs.length; k++) bs[k].setTypeface(null, k == m ? Typeface.BOLD : Typeface.NORMAL);
     for (int k = 0; k < bs.length; k++) bs[k].setSelected(k == m && !folded);
@@ -941,9 +941,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     boolean on = svc != null && (svc.listenPt || svc.listenRu);
     bModeListen.setText(on ? "👂 слушаю ▶" : "👂 слушать");
     hearListen.setBar(on);
-    Hearing h = svc == null ? null : svc.hearing;
-    if (!on) hearListen.setLine(LISTEN_HINT, Color.GRAY);
-    else if (h == null) hearListen.setLine("слушаю — как слышно, будет видно после первой фразы", Color.GRAY);
     meter();
   }
 
@@ -952,10 +949,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   final Runnable meterTick = new Runnable() { public void run() {
     boolean listening = svc != null && (svc.listenPt || svc.listenRu), holding = svc != null && svc.recording;
     if (!resumed || (!listening && !holding)) { meterOn = false; return; }
-    if (holding) bMic.setLevel(svc.levelDb, svc.levelOver);
+    if (holding) bMic.setLevel(svc.levelDb, svc.liveQ);
     else if (modeNow == 2 && !folded) {
       double nz = svc.noiseRms;
-      hearListen.setLevel(svc.levelDb, nz > 0 ? (float) TranslatorService.db(nz) : Float.NaN, svc.levelOver);
+      hearListen.setLevel(svc.levelDb, nz > 0 ? (float) TranslatorService.db(nz) : Float.NaN, svc.liveQ, svc.liveSpeech);
     }
     ui.postDelayed(this, holding ? 100 : 200);
   }};
@@ -1014,12 +1011,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }, "photo").start();
   }
 
-  /** Как слышно последнюю фразу — в строке под кнопками того режима, в котором она сказана. */
-  @Override public void onHearing(Hearing h) {
-    if (h == null || hearPtt == null) return;
-    hearPtt.setLine(h.text, h.color());
-    if (svc != null && (svc.listenPt || svc.listenRu)) hearListen.setLine(h.text, h.color());
-  }
   /** Снимок в JPEG разумного размера: 12 Мп ни распознавателю, ни каналу не нужны. */
   byte[] jpegOf(android.net.Uri u) {
     try {
@@ -1556,6 +1547,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     show(0); if (folded) fold(false);
     if ("meter".equals(kind)) { meterDemo(ms, was, wasFolded); return; }
+    if ("live".equals(kind)) { liveDemo(ms, was, wasFolded); return; }
     mode(1);
     bMic.demo(kind, ms, () -> {
       getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -1574,8 +1566,27 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         mode(was); if (wasFolded) fold(true); markListen(); return;
       }
       lv = Math.max(-55, Math.min(-12, lv + (float) rnd.nextGaussian() * 6));   // слоги то громче, то тише
-      hearListen.setLevel(lv, -48, false);
+      hearListen.setLevel(lv, -48, (float) Hearing.quality(lv, lv + 48), lv > -38);
       ui.postDelayed(this, 200);
+    }});
+  }
+  /** Стенд: кнопка удержания нажата, уровень и цвет — как у речи, без микрофона: по 3 с тишина
+   *  (красный, свечение у края), тихая речь (жёлтый) и хорошая (зелёный, свечение вширь), по кругу.
+   *  Снимки экрана и цена свечения (measure_mic_anim.sh, вид live). */
+  void liveDemo(long ms, int was, boolean wasFolded) {
+    mode(1);
+    bMic.demo("pulse30", ms, () -> {
+      getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+      mode(was); if (wasFolded) fold(true);
+    });
+    final long t0 = android.os.SystemClock.uptimeMillis(), end = t0 + ms; final java.util.Random rnd = new java.util.Random(7);
+    ui.post(new Runnable() { public void run() {
+      long t = android.os.SystemClock.uptimeMillis();
+      if (t >= end) return;
+      int phase = (int) ((t - t0) / 3000 % 3);
+      float q = phase == 0 ? 0 : phase == 1 ? 0.45f : 1, lv = phase == 0 ? -62 : (phase == 1 ? -42 : -22) + (float) rnd.nextGaussian() * 5;
+      bMic.setLevel(lv, q);
+      ui.postDelayed(this, 100);
     }});
   }
   boolean enroll(MotionEvent e, String who, String lang) {

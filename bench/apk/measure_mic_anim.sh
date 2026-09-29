@@ -2,11 +2,13 @@
 # Во что обходится движение кнопки удержания: вращение кольца или пульс ореола — на телефоне.
 #
 #   bash bench/apk/measure_mic_anim.sh [повторов=2] [окно, с=10]
-#   KINDS="pulse pulse30" bash bench/apk/measure_mic_anim.sh 4
+#   KINDS="none live" bash bench/apk/measure_mic_anim.sh 3
 #
-# Виды — MicButton.kind: pulse30 (рабочий), pulse (тот же пульс на каждом кадре экрана), spin
-# (вращение кольца надписей), none (нажатая позиция без движения — нулевая точка); meter —
-# полоска уровня под кнопками слушания с уровнем, похожим на речь (MainActivity.meterDemo).
+# Виды: live — рабочий: кнопка удержания с цветом и свечением по уровню, похожему на речь
+# (MainActivity.liveDemo); pulse30 — ровный пульс без уровня; spin — вращение кольца надписей;
+# none — нажатая позиция без движения (нулевая точка); meter — полоска уровня под кнопками
+# слушания (MainActivity.meterDemo). Пульс на каждом кадре экрана (pulse) из кода убран — замер
+# 2026-09-29 в results/2026-09-29-mic-button.md.
 # Приложение показывает нажатую позицию без записи (--es micanim <вид>): микрофон не открывается,
 # в разговоры ничего не попадает. За окно считается время на процессоре (нс из schedstat) — главный
 # поток приложения, его RenderThread, весь процесс, SurfaceFlinger, все ядра по /proc/stat — и кадры
@@ -20,7 +22,7 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 REP=${1:-2}; WIN=${2:-10}
-KINDS=(${KINDS:-none spin pulse pulse30 meter})
+KINDS=(${KINDS:-none spin pulse30 meter live})
 D=$(mktemp -d /tmp/falar-micanim.XXXX); RAW=$D/raw.txt
 sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
 say() { printf '%s\n' "$*"; }
@@ -107,7 +109,7 @@ for block in open(sys.argv[1], encoding="utf-8").read().split("@run ")[1:]:
                  "f50": g.get("cpu50"), "f90": g.get("cpu90"), "gpu50": g.get("gpu50"), "gpu90": g.get("gpu90")})
 print("\nмс процессора на секунду окна (среднее ± половина разброса), кадры — последнего прогона вида")
 print("%-11s %2s %11s %11s %11s %11s %13s %11s  %9s  %9s" % ("вид", "n", "главный", "Render", "процесс", "SF", "все ядра", "кадр/с", "кадр50/90", "GPU50/90"))
-for kind in ["none", "spin", "pulse", "pulse30", "meter"]:
+for kind in ["none", "spin", "pulse", "pulse30", "meter", "live"]:
     rs = [r for r in runs if r["kind"] == kind]
     if not rs: continue
     def f(key):

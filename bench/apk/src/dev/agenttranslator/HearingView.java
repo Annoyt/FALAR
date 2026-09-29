@@ -6,8 +6,10 @@ import android.text.TextPaint;
 import android.text.TextUtils;
 import android.view.View;
 
-/** Строка «как слышно» под кнопками слушания и под кнопкой удержания: слева полоска уровня входа
- *  с отметкой фона, справа — как слышно последнюю фразу (Hearing) или обычная подсказка.
+/** Строка под кнопками слушания и под кнопкой удержания: слева — полоска уровня входа с отметкой
+ *  фона, пока слушаем, справа — обычная подсказка. Полоска окрашена тем, как слышно
+ *  (Hearing.quality): зелёная — громкости хватает, чем краснее — тем тише и вероятнее ошибки;
+ *  в паузе — серая. Слов о том, как слышно, здесь нет — они в журнале.
  *
  *  Полоска перерисовывается, только когда её длина меняется на экранный пиксель: любая
  *  перерисовка — это перерисовка всего экрана (results/2026-09-29-mic-button.md), поэтому в
@@ -18,7 +20,7 @@ public class HearingView extends View {
   final TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG);
   final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG), tick = new Paint(Paint.ANTI_ALIAS_FLAG);
   final float dp; final RectF r = new RectF();
-  boolean bar = false, over = false; float level = LO, floor = Float.NaN; int shownPx = -1, shownFloorPx = -1;
+  boolean bar = false; float level = LO, floor = Float.NaN; int shownPx = -1, shownFloorPx = -1, shownColor = 0;
   String line = ""; int lineColor = 0xFF808080;
 
   public HearingView(Context c) {
@@ -36,11 +38,13 @@ public class HearingView extends View {
     line = s; lineColor = color; setContentDescription(s); invalidate();   // строку читает TalkBack и стенд (uiautomator)
   }
 
-  /** Уровень и фон в dBFS; over — вход упёрся в край шкалы. Перерисовка — только если сдвинулось. */
-  public void setLevel(float db, float floorDb, boolean ov) {
+  /** Уровень и фон в dBFS, как слышно 0…1 и была ли сейчас речь. Перерисовка — только если
+   *  сдвинулись длина полоски, отметка фона или цвет (оттенок шагами по 5°). */
+  public void setLevel(float db, float floorDb, float q, boolean speech) {
     level = db; floor = floorDb;
     int px = px(db), fpx = Float.isNaN(floorDb) ? -1 : px(floorDb);
-    if (px != shownPx || fpx != shownFloorPx || ov != over) { over = ov; shownPx = px; shownFloorPx = fpx; invalidate(); }
+    int col = speech ? MicButton.qColor(Math.round(q * 24) / 24f, 0.75f, 0.70f) : 0xFF9E9E9E;
+    if (px != shownPx || fpx != shownFloorPx || col != shownColor) { shownPx = px; shownFloorPx = fpx; shownColor = col; invalidate(); }
   }
 
   int barW() { return Math.round(64 * dp); }
@@ -56,12 +60,7 @@ public class HearingView extends View {
     if (bar) {
       float bw = barW(), bh = 6 * dp;
       r.set(0, cy - bh / 2, bw, cy + bh / 2); cv.drawRoundRect(r, bh / 2, bh / 2, track);
-      // У фона — серый: в паузе между фразами говорить «тихо» не о чем. Выше фона: зелёный —
-      // рабочий уровень, янтарный — тише или громче его, красный — у края шкалы или перегруз
-      // входа. Пороги те же, что у строки (Hearing), только здесь — пик, а не вся фраза.
-      boolean speech = Float.isNaN(floor) || level > floor + 10;
-      fill.setColor(over || level > -6 ? 0xFFC62828 : !speech ? 0xFF9E9E9E
-          : level < Hearing.QUIET_DB || level > Hearing.LOUD_DB ? 0xFFB26A00 : 0xFF2E7D4F);
+      fill.setColor(shownColor);
       if (shownPx > 0) { r.set(0, cy - bh / 2, shownPx, cy + bh / 2); cv.drawRoundRect(r, bh / 2, bh / 2, fill); }
       if (shownFloorPx >= 0) cv.drawRect(shownFloorPx - dp, cy - bh, shownFloorPx + dp, cy + bh, tick);
       x = bw + 8 * dp;

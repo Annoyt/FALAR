@@ -33,9 +33,7 @@ public class TranslatorService extends Service {
     void onUpdate(String state);
     /** Что приложение делает прямо сейчас: «перевожу…», «уточняю перевод» — для полосы на экране
      *  разговора. what == null — ничего; total > 0 — сделано done из total, иначе без хода. */
-    void onBusy(String what, int done, int total);
-    /** Как слышно последнюю фразу — удержания или прослушивания: строка под кнопками. */
-    void onHearing(Hearing h); }
+    void onBusy(String what, int done, int total); }
   public class LocalBinder extends Binder { public TranslatorService get() { return TranslatorService.this; } }
   final IBinder binder = new LocalBinder(); final Handler main = new Handler(Looper.getMainLooper());
   final ExecutorService worker = Executors.newSingleThreadExecutor(); volatile Listener listener;
@@ -93,8 +91,13 @@ public class TranslatorService extends Service {
    *  (1,5 дБ за кадр 32 мс), чтобы опрос 5–10 раз в секунду видел всплески, а не случайный кадр.
    *  levelOver — вход в кадре упёрся в край шкалы ещё до усиления. */
   volatile float levelDb = -120; volatile boolean levelOver = false; volatile long levelAt = 0;
-  /** Как слышно последнюю фразу. */
-  volatile Hearing hearing = null;
+  /** Как слышно прямо сейчас, 0…1 (Hearing.quality) — цвет кнопки удержания и полоски под
+   *  кнопками слушания: 1 — зелёный, 0 — красный. Следует за речью с лёгким сглаживанием, а в
+   *  тишине за секунду сходит к нулю: держат кнопку и молчат — «не слышу». liveSpeech — речь была
+   *  в последнюю секунду (полоске слушания в паузе красный не нужен — там пауза нормальна). */
+  volatile float liveQ = 0; volatile boolean liveSpeech = false; long liveSpeechAt = 0;
+  /** Удержание: фон — нижняя огибающая уровня (вверх ~1 дБ/с), голос — пик с плавным спадом, dBFS до усиления. */
+  float pttFloorDb = Float.NaN, pttPeakDb = -120;
   /** Как слышно последнюю фразу, для журнала at.tsv: речь и фон по самой фразе, доли отсчётов —
    *  перегруз входа, работа ограничителя, срез. */
   volatile double segGainDb = 0, segSpeechDb = Double.NaN, segFloorDb = Double.NaN, segOverPct = 0, segLimPct = 0, segCutPct = 0;
@@ -757,6 +760,7 @@ public class TranslatorService extends Service {
     notify(on ? "Слушаю…" : "Микрофон выключен"); }
   public void pttStart(String dir) {
     synchronized (pttBuf) { pttBuf.clear(); }
+    pttFloorDb = Float.NaN; pttPeakDb = -120; liveQ = 0; liveSpeechAt = 0; liveSpeech = false; levelDb = -120;
     pttDir = dir; recording = true;
     // Удержание принимает любой язык: на время записи снимаем закрепление от кнопок.
     pttFixed = fixedDir; pttAuto = autoLang; fixedDir = null; autoLang = true;
@@ -784,19 +788,37 @@ public class TranslatorService extends Service {
     worker.submit(() -> { hear(Gain.speechFloor(all), st, g.db); segDb = db(rms(all, all.length)); segNoiseDb = segFloorDb; process(d, all, 16000, true); });
   }
 
-  /** Полосе уровня во время удержания: уровень кадра с учётом усиления и перегруз входа. */
+  /** Удержание, каждый кадр: уровень для кольца (с учётом ручного усиления) и как слышно —
+   *  по уровню, который дойдёт до распознавания (в авто — после подстройки к TARGET_DB), и запасу
+   *  голоса над фоном. */
   void level(float[] c, int n, double gainDb) {
     float peak = 0; for (int k = 0; k < n; k++) peak = Math.max(peak, Math.abs(c[k]));
-    levelDb = (float) Math.max(Math.min(0, db(rms(c, n)) + gainDb), levelDb - 1.5); levelOver = peak >= Gain.OVER; levelAt = System.currentTimeMillis();
+    float r = (float) db(rms(c, n));
+    levelDb = (float) Math.max(Math.min(0, r + gainDb), levelDb - 1.5); levelOver = peak >= Gain.OVER; levelAt = System.currentTimeMillis();
+    pttFloorDb = Float.isNaN(pttFloorDb) ? r : Math.min(r, pttFloorDb + 0.03f);
+    pttPeakDb = Math.max(r, pttPeakDb - 1.5f);
+    double eff = ENROLL.equals(pttDir) ? pttPeakDb : autoOn() ? pttPeakDb + clampAuto(TARGET_DB - pttPeakDb) : pttPeakDb + gainDb;
+    live(pttPeakDb, pttFloorDb, eff);
+  }
+
+  /** Как слышно сейчас: речь — голос на 10 дБ и больше над фоном. */
+  void live(double lvl, double floor, double eff) {
+    long now = android.os.SystemClock.uptimeMillis();
+    if (!Double.isNaN(floor) && lvl - floor >= 10) {
+      liveSpeechAt = now;
+      liveQ += 0.3f * ((float) Hearing.quality(eff, lvl - floor) - liveQ);
+    } else liveQ = Math.max(0, liveQ - 0.03f);                  // кадр 32 мс: за секунду тишины — к нулю
+    liveSpeech = now - liveSpeechAt < 1000;
   }
 
   /** Как слышно фразу: речь и фон по ней самой (sf — Gain.speechFloor), перегруз входа и работа
-   *  ограничителя — в журнал at.tsv и строкой на экран. */
+   *  ограничителя — в машинный журнал at.tsv и строкой в журнал. На экране слов нет: там цвет. */
   void hear(double[] sf, Gain.Stats st, double gainDb) {
     segGainDb = gainDb; segSpeechDb = sf[0]; segFloorDb = sf[1];
     segOverPct = st.overPct(); segLimPct = st.limitedPct(); segCutPct = st.cutPct();
-    final Hearing h = Hearing.of(sf[0], sf[1], segOverPct, gainDb, autoOn()); hearing = h;
-    Listener l = listener; if (l != null) main.post(() -> l.onHearing(h));
+    Hearing h = Hearing.of(sf[0], sf[1], segOverPct, gainDb, autoOn());
+    log("🎚 " + h.text + (Double.isNaN(sf[0]) ? "" : String.format(Locale.ROOT, " · речь %.0f, фон %.0f dBFS, усиление %+.0f дБ%s",
+        sf[0], sf[1], gainDb, segLimPct > 0 ? String.format(Locale.ROOT, ", ограничитель %.2f %%", segLimPct) : "")));
   }
   volatile String pttFixed = null; volatile boolean pttAuto = true;
   static final String ENROLL = "enroll";
@@ -1955,6 +1977,7 @@ public class TranslatorService extends Service {
         gainListen.db = gNow; gainListen.limit = limiterOn; gainListen.apply(win, win.length, fs);
         double frame = rms(win, win.length);
         levelDb = (float) Math.max(db(frame), levelDb - 1.5); levelOver = fs.over > 0; levelAt = System.currentTimeMillis();
+        live(levelDb, noiseRms > 0 ? db(noiseRms) : Double.NaN, levelDb);
         eng.vad.acceptWaveform(win);
         boolean sp = eng.vad.isSpeechDetected();
         while (!eng.vad.empty()) eng.vad.pop();          // внутренняя сборка sherpa не используется
