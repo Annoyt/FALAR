@@ -582,6 +582,14 @@ def barcode(t):
 WEB = re.compile(r'(?i)^(?:www\.|https?://)\S+$|^\S+@\S+\.\S+$')
 
 
+# Строка кончается адресом — родовым словом и словами названия с заглавной («… Av. Lindolpho»), а
+# следующая продолжает название до запятой перед номером дома («Augusto da Costa, 1.001 - …») — это
+# одно название. Без запятой — нет: «RUA AUGUSTA» / «CEP 01305-000» или «Horário: …» — отдельные поля.
+ADDR_END = re.compile(r'\b(?i:rua|av\.?|avenida|travessa|alameda|praça|praca|estrada|rodovia|largo)\s+'
+                      r'(?:d[aeo]s?\s+)?[A-ZÀ-ÖØ-Þ]\w*(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-ÖØ-Þ]\w*){0,2}\s*$')
+ADDR_NEXT = re.compile(r'^[A-ZÀ-ÖØ-Þ]\w+(?:\s+(?:(?i:d[aeo]s?)\s+)?[A-ZÀ-ÖØ-Þ]\w+){0,3}\s*,')
+
+
 def is_caps(t):
     """Все буквы строки прописные (и буквы есть)."""
     letters = [c for c in t if c.isalpha()]
@@ -618,7 +626,8 @@ def paragraphs(block):
                 pass
             elif not re.search(r'[.!?:;]$', prev) and (prev.endswith(',') or last in CONT or t[:1].islower()
                                                      or prev.count('(') > prev.count(')')
-                                                     or re.search(r'\s[-–—]$', prev)):
+                                                     or re.search(r'\s[-–—]$', prev)
+                                                     or (ADDR_END.search(prev) and ADDR_NEXT.search(t))):
                 out[-1] = (prev + ' ' + t, rows + [r]); continue
         out.append((t, [r]))
     return out

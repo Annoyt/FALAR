@@ -134,6 +134,21 @@ public class WordList {
     return best;
   }
 
+  /** Имя в тексте снимка: только точное вхождение (буквы без регистра, ударений и знаков). */
+  int[] locateExact(String[] words, Entry e, String lang) {
+    String target = e.side(lang);
+    if (target == null || target.isEmpty()) return null;
+    String to = letters(target); int n = target.split("\\s+").length;
+    if (to.isEmpty()) return null;
+    for (int i = 0; i < words.length; i++)
+      for (int k = Math.max(1, n - 1); k <= n + 2 && i + k <= words.length; k++) {
+        StringBuilder w = new StringBuilder();
+        for (int j = i; j < i + k; j++) w.append(words[j]);
+        if (letters(w.toString()).equals(to)) return new int[]{i, i + k};
+      }
+    return null;
+  }
+
   /**
    * Заменяет найденные имена плейсхолдерами. Проходит ДО обычного маскирования, иначе адресный
    * шаблон перехватит «Rua Augusta» и она останется латиницей посреди русской фразы.
@@ -144,11 +159,15 @@ public class WordList {
     public final String readable;   // то, что видит человек и получает LLM: имена исправлены, но на месте
     Result(String m, String r) { masked = m; readable = r; }
   }
-  public Result apply(String text, String src, String tgt, List<String[]> slots, List<Hit> out) {
+  public Result apply(String text, String src, String tgt, List<String[]> slots, List<Hit> out) { return apply(text, src, tgt, slots, out, false); }
+  /** exactOnly — текст снимка: имя только точным вхождением. Сравнение по звучанию чинит имя, искажённое
+   *  распознаванием речи, а в прочитанном тексте только ошибается: «Augusto da Costa» на этикетке
+   *  становился улицей «Rua Augusta» из своих слов («Руа Аугуста Коста»). */
+  public Result apply(String text, String src, String tgt, List<String[]> slots, List<Hit> out, boolean exactOnly) {
     if (entries.isEmpty()) return new Result(text, text);
     for (Entry e : entries) {
       String[] words = text.split("\\s+");
-      int[] span = locate(words, e, src);
+      int[] span = exactOnly ? locateExact(words, e, src) : locate(words, e, src);
       if (span == null) continue;
       StringBuilder found = new StringBuilder();
       for (int j = span[0]; j < span[1]; j++) { if (found.length() > 0) found.append(' '); found.append(words[j]); }

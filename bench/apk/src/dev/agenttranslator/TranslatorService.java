@@ -2568,7 +2568,7 @@ public class TranslatorService extends Service {
     }
     r.dir = dir; r.src = src; r.tgt = tgt;
     asr = TextRules.fixAsr(asr, src);                                     // у parakeet нет «ё», она выходит как <unk>
-    WordList.Result wr = words == null ? null : words.apply(asr, src, tgt, r.slots, r.whits);
+    WordList.Result wr = words == null ? null : words.apply(asr, src, tgt, r.slots, r.whits, sign);   // снимок — только точно
     String pre = wr == null ? asr : wr.masked;
     if (wr != null) asr = wr.readable;                                   // дальше везде — исправленный текст // свои слова — раньше адресного шаблона
     TextRules.Masked mk = TextRules.mask(pre, src, r.slots, sign);        // §6 ярус 3: числа/цены/адреса в плейсхолдеры
@@ -2597,6 +2597,9 @@ public class TranslatorService extends Service {
       if (sents.length > 1) {                                             // по предложениям: словарь там, где попал
         StringBuilder sb = new StringBuilder(); int pbHits = 0;
         for (String sn : sents) {
+          // у вывески предложение из одних сокращений и чисел — как есть, как и строка без слов выше:
+          // «ICPA CEPÊRA XQ1. XQ2, XQ3 - XQ4» переводчик превращал в «… Модель: XQ2 XQ4, XQ3»
+          if (sign && !TextRules.hasWords(sn)) { if (sb.length() > 0) sb.append(' '); sb.append(sn); continue; }
           Phrasebook.Hit h = pb.lookup(dir, sn);
           String part; if (h != null) { part = h.dst; pbHits++; } else { part = eng.translate(dir, sn); if (learn) pb.record(dir, sn, part); }
           if (sb.length() > 0) sb.append(' '); sb.append(part);

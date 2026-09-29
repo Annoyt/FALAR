@@ -46,7 +46,7 @@ public class TextRules {
    *  отдельное «PE», «MA», «AL» на вывеске прописными может быть португальским словом. */
   static final Map<String, String> STATE_RU = new LinkedHashMap<>();
   static {
-    String[] a = {"CNPJ", "ИНН", "CPF", "ИНН", "CEP", "индекс", "SAC", "служба поддержки"};
+    String[] a = {"CNPJ", "ИНН", "CPF", "ИНН", "CEP", "индекс", "SAC", "служба поддержки", "LTDA", "ООО"};
     for (int i = 0; i < a.length; i += 2) ABBR_RU.put(a[i], a[i + 1]);
     String[] st = {"AC", "Акри", "AL", "Алагоас", "AP", "Амапа", "AM", "Амазонас", "BA", "Баия", "CE", "Сеара",
         "DF", "Федеральный округ", "ES", "Эспириту-Санту", "GO", "Гояс", "MA", "Мараньян", "MT", "Мату-Гросу",
@@ -59,13 +59,18 @@ public class TextRules {
   static final String STATES = String.join("|", STATE_RU.keySet());
   static final Pattern[] PT_SIGN = { PT[0], PT[1], PT[2],
     P("(?i)\\bn\\.?[º°]\\s?\\d+"),
-    P("(?i)\\b(?:CNPJ|CPF|CEP|SAC)\\b"),
+    P("(?i)\\b(?:CNPJ|CPF|CEP|SAC|LTDA)\\b"),
+    // город вместе с кодом штата через дефис или дробь («Monte Alto-SP», «São Paulo/SP») или, после
+    // «- » и «, » адреса, с дефисом в конце строки, когда код штата ушёл на следующую («…, 1.001 -
+    // Monte Alto-»); просто «Segunda-» в конце строки — не город. Как пишется — cityRu
+    P("\\b\\p{Lu}\\p{Ll}+(?:[^\\S\\n]+(?:d[aeo]s?[^\\S\\n]+)?\\p{Lu}\\p{Ll}+){0,3}[^\\S\\n]?[-/][^\\S\\n]?(?:" + STATES + ")\\b"
+      + "|(?<=[,–-][^\\S\\n])\\p{Lu}\\p{Ll}+(?:[^\\S\\n]+(?:d[aeo]s?[^\\S\\n]+)?\\p{Lu}\\p{Ll}+){0,3}[^\\S\\n]?-(?=[^\\S\\n]*$)"),
     P("(?<=[-/][^\\S\\n]?)(?:" + STATES + ")\\b|\\b(?:" + STATES + ")(?=[^\\S\\n]?/)"),
     P("\\b\\d+(?:[.,]\\d+)?\\s?[º°]\\s?[CF]?(?!\\p{L})"),
     // цифры одним куском, в том числе с точками тысяч: «62.162.243/0003-45»
     P("\\b\\d+(?:[.,]\\d+)*(?:[ /-]\\d+(?:[.,]\\d+)*)+\\b"),
     PT[3] };
-  static final String[] KIND_SIGN = {"addr", "money", "time", "no", "abbr", "abbr", "num", "num", "num"};
+  static final String[] KIND_SIGN = {"addr", "money", "time", "no", "abbr", "city", "abbr", "num", "num", "num"};
   static final Pattern WORD2 = P("\\p{L}{2,}");
   /** Плейсхолдер слота. «N1» не годится: замер на самой модели показал, что в ru→pt она съедает
    *  букву и оставляет «1» (выживает 1 раз из 6), из-за чего слот теряется и уезжает в конец фразы.
@@ -199,8 +204,11 @@ public class TextRules {
           if (name.isEmpty() || (sign && !properName(name))) { m.appendReplacement(sb, Matcher.quoteReplacement(m.group())); continue; }
           String head = m.group().substring(0, m.start(1) - m.start());
           String tail = m.group(1).substring(name.length());          // то, что отрезали, возвращаем в текст
-          slots.add(new String[]{ph, name, kinds[k]});
-          m.appendReplacement(sb, Matcher.quoteReplacement(head + ph + tail));
+          // У вывески и родовое слово — в слоте: переводчик на адресе выдумывал («Av. Lindolpho /
+          // Augusto da Costa» → «Руа Аугуста Коста»), а родовое слово переводит сама подстановка
+          // (Translit.address: «проспект Линдолфу Аугусту да Коста»). У речи — как было.
+          slots.add(new String[]{ph, sign ? head.trim() + " " + name : name, kinds[k]});
+          m.appendReplacement(sb, Matcher.quoteReplacement((sign ? "" : head) + ph + tail));
         } else {
           slots.add(new String[]{ph, m.group(), kinds[k]});
           m.appendReplacement(sb, Matcher.quoteReplacement(ph));
@@ -227,10 +235,29 @@ public class TextRules {
     for (String r : missing) t = t + " " + r;
     return t.trim();
   }
+  /** Города с устоявшимся русским названием, которое транскрипция не даёт («Рио-ди-Жанейру»). */
+  static final Map<String, String> CITY_RU = new HashMap<>();
+  static {
+    String[] c = {"Rio de Janeiro", "Рио-де-Жанейро", "Goiânia", "Гояния", "João Pessoa", "Жуан-Песоа", "Cuiabá", "Куяба"};
+    for (int i = 0; i < c.length; i += 2) CITY_RU.put(c[i], c[i + 1]);
+  }
+  static final Pattern CITY_UF = P("^(.+?)[^\\S\\n]?[-/][^\\S\\n]?(" + STATES + ")?$");
+  /** Город со штатом — «Монти-Алту (Сан-Паулу)»: через дефис, как в оригинале, выходило одно длинное
+   *  имя «Монти-Алту-Сан-Паулу». Город, названный как штат, — один раз («São Paulo/SP» — «Сан-Паулу»).
+   *  Дефис в конце строки, когда штат на следующей, — запятой: «Монти-Алту,» / «Сан-Паулу /ИНН: …». */
+  static String cityRu(String s) {
+    Matcher m = CITY_UF.matcher(s.trim());
+    if (!m.matches()) return cityName(s.trim());
+    String c = cityName(m.group(1)), st = m.group(2) == null ? null : STATE_RU.get(m.group(2));
+    return st == null ? c + "," : st.equals(c) ? c : c + " (" + st + ")";
+  }
+  static String cityName(String s) { return CITY_RU.getOrDefault(s, Translit.ptToRu(s).replaceAll("\\s+", "-")); }
+
   static String render(String orig, String kind, String tgt) {
     if (kind.startsWith("name:")) return kind.substring(5);   // имя из списка своих слов — уже на нужном языке
     if (kind.equals("addr")) return Translit.address(orig, tgt);  // адрес не переводим, но пишем алфавитом цели
     if (kind.equals("no")) { Matcher d = P("\\d+").matcher(orig); return tgt.equals("ru") && d.find() ? "№ " + d.group() : orig; }
+    if (kind.equals("city")) return tgt.equals("ru") ? cityRu(orig) : orig;
     if (kind.equals("abbr")) {
       if (!tgt.equals("ru")) return orig;
       String k = orig.toUpperCase(Locale.ROOT), r = ABBR_RU.get(k);

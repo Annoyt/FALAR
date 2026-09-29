@@ -16,7 +16,7 @@ public class Translit {
 
   // Порядок важен: диграфы проверяются раньше одиночных букв.
   static final String[][] DI = {
-    {"lh", "ль"}, {"nh", "нь"}, {"ch", "ш"},
+    {"lh", "ль"}, {"nh", "нь"}, {"ch", "ш"}, {"ph", "ф"},   // «ph» — старое написание имён: Lindolpho = Lindolfo
     {"ss", "с"}, {"rr", "рр"}, {"sc", "с"}, {"sç", "с"}, {"xc", "с"},
     {"ães", "айнс"}, {"ões", "ойнс"}, {"ão", "ан"}, {"ãe", "айн"}, {"õe", "ойн"},
     {"ai", "ай"}, {"ei", "ей"}, {"oi", "ой"}, {"ui", "уй"}, {"ái", "ай"}, {"éi", "ей"}, {"ói", "ой"},
@@ -42,7 +42,6 @@ public class Translit {
   static String ptWord(String w) {
     String low = Normalizer.normalize(w, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
     String e = EXC.get(low); if (e != null) return e;
-    boolean accent = low.matches(".*[áéíóúâêô].*");
     StringBuilder out = new StringBuilder();
     int i = 0, n = low.length();
     outer:
@@ -61,10 +60,16 @@ public class Translit {
       else if (c == 'g') out.append(nx == 'e' || nx == 'i' || nx == 'é' || nx == 'í' ? "ж" : "г");
       else if (c == 's') out.append(isVowel(prev) && isVowel(nx) ? "з" : "с");
       else if (c == 'x') out.append("ш");
-      else if (c == 'o' && i == n - 1 && !accent) out.append("у");
-      else if (c == 'o' && i == n - 2 && nx == 's' && !accent) out.append("у");
-      else if (c == 'e' && i == n - 1 && !accent && n > 2) out.append("и");
-      else if (c == 'm' && !isVowel(nx)) out.append("н");
+      // конечные -o, -os, -e без знака всегда безударны, знак на другом слоге этого не меняет: Эспириту, Антониу
+      else if (c == 'o' && i == n - 1) out.append("у");
+      else if (c == 'o' && i == n - 2 && nx == 's') out.append("у");
+      else if (c == 'e' && i == n - 1 && n > 2) out.append("и");
+      // «э» — в начале слова и после гласной (Эспириту, Энрики, Рафаэл, Коэлью), после согласной и «i» —
+      // «е» (Жозе, Пеле, Тиете); «u» в «gu», «qu» — не гласная (Герра)
+      else if ((c == 'e' || c == 'é' || c == 'ê') && (i == 0 || (i == 1 && prev == 'h') || "aoáóâôã".indexOf(prev) >= 0
+          || (prev == 'u' && !(i >= 2 && (low.charAt(i - 2) == 'q' || low.charAt(i - 2) == 'g'))))) out.append("э");
+      else if (c == 'é') out.append("е");
+      else if (c == 'm' && !isVowel(nx) && nx != 'p' && nx != 'b') out.append("н");   // перед p/b — «м»: Campinas, Triumpho
       else if (c == 'ã') out.append(i == n - 1 ? "а" : "ан");
       else out.append(ONE.containsKey(c) ? ONE.get(c) : String.valueOf(c));
       i++;

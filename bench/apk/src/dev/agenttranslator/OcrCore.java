@@ -672,6 +672,14 @@ public final class OcrCore {
     return any;
   }
   static boolean webby(String t) { return WEB.matcher(t.trim()).find(); }
+  /** Строка кончается адресом — родовым словом и словами названия с заглавной («… Av. Lindolpho»), а
+   *  следующая продолжает название до запятой перед номером дома («Augusto da Costa, 1.001 - …») —
+   *  это одно название. Без запятой — нет: табличка «RUA AUGUSTA» / «CEP 01305-000» или «Horário: …»
+   *  под названием улицы — отдельные поля. */
+  // через TextRules.P: юникодные \\b и \\w на столе — с флагом, а ICU на Android флага не знает (бросает)
+  static final Pattern ADDR_END = TextRules.P("\\b(?i:rua|av\\.?|avenida|travessa|alameda|praça|praca|estrada|rodovia|largo)\\s+"
+      + "(?:d[aeo]s?\\s+)?[A-ZÀ-ÖØ-Þ]\\w*(?:\\s+(?:d[aeo]s?\\s+)?[A-ZÀ-ÖØ-Þ]\\w*){0,2}\\s*$"),
+      ADDR_NEXT = TextRules.P("^[A-ZÀ-ÖØ-Þ]\\w+(?:\\s+(?:(?i:d[aeo]s?)\\s+)?[A-ZÀ-ÖØ-Þ]\\w+){0,3}\\s*,");
   static int count(String s, char c) { int n = 0; for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++; return n; }
 
   /** Строки блока → фразы для перевода. Склеиваем, только когда обрыв очевиден: перенос со
@@ -694,7 +702,8 @@ public final class OcrCore {
         }
         if (!barcode(prev) && !barcode(t) && !webby(prev) && !webby(t) && !END.matcher(prev).find() && (prev.endsWith(",") || CONT.contains(lastWord(prev))
             || Character.isLowerCase(t.charAt(0))            // текст строки не пустой: пустые рамки отсеяны в layout
-            || count(prev, '(') > count(prev, ')') || DASH_END.matcher(prev).find())) {
+            || count(prev, '(') > count(prev, ')') || DASH_END.matcher(prev).find()
+            || (ADDR_END.matcher(prev).find() && ADDR_NEXT.matcher(t).find()))) {
           texts.set(k, prev + " " + t); rows.get(k).add(r); continue;
         }
       }

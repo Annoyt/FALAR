@@ -205,6 +205,16 @@ public class OcrCoreTest {
     ok(pt.equals(Arrays.asList("Augusto da Costa, 1.001 - Monte Alto-", "SP / CNPJ: 62.162.243/0003-45", "Mais informações no site", "PROIBIDO JOGAR BOLAS")),
         "Q7 перенос слова — со строчной или прописными целиком; «Monte Alto-» / «SP /CNPJ» — настоящий дефис и новое поле: " + pt);
 
+    rows.clear();
+    for (String t : new String[]{"ICPA CEPÊRA LTDA. Av. Lindolpho", "Augusto da Costa, 1.001 - Monte Alto-", "Rua Augusta", "Horário: 9h às 18h",
+        "RUA AUGUSTA", "CEP 01305-000", "Av. Paulista", "Consolação", "Rua do", "Triumpho, 120"}) {
+      OcrCore.Row r = new OcrCore.Row(); r.items.add(item(0, 0, 10, 10, t)); r.close(); rows.add(r);
+    }
+    pt.clear(); for (OcrCore.Para pp : OcrCore.paragraphs(rows)) pt.add(pp.text);
+    ok(pt.equals(Arrays.asList("ICPA CEPÊRA LTDA. Av. Lindolpho Augusto da Costa, 1.001 - Monte Alto-", "Rua Augusta", "Horário: 9h às 18h",
+        "RUA AUGUSTA", "CEP 01305-000", "Av. Paulista", "Consolação", "Rua do Triumpho, 120")),
+        "Q8 название улицы продолжается на следующей строке до запятой перед номером; табличка, «CEP», «Horário» — отдельно: " + pt);
+
     // --- S: изогнутые и тесные строки — полоса вдоль средней линии ---
     int SW = 200, SH = 70; float[] curved = new float[SW * SH];
     for (int x = 20; x <= 180; x++) { double c = 20 + 0.004 * (x - 100) * (x - 100); for (int y = 0; y < SH; y++) if (Math.abs(y - c) <= 3) curved[y * SW + x] = 0.9f; }

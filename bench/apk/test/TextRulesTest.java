@@ -26,7 +26,8 @@ public class TextRulesTest {
     TextRules.Masked a = TextRules.mask("Rodovia estreita e extremamente sinuosa", "pt", new ArrayList<>(), true);
     ok(a.slots.isEmpty() && a.text.contains("estreita"), "N1 вывеска: «Rodovia estreita» — не название дороги: " + a.text);
     TextRules.Masked b = TextRules.mask("Rua do Triumpho", "pt", new ArrayList<>(), true);
-    ok(b.slots.size() == 1 && b.slots.get(0)[1].equals("do Triumpho"), "N2 вывеска: «Rua do Triumpho» — название маскируется вместе со связкой");
+    ok(b.slots.size() == 1 && b.slots.get(0)[1].equals("Rua do Triumpho") && TextRules.unmask(b.text, b, "ru").equals("улица Триумфу"),
+        "N2 вывеска: адрес в слоте целиком, родовое слово переводит подстановка, «ph» — «ф»: " + TextRules.unmask(b.text, b, "ru"));
     TextRules.Masked d = TextRules.mask("Onde fica a rua das flores?", "pt", new ArrayList<>(), false);
     ok(d.slots.size() == 1 && d.slots.get(0)[1].equals("das flores"), "N3 речь: «rua das flores» строчными маскируется, как раньше");
     TextRules.Masked e = TextRules.mask("Onde fica a rua das flores?", "pt", new ArrayList<>(), true);
@@ -69,11 +70,25 @@ public class TextRulesTest {
     TextRules.Masked se = TextRules.mask("SE BEBER NÃO DIRIJA. MA SORTE", "pt", new ArrayList<>(), true);
     ok(se.slots.isEmpty(), "A3 «SE», «MA» без дефиса и дроби — слова, не коды штатов");
     TextRules.Masked addr = TextRules.mask("Monte Alto-SP e São Paulo/SP", "pt", new ArrayList<>(), true);
-    ok(TextRules.unmask(addr.text, addr, "ru").equals("Monte Alto-Сан-Паулу e São Paulo/Сан-Паулу"), "A4 код штата в адресе: " + TextRules.unmask(addr.text, addr, "ru"));
+    ok(TextRules.unmask(addr.text, addr, "ru").equals("Монти-Алту (Сан-Паулу) e Сан-Паулу"), "A4 город с кодом штата: " + TextRules.unmask(addr.text, addr, "ru"));
     ok(TextRules.mask("SP /CNPJ: 62", "pt", new ArrayList<>(), false).text.contains("SP /CNPJ"), "A5 речь: сокращения не трогаются");
     ok(TextRules.hasWords("WhatsApp: XQ1") && !TextRules.hasWords("L:XQ1 XQ2") && !TextRules.hasWords("XQ1 - XQ2"), "A6 что переводить: слово от двух букв помимо плейсхолдеров");
     TextRules.Masked cep2 = TextRules.mask("CEP 01035-100 · SAC 0800 770 3480", "pt", new ArrayList<>(), true);
     ok(TextRules.unmask(cep2.text, cep2, "ru").equals("индекс 01035-100 · служба поддержки 0800 770 3480"), "A7 CEP и SAC: " + TextRules.unmask(cep2.text, cep2, "ru"));
+
+    // Адрес этикетки: переводчик выдумывал «Руа Аугуста Коста, 1.001 - Гора Альто»
+    TextRules.Masked ad = TextRules.mask("ICPA CEPÊRA LTDA. Av. Lindolpho Augusto da Costa, 1.001 - Monte Alto-", "pt", new ArrayList<>(), true);
+    eq(TextRules.unmask(ad.text, ad, "ru"), "ICPA CEPÊRA ООО. проспект Линдолфу Аугусту да Коста, 1.001 - Монти-Алту,",
+        "D1 адрес целиком своей подстановкой: проспект, имена кириллицей, город через дефис, штат на следующей строке — после запятой, LTDA — ООО (" + ad.text + ")");
+    TextRules.Masked ct = TextRules.mask("Fábrica em Monte Alto-SP e loja em São Paulo / SP", "pt", new ArrayList<>(), true);
+    eq(TextRules.unmask(ct.text, ct, "ru"), "Fábrica em Монти-Алту (Сан-Паулу) e loja em Сан-Паулу", "D2 город со штатом — штат в скобках, одноимённый — один раз");
+    TextRules.Masked rj = TextRules.mask("Rio de Janeiro/RJ · Brasília - DF · São José dos Campos-SP", "pt", new ArrayList<>(), true);
+    eq(TextRules.unmask(rj.text, rj, "ru"), "Рио-де-Жанейро · Бразилиа (Федеральный округ) · Сан-Жозе-дус-Кампус (Сан-Паулу)",
+        "D5 устоявшееся название города; «m» перед «p» — «м»");
+    TextRules.Masked sg = TextRules.mask("Aberto de Segunda-", "pt", new ArrayList<>(), true);
+    ok(sg.slots.isEmpty(), "D3 «Segunda-» в конце строки без «- » или «, » перед ним — не город");
+    TextRules.Masked sp3 = TextRules.mask("Onde fica a Av. Paulista?", "pt", new ArrayList<>(), false);
+    ok(sp3.slots.size() == 1 && sp3.slots.get(0)[1].equals("Paulista") && sp3.text.startsWith("Onde fica a Av. XQ1"), "D4 речь: родовое слово видно переводчику, как раньше: " + sp3.text);
 
     System.out.println(fails == 0 ? "TextRules: " + checks + " проверок, все прошли" : "TextRules: провалов " + fails + " из " + checks);
     return fails;
