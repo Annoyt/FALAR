@@ -793,6 +793,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Экран разговора: крупно португальский, мелко русский, ниже — предыдущие реплики. */
   View buildTalk() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 16, 24, 16);
+    // Облако вокруг кнопки удержания расходится до трёх её радиусов — за край списка: пусть
+    // уходит под нижние ряды (они рисуются поверх), а не обрезается ровной линией.
+    v.setClipChildren(false);
     hint = new TextView(this); hint.setTextSize(13); hint.setTextColor(Color.GRAY); hint.setId(app.falar.R.id.hint);
     hint.setText("Запуск…"); v.addView(hint);
     // Касание строки с названием — «Память разговора»: что уточнитель знает о разговоре.
@@ -871,7 +874,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Кнопка удержания плавает над репликами, а не занимает свой ряд: место у текста она не
     // отнимает, и текст за ней виден. Видна только в режиме удержания (mode).
     FrameLayout histBox = new FrameLayout(this); histBox.setClipChildren(false);   // ореол шире кнопки
-    histBox.addView(histList, new FrameLayout.LayoutParams(-1, -1));
+    // Список — в своей рамке, которая режет по краю: иначе, раз ни histBox, ни экран детей не режут
+    // (облаку кнопки нужно выходить за край), строки списка вылезали бы под нижние ряды.
+    FrameLayout listClip = new FrameLayout(this);
+    listClip.addView(histList, new FrameLayout.LayoutParams(-1, -1));
+    histBox.addView(listClip, new FrameLayout.LayoutParams(-1, -1));
     bMic = new MicButton(this); bMic.setEnabled(false);
     bMic.setContentDescription("Удерживайте и говорите — по-португальски или по-русски");
     FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(dp(128), dp(128), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
