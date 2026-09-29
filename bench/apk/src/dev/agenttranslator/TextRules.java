@@ -39,12 +39,34 @@ public class TextRules {
    *  пробел, дефис или дробь — одним куском («7 896025 804067», «3242-3300», «10/05/2026»): два
    *  плейсхолдера подряд переводчик переписывал кириллицей («СК3 СК4») или выдумывал вокруг них
    *  «Модель:». Речь это не трогает: там цифры через пробел — разные числа. */
+  /** Сокращения этикеток и вывесок — своим переводом, переводчику их не показываем: он их не знает
+   *  и выдумывает вокруг («SP /CNPJ: 62.162.243/0003-45» → «Модель: 62.162.243/0003-45»). */
+  static final Map<String, String> ABBR_RU = new HashMap<>();
+  /** Коды штатов — только рядом с дефисом или дробью, как в адресе («Monte Alto-SP», «SP /CNPJ»):
+   *  отдельное «PE», «MA», «AL» на вывеске прописными может быть португальским словом. */
+  static final Map<String, String> STATE_RU = new LinkedHashMap<>();
+  static {
+    String[] a = {"CNPJ", "ИНН", "CPF", "ИНН", "CEP", "индекс", "SAC", "служба поддержки"};
+    for (int i = 0; i < a.length; i += 2) ABBR_RU.put(a[i], a[i + 1]);
+    String[] st = {"AC", "Акри", "AL", "Алагоас", "AP", "Амапа", "AM", "Амазонас", "BA", "Баия", "CE", "Сеара",
+        "DF", "Федеральный округ", "ES", "Эспириту-Санту", "GO", "Гояс", "MA", "Мараньян", "MT", "Мату-Гросу",
+        "MS", "Мату-Гросу-ду-Сул", "MG", "Минас-Жерайс", "PA", "Пара", "PB", "Параиба", "PR", "Парана",
+        "PE", "Пернамбуку", "PI", "Пиауи", "RJ", "Рио-де-Жанейро", "RN", "Риу-Гранди-ду-Норти",
+        "RS", "Риу-Гранди-ду-Сул", "RO", "Рондония", "RR", "Рорайма", "SC", "Санта-Катарина", "SP", "Сан-Паулу",
+        "SE", "Сержипи", "TO", "Токантинс"};
+    for (int i = 0; i < st.length; i += 2) STATE_RU.put(st[i], st[i + 1]);
+  }
+  static final String STATES = String.join("|", STATE_RU.keySet());
   static final Pattern[] PT_SIGN = { PT[0], PT[1], PT[2],
     P("(?i)\\bn\\.?[º°]\\s?\\d+"),
+    P("(?i)\\b(?:CNPJ|CPF|CEP|SAC)\\b"),
+    P("(?<=[-/][^\\S\\n]?)(?:" + STATES + ")\\b|\\b(?:" + STATES + ")(?=[^\\S\\n]?/)"),
     P("\\b\\d+(?:[.,]\\d+)?\\s?[º°]\\s?[CF]?(?!\\p{L})"),
-    P("\\b\\d+(?:[.,]\\d+)?(?:[ /-]\\d+(?:[.,]\\d+)?)+\\b"),
+    // цифры одним куском, в том числе с точками тысяч: «62.162.243/0003-45»
+    P("\\b\\d+(?:[.,]\\d+)*(?:[ /-]\\d+(?:[.,]\\d+)*)+\\b"),
     PT[3] };
-  static final String[] KIND_SIGN = {"addr", "money", "time", "no", "num", "num", "num"};
+  static final String[] KIND_SIGN = {"addr", "money", "time", "no", "abbr", "abbr", "num", "num", "num"};
+  static final Pattern WORD2 = P("\\p{L}{2,}");
   /** Плейсхолдер слота. «N1» не годится: замер на самой модели показал, что в ru→pt она съедает
    *  букву и оставляет «1» (выживает 1 раз из 6), из-за чего слот теряется и уезжает в конец фразы.
    *  «XQ1» выживает 6 из 6 в обе стороны. Проверка: tools/placeholder_probe.py */
@@ -188,6 +210,10 @@ public class TextRules {
     }
     Masked out = new Masked(t); out.slots.addAll(slots); return out;
   }
+  /** Есть ли что переводить в тексте с плейсхолдерами: слово от двух букв помимо самих плейсхолдеров.
+   *  «XQ1 /XQ2: XQ3» (строка «SP /CNPJ: 62.162.243/0003-45») — нечего, и переводчик, получив её,
+   *  выдумывал «Модель:». */
+  public static boolean hasWords(String masked) { return WORD2.matcher(PH_LEFT.matcher(masked).replaceAll(" ")).find(); }
   /** Плейсхолдеры обратно; деньги — в валютную форму целевого языка; потерянные MT слоты дописываются в конец. */
   public static String unmask(String translated, Masked m, String tgt) {
     String t = translated; List<String> missing = new ArrayList<>();
@@ -205,6 +231,11 @@ public class TextRules {
     if (kind.startsWith("name:")) return kind.substring(5);   // имя из списка своих слов — уже на нужном языке
     if (kind.equals("addr")) return Translit.address(orig, tgt);  // адрес не переводим, но пишем алфавитом цели
     if (kind.equals("no")) { Matcher d = P("\\d+").matcher(orig); return tgt.equals("ru") && d.find() ? "№ " + d.group() : orig; }
+    if (kind.equals("abbr")) {
+      if (!tgt.equals("ru")) return orig;
+      String k = orig.toUpperCase(Locale.ROOT), r = ABBR_RU.get(k);
+      return r != null ? r : STATE_RU.getOrDefault(k, orig);
+    }
     if (!kind.equals("money")) return orig;
     Matcher n = P("\\d+(?:[.,]\\d+)?").matcher(orig); if (!n.find()) return orig; String num = n.group();
     if (tgt.equals("ru")) { if (orig.contains("R$") || orig.matches(".*rea(l|is).*")) return num + " реалов"; if (orig.contains("centavos")) return num + " сентаво"; return orig; }

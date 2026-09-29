@@ -48,7 +48,8 @@ public class TextRulesTest {
     ok(no.slots.size() == 2 && no.slots.get(1)[2].equals("no") && TextRules.unmask("Улица XQ1, XQ2", no, "ru").endsWith(", № 120"),
         "M4 номер дома: «Nº» переводчик читал как «Нет» — в переводе «№ 120»: " + no.text + " → " + TextRules.unmask("Улица XQ1, XQ2", no, "ru"));
     TextRules.Masked cep = TextRules.mask("CEP 01035-100", "pt", new ArrayList<>(), true);
-    ok(cep.slots.size() == 1 && cep.slots.get(0)[2].equals("time"), "M5 CEP — своей маской, как раньше");
+    ok(cep.slots.size() == 2 && cep.slots.get(0)[2].equals("time") && cep.slots.get(0)[1].equals("01035-100") && cep.slots.get(1)[2].equals("abbr"),
+        "M5 номер CEP — своей маской, как раньше; само слово CEP — сокращение (переводится «индекс»)");
 
     // Плейсхолдер, переписанный переводчиком кириллицей
     eq(TextRules.unmask("После использования закройте СК1 крышка.", g, "ru"), "После использования закройте 7 896025 804067 крышка. 3242-3300",
@@ -57,6 +58,22 @@ public class TextRulesTest {
     eq(TextRules.unmask("Цена СК7 сегодня", TextRules.mask("hoje", "pt"), "ru"), "Цена сегодня", "U3 лишний «СК7» без слота вычищается, как «XQ7»");
     eq(TextRules.unmask("СК12 и СК1", TextRules.mask("custa 5", "pt", new ArrayList<>(), true), "ru"), "и 5",
         "U4 «СК12» не принимается за слот 1 (и вычищается как лишний)");
+
+    // Сокращения этикеток: «SP /CNPJ: 62.162.243/0003-45» переводчик превращал в «Модель: …»
+    TextRules.Masked sp = TextRules.mask("SP /CNPJ: 62.162.243/0003-45", "pt", new ArrayList<>(), true);
+    ok(!TextRules.hasWords(sp.text) && TextRules.unmask(sp.text, sp, "ru").equals("Сан-Паулу /ИНН: 62.162.243/0003-45"),
+        "A1 строка из сокращений и чисел — без слов, сокращения своим переводом: " + sp.text + " → " + TextRules.unmask(sp.text, sp, "ru"));
+    TextRules.Masked sp2 = TextRules.mask("SP /Cnpj: 62.162.243/0003-45", "pt", new ArrayList<>(), true);
+    ok(TextRules.unmask(sp2.text, sp2, "ru").equals("Сан-Паулу /ИНН: 62.162.243/0003-45"), "A1 и после unshoutSign («Cnpj»)");
+    ok(sp.slots.size() == 3 && sp.slots.get(2)[1].equals("62.162.243/0003-45"), "A2 номер с точками тысяч и дробью — одним куском: " + sp.text);
+    TextRules.Masked se = TextRules.mask("SE BEBER NÃO DIRIJA. MA SORTE", "pt", new ArrayList<>(), true);
+    ok(se.slots.isEmpty(), "A3 «SE», «MA» без дефиса и дроби — слова, не коды штатов");
+    TextRules.Masked addr = TextRules.mask("Monte Alto-SP e São Paulo/SP", "pt", new ArrayList<>(), true);
+    ok(TextRules.unmask(addr.text, addr, "ru").equals("Monte Alto-Сан-Паулу e São Paulo/Сан-Паулу"), "A4 код штата в адресе: " + TextRules.unmask(addr.text, addr, "ru"));
+    ok(TextRules.mask("SP /CNPJ: 62", "pt", new ArrayList<>(), false).text.contains("SP /CNPJ"), "A5 речь: сокращения не трогаются");
+    ok(TextRules.hasWords("WhatsApp: XQ1") && !TextRules.hasWords("L:XQ1 XQ2") && !TextRules.hasWords("XQ1 - XQ2"), "A6 что переводить: слово от двух букв помимо плейсхолдеров");
+    TextRules.Masked cep2 = TextRules.mask("CEP 01035-100 · SAC 0800 770 3480", "pt", new ArrayList<>(), true);
+    ok(TextRules.unmask(cep2.text, cep2, "ru").equals("индекс 01035-100 · служба поддержки 0800 770 3480"), "A7 CEP и SAC: " + TextRules.unmask(cep2.text, cep2, "ru"));
 
     System.out.println(fails == 0 ? "TextRules: " + checks + " проверок, все прошли" : "TextRules: провалов " + fails + " из " + checks);
     return fails;

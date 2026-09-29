@@ -2401,6 +2401,7 @@ public class TranslatorService extends Service {
         String sign = TextRules.unshoutSign(text, wd -> (ow != null && ow.common(wd)) || (words != null && words.isCommon(wd, "pt")));
         Once r = translateOnce("pt2ru", sign, false, false, true);
         if (r.skip == null && r.mt != null && !r.mt.trim().isEmpty()) ru = r.mt.trim();
+        if (ru != null && ru.equals(text.trim())) ru = null;          // перевод тот же, что снимок («L:117126 16:26») — рисовать нечего
       }
       else d.skipped++;
       double[] f = p.frame(); org.json.JSONArray fa = new org.json.JSONArray();
@@ -2581,6 +2582,13 @@ public class TranslatorService extends Service {
       if (gate && lk >= 0 && lk < LANG_MIN) {
         r.skip = "(не похоже на " + (src.equals("pt") ? "португальский" : "русский") + ", доля своих слов " + String.format("%.2f", lk) + " — пропускаю: «" + asr + "»)";
         r.skipKind = "skip_lang"; r.lkTag = String.format(Locale.ROOT, "%.2f", lk); return r; }
+    }
+    // Вывеска, где после масок не осталось слов, — только сокращения, числа и знаки («SP /CNPJ:
+    // 62.162.243/0003-45»). Переводчику тут нечего переводить, и он выдумывал «Модель:». Слоты
+    // подставляются сами, сокращения — своим переводом: «Сан-Паулу /ИНН: 62.162.243/0003-45».
+    if (sign && !TextRules.hasWords(mk.text)) {
+      r.mt = TextRules.unmask(mk.text, mk, tgt); r.maskedMt = mk.text; r.tag = "без переводчика: сокращения и числа";
+      return r;
     }
     Phrasebook.Hit hit = pb.lookup(dir, mk.text); String mt, tag, maskedMt; int hits = 0;
     if (hit != null) { maskedMt = hit.dst; mt = TextRules.unmask(hit.dst, mk, tgt); tag = hit.kind; }
