@@ -794,7 +794,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   View buildTalk() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 16, 24, 16);
     // Облако вокруг кнопки удержания расходится до трёх её радиусов — за край списка: пусть
-    // уходит под нижние ряды (они рисуются поверх), а не обрезается ровной линией.
+    // уходит под нижние ряды (они рисуются поверх), а не обрезается ровной линией. Цена: экран
+    // больше не режет детей по краю, и всё, что прокручивается, обязано сидеть в своей режущей
+    // рамке — у прокрутки без отступов своей обрезки нет. Таких двое: крупный текст (bigClip) и
+    // список реплик (listClip). В 0.24.0 крупный текст без рамки рисовался поверх названия,
+    // подсказки и списка, и список под ним было не прокрутить.
     v.setClipChildren(false);
     hint = new TextView(this); hint.setTextSize(13); hint.setTextColor(Color.GRAY); hint.setId(app.falar.R.id.hint);
     hint.setText("Запуск…"); v.addView(hint);
@@ -843,7 +847,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     LinearLayout turnCol = new LinearLayout(this); turnCol.setOrientation(LinearLayout.VERTICAL);
     turnCol.addView(bigBox);
     bigScroll.addView(turnCol);
-    v.addView(bigScroll);
+    FrameLayout bigClip = new FrameLayout(this);                // режет прокрутку по краю — см. setClipChildren выше
+    bigClip.addView(bigScroll, new FrameLayout.LayoutParams(-1, -2));
+    v.addView(bigClip);
 
     // Русская строка и рядом видимая точка входа в меню последней реплики. Раньше меню открывалось
     // долгим нажатием на крупный текст, а этот жест занят чтением вслух; долгое нажатие само по
