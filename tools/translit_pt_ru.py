@@ -18,7 +18,7 @@ VOWELS = set('aeiouáéíóúâêôãõàäëïöü')
 
 # Диграфы и особые сочетания — проверяются раньше одиночных букв, порядок важен.
 DIGRAPHS = [
-    ('lh', 'ль'), ('nh', 'нь'), ('ch', 'ш'),
+    ('lh', 'ль'), ('nh', 'нь'), ('ch', 'ш'), ('ph', 'ф'),   # «ph» — старое написание имён: Lindolpho
     ('ss', 'с'), ('rr', 'рр'), ('sc', 'с'), ('sç', 'с'), ('xc', 'с'),
     ('qu', 'к'), ('gu', 'г'),
     ('ão', 'ан'), ('ãe', 'айн'), ('õe', 'ойн'), ('ães', 'айнс'), ('ões', 'ойнс'),
@@ -48,14 +48,6 @@ EXCEPTIONS = {
 }
 
 
-def _stressed_index(w):
-    """Грубое определение ударного слога: явный акут/циркумфлекс, иначе правило по окончанию."""
-    for i, ch in enumerate(w):
-        if ch in 'áéíóúâêô':
-            return i
-    return None
-
-
 def word(w):
     """Транскрибирует одно слово (без учёта регистра на входе)."""
     low = unicodedata.normalize('NFC', w.lower())
@@ -64,7 +56,6 @@ def word(w):
     s = low
     out = []
     i = 0
-    has_accent = _stressed_index(s) is not None
     while i < len(s):
         # диграфы
         for a, b in DIGRAPHS:
@@ -94,14 +85,20 @@ def word(w):
                 out.append('з' if prev in VOWELS and nxt in VOWELS else 'с')
             elif ch == 'x':
                 out.append('ш')                       # в бразильских именах почти всегда /ʃ/
-            elif ch == 'o' and i == len(s) - 1 and not has_accent:
-                out.append('у')                       # бразильское конечное безударное -o
-            elif ch == 'o' and i == len(s) - 2 and nxt == 's' and not has_accent:
+            # конечные -o, -os, -e без знака всегда безударны, знак на другом слоге этого не меняет
+            elif ch == 'o' and i == len(s) - 1:
+                out.append('у')                       # бразильское конечное безударное -o: Эспириту, Антониу
+            elif ch == 'o' and i == len(s) - 2 and nxt == 's':
                 out.append('у')                       # -os -> -ус
-            elif ch == 'e' and i == len(s) - 1 and not has_accent and len(s) > 2:
+            elif ch == 'e' and i == len(s) - 1 and len(s) > 2:
                 out.append('и')                       # конечное безударное -e -> -и
-            elif ch == 'm' and (nxt == '' or nxt not in VOWELS):
-                out.append('н')                       # носовой призвук
+            elif ch in 'eéê' and (i == 0 or (i == 1 and prev == 'h') or prev in 'aoáóâôã'
+                                  or (prev == 'u' and not (i >= 2 and s[i - 2] in 'qg'))):
+                out.append('э')                       # в начале и после гласной: Эспириту, Рафаэл; «gu», «qu» — не гласная
+            elif ch == 'é':
+                out.append('е')                       # после согласной и «i» — «е»: Жозе, Пеле
+            elif ch == 'm' and (nxt == '' or nxt not in VOWELS) and nxt not in ('p', 'b'):
+                out.append('н')                       # носовой призвук; перед p/b — «м»: Campinas
             elif ch == 'ã':
                 out.append('а' if i == len(s) - 1 else 'ан')
             else:
@@ -190,6 +187,19 @@ SAMPLES = [
     ('Botafogo', 'Ботафогу'),
     ('Leblon', 'Леблон'),
     ('Tijuca', 'Тижука'),
+    ('Campinas', 'Кампинас'),
+    ('Pernambuco', 'Пернамбуку'),
+    ('Jardim', 'Жардин'),
+    ('Lindolpho', 'Линдолфу'),
+    ('Espírito Santo', 'Эспириту Санту'),
+    ('Antônio', 'Антониу'),
+    ('Henrique', 'Энрики'),
+    ('Rafael', 'Рафаэл'),
+    ('Coelho', 'Коэлью'),
+    ('José', 'Жозе'),
+    ('Guerra', 'Герра'),
+    ('Tietê', 'Тиете'),
+    ('Paraíso', 'Параизу'),
 ]
 
 if __name__ == '__main__':

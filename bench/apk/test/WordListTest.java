@@ -58,6 +58,13 @@ public class WordListTest {
     eq(masked(w, "Приезжайте пятого августа", "ru", "pt"), "Приезжайте пятого августа", "W7 «пятого августа» не становится улицей");
     ok(!masked(w, "Quero uma feijoada", "pt", "ru").contains("feijoada"), "W7 а само блюдо находится");
 
+    // текст снимка: только точное вхождение — по звучанию «Augusto da Costa» становился «Rua Augusta»
+    String lbl = "ICPA CEPÊRA LTDA. Av. Lindolpho Augusto da Costa, 1.001";
+    eq(w.apply(lbl, "pt", "ru", new ArrayList<>(), new ArrayList<>(), true).masked, lbl, "W8 снимок: похожее по звучанию имя не подменяется");
+    ok(!w.apply("HOTEL COPACABANA PALACE", "pt", "ru", new ArrayList<>(), new ArrayList<>(), true).masked.contains("PALACE"), "W8 снимок: точное имя — прописными тоже");
+    ok(!w.apply("Loja na Rua Augusta, 1500", "pt", "ru", new ArrayList<>(), new ArrayList<>(), true).masked.contains("Augusta"), "W8 снимок: точное имя находится");
+    ok(w.apply("Fica perto do Capocapana Palace", "pt", "ru", new ArrayList<>(), new ArrayList<>(), true).masked.contains("Palace"), "W8 снимок: искажённое — не ищется");
+
     System.out.println(fails == 0 ? "WordList: " + checks + " проверок, все прошли" : "WordList: провалов " + fails + " из " + checks);
     return fails;
   }

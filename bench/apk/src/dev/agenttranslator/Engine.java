@@ -95,10 +95,33 @@ public class Engine {
     log.log("MT загружен за " + loadMtMs + " мс · +" + (rss1 - rss0) + " МБ резидентно, всего " + rss1 + " МБ · "
         + (kvDirs == 2 ? "две сессии на направление" : kvDirs == 0 ? "три сессии на направление" : "две сессии в одном направлении, три в другом")
         + (legacy ? " (стенд: прежний путь)" : ""));
-    t = System.nanoTime(); long r2 = rssMb();
-    ttsRu = tts(new File(m, "tts_ru"), "ru_RU-dmitri-medium.onnx"); ttsPt = tts(new File(m, "tts_pt"), "pt_BR-faber-medium.onnx");
-    loadTtsMs = (System.nanoTime() - t) / 1000000; log.log("TTS загружен за " + loadTtsMs + " мс · +" + (rssMb() - r2) + " МБ резидентно");
+    if (withTts) loadTts(); else log.log("TTS не загружается: модуль «Озвучка» выключен");
   }
+
+  /** Поднимать ли голоса при создании движка: модуль «Озвучка» (Modules.TTS). Статическое поле,
+   *  как mtVariant: сервис ставит его до конструктора. */
+  public static volatile boolean withTts = true;
+
+  /** Голоса — отдельно от остального: модуль «Озвучка» включают и выключают на ходу. Нет файлов —
+   *  не ошибка запуска, а приложение без голоса: перевод виден на экране. */
+  public synchronized boolean loadTts() {
+    if (ttsRu != null && ttsPt != null) return true;
+    File ru = new File(m, "tts_ru"), pt = new File(m, "tts_pt");
+    if (!new File(ru, "ru_RU-dmitri-medium.onnx").isFile() || !new File(pt, "pt_BR-faber-medium.onnx").isFile()) {
+      log.log("TTS: файлов голоса нет — перевод только на экране"); return false;
+    }
+    long t = System.nanoTime(), r2 = rssMb();
+    ttsRu = tts(ru, "ru_RU-dmitri-medium.onnx"); ttsPt = tts(pt, "pt_BR-faber-medium.onnx");
+    loadTtsMs = (System.nanoTime() - t) / 1000000; log.log("TTS загружен за " + loadTtsMs + " мс · +" + (rssMb() - r2) + " МБ резидентно");
+    return true;
+  }
+  /** Отдать голоса: модуль выключили. Звать, когда очередь озвучки остановлена. */
+  public synchronized void releaseTts() {
+    try { if (ttsRu != null) ttsRu.release(); } catch (Throwable ignore) {}
+    try { if (ttsPt != null) ttsPt.release(); } catch (Throwable ignore) {}
+    ttsRu = ttsPt = null;
+  }
+  public boolean hasTts() { return ttsRu != null && ttsPt != null; }
   static String p(File d, String n) { return new File(d, n).getAbsolutePath(); }
 
   /** Отдать модели. Без этого нативная память (распознавание, синтез, VAD, шесть сессий перевода —

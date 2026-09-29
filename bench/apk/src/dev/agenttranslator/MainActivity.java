@@ -44,7 +44,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   float szPt = 34, szRu = 17;
   /** Экран первого запуска: разрешения и загрузка моделей по манифесту; блок моделей в «Системе». */
   View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
-  Button bSetupMic, bSetupDl, bSetupStop, bModelsDl, bModelsStop, bModelsVerify, bModelsUp; ToggleButton tSetupAny, tAnyNet;
+  Button bSetupMic, bSetupDl, bSetupStop, bModelsStop, bModelsVerify, bModelsUp; ToggleButton tSetupAny, tAnyNet;
+  /** Модули: переключатели в «Системе» и на экране первого запуска; контейнеры их настроек. */
+  final java.util.Map<String, CheckBox> modChecks = new java.util.HashMap<>(), setupChecks = new java.util.HashMap<>();
+  LinearLayout ttsBox, cloudBox, modBox; Button bUnused, bKeyHelp, bKeyDrop, bModules; boolean setupSynced = false;
   ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint; ScrollView bigScroll;
   TextView updLbl; Button bUpdate, bUpdateGo;
   /** Экран показывает состояние сервиса галочками, а setChecked дёргает обработчик так же, как
@@ -62,6 +65,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
+    // Камера занимает много памяти, и пока она открыта, система выгружает Falar; снимок потом
+    // приходит в заново созданный экран. Адрес снимка и ждущий снимок — из сохранённого состояния,
+    // иначе снимок терялся молча (владелец, 29.09: «реальная картинка из камеры не прилетела»).
+    if (b != null) {
+      String pu = b.getString(K_PHOTO_URI), pp = b.getString(K_PENDING);
+      if (pu != null) photoUri = android.net.Uri.parse(pu);
+      if (pp != null) pendingPhoto = android.net.Uri.parse(pp);
+      cloudPhoto = b.getBoolean(K_CLOUD_PHOTO, false); pendingCloud = b.getBoolean(K_PENDING_CLOUD, false);
+    }
     LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
 
     prefs = getSharedPreferences("at", MODE_PRIVATE);
@@ -163,7 +175,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bFold.setOnClickListener(v -> fold(!folded));
     bModels.setOnClickListener(v -> showModels());
     // Долгое нажатие — сразу в облако, минуя офлайн-распознавание: нужно, когда оно не справилось.
-    bPhoto.setOnLongClickListener(v -> { cloudPhoto = true; pickPhotoMenu(); return true; });
+    bPhoto.setOnLongClickListener(v -> { if (svc == null || !svc.mod(Modules.CLOUD)) return false; cloudPhoto = true; pickPhotoMenu(); return true; });
     bPhoto.setOnClickListener(v -> { cloudPhoto = false; pickPhotoMenu(); });
 
     bType.setOnClickListener(v -> {
@@ -187,11 +199,24 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bKey.setOnClickListener(v -> {
       if (svc == null) return;
       final String k = keyIn.getText().toString().trim();
-      keyState.setText(k.isEmpty() ? "убираю ключ…" : "проверяю ключ у OpenRouter…");
+      // Пустое поле — ничего не делаем. Раньше «сохранить» с пустым полем стирал сохранённый ключ:
+      // поле после сохранения очищается, и второе нажатие молча убирало рабочий ключ (владелец, 29.09).
+      if (k.isEmpty()) { refreshKey("поле пустое — сохранённый ключ не тронут; ключ — кнопкой «как получить ключ»"); return; }
+      keyState.setText("проверяю ключ у OpenRouter…");
       bKey.setEnabled(false);
       // Сервис сам пишет итог в журнал, второй раз не дублируем.
       new Thread(() -> { final String r = svc.setCloudKey(k);
         runOnUiThread(() -> { keyIn.setText(""); bKey.setEnabled(true); refreshKey(r); }); }).start();
+    });
+    bKeyHelp.setOnClickListener(v -> keyHelpDialog());
+    bKeyDrop.setOnClickListener(v -> {
+      if (svc == null) return;
+      new android.app.AlertDialog.Builder(this).setTitle("Убрать ключ OpenRouter?")
+          .setMessage("Облако перестанет работать: «получше» облаком, пересмотр разговора и названия разговоров. "
+                    + "Ключ на сайте OpenRouter останется — его можно вставить снова.")
+          .setPositiveButton("убрать", (d, w) -> new Thread(() -> { final String r = svc.setCloudKey("");
+              runOnUiThread(() -> refreshKey(r)); }).start())
+          .setNegativeButton("отмена", null).show();
     });
     bClear.setOnClickListener(v -> {
       if (svc == null || svc.pb == null) return;
@@ -405,8 +430,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (svc == null || svc.chats == null) return;
     String[] t = svc.chats.turn(svc.chats.size() - 1);
     if (t == null) { showBig("—", "pt2ru", false); smallRu.setText(""); return; }
-    boolean srcPt = t[0].startsWith("pt");
-    showBig(srcPt ? t[1] : t[2], t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : t[1]);
+    boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]);
+    showBig((photo ? "📷 " : "") + (srcPt ? t[1] : t[2]), t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : t[1]);
   }
 
   final java.util.List<String[]> histRows = new java.util.ArrayList<>();
@@ -425,7 +450,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         LinearLayout col = new LinearLayout(MainActivity.this);
         col.setOrientation(LinearLayout.VERTICAL);
         TextView pt = new TextView(MainActivity.this);
-        pt.setText(srcPt ? t[1] : t[2]); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(Color.DKGRAY);
+        pt.setText((Chats.PHOTO.equals(t[8]) ? "📷 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(Color.DKGRAY);
+        if (Chats.PHOTO.equals(t[8])) pt.setMaxLines(3);
         TextView ru = new TextView(MainActivity.this);
         ru.setText((srcPt ? t[2] : t[1]) + ("1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : ""));
         ru.setTextSize(Math.max(10, szRu - 3)); ru.setTextColor(Color.GRAY);
@@ -442,7 +468,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       }
     });
     histList.setOnItemClickListener((p, vv, pos, id) -> {
-      if (pos < histRows.size()) editTurn(Integer.parseInt(histRows.get(pos)[3]), histRows.get(pos)[1]);
+      if (pos >= histRows.size()) return;
+      String[] t = histRows.get(pos);
+      if (Chats.PHOTO.equals(t[8])) openPhoto(Integer.parseInt(t[3]));      // снимок — перевод поверх фото, меню — долгим нажатием
+      else editTurn(Integer.parseInt(t[3]), t[1]);
     });
     histList.setOnItemLongClickListener((p, vv, pos, id) -> {   // прежний жест оставлен: к нему привыкли
       if (pos >= histRows.size()) return false;
@@ -459,16 +488,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   void turnMenu(final int idx) {
     if (svc == null || svc.chats == null) return;
     final String[] t = svc.chats.turn(idx); if (t == null) return;
-    final boolean mine = t[0].startsWith("ru");
+    final boolean mine = t[0].startsWith("ru"), photo = Chats.PHOTO.equals(t[8]);
     final java.util.List<String> items = new java.util.ArrayList<>();
+    if (photo) items.add("Показать снимок");
     if (mine) { items.add("Исправить текст"); items.add("Исправить перевод"); }
-    items.add("Произнести ещё раз"); items.add("Сообщить о переводе"); items.add("Удалить реплику"); items.add("Перенести в другой разговор");
+    if (!photo && svc.mod(Modules.TTS)) items.add("Произнести ещё раз");   // снимок не озвучивается; без модуля «Озвучка» — нечем
+    items.add("Сообщить о переводе"); items.add("Удалить реплику"); items.add("Перенести в другой разговор");
     String title = t[1].length() > 40 ? t[1].substring(0, 40) + "…" : t[1];
     new android.app.AlertDialog.Builder(this)
         .setTitle(title)
         .setItems(items.toArray(new String[0]), (d, w) -> {
           String it = items.get(w);
-          if (it.equals("Исправить текст")) editSource(idx, t[1]);
+          if (it.equals("Показать снимок")) openPhoto(idx);
+          else if (it.equals("Исправить текст")) editSource(idx, t[1]);
           else if (it.equals("Исправить перевод")) editTranslation(idx, t[1], t[2]);
           else if (it.equals("Произнести ещё раз")) svc.sayTurn(idx);
           else if (it.equals("Сообщить о переводе")) reportTurn(t[0], t[1], t[2]);
@@ -829,7 +861,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bTurn = new TextView(this); bTurn.setText("•••"); bTurn.setTextSize(18); bTurn.setTextColor(0xFF33507A);
     bTurn.setPadding(24, 2, 8, 8); ruRow.addView(bTurn);
     turnCol.addView(ruRow);
-    View.OnClickListener lastMenu = x -> { if (svc != null && svc.chats != null && svc.chats.size() > 0) turnMenu(svc.chats.size() - 1); };
+    View.OnClickListener lastMenu = x -> {
+      if (svc == null || svc.chats == null || svc.chats.size() == 0) return;
+      int last = svc.chats.size() - 1; String[] t = svc.chats.turn(last);
+      if (t != null && Chats.PHOTO.equals(t[8])) openPhoto(last); else turnMenu(last);   // снимок — сразу перевод поверх фото
+    };
     bTurn.setOnClickListener(lastMenu);
     smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
 
@@ -1000,28 +1036,163 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     } catch (Throwable t) { onLog("📷 не вышло открыть: " + t); }
   }
 
+  static final String K_PHOTO_URI = "photo_uri", K_PENDING = "photo_pending", K_CLOUD_PHOTO = "cloud_photo", K_PENDING_CLOUD = "photo_pending_cloud";
+
+  /** Снимок с камеры камера пишет в общую галерею: без FileProvider (его нет без AndroidX) ей больше
+   *  некуда. Копия для разговора — у нас (savePhoto), и в галерее снимок оставаться не должен: он
+   *  там виден всем приложениям и не удаляется вместе с репликой, а договорились хранить снимки в
+   *  приложении. Удаляется только своя запись (photoUri) — снимок, выбранный из галереи, не трогаем.
+   *  Если снимок не скопировался, запись остаётся: его можно выбрать из галереи ещё раз. */
+  void dropCapture(android.net.Uri u) {
+    if (u == null || photoUri == null || !u.equals(photoUri)) return;
+    try { getContentResolver().delete(u, null, null); } catch (Throwable t) { onLog("📷 снимок камеры в галерее не удалился: " + t); }
+    photoUri = null;
+  }
+  /** Снимок пришёл раньше, чем поднялся сервис с движками: прочитаем в onReady. */
+  android.net.Uri pendingPhoto; boolean pendingCloud;
+
+  @Override protected void onSaveInstanceState(Bundle out) {
+    super.onSaveInstanceState(out);
+    if (photoUri != null) out.putString(K_PHOTO_URI, photoUri.toString());
+    if (pendingPhoto != null) out.putString(K_PENDING, pendingPhoto.toString());
+    out.putBoolean(K_CLOUD_PHOTO, cloudPhoto); out.putBoolean(K_PENDING_CLOUD, pendingCloud);
+  }
+
   @Override protected void onActivityResult(int req, int res, Intent data) {
     super.onActivityResult(req, res, data);
-    if (req != REQ_PHOTO || res != RESULT_OK) return;
+    if (req != REQ_PHOTO) return;
+    if (res != RESULT_OK) {                          // пустая запись, заведённая под снимок, в галерее не нужна
+      if (res != RESULT_CANCELED) onLog("📷 камера вернула отказ (" + res + ")");
+      dropCapture(photoUri); return;
+    }
     final android.net.Uri u = data != null && data.getData() != null ? data.getData() : photoUri;
-    if (u == null || svc == null) return;
+    if (u == null) { onLog("📷 снимок не вернулся: камера не отдала файл"); return; }
+    if (svc == null || svc.eng == null) {
+      pendingPhoto = u; pendingCloud = cloudPhoto;
+      setHint("📷 снимок получен — прочитаю, как только приложение загрузится");
+      onLog("📷 снимок получен до загрузки приложения — ждёт движков");
+      return;
+    }
+    handlePhoto(u, cloudPhoto);
+  }
+
+  /** Прочитать снимок u: офлайн — без спроса, облаком — с согласием на каждый снимок. */
+  void handlePhoto(final android.net.Uri u, final boolean cloudPhoto) {
+    if (svc == null) return;
+    final boolean offline = svc.ocr != null && svc.ocr.ready() && svc.mod(Modules.OCR) && !cloudPhoto;
+    if (!offline && !svc.cloudReady()) {             // читать нечем: модели снимков ещё качаются, а облака нет
+      onLog(svc.mod(Modules.OCR) ? "📷 чтение снимков ещё докачивается — снимок прочитается, когда модели придут; попробуйте позже"
+                                 : "📷 снимок читать нечем: включите «Чтение снимков» или «Облако» в «Системе» → «Модули»");
+      return;
+    }
     new Thread(() -> {
+      if (offline) {                         // офлайн — без спроса: наружу ничего не уходит
+        final java.io.File f = svc.chats == null ? null : savePhoto(u, svc.chats.photos());
+        if (f != null) dropCapture(u);
+        runOnUiThread(() -> { if (f == null) onLog("📷 снимок не прочитался"); else svc.photoRead(f); });
+        return;
+      }
       final byte[] jpeg = jpegOf(u);
+      if (jpeg != null) dropCapture(u);
       runOnUiThread(() -> {
         if (jpeg == null) { onLog("📷 снимок не прочитался"); return; }
-        boolean offline = svc.ocr != null && svc.ocr.ready && !cloudPhoto;
-        if (offline) { svc.photoText(jpeg, false); return; }   // офлайн — без спроса, наружу ничего не уходит
-        // Офлайн-распознавания пока нет, значит снимок уйдёт наружу. Спрашиваем каждый раз:
-        // на снимке может быть чужая переписка, а правило проекта — разговоры остаются здесь.
+        // Облако — третья сторона. Спрашиваем каждый раз: на снимке может быть чужая переписка,
+        // а правило проекта — разговоры остаются здесь.
+        boolean noModels = svc.ocr == null || !svc.ocr.ready();
         new android.app.AlertDialog.Builder(this)
             .setTitle("Отправить снимок в облако?")
-            .setMessage("Офлайн-распознавание текста ещё не подключено. Снимок (" + (jpeg.length / 1024) + " КБ) "
-                      + "уйдёт бесплатной модели OpenRouter — это третья сторона. Перевод потом считается здесь, "
-                      + "на устройстве.")
+            .setMessage((noModels ? "Модели офлайн-чтения ещё не скачаны. " : "")
+                      + "Снимок (" + (jpeg.length / 1024) + " КБ) уйдёт бесплатной модели OpenRouter — это третья сторона. "
+                      + "Перевод потом считается здесь, на устройстве.")
             .setPositiveButton("отправить", (d, w) -> svc.photoText(jpeg, true))
             .setNegativeButton("отмена", null).show();
       });
     }, "photo").start();
+  }
+
+  /** Длинная сторона снимка для офлайн-чтения. Замер на наборе вывесок (bench/ocr): при 1000 px
+   *  слов прочитано на 3 пункта меньше, чем при 1280, при 800 — на 10; детектор всё равно
+   *  смотрит на 960, а строки вырезаются из полного снимка. */
+  static final int PHOTO_MAX = 2048;
+
+  /** Снимок для офлайн-чтения — в каталог снимков разговоров: до PHOTO_MAX по длинной стороне,
+   *  повёрнутый по EXIF (камера пишет портрет как пейзаж с пометкой, а BitmapFactory её не
+   *  применяет — распознаватель читает строки только горизонтально), JPEG 90. */
+  java.io.File savePhoto(android.net.Uri u, java.io.File dir) {
+    try {
+      android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+      o.inJustDecodeBounds = true;
+      try (java.io.InputStream in = getContentResolver().openInputStream(u)) { android.graphics.BitmapFactory.decodeStream(in, null, o); }
+      int max = Math.max(o.outWidth, o.outHeight), sz = 1;
+      if (max <= 0) return null;
+      while (max / (sz * 2) >= 1600) sz *= 2;           // грубо — не ниже 1600, точно — дальше матрицей
+      android.graphics.BitmapFactory.Options o2 = new android.graphics.BitmapFactory.Options(); o2.inSampleSize = sz;
+      android.graphics.Bitmap bm;
+      try (java.io.InputStream in = getContentResolver().openInputStream(u)) { bm = android.graphics.BitmapFactory.decodeStream(in, null, o2); }
+      if (bm == null) return null;
+      bm = oriented(bm, exifRotation(u), PHOTO_MAX);
+      dir.mkdirs();
+      java.io.File f = new java.io.File(dir, "p" + System.currentTimeMillis() + ".jpg");
+      try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) { bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out); }
+      bm.recycle();
+      return f;
+    } catch (Throwable t) { return null; }
+  }
+
+  /** Поворот снимка по EXIF, градусы по часовой. */
+  int exifRotation(android.net.Uri u) {
+    try (java.io.InputStream in = getContentResolver().openInputStream(u)) {
+      int o = new android.media.ExifInterface(in).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL);
+      return o == android.media.ExifInterface.ORIENTATION_ROTATE_90 ? 90 : o == android.media.ExifInterface.ORIENTATION_ROTATE_180 ? 180
+           : o == android.media.ExifInterface.ORIENTATION_ROTATE_270 ? 270 : 0;
+    } catch (Throwable t) { return 0; }
+  }
+
+  /** Повернуть и уменьшить до max по длинной стороне одной матрицей; исходник освобождается. */
+  static android.graphics.Bitmap oriented(android.graphics.Bitmap bm, int rot, int max) {
+    float k = Math.min(1f, (float) max / Math.max(bm.getWidth(), bm.getHeight()));
+    if (k >= 1f && rot == 0) return bm;
+    android.graphics.Matrix m = new android.graphics.Matrix(); m.postScale(k, k); m.postRotate(rot);
+    android.graphics.Bitmap r = android.graphics.Bitmap.createBitmap(bm, 0, 0, bm.getWidth(), bm.getHeight(), m, true);
+    if (r != bm) bm.recycle();
+    return r;
+  }
+
+  /** Перевод поверх снимка во весь экран (PhotoView). Касание абзаца — его оригинал и перевод
+   *  текстом внизу, удержание — снимок без перевода, «✕» или «назад» — закрыть. */
+  void openPhoto(int idx) {
+    if (svc == null || svc.chats == null) return;
+    org.json.JSONObject p = svc.chats.photo(idx);
+    if (p == null) return;
+    java.io.File f = new java.io.File(svc.chats.photos(), p.optString("file", ""));
+    final android.graphics.Bitmap bm = f.isFile() ? android.graphics.BitmapFactory.decodeFile(f.getAbsolutePath()) : null;
+    if (bm == null) { onLog("📷 файла снимка нет — осталась только реплика с текстом"); return; }
+    final android.app.Dialog d = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+    FrameLayout root = new FrameLayout(this); root.setBackgroundColor(Color.BLACK);
+    final PhotoView pv = new PhotoView(this, bm, p.optJSONArray("blocks"));
+    root.addView(pv, new FrameLayout.LayoutParams(-1, -1));
+    final String tip = "касание абзаца — его текст здесь · удержание — оригинал · щипок — крупнее";
+    final TextView info = new TextView(this); info.setTextColor(Color.WHITE); info.setTextSize(16);
+    info.setBackgroundColor(0xE0202020); info.setPadding(32, 20, 32, 28); info.setText(tip);
+    info.setMaxLines(8); info.setMovementMethod(new ScrollingMovementMethod());
+    root.addView(info, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+    Button close = new Button(this); close.setText("✕"); close.setTextSize(20);
+    close.setOnClickListener(v -> d.dismiss());
+    root.addView(close, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END));
+    pv.onPick = (src, dst) -> {
+      info.scrollTo(0, 0);
+      info.setText(src == null ? tip : src + "\n→ " + (dst == null || dst.isEmpty() ? "(оставлено как есть: не португальский или служебное слово)" : dst));
+    };
+    d.setContentView(root);
+    d.setOnDismissListener(x -> bm.recycle());
+    d.show();
+  }
+
+  @Override public void onPhoto(long chatId, long at) {
+    if (isFinishing() || isDestroyed() || svc == null || svc.chats == null || svc.chats.current != chatId) return;
+    showLastTurn();
+    java.util.List<String[]> all = svc.chats.all();
+    for (int k = all.size() - 1; k >= 0; k--) if (all.get(k)[6].equals(String.valueOf(at))) { openPhoto(k); break; }
   }
 
   /** Снимок в JPEG разумного размера: 12 Мп ни распознавателю, ни каналу не нужны. */
@@ -1038,6 +1209,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       android.graphics.Bitmap bm;
       try (java.io.InputStream in = getContentResolver().openInputStream(u)) { bm = android.graphics.BitmapFactory.decodeStream(in, null, o2); }
       if (bm == null) return null;
+      bm = oriented(bm, exifRotation(u), 1024);          // облаку тоже — портрет с камеры иначе лежит на боку
       java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
       bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, bo);
       bm.recycle();
@@ -1188,14 +1360,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (svc == null || svc.learn == null) return;
     shownWords.clear();
     for (Learn.Word w : l) shownWords.add(w.w);
+    String say = svc.mod(Modules.TTS) ? "нажатие произносит, " : "";
     if (knownMode) learnHint.setText(l.isEmpty() ? "Известных слов пока нет — отмечайте их долгим нажатием во вкладке «учу»"
-                                                 : "Знаю: " + l.size() + " слов · нажатие произносит, долгое возвращает в изучение");
+                                                 : "Знаю: " + l.size() + " слов · " + say + "долгое возвращает в изучение");
     else learnHint.setText(l.isEmpty()
           ? "Пока нечего показать: нужно, чтобы слово встретилось не меньше " + min + " раз"
-          : "Слов от " + min + " повторов: " + l.size() + " · нажатие произносит, долгое — «знаю»");
+          : "Слов от " + min + " повторов: " + l.size() + " · " + say + "долгое — «знаю»");
     wordList.setAdapter(new WordRow(l, knownMode));
     wordList.setOnItemClickListener((p, vv, pos, id) -> {
-      if (pos < shownWords.size() && svc != null) svc.sayWord(shownWords.get(pos), "pt");
+      if (pos < shownWords.size() && svc != null && svc.mod(Modules.TTS)) svc.sayWord(shownWords.get(pos), "pt");
     });
     wordList.setOnItemLongClickListener((p, vv, pos, id) -> {
       if (pos >= shownWords.size() || svc == null || svc.learn == null) return false;
@@ -1233,6 +1406,27 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     for (Button b : new Button[]{bUpdate, bUpdateGo}) style(b);
     bUpdate.setOnClickListener(vv -> { if (svc != null) svc.checkUpdates(true); });
     bUpdateGo.setOnClickListener(vv -> { if (svc != null) svc.installUpdate(); });
+    // Модули: что приложение делает на этом телефоне. Выключенный модуль спрятан и не держит
+    // память; его файлы остаются — удаляются отдельной кнопкой (решение владельца 28.09).
+    // Список спрятан за кнопкой и свёрнут по умолчанию, как журнал (владелец, 29.09): модули
+    // выбирают редко, а «Система» и без них длинная. Свёрнутая кнопка показывает, сколько включено.
+    bModules = new Button(this); bModules.setTextSize(13); style(bModules); v.addView(bModules);
+    modBox = new LinearLayout(this); modBox.setOrientation(LinearLayout.VERTICAL); v.addView(modBox);
+    bModules.setOnClickListener(vv -> showModules(modBox.getVisibility() != View.VISIBLE));
+    for (String m : Modules.CHOICE) {
+      CheckBox cb = new CheckBox(this); cb.setTextSize(15); cb.setText(Modules.title(m)); modBox.addView(cb); modChecks.put(m, cb);
+      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(Color.GRAY); w.setPadding(dp(32), 0, 0, dp(6)); w.setText(Modules.what(m)); modBox.addView(w);
+      cb.setOnCheckedChangeListener((vv, on) -> {
+        if (uiSync || svc == null) return;
+        if (on && svc.store != null && svc.store.bytes(m) > 0 && !svc.store.onPhone(m))
+          onLog("🧩 " + Modules.title(m) + ": включён, докачивается " + ModelStore.mb(svc.store.bytes(m)) + " МБ"
+                + (prefs.getBoolean("models_any_net", false) ? "" : " — по Wi-Fi"));
+        svc.setModule(m, on); applyModules();
+      });
+    }
+    bUnused = new Button(this); bUnused.setTextSize(13); bUnused.setText("удалить неиспользуемые модели"); style(bUnused); modBox.addView(bUnused);
+    bUnused.setOnClickListener(vv -> unusedDialog());
+    showModules(prefs.getBoolean("mods_open", false));
     TextView ml = new TextView(this); ml.setTextSize(13); ml.setTextColor(Color.GRAY);
     ml.setText("Вход: чувствительность и источник"); v.addView(ml);
     // Ползунок показывает то, что сервис применяет на самом деле. Раньше он всегда рисовал +0 дБ,
@@ -1261,8 +1455,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // иначе на длинном монологе перевод начинает звучать собеседнику в лицо посреди фразы.
     // Одна настройка на оба языка: длинная фраза бывает и по-русски, и по-португальски.
     int hold = prefs.getInt("hold", 1500);
-    holdLbl = new TextView(this); holdLbl.setTextSize(13); v.addView(holdLbl);
-    sHold = new SeekBar(this); sHold.setMax(24); sHold.setProgress(hold / 250); v.addView(sHold);   // 0…6,0 с шагом 0,25
+    ttsBox = new LinearLayout(this); ttsBox.setOrientation(LinearLayout.VERTICAL); v.addView(ttsBox);   // прячется без модуля «Озвучка»
+    holdLbl = new TextView(this); holdLbl.setTextSize(13); ttsBox.addView(holdLbl);
+    sHold = new SeekBar(this); sHold.setMax(24); sHold.setProgress(hold / 250); ttsBox.addView(sHold);   // 0…6,0 с шагом 0,25
     holdLbl.setText(holdText(hold));
     sHold.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
       public void onProgressChanged(SeekBar sb, int p, boolean u) { holdLbl.setText(holdText(p * 250)); }
@@ -1289,37 +1484,40 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // на экране разговора. Два места для одного решения давали противоречие, и побеждало то,
     // что нажали последним.
     bVoices = new Button(this); bVoices.setText("🎤 голоса и авто-направление →"); v.addView(bVoices);
+    cloudBox = new LinearLayout(this); cloudBox.setOrientation(LinearLayout.VERTICAL); v.addView(cloudBox);   // прячется без модуля «Облако»
     TextView kl = new TextView(this); kl.setTextSize(13); kl.setTextColor(Color.GRAY);
-    kl.setText("Ключ OpenRouter — только бесплатные модели; нужен для названий разговоров и кнопки «получше». "
-             + "Пустое поле и «сохранить» — ключ убрать.");
-    v.addView(kl);
+    kl.setText("Ключ OpenRouter — только бесплатные модели; нужен для названий разговоров и кнопки «получше».");
+    cloudBox.addView(kl);
+    LinearLayout rowKH = new LinearLayout(this); rowKH.setOrientation(LinearLayout.HORIZONTAL);
+    bKeyHelp = new Button(this); bKeyHelp.setText("как получить ключ"); bKeyHelp.setTextSize(13); style(bKeyHelp);
+    rowKH.addView(bKeyHelp, new LinearLayout.LayoutParams(0, -2, 1f));
+    bKeyDrop = new Button(this); bKeyDrop.setText("убрать ключ"); bKeyDrop.setTextSize(13); style(bKeyDrop); bKeyDrop.setVisibility(View.GONE);
+    rowKH.addView(bKeyDrop, new LinearLayout.LayoutParams(-2, -2));
+    cloudBox.addView(rowKH);
     LinearLayout rowK = new LinearLayout(this); rowK.setOrientation(LinearLayout.HORIZONTAL);
     keyIn = new EditText(this); keyIn.setHint("sk-or-…"); keyIn.setSingleLine(true); keyIn.setTextSize(14);
     rowK.addView(keyIn, new LinearLayout.LayoutParams(0, -2, 1f));
     bKey = new Button(this); bKey.setText("сохранить"); bKey.setEnabled(false);
     rowK.addView(bKey, new LinearLayout.LayoutParams(-2, -2));
-    v.addView(rowK);
+    cloudBox.addView(rowK);
     // Состояние ключа видно всегда. Поле после сохранения очищается, и без этой строки отличить
     // «сохранён» от «не сохранился» было нельзя — ключ вводили повторно, думая, что он не дошёл.
-    keyState = new TextView(this); keyState.setTextSize(13); keyState.setTextColor(0xFF33507A); v.addView(keyState);
+    keyState = new TextView(this); keyState.setTextSize(13); keyState.setTextColor(0xFF33507A); cloudBox.addView(keyState);
     bModels = new Button(this); bModels.setText("☁ модели и маршрут"); bModels.setTextSize(13); bModels.setEnabled(false);
-    v.addView(bModels);
+    cloudBox.addView(bModels);
     // Файлы моделей на телефоне: что есть по манифесту, докачка необязательного, полная проверка.
     modelsLbl = new TextView(this); modelsLbl.setTextSize(13); modelsLbl.setTextColor(0xFF33507A); modelsLbl.setPadding(0, 16, 0, 0); modelsLbl.setText("Файлы моделей: проверяю…"); v.addView(modelsLbl);
-    LinearLayout rowM = new LinearLayout(this); rowM.setOrientation(LinearLayout.HORIZONTAL);
-    bModelsDl = new Button(this); bModelsDl.setText("⬇ скачать необязательное…"); bModelsDl.setTextSize(13); bModelsDl.setEnabled(false); rowM.addView(bModelsDl, new LinearLayout.LayoutParams(0, -2, 1f));
-    bModelsStop = new Button(this); bModelsStop.setText("стоп"); bModelsStop.setTextSize(13); bModelsStop.setVisibility(View.GONE); rowM.addView(bModelsStop, new LinearLayout.LayoutParams(-2, -2));
-    v.addView(rowM);
+    // Необязательное больше не отдельной кнопкой: его выбирают модулями выше.
+    bModelsStop = new Button(this); bModelsStop.setText("стоп загрузки"); bModelsStop.setTextSize(13); bModelsStop.setVisibility(View.GONE); v.addView(bModelsStop);
     tAnyNet = new ToggleButton(this); tAnyNet.setTextOn("качать и по мобильной сети: ВКЛ"); tAnyNet.setTextOff("качать и по мобильной сети: выкл");
     tAnyNet.setChecked(prefs.getBoolean("models_any_net", false)); v.addView(tAnyNet);
     tAnyNet.setOnCheckedChangeListener((vv, on) -> setAnyNet(on));
     bModelsVerify = new Button(this); bModelsVerify.setText("проверить файлы моделей"); bModelsVerify.setTextSize(13); bModelsVerify.setEnabled(false); v.addView(bModelsVerify);
     // Появляется, когда у перевода есть файлы полегче, а на телефоне — прежние (обновление 0.23).
     bModelsUp = new Button(this); bModelsUp.setTextSize(13); bModelsUp.setVisibility(View.GONE); v.addView(bModelsUp);
-    for (Button b : new Button[]{bModelsDl, bModelsStop, bModelsVerify, bModelsUp}) style(b);
+    for (Button b : new Button[]{bModelsStop, bModelsVerify, bModelsUp}) style(b);
     bModelsUp.setOnClickListener(vv -> upgradeDialog());
     style(tAnyNet);
-    bModelsDl.setOnClickListener(vv -> optionalDialog());
     bModelsStop.setOnClickListener(vv -> { if (svc != null) svc.cancelModels(); });
     bModelsVerify.setOnClickListener(vv -> { if (svc != null) svc.verifyModels(); });
     tCtx = new ToggleButton(this); tCtx.setTextOn("🧠 контекст (LLM в фоне): ВКЛ"); tCtx.setTextOff("🧠 контекст (LLM в фоне): выкл"); tCtx.setChecked(false); tCtx.setEnabled(false); v.addView(tCtx);
@@ -1445,6 +1643,31 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
     keyState.setText(note == null ? base : base + "\n" + note);
     if (bModels != null) bModels.setEnabled(c != null && c.modelCount() > 0);
+    if (bKeyDrop != null) bKeyDrop.setVisibility(id.isEmpty() ? View.GONE : View.VISIBLE);
+  }
+
+  /** Как получить ключ OpenRouter и что даёт пополнение. Лимиты — по справке OpenRouter на
+   *  29.09.2026: бесплатные модели — 20 запросов в минуту и 50 в сутки; после покупки кредитов
+   *  на $10 и больше (за всё время) — 1000 в сутки, навсегда. Falar ходит только к моделям с
+   *  нулевой ценой (Cloud: суффикс :free и max_price 0 в каждом запросе), так что пополнение
+   *  поднимает лимит, а не тратится. */
+  void keyHelpDialog() {
+    TextView t = new TextView(this); t.setTextSize(15); t.setPadding(48, 24, 48, 8);
+    t.setText("1. Зарегистрируйтесь на openrouter.ai — можно через Google.\n"
+        + "2. Откройте «Keys» и нажмите «Create Key». Лимит расходов ключа можно поставить 0,01 $: "
+        + "Falar ходит только к бесплатным моделям, лимит лишь страхует.\n"
+        + "3. Скопируйте ключ (sk-or-…), вставьте в поле и нажмите «сохранить».\n\n"
+        + "Бесплатно: до 50 запросов в сутки и 20 в минуту. Один ключ можно дать нескольким людям, "
+        + "но лимит у них общий — вдвоём-втроём его хватает на пересмотр разговоров, но не с запасом.\n\n"
+        + "Если один раз пополнить счёт на 10 $ (с комиссией около 11 $), бесплатных запросов станет "
+        + "1000 в сутки — в 20 раз больше, и насовсем, даже когда деньги на счёте кончатся. Отказов «превышен лимит» "
+        + "станет намного меньше, и облако будет отвечать почти всегда. Деньги Falar при этом не тратит.");
+    new android.app.AlertDialog.Builder(this).setTitle("Ключ OpenRouter").setView(t)
+        .setPositiveButton("открыть openrouter.ai", (d, w) -> {
+          try { startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://openrouter.ai/keys"))); }
+          catch (Exception e) { onLog("не открылось: " + e); }
+        })
+        .setNegativeButton("закрыть", null).show();
   }
 
   /** Список моделей в том порядке, в котором их будет пробовать маршрутизация, с причиной порядка.
@@ -1625,6 +1848,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
   @Override public void onReady() {
+    if (pendingPhoto != null && svc != null) {       // снимок ждал движков — теперь читаем
+      final android.net.Uri u = pendingPhoto; final boolean c = pendingCloud; pendingPhoto = null;
+      new Handler(Looper.getMainLooper()).post(() -> handlePhoto(u, c));
+    }
     bPin.setEnabled(true); bBetter.setEnabled(true);
     tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bVoice.setEnabled(true); bVoice2.setEnabled(true); bWord.setEnabled(true);
     bMic.setEnabled(true); bPhoto.setEnabled(true); bType.setEnabled(true);
@@ -1639,7 +1866,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (bigText.length() < 2)
       setHint(svc != null && (svc.listenPt || svc.listenRu) ? "Pode falar · здесь появится перевод"
                                                             : "Микрофон выключен — включите «Слушать» или удержание");
-    refreshChats(); refreshKey(null); refreshVoice(); markListen(); refreshBetter(); refreshIntervals(); refreshReadGuard();
+    refreshChats(); refreshKey(null); refreshVoice(); markListen(); refreshBetter(); refreshIntervals(); refreshReadGuard(); applyModules();
     onUpdate(svc == null ? "" : svc.updateState);
   }
   @Override public void onStatus(String s) { status.setText(s); }
@@ -1676,10 +1903,80 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bUpdate.setEnabled(svc != null && !svc.updateBusy);
   }
   @Override public void onModels(ModelStore.State s) {
-    mst = s; refreshSetup(); refreshModels();
+    mst = s; refreshSetup(); refreshModels(); refreshModules();
     // Обязательное на месте и микрофон разрешён — первый экран больше не нужен; движки грузит сервис.
     if (setupView.getVisibility() == View.VISIBLE && s.checked && s.coreMissing == 0 && !s.busy()
         && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { show(0); setHint("Загружаю движки…"); }
+  }
+
+  @Override public void onModules() { applyModules(); }
+
+  static void vis(View v, boolean on) { if (v != null) v.setVisibility(on ? View.VISIBLE : View.GONE); }
+
+  /** Спрятать или показать всё, что принадлежит модулям. Выключенный модуль не должен оставлять
+   *  кнопку, которая на нажатие отвечает ошибкой «нет модели». */
+  void applyModules() {
+    if (svc == null) return;
+    java.util.Set<String> on = svc.modules;
+    boolean tts = on.contains(Modules.TTS), cloud = on.contains(Modules.CLOUD), llm = on.contains(Modules.LLM);
+    vis(ttsBox, tts); vis(bRevStart, tts);
+    if (!tts && revOpen && bRevStart != null) bRevStart.performClick();          // повторение на слух без голоса бессмысленно
+    vis(cloudBox, cloud); vis(bCloudEvery, cloud); vis(bCloudPrefer, cloud);
+    vis(tCtx, llm); vis(bRefineEvery, llm);
+    vis(bVoices, on.contains(Modules.SPEAKER));
+    boolean photo = Modules.photo(on);
+    vis(bPhoto, photo); if (bModeInput != null) bModeInput.setText(photo ? "📷 ⌨" : "⌨");
+    vis(bBetter, Modules.better(on));
+    refreshModules(); refreshBetter();
+  }
+
+  /** Модули под кнопкой: развернуть — переключатели и «удалить неиспользуемые», свернуть — одна строка. */
+  void showModules(boolean open) {
+    if (modBox == null) return;
+    prefs.edit().putBoolean("mods_open", open).apply();
+    modBox.setVisibility(open ? View.VISIBLE : View.GONE);
+    refreshModulesButton();
+  }
+  void refreshModulesButton() {
+    if (bModules == null) return;
+    boolean open = modBox != null && modBox.getVisibility() == View.VISIBLE;
+    String on = svc == null ? "" : " · включено " + svc.modules.size() + " из " + Modules.CHOICE.size();
+    bModules.setText("🧩 модули" + on + (open ? " · свернуть" : " · развернуть"));
+  }
+
+  /** Переключатели модулей: состояние, размер, скачано ли. Только по размеру файлов — без хэшей. */
+  void refreshModules() {
+    refreshModulesButton();
+    if (svc == null || svc.store == null || modChecks.isEmpty()) return;
+    uiSync = true;
+    for (String m : Modules.CHOICE) {
+      CheckBox cb = modChecks.get(m); if (cb == null) continue;
+      cb.setChecked(svc.mod(m));
+      long b = svc.store.bytes(m);
+      String st = b == 0 ? (svc.cloud != null && svc.cloud.ready ? "ключ есть" : "нужен ключ OpenRouter")
+                : svc.store.onPhone(m) ? "скачано" : svc.mod(m) ? "докачивается" : "не скачано";
+      cb.setText(Modules.title(m) + (b > 0 ? " · " + ModelStore.mb(b) + " МБ" : "") + " · " + st);
+    }
+    uiSync = false;
+    long unused = svc.unusedBytes();
+    if (bUnused != null) {
+      bUnused.setEnabled(unused > 0);
+      bUnused.setText(unused > 0 ? "удалить неиспользуемые модели · " + ModelStore.mb(unused) + " МБ" : "неиспользуемых моделей нет");
+    }
+  }
+
+  /** «Удалить неиспользуемые модели» — файлы выключенных модулей. Отдельным действием с вопросом:
+   *  выключить модуль и удалить его файлы — разные решения (владелец, 28.09). */
+  void unusedDialog() {
+    if (svc == null || svc.store == null) return;
+    long b = svc.unusedBytes(); if (b == 0) { refreshModules(); return; }
+    StringBuilder names = new StringBuilder();
+    for (String m : Modules.CHOICE) if (!svc.mod(m) && svc.store.bytes(m) > 0 && svc.store.onPhone(m)) names.append(names.length() > 0 ? ", " : "").append(Modules.title(m));
+    new android.app.AlertDialog.Builder(this).setTitle("Удалить неиспользуемые модели?")
+        .setMessage("Файлы выключенных модулей: " + (names.length() > 0 ? names : "частично скачанные") + ". Освободится " + ModelStore.mb(b) + " МБ. "
+                  + "Если модуль потом включить, его файлы скачаются заново.")
+        .setPositiveButton("удалить", (d, w) -> svc.removeUnusedModels())
+        .setNegativeButton("отмена", null).show();
   }
 
   // ---- первый запуск и файлы моделей ------------------------------------------------------
@@ -1705,7 +2002,18 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     TextView h1 = new TextView(this); h1.setTextSize(17); h1.setTypeface(null, Typeface.BOLD); h1.setText("1. Микрофон"); v.addView(h1);
     setupMic = new TextView(this); setupMic.setTextSize(15); v.addView(setupMic);
     bSetupMic = new Button(this); bSetupMic.setText("разрешить микрофон"); v.addView(bSetupMic);
-    TextView h2 = new TextView(this); h2.setTextSize(17); h2.setTypeface(null, Typeface.BOLD); h2.setPadding(0, 24, 0, 0); h2.setText("2. Модели"); v.addView(h2);
+    // Модули: что ставить. Отмечено под этот телефон (Modules.defaults); всё меняется потом
+    // в «Системе» → «Модули», и включённое туда же докачивается само.
+    TextView hm = new TextView(this); hm.setTextSize(17); hm.setTypeface(null, Typeface.BOLD); hm.setPadding(0, 24, 0, 0); hm.setText("2. Что нужно"); v.addView(hm);
+    TextView base = new TextView(this); base.setTextSize(15); base.setPadding(0, 8, 0, 0);
+    base.setText("✓ " + Modules.title(Modules.BASE) + " — " + Modules.what(Modules.BASE)); v.addView(base);
+    java.util.Set<String> pre = Modules.defaults(totalRam());
+    for (String m : Modules.CHOICE) {
+      CheckBox cb = new CheckBox(this); cb.setTextSize(15); cb.setText(Modules.title(m)); cb.setChecked(pre.contains(m)); v.addView(cb); setupChecks.put(m, cb);
+      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(Color.GRAY); w.setPadding(dp(32), 0, 0, dp(4)); w.setText(Modules.what(m)); v.addView(w);
+      cb.setOnCheckedChangeListener((vv, on) -> refreshSetup());
+    }
+    TextView h2 = new TextView(this); h2.setTextSize(17); h2.setTypeface(null, Typeface.BOLD); h2.setPadding(0, 24, 0, 0); h2.setText("3. Модели"); v.addView(h2);
     setupText = new TextView(this); setupText.setTextSize(15); v.addView(setupText);
     tSetupAny = new ToggleButton(this); tSetupAny.setTextOn("качать и по мобильной сети: ВКЛ"); tSetupAny.setTextOff("качать и по мобильной сети: выкл");
     tSetupAny.setChecked(prefs.getBoolean("models_any_net", false)); v.addView(tSetupAny);
@@ -1718,9 +2026,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     setupProg = new TextView(this); setupProg.setTextSize(14); setupProg.setTextColor(Color.DKGRAY); v.addView(setupProg);
     for (Button b : new Button[]{bSetupMic, bSetupDl, bSetupStop}) style(b);
     bSetupMic.setOnClickListener(vv -> askMic());
-    bSetupDl.setOnClickListener(vv -> { if (svc != null) svc.downloadModels("core"); });
+    bSetupDl.setOnClickListener(vv -> { if (svc != null) svc.setupModules(setupChoice()); });
     bSetupStop.setOnClickListener(vv -> { if (svc != null) svc.cancelModels(); });
     return sv;
+  }
+  /** Отмеченное на первом экране. */
+  java.util.Set<String> setupChoice() {
+    java.util.Set<String> on = new java.util.LinkedHashSet<>();
+    for (String m : Modules.CHOICE) { CheckBox cb = setupChecks.get(m); if (cb != null && cb.isChecked()) on.add(m); }
+    return on;
+  }
+  long totalRam() {
+    try { android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo(); getSystemService(android.app.ActivityManager.class).getMemoryInfo(mi); return mi.totalMem; }
+    catch (Throwable t) { return 0; }
   }
   void askMic() {
     if (micForever) {   // отказано с «больше не спрашивать» — система диалог не покажет
@@ -1750,13 +2068,18 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     setupMic.setText(mic ? "✓ разрешён" : micForever ? "Доступ запрещён — включите микрофон в настройках приложения." : "Без микрофона слушать нечем. Разрешение спросит система.");
     bSetupMic.setText(micForever && !mic ? "открыть настройки приложения" : "разрешить микрофон"); bSetupMic.setVisibility(mic ? View.GONE : View.VISIBLE);
     ModelStore.State s = mst; boolean busy = s != null && s.busy();
-    if (!mic) setupText.setText("Обязательные модели (около 1,6 ГБ, с Hugging Face) — после разрешения микрофона.");
+    if (!setupSynced && svc != null && svc.modulesChosen) {       // выбор уже был (загрузку прервали) — показать его, а не умолчания
+      setupSynced = true;
+      for (String m : Modules.CHOICE) { CheckBox cb = setupChecks.get(m); if (cb != null) cb.setChecked(svc.mod(m)); }
+    }
+    long need = svc != null && svc.store != null ? svc.store.needBytes(setupChoice()) : 0;
+    if (!mic) setupText.setText("Модели — после разрешения микрофона: перевод речи и выбранные модули.");
     else if (svc == null || s == null || !s.checked) setupText.setText("Проверяю, что уже лежит на телефоне…");
     else if (s.coreMissing == 0 && !busy) setupText.setText("✓ модели на месте");
-    else setupText.setText("Не хватает " + s.coreMissing + " файлов, " + ModelStore.mb(s.coreBytes) + " МБ. Качается с Hugging Face один раз; "
+    else setupText.setText("Скачать " + ModelStore.mb(need) + " МБ: перевод речи и отмеченные модули. Качается с Hugging Face один раз; "
                          + "по умолчанию только по Wi-Fi. Можно остановить и продолжить позже с того же места.");
     bSetupDl.setEnabled(mic && svc != null && s != null && s.checked && !busy && s.coreMissing > 0);
-    bSetupDl.setText(s != null && ModelStore.PAUSED.equals(s.phase) ? "продолжить" : "скачать" + (s != null && s.coreBytes > 0 ? " " + ModelStore.mb(s.coreBytes) + " МБ" : ""));
+    bSetupDl.setText(s != null && ModelStore.PAUSED.equals(s.phase) ? "продолжить" : "скачать" + (need > 0 ? " " + ModelStore.mb(need) + " МБ" : ""));
     bSetupStop.setVisibility(busy ? View.VISIBLE : View.GONE);
     setupBar.setVisibility(s != null && (busy || ModelStore.PAUSED.equals(s.phase)) ? View.VISIBLE : View.GONE);
     if (s != null && s.total > 0) setupBar.setProgress((int) (s.done * 1000 / s.total));
@@ -1765,26 +2088,18 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   void refreshModels() {
     if (modelsLbl == null) return;
     ModelStore.State s = mst;
-    if (s == null || !s.checked) { modelsLbl.setText("Файлы моделей: проверяю…"); bModelsDl.setEnabled(false); bModelsVerify.setEnabled(false); bModelsStop.setVisibility(View.GONE); return; }
+    if (s == null || !s.checked) { modelsLbl.setText("Файлы моделей: проверяю…"); bModelsVerify.setEnabled(false); bModelsStop.setVisibility(View.GONE); return; }
     StringBuilder sb = new StringBuilder("Файлы моделей " + (svc != null && svc.store != null ? svc.store.app : "") + ": обязательные "
-      + (s.coreMissing == 0 ? "все на месте" : "нет " + s.coreMissing + " (" + ModelStore.mb(s.coreBytes) + " МБ)") + " · необязательные "
-      + (s.optMissing == 0 ? "все на месте" : "нет " + s.optMissing + " (" + ModelStore.mb(s.optBytes) + " МБ)"));
+      + (s.coreMissing == 0 ? "все на месте" : "нет " + s.coreMissing + " (" + ModelStore.mb(s.coreBytes) + " МБ)")
+      + (s.autoMissing == 0 ? " · модули на месте" : " · модулям не хватает " + ModelStore.mb(s.autoBytes) + " МБ — докачается само"));
     if (s.busy() || !s.message.isEmpty()) sb.append("\n").append(progressLine(s));
     if (s.upgrade > 0) sb.append("\nМожно облегчить перевод: скачать ").append(ModelStore.mb(s.upgradeBytes)).append(" МБ");
     modelsLbl.setText(sb);
     bModelsUp.setVisibility(s.upgrade > 0 && !s.busy() ? View.VISIBLE : View.GONE);
     bModelsUp.setText("⬇ облегчить перевод · " + ModelStore.mb(s.upgradeBytes) + " МБ");
-    bModelsDl.setEnabled(!s.busy() && s.optMissing > 0);
     bModelsStop.setVisibility(ModelStore.CHECK.equals(s.phase) ? View.GONE : s.busy() ? View.VISIBLE : View.GONE);
     bModelsVerify.setEnabled(!s.busy());
     bModelsVerify.setText(ModelStore.CHECK.equals(s.phase) ? "проверяю…" : "проверить файлы моделей");
-  }
-  static String modelTitle(ModelStore.Item it) {
-    String p = it.path;
-    String t = p.startsWith("llm/") ? "🧠 контекстный уточнитель (LLM, нужен сильный телефон)" : p.startsWith("speaker/") ? "🎤 отпечаток голоса: авто-направление, разделение говорящих"
-      : p.startsWith("denoiser/") ? "🔇 шумоподавитель" : p.equals("phrasebook_tatoeba.tsv") ? "📚 корпус фраз Tatoeba (190 тыс. пар)"
-      : p.equals("common_words.txt") ? "📝 частотные слова: поиск имён в речи" : p;
-    return t + " · " + ModelStore.mb(it.size) + " МБ";
   }
   /** «Облегчить перевод»: новые файлы перевода вместо прежних — перевод занимает на полгигабайта меньше
    *  памяти, и уточнитель чаще помещается рядом. Качается по выбору: 305 МБ — не мелочь. */
@@ -1798,21 +2113,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         .setPositiveButton("скачать", (d, w) -> { if (svc != null) new Thread(svc::downloadUpgrade, "upgrade").start(); })
         .setNegativeButton("не сейчас", null).show();
   }
-  /** Необязательное — по выбору: LLM на 1,1 ГБ слабому телефону ни к чему. */
-  void optionalDialog() {
-    if (svc == null || svc.store == null) return;
-    new Thread(() -> { final java.util.List<ModelStore.Item> need = svc.store.check("optional").need; runOnUiThread(() -> {
-      if (isFinishing() || isDestroyed()) return;
-      if (need.isEmpty()) { onLog("⬇ необязательное всё на месте"); return; }
-      final String[] names = new String[need.size()]; final boolean[] on = new boolean[need.size()];
-      for (int k = 0; k < need.size(); k++) { names[k] = modelTitle(need.get(k)); on[k] = true; }
-      new android.app.AlertDialog.Builder(this).setTitle("Скачать необязательное")
-        .setMultiChoiceItems(names, on, (d, w, c) -> on[w] = c)
-        .setPositiveButton("скачать", (d, w) -> { java.util.List<ModelStore.Item> sel = new java.util.ArrayList<>(); for (int k = 0; k < need.size(); k++) if (on[k]) sel.add(need.get(k)); if (!sel.isEmpty() && svc != null) svc.downloadModels(sel); })
-        .setNegativeButton("отмена", null).show();
-    }); }, "opt-list").start();
-  }
-
   /** Португальская сторона всегда крупно, русская мелко — независимо от направления перевода. */
   @Override public void onTurn(String dir, String src, String dst, boolean refined) {
     boolean srcIsPt = dir.startsWith("pt");

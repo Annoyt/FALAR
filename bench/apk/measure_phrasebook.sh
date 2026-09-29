@@ -10,7 +10,7 @@ WAV=${WAV:-/data/local/tmp/sh/audio}
 
 $ADB wait-for-device
 echo "== установка =="
-$ADB install -r "$A/Falar.apk"
+$ADB install --no-incremental -r "$A/Falar.apk"    # incremental оставляет прежнюю установку на телефоне до перезагрузки
 echo "== словарь =="
 $ADB push "$R/data/tatoeba/phrasebook_tatoeba.tsv" $DST/
 $ADB push "$A/phrasebook_seed.json" $DST/phrasebook.json

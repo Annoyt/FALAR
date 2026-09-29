@@ -42,6 +42,8 @@ public class ModelStore {
 
   public static class Item {
     public final String path, sha256, tier, url, name; public final long size;
+    /** Модуль (Modules): base — нужен всегда, остальные — когда модуль включён. */
+    public String module = "";
     public final boolean archive; public final String unpackTo; public final List<String[]> check;
     /** Файлы, которые этот заменяет: {путь, размер, sha256}. */
     public final List<String[]> replaces;
@@ -65,15 +67,19 @@ public class ModelStore {
     public boolean checked; public int coreMissing, optMissing; public long coreBytes, optBytes;
     /** Замены, которые можно скачать: прежние файлы на месте, новых нет. */
     public int upgrade; public long upgradeBytes;
+    /** Недостающее из яруса auto: докачивается само в фоне и запуск не держит. */
+    public int autoMissing; public long autoBytes;
     public boolean busy() { return DOWN.equals(phase) || WAIT.equals(phase) || RETRY.equals(phase) || UNPACK.equals(phase) || CHECK.equals(phase); }
     public State copy() {
       State s = new State();
       s.phase = phase; s.tier = tier; s.file = file; s.message = message; s.done = done; s.total = total; s.bps = bps; s.retryIn = retryIn;
       s.errors = new ArrayList<>(errors); s.checked = checked; s.coreMissing = coreMissing; s.optMissing = optMissing; s.coreBytes = coreBytes; s.optBytes = optBytes;
-      s.upgrade = upgrade; s.upgradeBytes = upgradeBytes;
+      s.upgrade = upgrade; s.upgradeBytes = upgradeBytes; s.autoMissing = autoMissing; s.autoBytes = autoBytes;
       return s;
     }
   }
+  /** Метка загрузки файлов включённых модулей в фоне (состояние tier) — см. autos(). */
+  public static final String AUTO = "auto";
   public static final String IDLE = "idle", CHECK = "check", WAIT = "wait", DOWN = "down", RETRY = "retry", UNPACK = "unpack",
                              DONE = "done", PAUSED = "paused", ERROR = "error";
 
@@ -110,6 +116,7 @@ public class ModelStore {
         for (int j = 0; rs != null && j < rs.length(); j++) { JSONObject r = rs.getJSONObject(j); rep.add(new String[]{r.getString("path"), "" + r.getLong("size"), r.getString("sha256")}); }
         items.add(new Item(f.getString("path"), f.getLong("size"), f.getString("sha256"), f.optString("tier", "core"),
                            srcUrl(f.getJSONObject("source")), false, null, null, rep));
+        items.get(items.size() - 1).module = module(f);
       }
       JSONArray as = m.optJSONArray("archives");
       for (int i = 0; as != null && i < as.length(); i++) {
@@ -119,10 +126,14 @@ public class ModelStore {
         for (int j = 0; cs != null && j < cs.length(); j++) check.add(new String[]{cs.getJSONObject(j).getString("path"), cs.getJSONObject(j).getString("sha256")});
         items.add(new Item(a.getString("path"), a.getLong("size"), a.getString("sha256"), a.optString("tier", "core"),
                            srcUrl(a.getJSONObject("source")), true, a.optString("unpack_to", "."), check, Collections.emptyList()));
+        items.get(items.size() - 1).module = module(a);
       }
     } catch (JSONException e) { throw new IllegalArgumentException("манифест моделей: " + e.getMessage()); }
     loadVerified();
   }
+  /** Модуль записи манифеста: поле module; без него обязательное — base (манифесты до 0.24). */
+  static String module(JSONObject f) { return f.optString("module", "core".equals(f.optString("tier", "core")) ? "base" : ""); }
+
   /** {адрес, имя на стенде}. Имя для стенда — путь файла в репозитории HF (у OPUS-MT одинаковые
    *  имена в mt/pt2ru/ и mt/ru2pt/, одно имя файла их не различает), у прямых адресов — имя файла. */
   static String[] srcUrl(JSONObject s) throws JSONException {
@@ -281,13 +292,93 @@ public class ModelStore {
   /** Сводка «чего не хватает» в состоянии — по кэшу, без хэширования. Заменённое новым файлом
    *  не считается нехваткой, пока прежние на месте; оно идёт отдельной строкой «можно облегчить». */
   void summarize() {
-    int cm = 0, om = 0, up = 0; long cb = 0, ob = 0, ub = 0;
+    int cm = 0, om = 0, up = 0, am = 0; long cb = 0, ob = 0, ub = 0, ab = 0;
     for (Item it : items) {
       if (present(it, 1)) continue;
       if (replacedOk(it, 1)) { up++; ub += it.size; continue; }
-      if (it.core()) { cm++; cb += it.size; } else { om++; ob += it.size; }
+      if (it.core()) { cm++; cb += it.size; }
+      else if (wanted(it)) { am++; ab += it.size; }
+      else { om++; ob += it.size; }
     }
-    synchronized (st) { st.checked = true; st.coreMissing = cm; st.coreBytes = cb; st.optMissing = om; st.optBytes = ob; st.upgrade = up; st.upgradeBytes = ub; }
+    synchronized (st) { st.checked = true; st.coreMissing = cm; st.coreBytes = cb; st.optMissing = om; st.optBytes = ob; st.upgrade = up; st.upgradeBytes = ub; st.autoMissing = am; st.autoBytes = ab; }
+  }
+
+  /** Включённые модули (Modules). Обязательное (core) держит запуск; файлы включённых модулей и
+   *  base без core — нет: они докачиваются сами в фоне (autos), а до тех пор модуль просто не
+   *  работает. Выключенный модуль не качается вовсе. */
+  public volatile Set<String> modules = Collections.emptySet();
+  public boolean wanted(Item it) { return "base".equals(it.module) || modules.contains(it.module); }
+
+  /** Файлы, нужные включённым модулям, но не обязательные для запуска и ещё не скачанные. */
+  public List<Item> autos() {
+    List<Item> r = new ArrayList<>();
+    for (Item it : items) if (!it.core() && wanted(it) && !present(it, 1) && !replacedOk(it, 1)) r.add(it);
+    return r;
+  }
+
+  /** Обязательное и файлы модулей mods, которых нет: что качать на экране первого запуска. */
+  public List<Item> need(Set<String> mods) {
+    List<Item> r = new ArrayList<>();
+    for (Item it : items)
+      if ((it.core() || "base".equals(it.module) || mods.contains(it.module)) && !present(it, 1) && !replacedOk(it, 1)) r.add(it);
+    return r;
+  }
+
+  /** Файлы модуля на телефоне — по размеру, без хэша: для экрана, который перерисовывается часто. */
+  public boolean onPhone(String module) {
+    boolean any = false;
+    for (Item it : items) if (module.equals(it.module)) { any = true; if (!present(it, 0)) return false; }
+    return any;
+  }
+  /** Сколько качать при выборе модулей mods — по размеру, без хэша (для кнопки «скачать N МБ»). */
+  public long needBytes(Set<String> mods) {
+    long b = 0;
+    for (Item it : items)
+      if ((it.core() || "base".equals(it.module) || mods.contains(it.module)) && !present(it, 0) && !replacedOk(it, 0)) b += it.size;
+    return b;
+  }
+
+  /** Размер файлов модуля по манифесту, байт. */
+  public long bytes(String module) { long b = 0; for (Item it : items) if (module.equals(it.module)) b += it.size; return b; }
+
+  /** Все файлы модуля на месте (по кэшу сверки). У модуля без файлов (облако) — да. */
+  public boolean installed(String module) {
+    for (Item it : items) if (module.equals(it.module) && !present(it, 1)) return false;
+    return true;
+  }
+
+  /** Удалить файлы модуля — при его выключении, если человек согласился. Архив удаляется
+   *  распакованным: файлы из check, опустевший каталог и zip, если остался. Возвращает байты. */
+  public long remove(String module) {
+    if ("base".equals(module) || running()) return 0;
+    long freed = 0; int n = 0;
+    for (Item it : items) {
+      if (!module.equals(it.module)) continue;
+      List<String> paths = new ArrayList<>();
+      if (it.archive) { for (String[] c : it.check) paths.add(c[0]); paths.add(it.path + ".zip"); }
+      else { paths.add(it.path); paths.add(it.path + ".part"); }
+      for (String p : paths) {
+        File f = new File(dir, p);
+        if (!f.isFile()) continue;
+        long len = f.length();
+        if (f.delete()) { freed += len; n++; forget(p); }
+      }
+      if (it.archive) { File d = new File(dir, it.path); String[] left = d.list(); if (d.isDirectory() && left != null && left.length == 0) d.delete(); }
+    }
+    if (n > 0) log.log("📦 модуль «" + module + "»: удалено файлов " + n + ", освобождено " + mb(freed) + " МБ");
+    summarize();
+    return freed;
+  }
+
+  /** Почему файлы включённых модулей сейчас не докачиваются сами (null — можно): как autoUpgradeBlock. */
+  public static String autoFetchBlock(State s, boolean running, boolean tried, boolean net, long free, long spare) {
+    if (s == null || !s.checked) return "файлы ещё не проверены";
+    if (s.autoMissing == 0) return "докачивать нечего";
+    if (running) return "уже идёт загрузка";
+    if (tried) return "в этот запуск уже пробовали";
+    if (!net) return "нет подходящей сети";
+    if (free >= 0 && free < s.autoBytes + spare) return "мало места: нужно ещё " + mb(s.autoBytes + spare - free) + " МБ";
+    return null;
   }
 
   // ---- загрузка ----------------------------------------------------------------------------

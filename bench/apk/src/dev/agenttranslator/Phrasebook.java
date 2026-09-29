@@ -22,7 +22,9 @@ public class Phrasebook {
   public volatile int minedCount = 0; public volatile long minedLoadMs = -1;
   public int pinsWithDigits = 0;
 
-  public Phrasebook(File modelsDir) {
+  public Phrasebook(File modelsDir) { this(modelsDir, true); }
+  /** corpus — модуль «Корпус фраз» (Modules.CORPUS): выключен — ярус Tatoeba не грузится. */
+  public Phrasebook(File modelsDir, boolean corpus) {
     dir = modelsDir; new File(dir, "cache").mkdirs();
     load(new File(dir, "phrasebook.json"), seed); load(new File(dir, "phrasebook_user.json"), user); load(new File(dir, "learned.json"), learned);
     seedCount = count(seed); userCount = count(user); learnedCount = count(learned);
@@ -31,8 +33,10 @@ public class Phrasebook {
     // (правило версионирования), поэтому считаем и сообщаем: перезакрепить их — дело человека.
     for (Map<String, JSONObject> m : user.values()) for (String k : m.keySet()) if (k.replaceAll("xq\\d+", "").matches(".*\\d.*")) pinsWithDigits++;
     for (Map<String, JSONObject> m : learned.values()) for (JSONObject o : m.values()) if (o.optBoolean("fast")) fastCount++;
-    io.submit(() -> loadMined(new File(dir, "phrasebook_tatoeba.tsv")));
+    if (corpus) io.submit(() -> loadMined(new File(dir, "phrasebook_tatoeba.tsv")));
   }
+  /** Выключили модуль «Корпус фраз»: ярус выгружается, остальное (затравка, пины, выученное) остаётся. */
+  public synchronized void dropMined() { mined.clear(); minedCount = 0; }
   /** Корпусный ярус: TSV «направление \t ключ \t исходник \t перевод \t ярус», грузится в фоне. */
   void loadMined(File f) {
     if (!f.exists()) return; long t0 = System.currentTimeMillis();
