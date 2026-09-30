@@ -16,8 +16,10 @@ import android.widget.FrameLayout;
  *  приложения: слива, золотая линия, мятный «звук».
  *
  *  Две позиции. Отпущена: всё неподвижно, круг сливовый, микрофон и надписи золотые. Нажата (идёт
- *  запись): круг окрашен тем, как слышно (Hearing.quality): зелёный — громкости хватает, чем
- *  краснее — тем тише и тем вероятнее ошибки; молчат — за секунду краснеет. Вокруг — облако
+ *  запись): круг окрашен тем, как слышно (Hearing.Live): зелёный — громкости хватает, чем
+ *  краснее — тем тише и тем вероятнее ошибки. Цвет — по речи с начала записи, в паузах между
+ *  словами и фразами он держится. Пока речи не было, цвета нет: круг сливовый, свечение и
+ *  надписи мятные; молчат полторы секунды — краснеет: «не слышу». Вокруг — облако
  *  того же цвета: чем громче голос, тем дальше оно расплывается — при обычной речи до 2,7 радиуса
  *  круга, при громкой до трёх (владелец 29.09: при обычной речи — «хотя бы на 50 % больше»). Слов на
  *  экране нет — как слышно словами уходит в журнал. Середину закрывает палец, поэтому главное —
@@ -54,8 +56,8 @@ public class MicButton extends FrameLayout {
   /** Шаг по кадрам экрана, но не чаще раза в 30 мс: на 60 Гц — каждый второй кадр, на 120 Гц —
    *  каждый четвёртый. Время из кадра, а не из часов: шаг ровно кратен кадру и не дрожит. */
   boolean ticking = false; long tickFrom = -1, tickLast = 0;
-  /** Уровень (размер свечения) и как слышно (цвет), 0…1, из setLevel. Сглажены и округлены: в
-   *  ровной тишине ничего не меняется, и кадров нет. */
+  /** Уровень (размер свечения) и как слышно (цвет), 0…1 (−1 — цвета ещё нет), из setLevel.
+   *  Сглажены и округлены: в ровной тишине ничего не меняется, и кадров нет. */
   volatile float levelK = 0, levelQ = 0; volatile long levelAt = 0; float shownK = -1, shownQ = -1;
   final Choreographer.FrameCallback tick = new Choreographer.FrameCallback() {
     @Override public void doFrame(long ns) {
@@ -65,8 +67,8 @@ public class MicButton extends FrameLayout {
         tickLast = ns;
         if (android.os.SystemClock.uptimeMillis() - levelAt < 500) {
           shownK = shownK < 0 ? levelK : shownK + (levelK - shownK) * 0.4f;
-          shownQ = shownQ < 0 ? levelQ : shownQ + (levelQ - shownQ) * 0.4f;
-          voice(Math.round(shownK * 48) / 48f, Math.round(shownQ * 24) / 24f);
+          shownQ = levelQ < 0 ? -1 : shownQ < 0 ? levelQ : shownQ + (levelQ - shownQ) * 0.4f;
+          voice(Math.round(shownK * 48) / 48f, shownQ < 0 ? -1 : Math.round(shownQ * 24) / 24f);
         } else pulse(pulseIn.getInterpolation((ns - tickFrom) / 1_000_000L % PULSE_MS / (float) PULSE_MS));
       }
       Choreographer.getInstance().postFrameCallback(this);
@@ -74,9 +76,9 @@ public class MicButton extends FrameLayout {
   };
 
   /** Уровень входа, dBFS (−55 — свечение у края круга, −15 и громче — во всю ширь), и как
-   *  слышно, 0…1 (Hearing.quality): 1 — зелёный, 0 — красный. */
+   *  слышно, 0…1 (Hearing.Live): 1 — зелёный, 0 — красный, меньше нуля — цвета ещё нет (мятный). */
   public void setLevel(float db, float q) {
-    levelK = Math.max(0, Math.min(1, (db + 55) / 40)); levelQ = Math.max(0, Math.min(1, q));
+    levelK = Math.max(0, Math.min(1, (db + 55) / 40)); levelQ = q < 0 ? -1 : Math.min(1, q);
     levelAt = android.os.SystemClock.uptimeMillis();
   }
 
@@ -133,9 +135,10 @@ public class MicButton extends FrameLayout {
     }
   }
 
-  /** Шаг голоса: k — насколько далеко свечение, q — его цвет и цвет круга. */
+  /** Шаг голоса: k — насколько далеко свечение, q — его цвет и цвет круга (−1 — мятное свечение,
+   *  сливовый круг: речи ещё не было). */
   void voice(float k, float q) {
-    int c = qColor(q, 0.75f, 0.80f);
+    int c = q < 0 ? MINT : qColor(q, 0.75f, 0.80f);
     halo.set(GLOW_MIN + (GLOW - GLOW_MIN) * k, c, 1);
     face.setQ(q); ring.setQ(q);
   }

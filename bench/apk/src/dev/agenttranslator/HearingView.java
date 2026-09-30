@@ -8,8 +8,9 @@ import android.view.View;
 
 /** Строка под кнопками слушания и под кнопкой удержания: слева — полоска уровня входа с отметкой
  *  фона, пока слушаем, справа — обычная подсказка. Полоска окрашена тем, как слышно
- *  (Hearing.quality): зелёная — громкости хватает, чем краснее — тем тише и вероятнее ошибки;
- *  в паузе — серая. Слов о том, как слышно, здесь нет — они в журнале.
+ *  (Hearing.Live — по каждой фразе, паузы его не трогают): зелёная — громкости хватает, чем
+ *  краснее — тем тише и вероятнее ошибки; в паузе — серая. Слов о том, как слышно, здесь нет —
+ *  они в журнале.
  *
  *  Полоска перерисовывается, только когда её длина меняется на экранный пиксель: любая
  *  перерисовка — это перерисовка всего экрана (results/2026-09-29-mic-button.md), поэтому в
@@ -43,7 +44,7 @@ public class HearingView extends View {
   public void setLevel(float db, float floorDb, float q, boolean speech) {
     level = db; floor = floorDb;
     int px = px(db), fpx = Float.isNaN(floorDb) ? -1 : px(floorDb);
-    int col = speech ? MicButton.qColor(Math.round(q * 24) / 24f, 0.75f, 0.70f) : 0xFF9E9E9E;
+    int col = speech && q >= 0 ? MicButton.qColor(Math.round(q * 24) / 24f, 0.75f, 0.70f) : 0xFF9E9E9E;
     if (px != shownPx || fpx != shownFloorPx || col != shownColor) { shownPx = px; shownFloorPx = fpx; shownColor = col; invalidate(); }
   }
 

@@ -71,6 +71,24 @@ public class GainTest {
     float[] sil = new float[16000]; for (int k = 0; k < sil.length; k++) sil[k] = (float) (nz * rnd.nextGaussian());
     ok(Double.isNaN(Gain.speechFloor(sil)[0]), "G6 одна тишина — речи нет (NaN)");
     ok(Double.isNaN(Gain.speechFloor(new float[100])[0]), "G6 короче кадра — NaN, без падения");
+    // G8: удержание без тишины — фон по самым тихим кадрам, а не по тихим местам речи; цифровая
+    // тишина не фон; фон комнаты, измеренный слушанием, — потолок фона фразы.
+    float[] talk = new float[48000];                    // 3 с «речи»: слоги −16…−36 dBFS, фон −50 — только в 2 % кадров
+    for (int k = 0; k < talk.length; k++) {
+      int fr = k / 512; double lv = fr % 50 == 0 ? -50 : fr % 3 == 0 ? -36 : fr % 3 == 1 ? -24 : -16;
+      talk[k] = (float) (Math.pow(10, lv / 20) * Math.sqrt(2) * Math.sin(2 * Math.PI * 220 * k / 16000) + nz * rnd.nextGaussian());
+    }
+    double[] tf = Gain.speechFloor(talk);
+    ok(tf[1] < -40, "G8 сплошная речь с короткими провалами — фон по провалам, не по тихим слогам: " + tf[1]);
+    ok(!Double.isNaN(tf[0]) && tf[0] - tf[1] > 20, "G8 и речь над фоном видна: запас " + (tf[0] - tf[1]));
+    float[] dead = new float[16000 + 32000]; System.arraycopy(ph, 0, dead, 16000, 32000);   // первая секунда — нули
+    double[] df = Gain.speechFloor(dead);
+    ok(Math.abs(df[1] + 50) < 2, "G8 нули на старте микрофона — не фон: " + df[1]);
+    float[] close = new float[32000]; for (int k = 0; k < close.length; k++) close[k] = (float) (tn * Math.sin(2 * Math.PI * 300 * k / 16000) * (k / 512 % 2 == 0 ? 1 : 0.3) + nz * rnd.nextGaussian());
+    double[] lf = Gain.speechFloor(close), lb = Gain.speechFloor(close, -50);
+    ok(Double.isNaN(lf[0]) || lf[0] - lf[1] < 15, "G8 громкая речь без тишины, фона не видно — запас мал: " + (lf[0] - lf[1]));
+    ok(Math.abs(lb[1] + 50) < 0.01 && lb[0] - lb[1] > 25, "G8 с фоном комнаты от слушания — запас настоящий: " + (lb[0] - lb[1]));
+    ok(Gain.speechFloor(ph, -30)[1] < -48, "G8 фон слушания выше фона фразы — берётся фраза: " + Gain.speechFloor(ph, -30)[1]);
 
     // G7: счётчики складываются по кускам так же, как по целому.
     Gain.Stats s1 = new Gain.Stats(), s2 = new Gain.Stats(), all = new Gain.Stats();
