@@ -72,7 +72,13 @@ public class TextRulesTest {
     TextRules.Masked addr = TextRules.mask("Monte Alto-SP e São Paulo/SP", "pt", new ArrayList<>(), true);
     ok(TextRules.unmask(addr.text, addr, "ru").equals("Монти-Алту (Сан-Паулу) e Сан-Паулу"), "A4 город с кодом штата: " + TextRules.unmask(addr.text, addr, "ru"));
     ok(TextRules.mask("SP /CNPJ: 62", "pt", new ArrayList<>(), false).text.contains("SP /CNPJ"), "A5 речь: сокращения не трогаются");
-    ok(TextRules.hasWords("WhatsApp: XQ1") && !TextRules.hasWords("L:XQ1 XQ2") && !TextRules.hasWords("XQ1 - XQ2"), "A6 что переводить: слово от двух букв помимо плейсхолдеров");
+    ok(TextRules.hasWords("WhatsApp: XQ1") && !TextRules.hasWords("L:XQ1 XQ2") && !TextRules.hasWords("XQ1 - XQ2"), "A6 что переводить: слово от трёх букв помимо плейсхолдеров");
+    TextRules.Masked un = TextRules.mask("1 UN 5,49 5,49", "pt", new ArrayList<>(), true);
+    TextRules.Masked kg = TextRules.mask("0,850 KG 7,99 6,79", "pt", new ArrayList<>(), true);
+    ok(!TextRules.hasWords(un.text) && !TextRules.hasWords(kg.text) && TextRules.hasWords(TextRules.mask("ARROZ TIPO 1 5kg", "pt", new ArrayList<>(), true).text),
+        "A6 строка количества и цен чека — единица при числах не слово, переводчику не отдаётся («1 ООН», «Модель:»): " + un.text + " · " + kg.text);
+    TextRules.Masked ie = TextRules.mask("CNPJ: 39.508.023/0002-28 IE: 85.743.031", "pt", new ArrayList<>(), true);
+    ok(!TextRules.hasWords(ie.text) && TextRules.unmask(ie.text, ie, "ru").startsWith("ИНН: 39.508.023/0002-28 IE:"), "A6 «IE:» без переводчика — не «Модель:»: " + TextRules.unmask(ie.text, ie, "ru"));
     TextRules.Masked cep2 = TextRules.mask("CEP 01035-100 · SAC 0800 770 3480", "pt", new ArrayList<>(), true);
     ok(TextRules.unmask(cep2.text, cep2, "ru").equals("индекс 01035-100 · служба поддержки 0800 770 3480"), "A7 CEP и SAC: " + TextRules.unmask(cep2.text, cep2, "ru"));
 

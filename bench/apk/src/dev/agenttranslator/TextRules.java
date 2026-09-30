@@ -136,7 +136,7 @@ public class TextRules {
     P("\\b\\d+(?:[.,]\\d+)*(?:[ /-]\\d+(?:[.,]\\d+)*)+\\b"),
     PT[3] };
   static final String[] KIND_SIGN = {"addr", "money", "time", "no", "firm", "abbr", "city", "abbr", "num", "num", "num"};
-  static final Pattern WORD2 = P("\\p{L}{2,}");
+  static final Pattern WORD2 = P("\\p{L}{2,}"), WORD3 = P("\\p{L}{3,}");
   /** Плейсхолдер слота. «N1» не годится: замер на самой модели показал, что в ru→pt она съедает
    *  букву и оставляет «1» (выживает 1 раз из 6), из-за чего слот теряется и уезжает в конец фразы.
    *  «XQ1» выживает 6 из 6 в обе стороны. Проверка: tools/placeholder_probe.py */
@@ -303,10 +303,12 @@ public class TextRules {
     }
     Masked out = new Masked(t); out.slots.addAll(slots); return out;
   }
-  /** Есть ли что переводить в тексте с плейсхолдерами: слово от двух букв помимо самих плейсхолдеров.
+  /** Есть ли что переводить в тексте с плейсхолдерами: слово от трёх букв помимо самих плейсхолдеров.
    *  «XQ1 /XQ2: XQ3» (строка «SP /CNPJ: 62.162.243/0003-45») — нечего, и переводчик, получив её,
-   *  выдумывал «Модель:». */
-  public static boolean hasWords(String masked) { return WORD2.matcher(PH_LEFT.matcher(masked).replaceAll(" ")).find(); }
+   *  выдумывал «Модель:». Одна-две буквы при числах — единица («1 UN 5,49 5,49», «0,850 KG 7,99 6,79»):
+   *  такую строку он превращал в «1 ООН …» и «Модель: …». На 268 абзацах набора вывесок и чека от трёх
+   *  букв вместо двух перестают переводиться 15: строки количества и цен чека, «4 km», обрывок «DO». */
+  public static boolean hasWords(String masked) { return WORD3.matcher(PH_LEFT.matcher(masked).replaceAll(" ")).find(); }
   /** Плейсхолдеры обратно; деньги — в валютную форму целевого языка; потерянные MT слоты дописываются в конец. */
   public static String unmask(String translated, Masked m, String tgt) {
     String t = translated; List<String> missing = new ArrayList<>();
