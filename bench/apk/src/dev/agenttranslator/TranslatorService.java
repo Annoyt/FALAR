@@ -2423,7 +2423,7 @@ public class TranslatorService extends Service {
       busy("live", "перевожу снимок…", i, pg.paras.size());
       OcrCore.Para p = pg.paras.get(i);
       List<String[]> fx = new ArrayList<>();
-      String text = ow == null ? p.text : ow.fix(p.text, fx);
+      String text = ow == null ? p.text : ow.fix(p.text, fx, p.table && OcrWords.bare(p.text));   // чек — без знаков над буквами
       // Абзац, который распознаватель сам прочитал неуверенно, — каша («Porções por ombalad m •
       // or:o: 1lm»): её перевод закрыл бы собой настоящий текст на снимке. Такой остаётся как есть.
       String ru = null, why = p.score() < OcrCore.CONF_MIN ? "плохо прочитано" : photoSkip(text, p.table);

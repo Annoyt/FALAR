@@ -45,6 +45,14 @@ MIN_FREQ = 2        # замена — слово, встреченное в к�
 ACCENT_MIN = 3      # замена по одним ударениям
 TITLE_MIN = 50      # слово с заглавной посреди текста — скорее имя; заменяем только на частое
 MIN_LEN = 4         # пропущенную букву ищем у слов от четырёх букв
+# Чек печатается без знаков над буквами, и там «MACA» — maçã (яблоко), но «maca»
+# (носилки) — тоже слово, и ударения не возвращались: переводчик писал «мак». В строке без
+# единого знака, прописными, берётся форма со знаками, если она в BARE_RATIO раз чаще: maçã 386 против
+# maca 7. Порог — по словарю: до 10 раз пары двусмысленны (faca «нож» 276 против faça 1162, esta
+# против está, coco против cocô). Только в строках таблицы: на вывеске «SECRETARIA DE SAUDE» (ведомство)
+# так стала бы «секретаршей» — secretária в корпусе в 23 раза чаще.
+BARE_RATIO = 10
+BARE_MIN = 4
 SPLIT_LEN = 7       # разбиваем слова от семи букв
 SPLIT_PART = 10     # часть разбивки от трёх букв — не реже 10 раз в корпусе и не имя
 SPLIT_GEO = 30      # средняя (геометрическая) частота частей — не ниже 30: «CONTÉM·GLÚTEN» — 42
@@ -145,10 +153,14 @@ class Words:
     def target(self, f, capital, fmin):
         return self.freq[f] >= fmin and (capital or f not in self.names) and f not in self.english
 
-    def best(self, w, title, capital):
-        """Замена для слова w (строчными) или None."""
+    def best(self, w, title, capital, bare=False):
+        """Замена для слова w (строчными) или None. bare — строка чека без знаков над буквами."""
         if w in self.freq:
-            return None
+            if not bare or len(w) < BARE_MIN:
+                return None
+            f = self.idx[plain(w)][0]                   # самая частая форма с теми же буквами
+            ok = f != w and self.freq[f] >= BARE_RATIO * max(1, self.freq[w]) and self.target(f, capital, ACCENT_MIN)
+            return f if ok else None
         p = plain(w)
         fmin = TITLE_MIN if title else MIN_FREQ
         if len(p) >= 3 and p in self.idx:
@@ -221,13 +233,13 @@ class Words:
             prod *= self.count(x.lower())
         return best[1] if prod >= SPLIT_GEO ** len(best[1]) else None
 
-    def fix(self, text, changes=None):
+    def fix(self, text, changes=None, bare=False):
         def rep(m):
             t = m.group(0); lw = t.lower()
             if len(lw) < 3:
                 return t
             title = t[:1].isupper() and not is_upper(t)
-            b = self.best(lw, title, t[:1].isupper())
+            b = self.best(lw, title, t[:1].isupper(), bare)
             if b is not None and b != lw:
                 r = case_as(t, b)
             elif not self.known(lw):
@@ -241,6 +253,13 @@ class Words:
                 changes.append((t, r))
             return r
         return TOKEN.sub(rep, text)
+
+    @staticmethod
+    def bare(text):
+        """Строка прописными без единого знака над буквами — как печатает кассовый аппарат. Единицы
+        («kg», «un», «ml») бывают строчными — в счёт идут слова от трёх букв."""
+        ws = [w for w in TOKEN.findall(text) if len(w) >= 3]
+        return bool(ws) and all(is_upper(w) for w in ws) and plain(text) == text.lower()
 
     def share(self, text):
         """Доля известных слов от трёх букв; -2 — слов меньше двух, судить не по чему."""

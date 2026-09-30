@@ -34,6 +34,13 @@ public class OcrWordsTest {
     eq(w.fix("maximo", null), "máximo", "A1 ударение по частой форме");
     eq(w.fix("MAXIMO Maximo", null), "MÁXIMO Máximo", "A1 регистр сохраняется; «Maximo» с заглавной — частое слово, годится");
     eq(w.fix("esta", null), "esta", "A2 известная форма не трогается, хотя «está» чаще");
+    // чек без знаков над буквами: форма со знаками — если она хотя бы в 10 раз чаще
+    OcrWords rc = of("maçã 386", "maca 7", "faça 1162", "faca 276", "água 2406", "agua 3", "ácida 5", "coco 25", "cocô 17");
+    eq(rc.fix("003 12 MACA FUJI kg", null, true), "003 12 MAÇÃ FUJI kg", "A9 чек: «MACA» — maçã (в 55 раз чаще), «kg» строчными не мешает");
+    eq(rc.fix("MACA FUJI", null, false), "MACA FUJI", "A9 не чек — знакомое «maca» не трогается, как раньше");
+    eq(rc.fix("FACA INOX · COCO RALADO · AGUA", null, true), "FACA INOX · COCO RALADO · ÁGUA", "A9 «faca» (нож) и «coco» — не намного реже, остаются");
+    ok(OcrWords.bare("003 12 MACA FUJI kg") && OcrWords.bare("ARROZ TIPO 1 5kg") && !OcrWords.bare("MAÇÃ FUJI") && !OcrWords.bare("Maca fuji") && !OcrWords.bare("12,90"),
+        "A9 строка чека: слова от трёх букв прописными, ни одного знака над буквой");
     eq(w.fix("vnagre camim", null), "vinagre carmim", "A3 пропущенная буква; «caim» — имя, и до него не пропуск, а лишняя буква");
     eq(w.fix("Áagua açúucares", null), "Água açúcares", "A4 сдвоенная гласная");
     eq(w.fix("CERVA Gomes nomez", null), "CERVA Gomes nomez", "A5 замены буквы нет («cervo», «nomes»)");
