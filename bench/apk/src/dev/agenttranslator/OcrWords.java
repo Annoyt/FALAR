@@ -24,6 +24,13 @@ public class OcrWords {
    *  двусмысленны (faca «нож» 276 против faça 1162, esta и está, coco и cocô). Эталон и замер —
    *  tools/ocr_words.py. */
   static final double BARE_RATIO = 10; static final int BARE_MIN = 4;
+  /** Цифра вместо буквы: распознаватель путает похожие знаки (0 и O, 1 и I/l, 5 и S, 8 и B, 6 и G, 2 и Z).
+   *  Слово из букв с одной цифрой, где похожая буква даёт слово из словаря («F0ne» → «Fone», «FEIJ0ADA»
+   *  → «FEIJOADA»), — это слово, а не два обрывка для переводчика. Букв хотя бы три, цифра одна:
+   *  «500g», «30un», «B12», «4G», «PORTÃO7» не трогаются. Эталон и замер — tools/ocr_words.py. */
+  static final Pattern MIXED = Pattern.compile("(?<![\\p{L}\\p{N}])(\\p{L}*)(\\d)(\\p{L}*)(?![\\p{L}\\p{N}])");
+  static final String[] LOOK = new String[10];
+  static { LOOK[0] = "o"; LOOK[1] = "il"; LOOK[5] = "s"; LOOK[8] = "b"; LOOK[6] = "g"; LOOK[2] = "z"; }
   static final Set<String> FUNC2 = new HashSet<>(Arrays.asList("de", "da", "do", "as", "os", "em", "no", "na", "um", "ao"));
   // Буквы — как [^\W\d_] в Python: буквы и числовые знаки не из цифр («²»).
   static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{Nl}\\p{No}]+"),
@@ -191,6 +198,21 @@ public class OcrWords {
   }
   /** bare — строка чека без знаков над буквами: знакомое слово получает знаки, если их форма намного чаще. */
   public String fix(String text, List<String[]> changes, boolean bare) {
+    Matcher dm = MIXED.matcher(text); StringBuffer db = new StringBuffer();
+    while (dm.find()) {
+      String b = dm.group(1), a = dm.group(3), look = LOOK[dm.group(2).charAt(0) - '0'], r = null;
+      if (b.length() + a.length() >= 3 && look != null) {
+        int bc = -1; char best = 0;
+        for (char c : look.toCharArray()) {
+          String w = (b + c + a).toLowerCase(Locale.ROOT); int i = exact(w), n = count(w);
+          if (known(w) && !(i >= 0 && english[i]) && n >= MIN_FREQ && n > bc) { bc = n; best = c; }
+        }
+        if (best != 0) r = b + (isUpper(b + a) ? Character.toUpperCase(best) : best) + a;
+      }
+      if (r != null && changes != null) changes.add(new String[]{dm.group(), r});
+      dm.appendReplacement(db, Matcher.quoteReplacement(r != null ? r : dm.group()));
+    }
+    dm.appendTail(db); text = db.toString();
     Matcher m = TOKEN.matcher(text); StringBuffer sb = new StringBuffer();
     while (m.find()) {
       String t = m.group(), lw = t.toLowerCase(Locale.ROOT), r = null;

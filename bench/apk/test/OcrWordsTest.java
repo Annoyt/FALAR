@@ -39,6 +39,14 @@ public class OcrWordsTest {
     eq(rc.fix("003 12 MACA FUJI kg", null, true), "003 12 MAÇÃ FUJI kg", "A9 чек: «MACA» — maçã (в 55 раз чаще), «kg» строчными не мешает");
     eq(rc.fix("MACA FUJI", null, false), "MACA FUJI", "A9 не чек — знакомое «maca» не трогается, как раньше");
     eq(rc.fix("FACA INOX · COCO RALADO · AGUA", null, true), "FACA INOX · COCO RALADO · ÁGUA", "A9 «faca» (нож) и «coco» — не намного реже, остаются");
+    // цифра вместо похожей буквы: слово из букв с одной цифрой — слово, если так выходит слово из словаря
+    OcrWords dg = of("feijoada 50", "biscoito 40", "fone 30", "portão 20", "sal 300");
+    List<String[]> dch = new ArrayList<>();
+    eq(dg.fix("002 7890000000017 FEIJ0ADA BCO 1KG · Feij0ada · B1SCOITO · F0ne: 3242", dch), "002 7890000000017 FEIJOADA BCO 1KG · Feijoada · BISCOITO · Fone: 3242",
+        "A10 0 — O, 1 — I, регистр по соседним буквам");
+    ok(dch.size() == 4 && dch.get(0)[0].equals("FEIJ0ADA") && dch.get(0)[1].equals("FEIJOADA"), "A10 правка записана: было «FEIJ0ADA», стало «FEIJOADA»");
+    eq(dg.fix("500g 30un B12 4G PORTÃO7 98On1 00% 5AL", null), "500g 30un B12 4G PORTÃO7 98On1 00% 5AL",
+        "A10 коды и количества не трогаются: цифр больше одной, букв меньше трёх или 7 ни на что не похожа");
     ok(OcrWords.bare("003 12 MACA FUJI kg") && OcrWords.bare("ARROZ TIPO 1 5kg") && !OcrWords.bare("MAÇÃ FUJI") && !OcrWords.bare("Maca fuji") && !OcrWords.bare("12,90"),
         "A9 строка чека: слова от трёх букв прописными, ни одного знака над буквой");
     eq(w.fix("vnagre camim", null), "vinagre carmim", "A3 пропущенная буква; «caim» — имя, и до него не пропуск, а лишняя буква");

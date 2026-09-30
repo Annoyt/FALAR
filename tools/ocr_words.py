@@ -53,6 +53,13 @@ MIN_LEN = 4         # пропущенную букву ищем у слов о�
 # так стала бы «секретаршей» — secretária в корпусе в 23 раза чаще.
 BARE_RATIO = 10
 BARE_MIN = 4
+# Цифра вместо буквы: распознаватель путает похожие знаки — 0 и O, 1 и I/l, 5 и S, 8 и B, 6 и G, 2 и Z.
+# Слово из букв с одной цифрой, где похожая буква даёт слово из словаря («F0ne» → «Fone», «FEIJ0ADA» →
+# «FEIJOADA»), — это слово: иначе оно делилось на куски («FEIJ», «ADA»), и переводчик видел обрывки. Букв
+# хотя бы три, цифра одна: «500g», «30un», «B12», «4G», «PORTÃO7» не трогаются. На наборе вывесок
+# (1 338 строк) правило сработало один раз — «F0ne» → «Fone».
+LOOK = {'0': 'o', '1': 'il', '5': 's', '8': 'b', '6': 'g', '2': 'z'}
+MIXED = re.compile(r'(?<![^\W_])([^\W\d_]*)(\d)([^\W\d_]*)(?![^\W_])')
 SPLIT_LEN = 7       # разбиваем слова от семи букв
 SPLIT_PART = 10     # часть разбивки от трёх букв — не реже 10 раз в корпусе и не имя
 SPLIT_GEO = 30      # средняя (геометрическая) частота частей — не ниже 30: «CONTÉM·GLÚTEN» — 42
@@ -234,6 +241,24 @@ class Words:
         return best[1] if prod >= SPLIT_GEO ** len(best[1]) else None
 
     def fix(self, text, changes=None, bare=False):
+        def dig(m):
+            b, d, a = m.groups()
+            if len(b) + len(a) < 3:
+                return m.group(0)
+            best = None
+            for c in LOOK.get(d, ''):
+                w = (b + c + a).lower()
+                if self.known(w) and w not in self.english and self.count(w) >= MIN_FREQ and (best is None or self.count(w) > best[0]):
+                    best = (self.count(w), c)
+            if best is None:
+                return m.group(0)
+            r = b + (best[1].upper() if is_upper(b + a) else best[1]) + a
+            if changes is not None:
+                changes.append((m.group(0), r))
+            return r
+
+        text = MIXED.sub(dig, text)
+
         def rep(m):
             t = m.group(0); lw = t.lower()
             if len(lw) < 3:
