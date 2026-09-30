@@ -11,46 +11,54 @@ import android.text.method.ScrollingMovementMethod;
 import android.view.*;
 import android.widget.*;
 
-/** Два экрана. «Разговор» — то, что видит собеседник: португальская сторона крупно, русская мелко.
- *  Крупный португальский здесь не украшение, а замена озвучке: при подключённых наушниках вывести
- *  португальскую реплику в динамик нельзя ни одним штатным способом (results/2026-09-13-headphones.md),
- *  поэтому собеседник её читает. «Система» — всё остальное: кнопки, переключатели, журнал. */
+/** Экраны под общей шапкой. «Разговор» — то, что видит собеседник: португальская сторона крупно,
+ *  русская мелко. Крупный португальский здесь не украшение, а замена озвучке: при подключённых
+ *  наушниках вывести португальскую реплику в динамик нельзя ни одним штатным способом
+ *  (results/2026-09-13-headphones.md), поэтому собеседник её читает. «Слова» и «Настройки» — из
+ *  панели ☰ (решение владельца 01.10). Макеты — design/mockups/index.html. */
 public class MainActivity extends Activity implements TranslatorService.Listener {
   TextView status, logView, smallRu, hint, keyState, voiceState, voiceMsg;
   /** Крупный текст словами: под каждым словом транскрипция для чтения вслух. */
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
   Button bRefineEvery, bCloudEvery, bCloudPrefer; ToggleButton tTranslitOther;
   ListView histList;
-  Button bPin, bVoice, bVoice2, bWord, bBetter, bTalk, bSys, bLearn, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bLog;
+  Button bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bLog;
   TextView logLast;
   MicButton bMic;
-  /** Как слышно: строка под кнопками слушания (с полоской уровня) и под кнопкой удержания. */
-  HearingView hearListen, hearPtt;
-  static final String LISTEN_HINT = "Обе вместе — направление по языку каждой реплики. Микрофон открыт, только пока включено.",
-      PTT_HINT = "Удерживайте круг и говорите — язык определится по сказанному";
+  /** «Слушать» в доке: половинки PT и RU, кольцо «как слышно». Состояние держат tListenPt/tListenRu. */
+  ListenButton bListen;
+  static final String LISTEN_HINT = "Обе вместе — направление по языку каждой реплики. Микрофон открыт, только пока включено.";
   final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
   boolean meterOn = false, resumed = false;
   EditText keyIn; ToggleButton tKnown, tMicSrc; SeekBar sMic, sHold; TextView micLbl, holdLbl; CheckBox cMicAuto;
   View reviewBox; TextView revWord, revRu, revEx, revStat; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart;
   String revCur; boolean revOpen;
   ToggleButton tCtx, tAuto, tLang, tListenPt, tListenRu;
-  View talkView, sysView, learnView, voiceView, panelInput, panelPtt, panelListen; ScrollView logScroll;
-  FrameLayout panelBox; LinearLayout utilRow; int modeNow = 2; boolean folded = false;
+  View talkView, sysView, learnView, voiceView; ScrollView logScroll;
+  /** Какой раздел открыт: 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск. */
+  int screen = 0;
   ListView wordList; TextView learnHint; SeekBar sMin;
   TranslatorService svc;
-  ListView chatList; View sidePanel; Button bMenu, bEnd; SeekBar sPt, sRu;
+  /** Панель ☰ поверх экрана и затемнение под ней. */
+  ListView chatList; View sidePanel, scrim; SeekBar sPt, sRu;
   TextView sizeLbl, hintSide;
+  /** Шапка: ☰ или «←», название разговора (строка hint под ним — его состояние), «＋»; полоса хода облака и загрузок. */
+  View appBar, rootView; ImageView abNav, abAct; TextView abTitle; ProgressLine abProg;
+  /** Док: «Снимок, текст» слева; подпись под ним. */
+  View bInput; ImageView inputIcon; TextView inputLbl;
+  /** Кто сказал текущую реплику; её действия — или ход её перевода на том же месте. */
+  TextView whoLbl, busyLbl; View chipsRow, busyRow, bTurn; ProgressLine stageBar;
   SharedPreferences prefs;
   /** Цвета экранов: свои, день и ночь вслед за системой (Look). */
   Look look;
   float szPt = 34, szRu = 17;
   /** Экран первого запуска: разрешения и загрузка моделей по манифесту; блок моделей в «Системе». */
-  View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
+  View setupView; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
   Button bSetupMic, bSetupDl, bSetupStop, bModelsStop, bModelsVerify, bModelsUp; ToggleButton tSetupAny, tAnyNet;
   /** Модули: переключатели в «Системе» и на экране первого запуска; контейнеры их настроек. */
   final java.util.Map<String, CheckBox> modChecks = new java.util.HashMap<>(), setupChecks = new java.util.HashMap<>();
   LinearLayout ttsBox, cloudBox, modBox; Button bUnused, bKeyHelp, bKeyDrop, bModules; boolean setupSynced = false;
-  ModelStore.State mst; boolean micForever, svcStarted; TextView bTurn, histHint; ScrollView bigScroll;
+  ModelStore.State mst; boolean micForever, svcStarted; ScrollView bigScroll;
   TextView updLbl; Button bUpdate, bUpdateGo;
   /** Экран показывает состояние сервиса галочками, а setChecked дёргает обработчик так же, как
    *  палец. Без этого признака показ «контекст включён» сам же включал контекст ещё раз и
@@ -77,63 +85,33 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (pp != null) pendingPhoto = android.net.Uri.parse(pp);
       cloudPhoto = b.getBoolean(K_CLOUD_PHOTO, false); pendingCloud = b.getBoolean(K_PENDING_CLOUD, false);
     }
-    LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(look.bg);
-
     prefs = getSharedPreferences("at", MODE_PRIVATE);
     szPt = prefs.getFloat("szPt", 34); szRu = prefs.getFloat("szRu", 17);
 
-    LinearLayout tabs = new LinearLayout(this); tabs.setOrientation(LinearLayout.HORIZONTAL);
-    bMenu = new Button(this); bMenu.setText("☰"); bMenu.setTextSize(16);
-    bTalk = new Button(this); bTalk.setText("Разговор"); bTalk.setTextSize(15);
-    bLearn = new Button(this); bLearn.setText("Изучение"); bLearn.setTextSize(15);
-    bSys = new Button(this); bSys.setText("Система"); bSys.setTextSize(15);
-    tabs.addView(bMenu, new LinearLayout.LayoutParams(-2, -2));
-    tabs.addView(bTalk, new LinearLayout.LayoutParams(0, -2, 1f));
-    tabs.addView(bLearn, new LinearLayout.LayoutParams(0, -2, 1f));
-    tabs.addView(bSys, new LinearLayout.LayoutParams(0, -2, 1f));
-    root.addView(tabs); tabsRow = tabs;
-
-    // Список разговоров слева: без AndroidX выдвижной панели нет, поэтому просто колонка,
-    // которая появляется по ☰ и делит ширину с содержимым.
-    LinearLayout mid = new LinearLayout(this); mid.setOrientation(LinearLayout.HORIZONTAL);
-    sidePanel = buildSide();
-    sidePanel.setVisibility(View.GONE);
-    mid.addView(sidePanel, new LinearLayout.LayoutParams(0, -1, 0.85f));   // узкая панель рвала заголовок по слову
+    // Шапка и под ней один из разделов. Вкладок больше нет: они занимали ряд над текстом, а
+    // «Слова» и «Настройки» посреди разговора не нужны — они в панели ☰ (решение владельца 01.10).
+    // Панель выезжает поверх экрана. Раньше без AndroidX она была колонкой, делила ширину с
+    // текстом, и нижние кнопки обрезались: «получ…», «запо…» (стенд, 30.09).
+    FrameLayout top = new FrameLayout(this); top.setBackgroundColor(look.bg);
+    LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+    top.addView(root, new FrameLayout.LayoutParams(-1, -1));
+    root.addView(appBar = buildAppBar());
     FrameLayout box = new FrameLayout(this);
     box.addView(talkView = buildTalk());
     box.addView(learnView = buildLearn());
     box.addView(sysView = buildSys());
     box.addView(voiceView = buildVoice());
     box.addView(setupView = buildSetup());
-    mid.addView(box, new LinearLayout.LayoutParams(0, -1, 1f));
-    root.addView(mid, new LinearLayout.LayoutParams(-1, 0, 1f));
-    for (Button btn : new Button[]{bMenu, bTalk, bLearn, bSys, bEnd, bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bPhoto, bType, bModeInput, bModePtt, bModeListen, bFold, bRefineEvery, bCloudEvery}) style(btn);
-    for (ToggleButton tg : new ToggleButton[]{tCtx, tAuto, tLang, tKnown, tMicSrc, tListenPt, tListenRu, tTranslitOther}) style(tg);
-    for (Button cb : new Button[]{bBetter, bPin, bEnd, bModeInput, bModePtt, bModeListen, bFold, bPhoto, bType}) {
-      cb.setMaxLines(1); cb.setPadding(6, 22, 6, 22);   // иначе подписи ломались по слогам: «слу/ша/ть»
-      cb.setEllipsize(android.text.TextUtils.TruncateAt.END);
-    }
-    setContentView(root);
-    show(0); applySizes(); mode(2);
-
-    bTalk.setOnClickListener(v -> show(0));
-    bLearn.setOnClickListener(v -> { show(1); refreshWords(); });
-    bSys.setOnClickListener(v -> show(2));
-    bMenu.setOnClickListener(v -> {
-      boolean open = sidePanel.getVisibility() != View.VISIBLE;
-      sidePanel.setVisibility(open ? View.VISIBLE : View.GONE);
-      // Миг нажатия здесь не видно — панель открывается сразу. Поэтому кнопка остаётся
-      // подсвеченной, пока список открыт: видно не «нажал», а «открыто».
-      bMenu.setSelected(open);
-      bMenu.setTypeface(null, open ? Typeface.BOLD : Typeface.NORMAL);
-      if (open) refreshChats();
-    });
-    bEnd.setOnClickListener(v -> {
-      if (svc == null) return;
-      svc.newChat("");                       // имя даст модель по содержанию, спрашивать нечего
-      clearTalk("Новый разговор");
-      refreshChats();
-    });
+    root.addView(box, new LinearLayout.LayoutParams(-1, 0, 1f));
+    scrim = new View(this); scrim.setBackgroundColor(0x80180814); scrim.setVisibility(View.GONE);
+    scrim.setOnClickListener(v -> drawer(false));
+    top.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
+    sidePanel = buildSide(); sidePanel.setVisibility(View.GONE);
+    top.addView(sidePanel, new FrameLayout.LayoutParams(dp(318), -1, Gravity.START));
+    for (Button btn : new Button[]{bVoice, bVoice2, bWord, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bRefineEvery, bCloudEvery}) style(btn);
+    for (ToggleButton tg : new ToggleButton[]{tCtx, tAuto, tLang, tKnown, tMicSrc, tTranslitOther}) style(tg);
+    setContentView(top); rootView = top;
+    show(0); applySizes();
 
     // Первый запуск: без микрофона или без обязательных моделей — экран с объяснением и кнопками,
     // а не системный диалог с порога. Всё на месте — как раньше: сервис сразу.
@@ -172,23 +150,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (on && !svc.autoDir) { v.setChecked(false); voiceMsg.setText("Сначала запишите свой голос — без профиля направление выводить не из чего."); }
       else voiceMsg.setText(on ? "Направление берётся из языка опознанного голоса." : "Направление задают кнопки «Слушать» на экране разговора.");
     });
-    bModeInput.setOnClickListener(v -> { if (folded) fold(false); mode(0); });
-    bModePtt.setOnClickListener(v -> { if (folded) fold(false); mode(1); });
-    bModeListen.setOnClickListener(v -> { if (folded) fold(false); mode(2); });
-    bFold.setOnClickListener(v -> fold(!folded));
     bModels.setOnClickListener(v -> showModels());
-    // Долгое нажатие — сразу в облако, минуя офлайн-распознавание: нужно, когда оно не справилось.
-    bPhoto.setOnLongClickListener(v -> { if (svc == null || !svc.mod(Modules.CLOUD)) return false; cloudPhoto = true; pickPhotoMenu(); return true; });
-    bPhoto.setOnClickListener(v -> { cloudPhoto = false; pickPhotoMenu(); });
-
-    bType.setOnClickListener(v -> {
-      final EditText in = new EditText(this);
-      in.setHint("что перевести"); in.setMinLines(2); in.setTextSize(16);
-      new android.app.AlertDialog.Builder(this)
-          .setTitle("Набрать фразу").setView(in)
-          .setPositiveButton("перевести", (d, w) -> { if (svc != null) svc.typedText(in.getText().toString()); })
-          .setNegativeButton("отмена", null).show();
-    });
+    // «Снимок, текст»: одно касание — камера, галерея или набрать фразу. Долгое нажатие — снимок
+    // сразу в облако, минуя офлайн-распознавание: нужно, когда оно не справилось.
+    bInput.setOnClickListener(v -> inputMenu());
+    bInput.setOnLongClickListener(v -> { if (svc == null || !svc.mod(Modules.CLOUD)) return false; cloudPhoto = true; pickPhotoMenu(); return true; });
+    // Половинки «Слушать» переключают те же PT и RU, что прежние две кнопки: одну, другую или обе.
+    bListen.onHalf = pt -> { if (pt) tListenPt.toggle(); else tListenRu.toggle(); };
     bVoices.setOnClickListener(v -> { show(3); refreshVoice(); });
     bVoiceBack.setOnClickListener(v -> show(2));
     bForget.setOnClickListener(v -> new android.app.AlertDialog.Builder(this)
@@ -238,7 +206,164 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   View findWord() { return wordIn; }
 
   void clearTalk(String h) {
-    showBig("—", "pt2ru", false); smallRu.setText(""); setHint(h); refreshHist();
+    showBig("—", "pt2ru", false); smallRu.setText(""); setWho(null); setHint(h); refreshHist();
+  }
+
+  void newChat() {
+    if (svc == null) return;
+    svc.newChat("");                       // имя даст модель по содержанию, спрашивать нечего
+    clearTalk("Новый разговор");
+    refreshChats();
+  }
+
+  /** «Снимок, текст»: камера, галерея или набрать фразу. Без чтения снимков — сразу набор. */
+  void inputMenu() {
+    if (svc == null || !Modules.photo(svc.modules)) { typeDialog(); return; }
+    new android.app.AlertDialog.Builder(this)
+        .setItems(new String[]{"Снять камерой", "Из галереи", "Набрать фразу"}, (d, w) -> {
+          if (w == 2) typeDialog(); else { cloudPhoto = false; pickPhoto(w == 0); }
+        }).show();
+  }
+  void typeDialog() {
+    final EditText in = new EditText(this);
+    in.setHint("что перевести"); in.setMinLines(2); in.setTextSize(16);
+    new android.app.AlertDialog.Builder(this)
+        .setTitle("Набрать фразу").setView(in)
+        .setPositiveButton("перевести", (d, w) -> { if (svc != null) svc.typedText(in.getText().toString()); })
+        .setNegativeButton("отмена", null).show();
+  }
+
+  // ---- шапка, панель ☰, значки ------------------------------------------------------------
+  android.graphics.drawable.Drawable icon(int res, int color) {
+    android.graphics.drawable.Drawable d = getDrawable(res).mutate(); d.setTint(color); return d;
+  }
+  android.graphics.drawable.GradientDrawable round(int color, float radiusDp, int strokeColor) {
+    android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+    g.setColor(color); g.setCornerRadius(dp((int) radiusDp)); if (strokeColor != 0) g.setStroke(Math.max(1, dp(1)), strokeColor);
+    return g;
+  }
+  /** Фон с откликом на касание: обычный и нажатый. */
+  android.graphics.drawable.StateListDrawable states(android.graphics.drawable.Drawable up, android.graphics.drawable.Drawable down) {
+    android.graphics.drawable.StateListDrawable sl = new android.graphics.drawable.StateListDrawable();
+    sl.addState(new int[]{android.R.attr.state_pressed}, down); sl.addState(new int[]{}, up); return sl;
+  }
+  final View.OnTouchListener haptic = (v, e) -> {
+    if (e.getAction() == MotionEvent.ACTION_DOWN) v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+    return false;
+  };
+  /** Круглая кнопка шапки со значком; fill — на полупрозрачном круге («＋»). */
+  ImageView barButton(int res, boolean fill) {
+    ImageView b = new ImageView(this); b.setScaleType(ImageView.ScaleType.CENTER);
+    b.setImageDrawable(icon(res, 0xFFFFFFFF));
+    b.setBackground(states(round(fill ? 0x24FFFFFF : 0, 22, 0), round(0x40FFFFFF, 22, 0)));
+    b.setClickable(true); b.setOnTouchListener(haptic);
+    return b;
+  }
+
+  /** Шапка — сливовая, одна на все разделы (решение владельца 01.10). Слева ☰ или «←»; посередине
+   *  название разговора и строка его состояния; справа «＋» — новый разговор. Касание названия,
+   *  как прежде касание строки-подсказки, открывает «Память разговора». По нижнему краю — ход того,
+   *  что идёт со всем разговором: пересмотра в облаке и загрузок (ход реплики — в самой реплике). */
+  View buildAppBar() {
+    FrameLayout bar = new FrameLayout(this);
+    bar.setBackground(new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+        look.night ? new int[]{0xFF4A1530, 0xFF1D0816} : new int[]{Look.PLUM, Look.DEEP}));
+    LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.CENTER_VERTICAL);
+    row.setPadding(dp(4), 0, dp(6), 0);
+    abNav = barButton(app.falar.R.drawable.ic_menu, false);
+    row.addView(abNav, new LinearLayout.LayoutParams(dp(44), dp(44)));
+    LinearLayout ttl = new LinearLayout(this); ttl.setOrientation(LinearLayout.VERTICAL); ttl.setId(app.falar.R.id.hint);
+    ttl.setPadding(dp(6), 0, dp(6), 0); ttl.setGravity(Gravity.CENTER_VERTICAL);
+    abTitle = new TextView(this); abTitle.setTextSize(17); abTitle.setTextColor(0xFFFFFFFF); abTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    abTitle.setSingleLine(true); abTitle.setEllipsize(android.text.TextUtils.TruncateAt.END); abTitle.setText("Falar");
+    hint = new TextView(this); hint.setTextSize(12.5f); hint.setTextColor(0xC0FFFFFF); hint.setText("Запуск…");
+    hint.setSingleLine(true); hint.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    ttl.addView(abTitle); ttl.addView(hint);
+    row.addView(ttl, new LinearLayout.LayoutParams(0, dp(56), 1f));
+    abAct = barButton(app.falar.R.drawable.ic_plus, true); abAct.setContentDescription("Новый разговор");
+    row.addView(abAct, new LinearLayout.LayoutParams(dp(44), dp(44)));
+    bar.addView(row, new FrameLayout.LayoutParams(-1, dp(56)));
+    abProg = new ProgressLine(this).colors(Look.MINT, 0x29FFFFFF, Look.MINT, 0x29FFFFFF);
+    abProg.setVisibility(View.GONE);
+    bar.addView(abProg, new FrameLayout.LayoutParams(-1, dp(4), Gravity.BOTTOM));
+    ttl.setOnClickListener(x -> { if (screen == 0) memoDialog(); });
+    ttl.setOnLongClickListener(x -> { if (screen != 0) return false; memoDialog(); return true; });
+    abNav.setOnClickListener(x -> { if (screen == 0) drawer(sidePanel.getVisibility() != View.VISIBLE); else onBackPressed(); });
+    abAct.setOnClickListener(x -> { if (screen == 0) newChat(); });
+    return bar;
+  }
+
+  /** Шапка под раздел: у разговора — ☰, название и «＋»; у остальных — «←» и имя раздела. */
+  void refreshAppBar() {
+    if (abTitle == null) return;
+    boolean talk = screen == 0;
+    abNav.setImageDrawable(icon(talk ? app.falar.R.drawable.ic_menu : app.falar.R.drawable.ic_back, 0xFFFFFFFF));
+    abNav.setContentDescription(talk ? "Разговоры, слова, настройки" : "Назад");
+    abAct.setVisibility(talk ? View.VISIBLE : View.GONE);
+    if (talk) { refreshHint(); return; }
+    abTitle.setText(screen == 1 ? "Слова" : screen == 2 ? "Настройки" : screen == 3 ? "Голоса" : "Falar");
+    hint.setText(screen == 1 ? "из ваших разговоров" : ""); hint.setVisibility(screen == 1 ? View.VISIBLE : View.GONE);
+    abProg.setVisibility(View.GONE);
+  }
+
+  /** Название в шапке: имя разговора (его даёт модель или человек), иначе тема, иначе дата. */
+  String chatTitle() {
+    if (svc == null || svc.chats == null) return "Falar";
+    Chats c = svc.chats;
+    if (!c.name.isEmpty()) return c.name;
+    if (!c.topic.isEmpty()) return c.topic;
+    return c.size() == 0 ? "Новый разговор" : "Разговор от " + android.text.format.DateFormat.format("dd.MM HH:mm", c.current);
+  }
+
+  /** Панель ☰ выезжает поверх экрана за 200 мс — одна анимация на открытие, не постоянная. */
+  void drawer(boolean open) {
+    if (sidePanel == null || open == (sidePanel.getVisibility() == View.VISIBLE && sidePanel.getTranslationX() == 0)) return;
+    float w = dp(318);
+    sidePanel.animate().cancel(); scrim.animate().cancel();
+    if (open) {
+      refreshChats();
+      sidePanel.setVisibility(View.VISIBLE); scrim.setVisibility(View.VISIBLE);
+      sidePanel.setTranslationX(-w); scrim.setAlpha(0);
+      sidePanel.animate().translationX(0).setDuration(200).start(); scrim.animate().alpha(1).setDuration(200).start();
+    } else {
+      sidePanel.animate().translationX(-w).setDuration(180).withEndAction(() -> sidePanel.setVisibility(View.GONE)).start();
+      scrim.animate().alpha(0).setDuration(180).withEndAction(() -> scrim.setVisibility(View.GONE)).start();
+    }
+  }
+
+  /** «Назад»: закрыть панель; из «Голосов» — в настройки; из «Слов» и «Настроек» — к разговору. */
+  @Override public void onBackPressed() {
+    if (sidePanel != null && sidePanel.getVisibility() == View.VISIBLE) { drawer(false); return; }
+    if (screen == 3) { show(2); return; }
+    if (screen == 1 || screen == 2) { show(0); return; }
+    super.onBackPressed();
+  }
+
+  /** Кто сказал текущую реплику — точкой цвета: слива — вы, золото — собеседник. */
+  void setWho(String dir) {
+    if (whoLbl == null) return;
+    if (dir == null || bigText.length() < 2) { whoLbl.setText(""); whoLbl.setCompoundDrawables(null, null, null, null); return; }
+    boolean me = dir.startsWith("ru");
+    android.graphics.drawable.GradientDrawable dot = round(me ? Look.PLUM : Look.GOLD, 4, 0);
+    dot.setBounds(0, 0, dp(8), dp(8));
+    whoLbl.setCompoundDrawables(dot, null, null, null);
+    whoLbl.setText(me ? "вы · по-португальски" : "собеседник");
+  }
+
+  /** Кнопка-«чип» под репликой: скруглённая рамка, значок слева. */
+  Button chip(String text, int res) {
+    Button b = new Button(this); b.setAllCaps(false); b.setTextSize(13); b.setText(text);
+    b.setMinHeight(0); b.setMinimumHeight(0); b.setMinWidth(0); b.setMinimumWidth(0);
+    b.setPadding(dp(10), 0, dp(12), 0); b.setStateListAnimator(null); b.setOnTouchListener(haptic);
+    b.setTextColor(new android.content.res.ColorStateList(new int[][]{{-android.R.attr.state_enabled}, {}}, new int[]{look.offText, look.fg}));
+    b.setBackground(states(round(look.bg, 16, look.line), round(look.tint, 16, look.line)));
+    b.setCompoundDrawablePadding(dp(6));
+    chipIcon(b, res);
+    return b;
+  }
+  void chipIcon(Button b, int res) {
+    android.graphics.drawable.Drawable d = icon(res, look.night ? Look.GOLD : Look.PLUM);
+    d.setBounds(0, 0, dp(16), dp(16)); b.setCompoundDrawables(d, null, null, null);
   }
 
   /** Крупный текст словами. Подсказка для чтения вслух показывается для своих реплик (ru2pt), для
@@ -295,10 +420,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         : svc.readGuard == 1 ? "молчать, пока держу текст" : "молчать, пока видна транскрипция"));
   }
 
-  /** Строка-подсказка: состояние, потом пометка о спрятанной транскрипции, потом тема разговора. */
+  /** Строка под названием в шапке: состояние, пометка о спрятанной транскрипции, тема разговора.
+   *  Пока с разговором идёт облако или загрузка, строка — их ход (convBusy). */
   void setHint(String s) { hintBase = s == null ? "" : s; refreshHint(); }
   void refreshHint() {
-    if (hint == null) return;
+    if (hint == null || screen != 0) return;
+    String title = chatTitle();
+    abTitle.setText(title);
     String h = hintBase;
     if (holdingRead) h = "читаете вслух · микрофон не слушает";
     else if (cribDefault() && !cribShown && bigText.length() > 1) h += (h.isEmpty() ? "" : " · ") + "транскрипция скрыта · касание вернёт";
@@ -308,8 +436,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (!m.equals("cloud") && !m.equals("local")) h += (h.isEmpty() ? "" : " · ") + "получше недоступно: " + m;
     }
     String topic = svc != null && svc.chats != null ? svc.chats.topic : "";
-    if (!topic.isEmpty() && !h.contains(topic)) h += (h.isEmpty() ? "" : " · ") + topic;
-    hint.setText(h);
+    if (!topic.isEmpty() && !h.contains(topic) && !title.equals(topic)) h += (h.isEmpty() ? "" : " · ") + topic;
+    if (convBusy != null) h = convBusy;
+    hint.setText(h); hint.setVisibility(h.isEmpty() ? View.GONE : View.VISIBLE);
+    abProg.setVisibility(convBusy != null ? View.VISIBLE : View.GONE);
   }
 
   /** Кнопка «получше» значит «улучшить сейчас»: облако, если есть ключ и сеть, иначе локальный
@@ -334,7 +464,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (bBetter == null) return;
     if (svc == null || svc.eng == null) { bBetter.setEnabled(false); return; }
     String m = svc.improveMode();
-    bBetter.setText(m.equals("cloud") ? "☁ получше" : m.equals("local") ? "🧠 получше" : "получше");
+    // Чем улучшит — значком: облако или уточнитель на телефоне; слово на чипе одно.
+    chipIcon(bBetter, m.equals("cloud") ? app.falar.R.drawable.ic_cloud : m.equals("local") ? app.falar.R.drawable.ic_wand : app.falar.R.drawable.ic_spark);
     bBetter.setEnabled(!svc.cloudBusy && (m.equals("cloud") || m.equals("local")));
     refreshHint();
   }
@@ -432,41 +563,47 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   void showLastTurn() {
     if (svc == null || svc.chats == null) return;
     String[] t = svc.chats.turn(svc.chats.size() - 1);
-    if (t == null) { showBig("—", "pt2ru", false); smallRu.setText(""); return; }
+    if (t == null) { showBig("—", "pt2ru", false); smallRu.setText(""); setWho(null); return; }
     boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]);
     showBig((photo ? "📷 " : "") + (srcPt ? t[1] : t[2]), t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : t[1]);
+    setWho(t[0]);
   }
 
   final java.util.List<String[]> histRows = new java.util.ArrayList<>();
 
   /** Реплики разговора, свежие сверху. Верхняя строка экрана показывает последнюю крупно,
-   *  поэтому в списке её нет — иначе одно и то же читается дважды. */
+   *  поэтому в списке её нет — иначе одно и то же читается дважды.
+   *
+   *  Реплики — карточками: собеседник слева, вы справа, как в переписке. Раньше строки шли одна
+   *  под другой одинаково, и кто что сказал, было не видно. Нажимается вся карточка — меню
+   *  реплики; значок «•••» больше не нужен: карточка сама видна как нажимаемая. */
   void refreshHist() {
     if (svc == null || svc.chats == null || histList == null) return;
     java.util.List<String[]> all = svc.chats.all();
     histRows.clear();
     for (int k = all.size() - 2; k >= 0; k--) histRows.add(all.get(k));
+    final int maxW = Math.round(getResources().getDisplayMetrics().widthPixels * 0.80f);
     histList.setAdapter(new ArrayAdapter<String[]>(this, 0, histRows) {
       @Override public View getView(int pos, View cv, ViewGroup parent) {
         String[] t = getItem(pos);
-        boolean srcPt = t[0].startsWith("pt");
-        LinearLayout col = new LinearLayout(MainActivity.this);
-        col.setOrientation(LinearLayout.VERTICAL);
+        boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]), me = !srcPt && !photo;
+        LinearLayout bub = new LinearLayout(MainActivity.this);
+        bub.setOrientation(LinearLayout.VERTICAL); bub.setPadding(dp(12), dp(8), dp(12), dp(9));
+        android.graphics.drawable.GradientDrawable bg = round(me ? look.tint : look.card, 16, me ? 0 : look.line);
+        float r = dp(16), s = dp(6);
+        bg.setCornerRadii(me ? new float[]{r, r, s, s, r, r, r, r} : new float[]{s, s, r, r, r, r, r, r});
+        bub.setBackground(bg);
         TextView pt = new TextView(MainActivity.this);
-        pt.setText((Chats.PHOTO.equals(t[8]) ? "📷 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(look.dim);
-        if (Chats.PHOTO.equals(t[8])) pt.setMaxLines(3);
+        pt.setText((photo ? "📷 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(look.fg);
+        pt.setMaxWidth(maxW); if (photo) pt.setMaxLines(3);
         TextView ru = new TextView(MainActivity.this);
         ru.setText((srcPt ? t[2] : t[1]) + ("1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : ""));
-        ru.setTextSize(Math.max(10, szRu - 3)); ru.setTextColor(look.soft);
-        col.addView(pt); col.addView(ru);
-        // Метка «•••» — только знак того, что у реплики есть меню. Нажимается вся строка:
-        // кликабельный потомок внутри ListView отнимает нажатие у самой строки.
-        TextView dots = new TextView(MainActivity.this);
-        dots.setText("•••"); dots.setTextSize(16); dots.setTextColor(look.soft); dots.setPadding(16, 2, 4, 2);
+        ru.setTextSize(Math.max(10, szRu - 3)); ru.setTextColor(look.dim); ru.setMaxWidth(maxW);
+        bub.addView(pt); bub.addView(ru);
         LinearLayout row = new LinearLayout(MainActivity.this);
-        row.setOrientation(LinearLayout.HORIZONTAL); row.setPadding(4, 10, 4, 10);
-        row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
-        row.addView(dots);
+        row.setOrientation(LinearLayout.HORIZONTAL); row.setPadding(0, dp(4), 0, dp(4));
+        row.setGravity(me ? Gravity.END : Gravity.START);
+        row.addView(bub, new LinearLayout.LayoutParams(-2, -2));
         return row;
       }
     });
@@ -647,32 +784,64 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
   }
 
-  /** 0 разговор · 1 изучение · 2 система · 3 голоса. Голоса — отдельный режим, а не вкладка:
-   *  его открывают один раз при настройке и больше туда не возвращаются, место в верхнем ряду
-   *  такому не положено. Подсветка при этом остаётся на «Системе», откуда в него вошли. */
+  /** 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск. «Слова» и «Настройки»
+   *  открываются из панели ☰, голоса — из настроек: их настраивают один раз. У первого запуска
+   *  шапки нет — у него свой заголовок. */
   void show(int tab) {
+    screen = tab;
     talkView.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
     learnView.setVisibility(tab == 1 ? View.VISIBLE : View.GONE);
     sysView.setVisibility(tab == 2 ? View.VISIBLE : View.GONE);
     if (tab == 2) micLabel();
     voiceView.setVisibility(tab == 3 ? View.VISIBLE : View.GONE);
     if (setupView != null) setupView.setVisibility(tab == 4 ? View.VISIBLE : View.GONE);
-    if (tabsRow != null) tabsRow.setVisibility(tab == 4 ? View.GONE : View.VISIBLE);
-    Button[] bs = {bTalk, bLearn, bSys};
-    for (int k = 0; k < bs.length; k++) {
-      boolean on = k == tab || (k == 2 && tab == 3);
-      bs[k].setSelected(on); bs[k].setTypeface(null, on ? Typeface.BOLD : Typeface.NORMAL);
-    }
+    if (appBar != null) appBar.setVisibility(tab == 4 ? View.GONE : View.VISIBLE);
+    refreshAppBar();
   }
 
-  /** Список разговоров: свежие сверху, галочка — улучшен ли перевод задним числом. */
+  /** Панель ☰: «＋ Новый разговор», разговоры (свежие сверху, галочка — перевод улучшен задним
+   *  числом), внизу «Слова» и «Настройки». Лежит поверх экрана; касания под неё не проходят. */
   View buildSide() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(12, 8, 8, 8);
-    TextView t = new TextView(this); t.setText("Разговоры"); t.setTextSize(14); t.setTextColor(look.soft); v.addView(t);
-    hintSide = new TextView(this); hintSide.setTextSize(11); hintSide.setTextColor(look.soft); v.addView(hintSide);
-    chatList = new ListView(this);
+    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL);
+    android.graphics.drawable.GradientDrawable bg = round(look.bg, 0, 0);
+    float r = dp(24); bg.setCornerRadii(new float[]{0, 0, r, r, r, r, 0, 0});
+    v.setBackground(bg); v.setElevation(dp(12)); v.setClipToOutline(true); v.setClickable(true);
+    LinearLayout head = new LinearLayout(this); head.setOrientation(LinearLayout.HORIZONTAL); head.setGravity(Gravity.CENTER_VERTICAL);
+    head.setPadding(dp(18), dp(18), dp(18), dp(16));
+    head.setBackground(new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+        look.night ? new int[]{0xFF4A1530, 0xFF1D0816} : new int[]{Look.PLUM, Look.DEEP}));
+    ImageView logo = new ImageView(this); logo.setImageResource(app.falar.R.mipmap.ic_launcher);
+    head.addView(logo, new LinearLayout.LayoutParams(dp(46), dp(46)));
+    LinearLayout ht = new LinearLayout(this); ht.setOrientation(LinearLayout.VERTICAL); ht.setPadding(dp(12), 0, 0, 0);
+    TextView hn = new TextView(this); hn.setText("Falar"); hn.setTextSize(20); hn.setTypeface(null, Typeface.BOLD); hn.setTextColor(0xFFFFFFFF);
+    String ver; try { ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { ver = ""; }
+    TextView hv = new TextView(this); hv.setText(ver + " · pt-BR ⇄ ru без сети"); hv.setTextSize(12.5f); hv.setTextColor(0xC0FFFFFF);
+    ht.addView(hn); ht.addView(hv); head.addView(ht);
+    v.addView(head);
+    Button bNew = new Button(this); bNew.setAllCaps(false); bNew.setText("＋  Новый разговор"); bNew.setTextSize(15); bNew.setTypeface(null, Typeface.BOLD);
+    bNew.setTextColor(0xFFFFFFFF); bNew.setStateListAnimator(null); bNew.setOnTouchListener(haptic);
+    bNew.setBackground(states(round(Look.PLUM, 22, 0), round(Look.DEEP, 22, 0)));
+    LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, dp(44)); np.setMargins(dp(14), dp(14), dp(14), dp(6));
+    v.addView(bNew, np);
+    bNew.setOnClickListener(x -> { newChat(); drawer(false); show(0); });
+    TextView t = new TextView(this); t.setText("Разговоры"); t.setTextSize(12); t.setTextColor(look.soft); t.setPadding(dp(18), dp(10), dp(18), 0); v.addView(t);
+    hintSide = new TextView(this); hintSide.setTextSize(11); hintSide.setTextColor(look.soft); hintSide.setPadding(dp(18), 0, dp(18), dp(4)); v.addView(hintSide);
+    chatList = new ListView(this); chatList.setDivider(null);
     v.addView(chatList, new LinearLayout.LayoutParams(-1, 0, 1f));
+    View div = new View(this); div.setBackgroundColor(look.line); v.addView(div, new LinearLayout.LayoutParams(-1, Math.max(1, dp(1))));
+    TextView nWords = navRow(app.falar.R.drawable.ic_book, "Слова"), nSys = navRow(app.falar.R.drawable.ic_tune, "Настройки");
+    v.addView(nWords); v.addView(nSys);
+    nWords.setOnClickListener(x -> { drawer(false); show(1); refreshWords(); });
+    nSys.setOnClickListener(x -> { drawer(false); show(2); });
     return v;
+  }
+  TextView navRow(int res, String text) {
+    TextView t = new TextView(this); t.setText(text); t.setTextSize(15); t.setTextColor(look.fg); t.setGravity(Gravity.CENTER_VERTICAL);
+    t.setPadding(dp(18), dp(12), dp(18), dp(12)); t.setCompoundDrawablePadding(dp(14));
+    android.graphics.drawable.Drawable d = icon(res, look.night ? Look.GOLD : Look.PLUM); d.setBounds(0, 0, dp(24), dp(24));
+    t.setCompoundDrawables(d, null, null, null);
+    t.setBackground(states(round(0, 0, 0), round(look.tint, 0, 0))); t.setClickable(true); t.setOnTouchListener(haptic);
+    return t;
   }
 
   final java.util.List<String> chatIds = new java.util.ArrayList<>();
@@ -681,7 +850,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   void refreshChats() {
     if (svc == null || svc.chats == null) return;
     java.util.List<String[]> l = svc.chats.list();
-    java.util.List<String> rows = new java.util.ArrayList<>();
+    final java.util.List<String[]> rows = new java.util.ArrayList<>();   // название, дата · реплики, улучшен, текущий
     chatIds.clear();
     chatTitles.clear();
     // Текущий разговор отмечаем: без этого не видно, в каком из них ты сидишь, и только что
@@ -692,16 +861,27 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       boolean empty = "0".equals(c[1]);
       chatIds.add(c[0]); chatTitles.add(c[2].isEmpty() ? (empty ? "новый разговор" : "без имени") : c[2]);
       String when = android.text.format.DateFormat.format("dd.MM HH:mm", Long.parseLong(c[0])).toString();
-      rows.add((here ? "▶ " : "") + when + " · " + (empty ? "пока пусто" : c[1] + " реплик")
-               + ("1".equals(c[3]) ? " ✓" : "") + "\n" + (c[2].isEmpty() && empty ? "новый разговор" : c[2]));
+      rows.add(new String[]{c[2].isEmpty() ? (empty ? "Новый разговор" : "Без имени") : c[2],
+          when + " · " + (empty ? "пока пусто" : c[1] + " реплик"), "1".equals(c[3]) ? "1" : "", here ? "1" : ""});
     }
-    if (rows.isEmpty()) rows.add("пока пусто");
+    if (rows.isEmpty()) rows.add(new String[]{"Пока пусто", "", "", ""});
     hintSide.setText(chatIds.isEmpty() ? "" : "долгое нажатие — переименовать или удалить");
-    chatList.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, rows) {
+    chatList.setAdapter(new ArrayAdapter<String[]>(this, 0, rows) {
       @Override public View getView(int pos, View cv, ViewGroup parent) {
-        TextView t = (TextView) super.getView(pos, cv, parent);
-        t.setMaxLines(3); t.setEllipsize(android.text.TextUtils.TruncateAt.END); t.setTextSize(13);
-        return t;
+        String[] r = getItem(pos);
+        LinearLayout row = new LinearLayout(MainActivity.this); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(18), dp(9), dp(16), dp(9));
+        if (!r[3].isEmpty()) row.setBackgroundColor(look.tint);                // текущий — подложкой
+        LinearLayout col = new LinearLayout(MainActivity.this); col.setOrientation(LinearLayout.VERTICAL);
+        TextView t = new TextView(MainActivity.this); t.setText(r[0]); t.setTextSize(15); t.setTextColor(look.fg);
+        t.setSingleLine(true); t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        if (!r[3].isEmpty()) t.setTypeface(null, Typeface.BOLD);
+        TextView m = new TextView(MainActivity.this); m.setText(r[1]); m.setTextSize(12); m.setTextColor(look.soft);
+        col.addView(t); if (!r[1].isEmpty()) col.addView(m);
+        row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+        if (!r[2].isEmpty()) { ImageView ok = new ImageView(MainActivity.this); ok.setImageDrawable(icon(app.falar.R.drawable.ic_check, look.night ? Look.MINT : 0xFF1E9E77));
+          row.addView(ok, new LinearLayout.LayoutParams(dp(18), dp(18))); }
+        return row;
       }
     });
     chatList.setOnItemClickListener((p, vv, pos, id) -> { if (pos < chatIds.size()) openChat(Long.parseLong(chatIds.get(pos))); });
@@ -767,20 +947,20 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   void showChat(long id, org.json.JSONObject o) {
     if (o == null) return;
-    String who = o.optString("name", "");
-    setHint((who.isEmpty() ? "разговор от " + android.text.format.DateFormat.format("dd.MM HH:mm", id) : who)
-        + " · продолжаем" + (o.optBoolean("refined", false) ? " · перевод улучшен" : ""));
+    // Название разговора — в шапке; здесь только его состояние.
+    setHint("продолжаем" + (o.optBoolean("refined", false) ? " · перевод улучшен" : ""));
     // Наверху всегда последняя реплика: экран разговора для того и нужен, чтобы собеседник
     // её читал. Раньше после открытия там стояло «—», и верх экрана пустовал.
     org.json.JSONArray t = o.optJSONArray("turns");
     org.json.JSONObject last = t == null || t.length() == 0 ? null : t.optJSONObject(t.length() - 1);
-    if (last == null) { showBig("—", "pt2ru", false); smallRu.setText(""); }
+    if (last == null) { showBig("—", "pt2ru", false); smallRu.setText(""); setWho(null); }
     else {
       boolean srcPt = last.optString("dir", "").startsWith("pt");
       String fixed = last.optString("fixed", "");
       String dst = fixed.isEmpty() ? last.optString("dst", "") : fixed;
       showBig(srcPt ? last.optString("src", "") : dst, last.optString("dir", "pt2ru"), !fixed.isEmpty());
       smallRu.setText(srcPt ? dst : last.optString("src", ""));
+      setWho(last.optString("dir", "pt2ru"));
     }
     refreshHist(); refreshHint();
   }
@@ -788,45 +968,38 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Открыть разговор по нажатию в списке: то же, плюс закрыть панель и уйти на экран разговора. */
   void showChatAndGo(long id, org.json.JSONObject o) {
     showChat(id, o);
-    sidePanel.setVisibility(View.GONE);
-    bMenu.setSelected(false); bMenu.setTypeface(null, Typeface.NORMAL);
+    drawer(false);
     show(0);
   }
 
-  /** Экран разговора: крупно португальский, мелко русский, ниже — предыдущие реплики. */
+  /** Экран разговора. Сверху — текущая реплика: кто сказал, португальский крупно, русский мелко;
+   *  под ней её действия («Получше», «Запомнить», «⋯») или, пока она распознаётся, переводится и
+   *  уточняется, — ход этого на том же месте (решение владельца 01.10: ход — в реплике). Ниже —
+   *  прежние реплики карточками. Внизу док: «Снимок, текст», кнопка удержания, «Слушать» PT | RU.
+   *  Режимов (ввод · удержание · слушать) и сворачивания больше нет: док занимает 76 dp, а три
+   *  прежних ряда внизу — 170 dp (стенд, 30.09), и всё нужное в нём видно сразу.
+   *
+   *  Облако вокруг кнопки удержания расходится до трёх её радиусов — за край списка: пусть уходит
+   *  под боковые кнопки дока (они рисуются поверх), а не обрезается ровной линией. Цена: экран не
+   *  режет детей по краю, и всё, что прокручивается, сидит в своей режущей рамке — у прокрутки без
+   *  отступов своей обрезки нет. Таких двое: крупный текст (bigClip) и список реплик (listClip).
+   *  В 0.24.0 крупный текст без рамки рисовался поверх названия и списка. */
   View buildTalk() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 16, 24, 16);
-    // Облако вокруг кнопки удержания расходится до трёх её радиусов — за край списка: пусть
-    // уходит под нижние ряды (они рисуются поверх), а не обрезается ровной линией. Цена: экран
-    // больше не режет детей по краю, и всё, что прокручивается, обязано сидеть в своей режущей
-    // рамке — у прокрутки без отступов своей обрезки нет. Таких двое: крупный текст (bigClip) и
-    // список реплик (listClip). В 0.24.0 крупный текст без рамки рисовался поверх названия,
-    // подсказки и списка, и список под ним было не прокрутить.
-    v.setClipChildren(false);
-    hint = new TextView(this); hint.setTextSize(13); hint.setTextColor(look.soft); hint.setId(app.falar.R.id.hint);
-    hint.setText("Запуск…"); v.addView(hint);
-    // Касание строки с названием — «Память разговора»: что уточнитель знает о разговоре.
-    hint.setOnClickListener(x -> memoDialog());
-    hint.setOnLongClickListener(x -> { memoDialog(); return true; });
-    // Полоса «что приложение делает сейчас»: распознаёт, переводит, поднимает уточнитель, уточняет,
-    // пересматривает в облаке, облегчает перевод. Место под неё держится всегда (INVISIBLE, а не
-    // GONE): иначе крупный текст подпрыгивал бы на каждой реплике.
-    busyRow = new LinearLayout(this); busyRow.setOrientation(LinearLayout.HORIZONTAL); busyRow.setGravity(Gravity.CENTER_VERTICAL);
-    busyRow.setId(app.falar.R.id.busy);
-    busyBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); busyBar.setIndeterminate(true);
-    busyRow.addView(busyBar, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-    busyLbl = new TextView(this); busyLbl.setTextSize(12); busyLbl.setTextColor(look.accent); busyLbl.setPadding(16, 0, 0, 0); busyLbl.setSingleLine(true);
-    busyRow.addView(busyLbl, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-    busyRow.setVisibility(View.INVISIBLE); v.addView(busyRow);
+    FrameLayout f = new FrameLayout(this); f.setClipChildren(false);
+    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setClipChildren(false);
+    f.addView(v, new FrameLayout.LayoutParams(-1, -1));
 
+    LinearLayout rep = new LinearLayout(this); rep.setOrientation(LinearLayout.VERTICAL); rep.setPadding(dp(16), dp(12), dp(16), 0);
+    whoLbl = new TextView(this); whoLbl.setTextSize(12); whoLbl.setTextColor(look.soft); whoLbl.setCompoundDrawablePadding(dp(6));
+    whoLbl.setGravity(Gravity.CENTER_VERTICAL); whoLbl.setPadding(0, 0, 0, dp(4));
+    rep.addView(whoLbl);
     // Крупный текст — контейнер с переносом по словам: под каждым словом транскрипция для чтения
-    // вслух. Касание прячет и возвращает её, долгое нажатие открывает меню правки реплики.
+    // вслух. Касание прячет и возвращает её.
     bigBox = new FlowLayout(this); bigBox.setClickable(true); bigBox.setLongClickable(true);
     bigBox.setOnClickListener(x -> { if (bigText.length() < 2) return; cribManual = true; cribShown = !cribShown; showBig(bigText, bigDir, bigRefined); refreshHint(); });
     // Удержание крупного текста — «читаю вслух»: транскрипция показывается на время удержания,
     // и микрофон в это время не слушает. Иначе приложение слышит, как владелец произносит
     // португальскую фразу с экрана, считает его собеседником и переводит ему её же обратно.
-    // Меню реплики переехало на русскую строку под текстом: жест удержания занят чтением.
     bigBox.setOnLongClickListener(x -> { if (bigText.length() < 2) return false; startReading(); return true; });
     bigBox.setOnTouchListener((bv, e) -> {
       int a = e.getAction();
@@ -835,8 +1008,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     });
     // Крупный текст прокручивается и не растёт выше половины экрана. Без этого длинная фраза
     // (а с транскрипцией каждое слово занимает две строки) выдавливала за нижний край список
-    // реплик и весь ряд кнопок — «получше», «запомнить», «＋ новый» становились недоступны,
-    // и начать новый разговор было нечем. Прокрутки на этом экране не было вовсе.
+    // реплик и кнопки внизу. В прокрутку уходит вся текущая реплика: и крупный текст, и русская
+    // строка — перевод длинного монолога сам по себе занимает шесть строк.
     bigScroll = new ScrollView(this) {
       @Override protected void onMeasure(int wSpec, int hSpec) {
         int max = Math.round(getResources().getDisplayMetrics().heightPixels * 0.5f);
@@ -844,140 +1017,116 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       }
     };
     bigScroll.setFillViewport(true);
-    // В прокрутку уходит вся текущая реплика: и крупный текст, и русская строка под ним. Русский
-    // перевод длинного монолога сам по себе занимает шесть строк, и, оставь его снаружи, нижний
-    // ряд кнопок опять уезжал бы за край — уже по другой причине.
     LinearLayout turnCol = new LinearLayout(this); turnCol.setOrientation(LinearLayout.VERTICAL);
     turnCol.addView(bigBox);
+    smallRu = new TextView(this); smallRu.setTextSize(17); smallRu.setTextColor(look.dim); smallRu.setPadding(0, dp(8), 0, 0);
+    turnCol.addView(smallRu);
     bigScroll.addView(turnCol);
-    FrameLayout bigClip = new FrameLayout(this);                // режет прокрутку по краю — см. setClipChildren выше
+    FrameLayout bigClip = new FrameLayout(this);                // режет прокрутку по краю — см. выше
     bigClip.addView(bigScroll, new FrameLayout.LayoutParams(-1, -2));
-    v.addView(bigClip);
+    rep.addView(bigClip);
+    smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
 
-    // Русская строка и рядом видимая точка входа в меню последней реплики. Раньше меню открывалось
-    // долгим нажатием на крупный текст, а этот жест занят чтением вслух; долгое нажатие само по
-    // себе не видно, и «как теперь удалить лишнюю фразу» — первый вопрос, который это вызвало.
-    LinearLayout ruRow = new LinearLayout(this); ruRow.setOrientation(LinearLayout.HORIZONTAL);
-    ruRow.setPadding(0, 12, 0, 0);
-    smallRu = new TextView(this); smallRu.setTextSize(17); smallRu.setTextColor(look.dim);
-    ruRow.addView(smallRu, new LinearLayout.LayoutParams(0, -2, 1f));
-    bTurn = new TextView(this); bTurn.setText("•••"); bTurn.setTextSize(18); bTurn.setTextColor(look.accent);
-    bTurn.setPadding(24, 2, 8, 8); ruRow.addView(bTurn);
-    turnCol.addView(ruRow);
-    View.OnClickListener lastMenu = x -> {
+    // Действия с репликой и ход её перевода — на одном месте одной высоты: пока идёт ход, чипов нет,
+    // и крупный текст не подпрыгивает, когда он начинается и кончается.
+    FrameLayout act = new FrameLayout(this);
+    LinearLayout chips = new LinearLayout(this); chips.setOrientation(LinearLayout.HORIZONTAL); chips.setGravity(Gravity.CENTER_VERTICAL);
+    bBetter = chip("Получше", app.falar.R.drawable.ic_spark); bBetter.setEnabled(false);
+    bPin = chip("Запомнить", app.falar.R.drawable.ic_pin); bPin.setEnabled(false);
+    Button more = chip("", app.falar.R.drawable.ic_more); more.setPadding(dp(8), 0, 0, 0); more.setContentDescription("Меню реплики");
+    LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, dp(32)); cp.setMarginEnd(dp(8));
+    chips.addView(bBetter, cp);
+    chips.addView(bPin, new LinearLayout.LayoutParams(cp));
+    chips.addView(more, new LinearLayout.LayoutParams(dp(32), dp(32)));
+    bTurn = more;
+    // Меню последней реплики — видимой кнопкой «⋯»: долгое нажатие само по себе не видно, а жест
+    // удержания крупного текста занят чтением вслух.
+    bTurn.setOnClickListener(x -> {
       if (svc == null || svc.chats == null || svc.chats.size() == 0) return;
       int last = svc.chats.size() - 1; String[] t = svc.chats.turn(last);
       if (t != null && Chats.PHOTO.equals(t[8])) openPhoto(last); else turnMenu(last);   // снимок — сразу перевод поверх фото
-    };
-    bTurn.setOnClickListener(lastMenu);
-    smallRu.setOnLongClickListener(x -> { if (svc == null || svc.chats == null || svc.chats.size() == 0) return false; turnMenu(svc.chats.size() - 1); return true; });
+    });
+    chipsRow = chips;
+    // Ход реплики: отрезки «распознаю · перевожу · уточняю» и подпись этапа. Стенд находит подпись
+    // по id busy (test_busy_device.sh).
+    LinearLayout busy = new LinearLayout(this); busy.setOrientation(LinearLayout.VERTICAL); busy.setId(app.falar.R.id.busy);
+    busy.setGravity(Gravity.CENTER_VERTICAL);
+    stageBar = new ProgressLine(this).colors(look.night ? Look.GOLD : Look.PLUM, Look.MINT, look.night ? Look.GOLD : Look.PLUM, look.line);
+    busy.addView(stageBar, new LinearLayout.LayoutParams(-1, dp(8)));
+    busyLbl = new TextView(this); busyLbl.setTextSize(12.5f); busyLbl.setTextColor(look.accent); busyLbl.setTypeface(null, Typeface.BOLD);
+    busyLbl.setSingleLine(true); busyLbl.setEllipsize(android.text.TextUtils.TruncateAt.END); busyLbl.setPadding(0, dp(6), 0, 0);
+    busy.addView(busyLbl);
+    busy.setVisibility(View.INVISIBLE); busyRow = busy;
+    act.addView(chips, new FrameLayout.LayoutParams(-1, -1));
+    act.addView(busy, new FrameLayout.LayoutParams(-1, -1));
+    LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(-1, dp(40)); ap.topMargin = dp(10);
+    rep.addView(act, ap);
+    v.addView(rep);
+
+    // «ранее»: черта, слово, черта.
+    LinearLayout sep = new LinearLayout(this); sep.setOrientation(LinearLayout.HORIZONTAL); sep.setGravity(Gravity.CENTER_VERTICAL);
+    sep.setPadding(dp(16), dp(6), dp(16), dp(2));
+    for (int i = 0; i < 3; i++) {
+      if (i == 1) { TextView s1 = new TextView(this); s1.setText("ранее"); s1.setTextSize(12); s1.setTextColor(look.soft); s1.setPadding(dp(10), 0, dp(10), 0); sep.addView(s1); }
+      else { View l1 = new View(this); l1.setBackgroundColor(look.line); sep.addView(l1, new LinearLayout.LayoutParams(0, Math.max(1, dp(1)), 1f)); }
+    }
+    v.addView(sep);
 
     // Прежние реплики — список, а не сплошной текст: каждую надо уметь удалить или перенести
     // в другой разговор. Случайная фраза из комнаты иначе остаётся в контексте уточнителя
-    // и в разборе слов для заучивания.
-    histHint = new TextView(this); histHint.setTextSize(11); histHint.setTextColor(look.soft);
-    histHint.setPadding(4, 6, 4, 2); histHint.setText("нажмите на реплику — поправить, удалить, перенести");
-    v.addView(histHint);
+    // и в разборе слов для заучивания. Низ списка не прячется под кнопкой: она заходит на него.
     histList = new ListView(this);
-    histList.setDivider(null); histList.setClipToPadding(false);
-    // Кнопка удержания плавает над репликами, а не занимает свой ряд: место у текста она не
-    // отнимает, и текст за ней виден. Видна только в режиме удержания (mode).
-    FrameLayout histBox = new FrameLayout(this); histBox.setClipChildren(false);   // ореол шире кнопки
-    // Список — в своей рамке, которая режет по краю: иначе, раз ни histBox, ни экран детей не режут
-    // (облаку кнопки нужно выходить за край), строки списка вылезали бы под нижние ряды.
+    histList.setDivider(null); histList.setClipToPadding(false); histList.setPadding(dp(12), dp(2), dp(12), dp(64));
     FrameLayout listClip = new FrameLayout(this);
     listClip.addView(histList, new FrameLayout.LayoutParams(-1, -1));
-    histBox.addView(listClip, new FrameLayout.LayoutParams(-1, -1));
+    v.addView(listClip, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+    // Док: фон полупрозрачный — облако кнопки видно и под ним.
+    View dockBg = new View(this);
+    android.graphics.drawable.GradientDrawable db = round((look.bg & 0x00FFFFFF) | 0xDB000000, 0, 0);
+    android.graphics.drawable.GradientDrawable dl = round(look.line, 0, 0);
+    android.graphics.drawable.LayerDrawable dock = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{dl, db});
+    dock.setLayerInset(1, 0, Math.max(1, dp(1)), 0, 0);
+    dockBg.setBackground(dock);
+    v.addView(dockBg, new LinearLayout.LayoutParams(-1, dp(76)));
+
+    // Кнопка удержания — всегда в центре дока, под большим пальцем: центр на 8 dp ниже края дока
+    // (док 76 dp, вид 128 dp, снизу 4 dp). Касание мимо круга кнопка отдаёт дальше.
     bMic = new MicButton(this); bMic.setEnabled(false);
     bMic.setContentDescription("Удерживайте и говорите — по-португальски или по-русски");
     FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(dp(128), dp(128), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-    mp.bottomMargin = dp(44);                     // свечение расходится на 40 dp за край кнопки — не резать его краем списка
-    histBox.addView(bMic, mp);
-    v.addView(histBox, new LinearLayout.LayoutParams(-1, 0, 1f));
+    mp.bottomMargin = dp(4);
+    f.addView(bMic, mp);
 
-    // Низ экрана — ряд режимов, над ним панель выбранного. Раньше всё лежало вповалку тремя
-    // рядами и съедало место у текста, который и есть главное на этом экране. Режим переключает
-    // только панель: включённое прослушивание при переходе в «ввод» не выключается — можно
-    // слушать монолог и одновременно сфотографировать вывеску или набрать фразу.
-    panelBox = new FrameLayout(this);
-    panelBox.addView(panelInput = buildInput());
-    panelBox.addView(panelPtt = buildPtt());
-    panelBox.addView(panelListen = buildListen());
-    v.addView(panelBox);
+    // Боковые кнопки дока — поверх облака кнопки.
+    FrameLayout side = new FrameLayout(this);
+    LinearLayout in = new LinearLayout(this); in.setOrientation(LinearLayout.VERTICAL); in.setGravity(Gravity.CENTER_HORIZONTAL);
+    in.setPadding(0, dp(6), 0, 0);
+    inputIcon = new ImageView(this); inputIcon.setScaleType(ImageView.ScaleType.CENTER);
+    inputIcon.setImageDrawable(icon(app.falar.R.drawable.ic_camera, look.night ? Look.GOLD : Look.PLUM));
+    inputIcon.setBackground(round(look.card, 22, look.line));
+    in.addView(inputIcon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+    inputLbl = new TextView(this); inputLbl.setText("Снимок, текст"); inputLbl.setTextSize(11); inputLbl.setTextColor(look.dim);
+    inputLbl.setSingleLine(true); inputLbl.setPadding(0, dp(3), 0, 0);
+    in.addView(inputLbl);
+    in.setClickable(true); in.setLongClickable(true); in.setOnTouchListener(haptic); in.setEnabled(false);
+    in.setContentDescription("Снимок или набрать фразу");
+    bInput = in;
+    side.addView(in, new FrameLayout.LayoutParams(dp(92), -1, Gravity.START));
+    LinearLayout ls = new LinearLayout(this); ls.setOrientation(LinearLayout.VERTICAL); ls.setGravity(Gravity.CENTER_HORIZONTAL);
+    bListen = new ListenButton(this); bListen.setEnabled(false);
+    bListen.setContentDescription(LISTEN_HINT);            // её читают TalkBack и стенд (test_hearing_device.sh)
+    ls.addView(bListen, new LinearLayout.LayoutParams(dp(108), dp(54)));
+    TextView ll = new TextView(this); ll.setText("Слушать"); ll.setTextSize(11); ll.setTextColor(look.dim);
+    ls.addView(ll);
+    side.addView(ls, new FrameLayout.LayoutParams(dp(108), -1, Gravity.END));
+    side.setPadding(dp(14), 0, dp(12), 0);
+    f.addView(side, new FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM));
 
-    utilRow = new LinearLayout(this); utilRow.setOrientation(LinearLayout.HORIZONTAL);
-    bBetter = new Button(this); bBetter.setText("☁ получше"); bBetter.setEnabled(false); bBetter.setTextSize(12);
-    utilRow.addView(bBetter, new LinearLayout.LayoutParams(0, -2, 1f));
-    bPin = new Button(this); bPin.setText("📌 запомнить"); bPin.setEnabled(false); bPin.setTextSize(12);
-    utilRow.addView(bPin, new LinearLayout.LayoutParams(0, -2, 1f));
-    bEnd = new Button(this); bEnd.setText("＋ новый"); bEnd.setTextSize(12);
-    utilRow.addView(bEnd, new LinearLayout.LayoutParams(0, -2, 1f));
-    v.addView(utilRow);
-
-    LinearLayout bar = new LinearLayout(this); bar.setOrientation(LinearLayout.HORIZONTAL);
-    bModeInput = new Button(this); bModeInput.setText("📷 ⌨"); bModeInput.setTextSize(15);
-    bModePtt = new Button(this); bModePtt.setText("🎙 PT⇄RU"); bModePtt.setTextSize(14);
-    bModeListen = new Button(this); bModeListen.setText("👂 слушать"); bModeListen.setTextSize(14);
-    bFold = new Button(this); bFold.setText("▾"); bFold.setTextSize(15);
-    bar.addView(bModeInput, new LinearLayout.LayoutParams(0, -2, 1f));
-    bar.addView(bModePtt, new LinearLayout.LayoutParams(0, -2, 1.2f));
-    bar.addView(bModeListen, new LinearLayout.LayoutParams(0, -2, 1.2f));
-    bar.addView(bFold, new LinearLayout.LayoutParams(-2, -2));
-    v.addView(bar);
-    return v;
-  }
-
-  /** Ввод не голосом: снимок и набранная фраза. Доступен и во время прослушивания. */
-  View buildInput() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.HORIZONTAL);
-    bPhoto = new Button(this); bPhoto.setText("📷 снимок"); bPhoto.setEnabled(false); bPhoto.setTextSize(13);
-    v.addView(bPhoto, new LinearLayout.LayoutParams(0, -2, 1f));
-    bType = new Button(this); bType.setText("⌨ набрать"); bType.setEnabled(false); bType.setTextSize(13);
-    v.addView(bType, new LinearLayout.LayoutParams(0, -2, 1f));
-    return v;
-  }
-
-  /** Удержание. Сама кнопка плавает над репликами (buildTalk), здесь — подсказка к ней. Кнопка
-   *  зовёт на обоих языках — FALAR и ГОВОРИ по кольцу: принимает тот, на котором в неё говорят. */
-  View buildPtt() {
-    hearPtt = new HearingView(this); hearPtt.setLine(PTT_HINT, look.soft);
-    return hearPtt;
-  }
-
-  View buildListen() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL);
-    LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
-    tListenPt = new ToggleButton(this); tListenPt.setTextOn("Слушать PT ▶"); tListenPt.setTextOff("Слушать PT");
-    tListenRu = new ToggleButton(this); tListenRu.setTextOn("Слушать RU ▶"); tListenRu.setTextOff("Слушать RU");
-    row.addView(tListenPt, new LinearLayout.LayoutParams(0, -2, 1f));
-    row.addView(tListenRu, new LinearLayout.LayoutParams(0, -2, 1f));
-    v.addView(row);
-    hearListen = new HearingView(this); hearListen.setLine(LISTEN_HINT, look.soft);
-    v.addView(hearListen);
-    return v;
-  }
-
-  /** Какой режим показан внизу; прослушивание при переключении не трогается. */
-  void mode(int m) {
-    modeNow = m;
-    panelInput.setVisibility(m == 0 ? View.VISIBLE : View.GONE);
-    panelPtt.setVisibility(m == 1 ? View.VISIBLE : View.GONE);
-    panelListen.setVisibility(m == 2 ? View.VISIBLE : View.GONE);
-    // Пока круг над списком, список дотягивается выше него: последняя реплика не остаётся под кругом.
-    boolean micOn = m == 1 && !folded;
-    bMic.setVisibility(micOn ? View.VISIBLE : View.GONE);
-    histList.setPadding(0, 0, 0, micOn ? dp(172) : 0);
-    Button[] bs = {bModeInput, bModePtt, bModeListen};
-    for (int k = 0; k < bs.length; k++) bs[k].setTypeface(null, k == m ? Typeface.BOLD : Typeface.NORMAL);
-    for (int k = 0; k < bs.length; k++) bs[k].setSelected(k == m && !folded);
-  }
-
-  void fold(boolean on) {
-    folded = on;
-    panelBox.setVisibility(on ? View.GONE : View.VISIBLE);
-    utilRow.setVisibility(on ? View.GONE : View.VISIBLE);
-    bFold.setText(on ? "▴" : "▾");
-    mode(modeNow);
+    // Состояние «Слушать PT» и «Слушать RU» держат прежние переключатели: на экране их больше нет,
+    // их половинки — в bListen, а обработчик и синхронизация с сервисом остались как были.
+    tListenPt = new ToggleButton(this); tListenRu = new ToggleButton(this);
+    return f;
   }
 
   /** Слушание отмечается прямо на кнопке режима: его видно и когда открыт другой режим. */
@@ -989,23 +1138,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         : "Чувствительность микрофона: +" + sMic.getProgress() + " дБ");
   }
 
+  /** Что слушаем — на самой кнопке «Слушать»: мятные половинки PT и RU. */
   void markListen() {
-    boolean on = svc != null && (svc.listenPt || svc.listenRu);
-    bModeListen.setText(on ? "👂 слушаю ▶" : "👂 слушать");
-    hearListen.setBar(on);
+    if (bListen != null) bListen.setState(svc != null && svc.listenPt, svc != null && svc.listenRu);
     meter();
   }
 
-  /** Опрос уровня входа: 5 раз в секунду, пока слушаем и строка видна, 10 — пока держат кнопку
+  /** Опрос уровня входа: 5 раз в секунду, пока слушаем и виден разговор, 10 — пока держат кнопку
    *  (кольцо следует за голосом). Сам останавливается, когда ни того, ни другого, или экран ушёл. */
   final Runnable meterTick = new Runnable() { public void run() {
     boolean listening = svc != null && (svc.listenPt || svc.listenRu), holding = svc != null && svc.recording;
     if (!resumed || (!listening && !holding)) { meterOn = false; return; }
     if (holding) bMic.setLevel(svc.levelDb, svc.liveQ);
-    else if (modeNow == 2 && !folded) {
-      double nz = svc.noiseRms;
-      hearListen.setLevel(svc.levelDb, nz > 0 ? (float) TranslatorService.db(nz) : Float.NaN, svc.liveQ, svc.liveSpeech);
-    }
+    else if (screen == 0) bListen.setLevel(svc.levelDb, svc.liveQ, svc.liveSpeech);
     ui.postDelayed(this, holding ? 100 : 200);
   }};
   void meter() { if (!meterOn && resumed) { meterOn = true; ui.post(meterTick); } }
@@ -1728,7 +1873,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Связь с сервисом — только пока экран виден. Сервис, к которому кто-то подключён, не
    *  останавливается даже по собственной команде, а на Android 12+ экран после «назад» не
    *  уничтожается: связь держалась бы вечно, и сервис никогда не отдавал бы память. */
-  boolean bound = false;
+  boolean bound = false, started = false;
   void bindSvc() { if (!bound) { bound = bindService(new Intent(this, TranslatorService.class), conn, Context.BIND_AUTO_CREATE); } }
   void unbindSvc() {
     if (!bound) return;
@@ -1738,6 +1883,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
   @Override protected void onStart() {
     super.onStart();
+    started = true;
     // Первый старт делает startSvc() из onCreate и уже привязан; повторный запуск здесь сбросил
     // бы стендовые флаги первого (например, беззвучный режим прогона записей). Только возвращение.
     if (!svcStarted || bound) return;
@@ -1747,6 +1893,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bindSvc();
   }
   @Override protected void onStop() {
+    started = false;
     unbindSvc();
     super.onStop();
   }
@@ -1779,45 +1926,77 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
   }
   /** Стенд: нажатая позиция кнопки удержания без записи — микрофон не открывается, в разговор
-   *  ничего не попадает. Экран держится включённым, пока идёт показ; режим внизу потом прежний. */
+   *  ничего не попадает. Экран держится включённым, пока идёт показ. Кнопка в доке видна всегда —
+   *  режима, который надо включать для показа, больше нет. */
   void micDemo(String kind, String sec) {
-    final int was = modeNow; final boolean wasFolded = folded;
     long ms = 1000L * (sec == null ? 15 : Integer.parseInt(sec));
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-    show(0); if (folded) fold(false);
-    if ("meter".equals(kind)) { meterDemo(ms, was, wasFolded); return; }
-    if ("live".equals(kind)) { liveDemo(ms, was, wasFolded); return; }
-    mode(1);
-    bMic.demo(kind, ms, () -> {
-      getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-      mode(was); if (wasFolded) fold(true);
-    });
+    show(0);
+    if ("meter".equals(kind)) { meterDemo(ms); return; }
+    if ("live".equals(kind)) { liveDemo(ms); return; }
+    bMic.demo(kind, ms, () -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
   }
-  /** Стенд: полоска «как слышно» под кнопками слушания с уровнем, похожим на речь, — тем же
-   *  опросом 5 раз в секунду, но без микрофона. Цена полоски на экране (measure_mic_anim.sh). */
-  void meterDemo(long ms, int was, boolean wasFolded) {
-    mode(2); hearListen.setBar(true); hearListen.setLine("стенд: полоска уровня", look.soft);
+  /** Стенд: снимок экрана самим приложением (--es uishot <имя> [--es uiscreen talk|drawer|words|settings]).
+   *  Вид раскладывается на размер окна и рисуется в files/<имя>.png. Работает и при погашенном
+   *  заблокированном экране, когда системе снимать нечего, а разблокировать чужой телефон нельзя.
+   *  Тени и остальное, что рисует только видеокарта, в снимок не попадают. Разговор на снимке —
+   *  владельца: снимок остаётся на телефоне и на столе, в репозиторий не идёт. */
+  void uiShot(String name, String which) {
+    // За блокировкой экран остановлен и от сервиса отключён — без разговора снимать нечего. На время
+    // снимка подключаемся (сервис сам отдаёт экрану разговор) и потом отключаемся, если экран всё ещё
+    // не виден: связь, которую держит невидимый экран, не даёт сервису отпустить память.
+    final boolean tmp = !bound;
+    if (tmp) bindSvc();
+    boolean dr = "drawer".equals(which); final int was = screen;
+    show("words".equals(which) ? 1 : "settings".equals(which) ? 2 : 0);
+    if (screen == 1) refreshWords();
+    if (sidePanel != null) {
+      sidePanel.animate().cancel(); scrim.animate().cancel();
+      if (dr) ui.postDelayed(this::refreshChats, tmp ? 2000 : 0);
+      sidePanel.setVisibility(dr ? View.VISIBLE : View.GONE); sidePanel.setTranslationX(0); scrim.setVisibility(dr ? View.VISIBLE : View.GONE); scrim.setAlpha(1);
+      if (dr) refreshChats();
+    }
+    ui.postDelayed(() -> {
+      android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+      int sb = 0, id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+      if (id > 0) sb = getResources().getDimensionPixelSize(id);
+      int w = rootView.getWidth() > 0 ? rootView.getWidth() : dm.widthPixels, h = rootView.getHeight() > 0 ? rootView.getHeight() : dm.heightPixels - sb;
+      // В ListView строки появляются при раскладке — поэтому раскладка дважды.
+      for (int k = 0; k < 2; k++) {
+        rootView.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+        rootView.layout(0, 0, w, h);
+      }
+      android.graphics.Bitmap bm = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+      rootView.draw(new android.graphics.Canvas(bm));
+      java.io.File f = new java.io.File(getExternalFilesDir(null), (name == null || name.isEmpty() ? "uishot" : name) + ".png");
+      try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) { bm.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out); onLog("🧪 снимок экрана: " + f.getName() + " " + w + "×" + h); }
+      catch (Exception e) { onLog("🧪 снимок экрана не записан: " + e); }
+      bm.recycle();
+      if (dr) { sidePanel.setVisibility(View.GONE); scrim.setVisibility(View.GONE); }
+      if (screen != was) show(was);                // снимок не оставляет экран на чужом разделе
+      if (tmp && !started) unbindSvc();
+    }, tmp ? 2500 : 700);
+  }
+  /** Стенд: кольцо «как слышно» вокруг «Слушать» с уровнем, похожим на речь, — тем же опросом
+   *  5 раз в секунду, но без микрофона. Цена кольца на экране (measure_mic_anim.sh, вид meter). */
+  void meterDemo(long ms) {
+    bListen.setState(true, false);
     final long end = android.os.SystemClock.uptimeMillis() + ms; final java.util.Random rnd = new java.util.Random(7);
     ui.post(new Runnable() { float lv = -50; public void run() {
       if (android.os.SystemClock.uptimeMillis() >= end) {
-        hearListen.setBar(false); hearListen.setLine(LISTEN_HINT, look.soft);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        mode(was); if (wasFolded) fold(true); markListen(); return;
+        markListen(); return;
       }
       lv = Math.max(-55, Math.min(-12, lv + (float) rnd.nextGaussian() * 6));   // слоги то громче, то тише
-      hearListen.setLevel(lv, -48, (float) Hearing.quality(lv, lv + 48), lv > -38);
+      bListen.setLevel(lv, (float) Hearing.quality(lv, lv + 48), lv > -38);
       ui.postDelayed(this, 200);
     }});
   }
   /** Стенд: кнопка удержания нажата, уровень и цвет — как у речи, без микрофона: по 3 с тишина
    *  (красный, свечение у края), тихая речь (жёлтый) и хорошая (зелёный, свечение вширь), по кругу.
    *  Снимки экрана и цена свечения (measure_mic_anim.sh, вид live). */
-  void liveDemo(long ms, int was, boolean wasFolded) {
-    mode(1);
-    bMic.demo("pulse30", ms, () -> {
-      getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-      mode(was); if (wasFolded) fold(true);
-    });
+  void liveDemo(long ms) {
+    bMic.demo("pulse30", ms, () -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
     final long t0 = android.os.SystemClock.uptimeMillis(), end = t0 + ms; final java.util.Random rnd = new java.util.Random(7);
     ui.post(new Runnable() { public void run() {
       long t = android.os.SystemClock.uptimeMillis();
@@ -1847,6 +2026,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // и вылезшее за свои границы видно не всегда: проверка прокрутки (test_scroll_device.sh) один
     // раз прошла на сборке с ошибкой. Целиком — вылезшее видно всегда.
     if (i.hasExtra("redraw")) { getWindow().getDecorView().invalidate(); return; }
+    if (i.hasExtra("uishot")) { uiShot(i.getStringExtra("uishot"), i.getStringExtra("uiscreen")); return; }
     if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
@@ -1857,7 +2037,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
     bPin.setEnabled(true); bBetter.setEnabled(true);
     tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bVoice.setEnabled(true); bVoice2.setEnabled(true); bWord.setEnabled(true);
-    bMic.setEnabled(true); bPhoto.setEnabled(true); bType.setEnabled(true);
+    bMic.setEnabled(true); bInput.setEnabled(true); bListen.setEnabled(true);
     uiSync = true;
     tCtx.setChecked(svc != null && svc.contextMode);
     if (svc != null) { tListenPt.setChecked(svc.listenPt); tListenRu.setChecked(svc.listenRu); }
@@ -1927,8 +2107,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     vis(cloudBox, cloud); vis(bCloudEvery, cloud); vis(bCloudPrefer, cloud);
     vis(tCtx, llm); vis(bRefineEvery, llm);
     vis(bVoices, on.contains(Modules.SPEAKER));
+    // Без чтения снимков и облака снимать нечем — кнопка дока только набирает фразу.
     boolean photo = Modules.photo(on);
-    vis(bPhoto, photo); if (bModeInput != null) bModeInput.setText(photo ? "📷 ⌨" : "⌨");
+    if (inputIcon != null) {
+      inputIcon.setImageDrawable(icon(photo ? app.falar.R.drawable.ic_camera : app.falar.R.drawable.ic_kbd, look.night ? Look.GOLD : Look.PLUM));
+      inputLbl.setText(photo ? "Снимок, текст" : "Набрать");
+    }
     vis(bBetter, Modules.better(on));
     refreshModules(); refreshBetter();
   }
@@ -2123,18 +2307,52 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     refreshHist();                      // список строится из самого разговора, а не копится в строке
     showBig(pt, dir, refined);
     setHint((srcIsPt ? "собеседник" : "вы") + (refined ? " · уточнено" : ""));
-    smallRu.setText(ru);
+    smallRu.setText(ru); setWho(dir);
     refreshBetter();
   }
-  LinearLayout busyRow; ProgressBar busyBar; TextView busyLbl;
-  @Override public void onBusy(String what, int done, int total) {
+
+  /** Ход работы. Живой перевод и уточнитель относятся к реплике — их ход в ней самой: отрезки
+   *  «распознаю · перевожу · уточняю» и подпись этапа на месте её кнопок (решение владельца 01.10).
+   *  Облако пересматривает весь разговор, загрузка — модели, поэтому их ход — в шапке: подпись вместо
+   *  строки состояния и полоса по её нижнему краю. Полосы стоят на месте и меняются только с ходом:
+   *  бегущая полоса перерисовывала весь экран на каждом кадре. */
+  String convBusy; long cloudFrom; long cloudTypical;
+  final Runnable cloudTick = new Runnable() { public void run() {
+    if (convBusy == null || cloudFrom == 0) return;
+    long ms = android.os.SystemClock.uptimeMillis() - cloudFrom;
+    convBusy = "пересматриваю разговор в облаке · " + ms / 1000 + " с";
+    // Точного хода у облака нет — это один запрос. Полоса идёт по времени: прошло / сколько обычно
+    // отвечает эта модель, и не доходит до конца, пока ответа нет.
+    abProg.set(1, 0, Math.min(0.95f, ms / (float) cloudTypical));
+    refreshHint();
+    ui.postDelayed(this, 1000);
+  }};
+  @Override public void onBusy(String kind, String what, int done, int total) {
     if (busyRow == null) return;
-    if (what == null) { busyRow.setVisibility(View.INVISIBLE); return; }
-    busyRow.setVisibility(View.VISIBLE);
-    busyBar.setIndeterminate(total <= 0);
-    if (total > 0) { busyBar.setMax(total); busyBar.setProgress(done); }
-    // «уточняю перевод · 1 из 2»: номер той, что в работе, а не уже сделанных. У процентов свой текст.
-    busyLbl.setText(total > 0 && !what.contains("%") ? what + " · " + Math.min(done + 1, total) + " из " + total : what);
+    boolean reply = what != null && ("live".equals(kind) || "refine".equals(kind));
+    busyRow.setVisibility(reply ? View.VISIBLE : View.INVISIBLE);
+    chipsRow.setVisibility(reply ? View.INVISIBLE : View.VISIBLE);
+    if (reply) {
+      // Этап — по тому, что идёт: распознавание (и чтение снимка), перевод, уточнение.
+      int stage = "refine".equals(kind) ? 2 : what.startsWith("перевожу") ? 1 : 0;
+      stageBar.set(3, stage, total > 0 ? Math.min(1f, done / (float) total) : 0f);
+      // «уточняю перевод · 1 из 2»: номер той, что в работе, а не уже сделанных. У процентов свой текст.
+      busyLbl.setText(total > 0 && !what.contains("%") ? what + " · " + Math.min(done + 1, total) + " из " + total : what);
+    }
+    boolean cloud = what != null && "cloud".equals(kind), models = what != null && "models".equals(kind);
+    if (cloud) {
+      if (cloudFrom == 0) {
+        cloudFrom = android.os.SystemClock.uptimeMillis();
+        long typ = 0;
+        try { Cloud c = svc == null ? null : svc.cloud; if (c != null) typ = c.metaOf(c.next()).ms; } catch (Throwable t) { typ = 0; }
+        cloudTypical = typ > 0 ? typ : 20000;
+        convBusy = "пересматриваю разговор в облаке · 0 с"; abProg.set(1, 0, 0);
+        ui.post(cloudTick);
+      }
+    } else { cloudFrom = 0; ui.removeCallbacks(cloudTick); }
+    if (models) { convBusy = what; abProg.set(1, 0, total > 0 ? done / (float) total : 0f); }
+    if (!cloud && !models) convBusy = null;
+    refreshHint();
   }
   @Override protected void onDestroy() { unbindSvc(); super.onDestroy(); }
 }

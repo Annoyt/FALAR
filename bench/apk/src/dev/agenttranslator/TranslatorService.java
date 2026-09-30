@@ -32,8 +32,10 @@ public class TranslatorService extends Service {
     /** Состояние проверки и установки обновления приложения; пустая строка — сказать нечего. */
     void onUpdate(String state);
     /** Что приложение делает прямо сейчас: «перевожу…», «уточняю перевод» — для полосы на экране
-     *  разговора. what == null — ничего; total > 0 — сделано done из total, иначе без хода. */
-    void onBusy(String what, int done, int total);
+     *  разговора. kind — чья работа (BUSY_ORDER): живой перевод и уточнитель экран показывает в
+     *  реплике, облако и загрузки — в шапке. what == null — ничего; total > 0 — сделано done из
+     *  total, иначе без хода. */
+    void onBusy(String kind, String what, int done, int total);
     /** Снимок прочитан и переведён: реплика «📷» с меткой at легла в разговор chatId — показать
      *  перевод поверх снимка. */
     void onPhoto(long chatId, long at);
@@ -841,10 +843,10 @@ public class TranslatorService extends Service {
   }
   void pushBusy() {
     final Listener l = listener; if (l == null) return;
-    Object[] top = null;
-    for (String k : BUSY_ORDER) { top = busyNow.get(k); if (top != null) break; }
-    final Object[] t = top;
-    main.post(() -> { if (t == null) l.onBusy(null, 0, 0); else l.onBusy((String) t[0], (Integer) t[1], (Integer) t[2]); });
+    Object[] top = null; String kind = null;
+    for (String k : BUSY_ORDER) { top = busyNow.get(k); if (top != null) { kind = k; break; } }
+    final Object[] t = top; final String kd = kind;
+    main.post(() -> { if (t == null) l.onBusy(null, null, 0, 0); else l.onBusy(kd, (String) t[0], (Integer) t[1], (Integer) t[2]); });
   }
   /** Что слушаем. Ни одна кнопка не нажата — микрофон отпускается совсем: приложение не должно
    *  держать вход и гореть точкой записи, когда его не просили слушать.
