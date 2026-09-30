@@ -482,6 +482,98 @@ def split_columns(rows):
     return out
 
 
+# Таблица (чек, прейскурант, пищевая ценность): числа стоят столбцом — цены, коды, количества. Строка
+# чека «003 1310      FEIJAO PRETO» / «1 UN   8,99   8,99» разбиралась на столбцы: коды, названия,
+# количества и цены читались отдельно и по очереди, и позиция нигде не собиралась. Число из такого
+# столбца связывает свою линию: соседние ячейки на той же линии — одна строка таблицы, какой бы ни был
+# просвет. Число с числом склеивается всегда, с текстом — с одной, ближней стороны; два текста через
+# просвет не склеиваются никогда (колонки текста на этикетке). Строки таблицы и то, что стоит между
+# ними, читаются одним блоком сверху вниз.
+TAB_COL = 3         # чисел в столбце, чтобы это была таблица
+TAB_GAP = 3.0       # строки одной таблицы — не дальше трёх высот друг от друга
+# Одна линия: смещение середины от средней линии более длинной ячейки — меньше 0,4 высоты меньшей
+# рамки. Строки чека идут с шагом 0,85 высоты рамки; на снимке чека у ячеек одной линии смещение
+# 0–0,30, у ячеек соседних строк («005 249» и «0,850 KG» ниже) — от 0,54.
+TAB_LINE = 0.4
+
+
+def numeric(t):
+    """Ячейка из чисел: есть цифра и нет слова от трёх букв («5,49», «1 UN», «0,850 KG», «003 1310»)."""
+    return bool(re.search(r'\d', t)) and not re.search(r'[^\W\d_]{3,}', t)
+
+
+def row_geom(row):
+    pts = np.concatenate([it['b'] for it in row])
+    return dict(x0=float(pts[:, 0].min()), x1=float(pts[:, 0].max()), c=np.mean([it['c'] for it in row], 0),
+                u=row[0]['u'], h=float(np.mean([it['h'] for it in row])), t=' '.join(it['t'] for it in row))
+
+
+def y_at(r, x):
+    u = r['u']
+    return r['c'][1] + (x - r['c'][0]) * (u[1] / u[0] if abs(u[0]) > 1e-6 else 0.0)
+
+
+def line_off(a, b):
+    """Смещение середины короткой ячейки от средней линии длинной (наклон короткой ненадёжен)."""
+    l, s = (a, b) if a['x1'] - a['x0'] >= b['x1'] - b['x0'] else (b, a)
+    return abs(y_at(l, s['c'][0]) - s['c'][1])
+
+
+def same_line(a, b):
+    """Ячейки на одной линии: середина одной — на средней линии другой, по горизонтали не перекрываются."""
+    h = min(a['h'], b['h'])
+    if abs(float(np.dot(a['u'], b['u']))) < 0.966:
+        return False
+    return line_off(a, b) < TAB_LINE * h and (a['x1'] <= b['x0'] + 0.5 * h or b['x1'] <= a['x0'] + 0.5 * h)
+
+
+def same_col(a, b):
+    """Числа одного столбца: на разных линиях, выровнены по правому или левому краю или перекрываются."""
+    h = max(a['h'], b['h'])
+    if line_off(a, b) < TAB_LINE * min(a['h'], b['h']):
+        return False
+    ov = min(a['x1'], b['x1']) - max(a['x0'], b['x0'])
+    return abs(a['x1'] - b['x1']) < h or abs(a['x0'] - b['x0']) < h or ov > 0.5 * min(a['x1'] - a['x0'], b['x1'] - b['x0'])
+
+
+def tables(rows):
+    """Строки таблицы склеиваются по линиям. Возвращает строки и признак «строка таблицы»."""
+    g = [row_geom(r) for r in rows]; n = len(rows)
+    num = [numeric(x['t']) for x in g]
+    col = [num[i] and sum(1 for j in range(n) if j != i and num[j] and same_col(g[i], g[j])) >= TAB_COL - 1 for i in range(n)]
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]; i = parent[i]
+        return i
+    for i in range(n):
+        if not col[i]:
+            continue
+        line = [j for j in range(n) if j != i and same_line(g[i], g[j])]
+        left = max((j for j in line if g[j]['x1'] <= g[i]['x0'] + 0.5 * g[i]['h']), key=lambda j: g[j]['x1'], default=None)
+        right = min((j for j in line if g[j]['x0'] >= g[i]['x1'] - 0.5 * g[i]['h']), key=lambda j: g[j]['x0'], default=None)
+        text = []
+        for j in (left, right):
+            if j is None:
+                continue
+            if num[j]:
+                parent[find(j)] = find(i)
+            else:
+                text.append(j)
+        if text:
+            j = min(text, key=lambda j: max(g[j]['x0'] - g[i]['x1'], g[i]['x0'] - g[j]['x1']))
+            parent[find(j)] = find(i)
+    groups = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    out, tab = [], []
+    for idx in groups.values():
+        out.append(sorted([it for k in idx for it in rows[k]], key=lambda it: it['L'][0]))
+        tab.append(any(col[k] for k in idx))
+    return out, tab
+
+
 def layout(boxes, texts, min_score=0.5):
     """Рамки -> блоки -> строки. Возвращает список блоков, блок — список строк (текст, как на вывеске).
 
@@ -523,21 +615,46 @@ def layout(boxes, texts, min_score=0.5):
         else:
             rows.append([it])
     rows = split_columns(rows)
+    rows, tab = tables(rows)
     rs = []
-    for row in rows:
+    for row, t in zip(rows, tab):
         pts = np.concatenate([it['b'] for it in row])
         h = float(np.mean([it['h'] for it in row]))
         c = np.mean([it['c'] for it in row], 0); u = row[0]['u']
         rs.append(dict(text=' '.join(it['t'] for it in row), x0=float(pts[:, 0].min()), x1=float(pts[:, 0].max()),
-                       c=c, u=u, h=h, boxes=[it['b'] for it in row], scores=[(len(it['t']), it['s']) for it in row]))
+                       c=c, u=u, h=h, boxes=[it['b'] for it in row], scores=[(len(it['t']), it['s']) for it in row], table=t))
     rs.sort(key=lambda r: r['c'][1])
 
-    def y_at(r, x):
-        u = r['u']
-        return r['c'][1] + (x - r['c'][0]) * (u[1] / u[0] if abs(u[0]) > 1e-6 else 0.0)
-
-    blocks = []
+    # таблицы: строки таблицы, не дальше TAB_GAP высот друг от друга, и всё, что стоит между ними
+    tbl = []
     for r in rs:
+        if r['table']:
+            if tbl and r['c'][1] - tbl[-1][-1]['c'][1] < TAB_GAP * max(r['h'], tbl[-1][-1]['h']):
+                tbl[-1].append(r)
+            else:
+                tbl.append([r])
+    for t in [t for t in tbl if len(t) == 1]:       # одна строка — не таблица: читается как обычная
+        t[0]['table'] = False
+    tbl = [t for t in tbl if len(t) > 1]
+    for t in tbl:
+        y0, y1 = t[0]['c'][1], t[-1]['c'][1]
+        x0, x1 = min(r['x0'] for r in t), max(r['x1'] for r in t)
+        for r in rs:
+            if not r['table'] and y0 < r['c'][1] < y1 and min(x1, r['x1']) > max(x0, r['x0']):
+                r['table'] = True; t.append(r)
+        t.sort(key=lambda r: r['c'][1])
+        lines = []                                  # одна линия таблицы — слева направо
+        for r in t:
+            if lines and line_off(r, lines[-1][0]) < TAB_LINE * min(r['h'], lines[-1][0]['h']):
+                lines[-1].append(r)
+            else:
+                lines.append([r])
+        t[:] = [r for ln in lines for r in sorted(ln, key=lambda r: r['x0'])]
+
+    blocks = [t for t in tbl]
+    for r in rs:
+        if r['table']:
+            continue
         placed = False
         for bl in reversed(blocks):
             p = bl[-1]

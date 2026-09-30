@@ -165,6 +165,39 @@ public class OcrCoreTest {
     double[] f = para.frame();
     ok(near(f[0], 105, 1e-9) && near(f[1], 20, 1e-9) && near(f[4], 190, 1e-9) && near(f[5], 20, 1e-9), "L9 прямоугольник абзаца — по его рамкам");
 
+    // --- T: таблица (чек): числа столбцом связывают свою линию, позиция читается строкой ---
+    List<OcrCore.Item> rc = new ArrayList<>();
+    String[][] pos = {{"001 66", "BANANA PRATA", "1 UN", "5,49", "5,49"}, {"002 7890000000017 ARROZ AGULHINHA TIPO 1 5KG", null, "2 UN", "24,90", "49,80"},
+        {"003 1310", "FEIJAO PRETO", "1 UN", "8,99", "8,99"}, {"004 309", "CEBOLA", "3 UN", "1,99", "5,97"}};
+    for (int k = 0; k < 4; k++) {
+      double y = 100 + 66 * k;                                  // строка названия, под ней — количество и цены
+      if (pos[k][1] == null) rc.add(item(10, y, 430, y + 30, pos[k][0]));   // код вплотную к названию — одной рамкой
+      else { rc.add(item(10, y, 90, y + 30, pos[k][0])); rc.add(item(200, y, 340, y + 30, pos[k][1])); }
+      rc.add(item(460, y + 27, 500, y + 57, pos[k][2])); rc.add(item(520, y + 27, 560, y + 57, pos[k][3])); rc.add(item(600, y + 27, 640, y + 57, pos[k][4]));
+    }
+    List<List<OcrCore.Row>> tb = OcrCore.layout(rc);
+    ok(texts(tb).equals(Arrays.asList("001 66 BANANA PRATA", "1 UN 5,49 5,49", "002 7890000000017 ARROZ AGULHINHA TIPO 1 5KG", "2 UN 24,90 49,80",
+        "003 1310 FEIJAO PRETO", "1 UN 8,99 8,99", "004 309 CEBOLA", "3 UN 1,99 5,97")),
+        "T1 чек читается позициями: код с названием, количество с ценами, по порядку: " + texts(tb));
+    ok(tb.size() == 1, "T1 таблица — один блок: " + tb.size());
+    List<OcrCore.Item> menu = new ArrayList<>();
+    String[][] mp = {{"Café", "5,00"}, {"Pão de queijo", "7,50"}, {"Suco natural", "9,00"}};
+    for (int k = 0; k < 3; k++) { menu.add(item(10, 10 + 40 * k, 150, 40 + 40 * k, mp[k][0])); menu.add(item(400, 10 + 40 * k, 450, 40 + 40 * k, mp[k][1])); }
+    ok(texts(OcrCore.layout(menu)).equals(Arrays.asList("Café 5,00", "Pão de queijo 7,50", "Suco natural 9,00")), "T2 прейскурант: название с ценой через просвет: " + texts(OcrCore.layout(menu)));
+    List<OcrCore.Item> txt2 = new ArrayList<>();
+    for (int k = 0; k < 3; k++) { txt2.add(item(10, 10 + 40 * k, 150, 40 + 40 * k, "Texto esquerdo " + k)); txt2.add(item(400, 10 + 40 * k, 560, 40 + 40 * k, "Texto direito " + k)); }
+    ok(texts(OcrCore.layout(txt2)).size() == 6, "T3 две колонки текста без чисел — не таблица, не склеиваются: " + texts(OcrCore.layout(txt2)));
+    List<OcrCore.Item> diag = new ArrayList<>();
+    String[][] dp = {{"005 249", "TOMATE kg", "0,850 KG", "7,99", "6,79"}, {"006 250", "BATATA kg", "1,20 KG", "4,99", "5,99"},
+        {"007 2", "CENOURA kg", "0,60 KG", "3,99", "2,39"}};
+    for (int k = 0; k < 3; k++) {
+      double y = 100 + 66 * k;                                  // цены ниже названия на 17 px — 0,57 высоты рамки
+      diag.add(item(10, y, 130, y + 30, dp[k][0])); diag.add(item(200, y, 380, y + 30, dp[k][1]));
+      diag.add(item(400, y + 17, 470, y + 47, dp[k][2])); diag.add(item(500, y + 17, 540, y + 47, dp[k][3])); diag.add(item(570, y + 17, 610, y + 47, dp[k][4]));
+    }
+    ok(texts(OcrCore.layout(diag)).subList(0, 2).equals(Arrays.asList("005 249 TOMATE kg", "0,850 KG 7,99 6,79")),
+        "T4 строка цен ниже на полстроки — не та же линия, что название, хоть и вплотную справа: " + texts(OcrCore.layout(diag)));
+
     // --- Q: колонки, стоящие вплотную (передняя этикетка соуса) ---
     List<OcrCore.Item> cols2 = new ArrayList<>();
     String[][] lr = {{"Pimenta Habanero", "Augusto da Costa, 1.001"}, {"Sabor Extra Picante", "INDÚSTRIA BRASILEIRA."}, {"Não contém glúten", "Atendimento ao consumidor:"}};

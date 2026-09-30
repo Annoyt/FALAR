@@ -502,7 +502,7 @@ public final class OcrCore {
 
   /** Строка: рамки одной линии текста слева направо. */
   public static final class Row {
-    public final List<Item> items = new ArrayList<>(); public String text; double x0, x1, cx, cy, ux, uy, h;
+    public final List<Item> items = new ArrayList<>(); public String text; double x0, x1, cx, cy, ux, uy, h; boolean table;
     void close() {
       StringBuilder sb = new StringBuilder(); x0 = Double.MAX_VALUE; x1 = -Double.MAX_VALUE; double sh = 0, sx = 0, sy = 0;
       for (Item it : items) {
@@ -584,9 +584,36 @@ public final class OcrCore {
     }
     rows = splitColumns(rows);
     for (Row r : rows) r.close();
+    rows = tables(rows);
     rows.sort(Comparator.comparingDouble(r -> r.cy));
-    List<List<Row>> blocks = new ArrayList<>();
+    // таблицы: строки таблицы не дальше TAB_GAP высот друг от друга и всё, что стоит между ними, — один блок
+    List<List<Row>> tbl = new ArrayList<>();
     for (Row r : rows) {
+      if (!r.table) continue;
+      if (!tbl.isEmpty()) {
+        List<Row> t = tbl.get(tbl.size() - 1); Row p = t.get(t.size() - 1);
+        if (r.cy - p.cy < TAB_GAP * Math.max(r.h, p.h)) { t.add(r); continue; }
+      }
+      List<Row> t = new ArrayList<>(); t.add(r); tbl.add(t);
+    }
+    for (List<Row> t : tbl) if (t.size() == 1) t.get(0).table = false;   // одна строка — не таблица
+    tbl.removeIf(t -> t.size() == 1);
+    for (List<Row> t : tbl) {
+      double y0 = t.get(0).cy, y1 = t.get(t.size() - 1).cy, x0 = Double.MAX_VALUE, x1 = -Double.MAX_VALUE;
+      for (Row r : t) { x0 = Math.min(x0, r.x0); x1 = Math.max(x1, r.x1); }
+      for (Row r : rows) if (!r.table && y0 < r.cy && r.cy < y1 && Math.min(x1, r.x1) > Math.max(x0, r.x0)) { r.table = true; t.add(r); }
+      t.sort(Comparator.comparingDouble(r -> r.cy));
+      List<List<Row>> lines = new ArrayList<>();              // одна линия таблицы — слева направо
+      for (Row r : t) {
+        if (!lines.isEmpty()) { Row f = lines.get(lines.size() - 1).get(0); if (lineOff(r, f) < TAB_LINE * Math.min(r.h, f.h)) { lines.get(lines.size() - 1).add(r); continue; } }
+        List<Row> ln = new ArrayList<>(); ln.add(r); lines.add(ln);
+      }
+      t.clear();
+      for (List<Row> ln : lines) { ln.sort(Comparator.comparingDouble(r -> r.x0)); t.addAll(ln); }
+    }
+    List<List<Row>> blocks = new ArrayList<>(tbl);
+    for (Row r : rows) {
+      if (r.table) continue;
       boolean placed = false;
       for (int i = blocks.size() - 1; i >= 0 && !placed; i--) {
         List<Row> bl = blocks.get(i); Row p = bl.get(bl.size() - 1);
@@ -645,6 +672,73 @@ public final class OcrCore {
         cur.items.add(r.get(k));
       }
       out.add(cur);
+    }
+    return out;
+  }
+
+  /** Таблица (tools/ocr_ref.py: tables — там и замер): чек, прейскурант, пищевая ценность. Числа стоят
+   *  столбцом — цены, коды, количества, и строка чека «003 1310 … FEIJAO PRETO» / «1 UN … 8,99 … 8,99»
+   *  разбиралась на столбцы: коды, названия, количества и цены читались по очереди, позиция нигде не
+   *  собиралась. Число из такого столбца связывает свою линию: число с соседним числом — всегда, с
+   *  текстом — с ближней стороны; два текста через просвет не склеиваются (колонки на этикетке).
+   *  TAB_LINE — допуск одной линии: строки чека идут с шагом 0,85 высоты рамки, у ячеек одной линии
+   *  на снимке смещение 0–0,30, у соседних строк — от 0,54. */
+  static final int TAB_COL = 3;
+  static final double TAB_GAP = 3.0, TAB_LINE = 0.4;
+  static final Pattern DIGIT = Pattern.compile("\\d"), WORD3 = Pattern.compile("\\p{L}{3,}");
+  /** Ячейка из чисел: есть цифра и нет слова от трёх букв («5,49», «1 UN», «0,850 KG», «003 1310»). */
+  static boolean numeric(String t) { return DIGIT.matcher(t).find() && !WORD3.matcher(t).find(); }
+  /** Смещение середины короткой ячейки от средней линии длинной: наклон короткой ненадёжен. */
+  static double lineOff(Row a, Row b) {
+    Row l = a.x1 - a.x0 >= b.x1 - b.x0 ? a : b, s = l == a ? b : a;
+    return Math.abs(l.yAt(s.cx) - s.cy);
+  }
+  static boolean sameLine(Row a, Row b) {
+    double h = Math.min(a.h, b.h);
+    if (Math.abs(a.ux * b.ux + a.uy * b.uy) < 0.966) return false;
+    return lineOff(a, b) < TAB_LINE * h && (a.x1 <= b.x0 + 0.5 * h || b.x1 <= a.x0 + 0.5 * h);
+  }
+  static boolean sameCol(Row a, Row b) {
+    double h = Math.max(a.h, b.h);
+    if (lineOff(a, b) < TAB_LINE * Math.min(a.h, b.h)) return false;
+    double ov = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+    return Math.abs(a.x1 - b.x1) < h || Math.abs(a.x0 - b.x0) < h || ov > 0.5 * Math.min(a.x1 - a.x0, b.x1 - b.x0);
+  }
+  static int find(int[] p, int i) { while (p[i] != i) { p[i] = p[p[i]]; i = p[i]; } return i; }
+  /** Строки таблицы склеиваются по линиям; у склеенных и у чисел столбца — признак table. */
+  static List<Row> tables(List<Row> rows) {
+    int n = rows.size(); boolean[] num = new boolean[n], col = new boolean[n]; int[] parent = new int[n];
+    for (int i = 0; i < n; i++) { num[i] = numeric(rows.get(i).text); parent[i] = i; }
+    for (int i = 0; i < n; i++) {
+      if (!num[i]) continue;
+      int c = 0; for (int j = 0; j < n; j++) if (j != i && num[j] && sameCol(rows.get(i), rows.get(j))) c++;
+      col[i] = c >= TAB_COL - 1;
+    }
+    for (int i = 0; i < n; i++) {
+      if (!col[i]) continue;
+      Row a = rows.get(i); int left = -1, right = -1;
+      for (int j = 0; j < n; j++) {
+        if (j == i || !sameLine(a, rows.get(j))) continue;
+        Row b = rows.get(j);
+        if (b.x1 <= a.x0 + 0.5 * a.h && (left < 0 || b.x1 > rows.get(left).x1)) left = j;
+        if (b.x0 >= a.x1 - 0.5 * a.h && (right < 0 || b.x0 < rows.get(right).x0)) right = j;
+      }
+      int text = -1; double tg = 0;
+      for (int j : new int[]{left, right}) {
+        if (j < 0) continue;
+        if (num[j]) { parent[find(parent, j)] = find(parent, i); continue; }
+        Row b = rows.get(j); double g = Math.max(b.x0 - a.x1, a.x0 - b.x1);
+        if (text < 0 || g < tg) { text = j; tg = g; }
+      }
+      if (text >= 0) parent[find(parent, text)] = find(parent, i);
+    }
+    Map<Integer, List<Integer>> groups = new LinkedHashMap<>();
+    for (int i = 0; i < n; i++) groups.computeIfAbsent(find(parent, i), k -> new ArrayList<>()).add(i);
+    List<Row> out = new ArrayList<>();
+    for (List<Integer> idx : groups.values()) {
+      Row r = new Row(); boolean t = false;
+      for (int k : idx) { r.items.addAll(rows.get(k).items); t |= col[k]; }
+      r.items.sort(Comparator.comparingDouble(it -> it.lx)); r.close(); r.table = t; out.add(r);
     }
     return out;
   }
