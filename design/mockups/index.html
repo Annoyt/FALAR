@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Falar — макеты нового оформления</title>
+<style>
+/* Макеты экранов Falar. Один файл без внешних запросов, как docs/index.html.
+   Размеры — в dp стендового Redmi Note 10 Pro: 1080×2400 при 440 dpi = 393×873 dp,
+   1 CSS-пиксель здесь = 1 dp, кегль в px = sp при обычном масштабе шрифта. */
+:root{
+  --plum:#802244; --deep:#3D0C2A; --gold:#E0B878; --mint:#6FE0BC;
+  --bg:#FFFFFF; --fg:#1A1420; --dim:#5D5566; --soft:#8A8092; --card:#FAF7F9; --line:#E6DFE6;
+  --page:#F4F1F4; --plum8:#F6EAF0; --gold12:#FBF3E4; --mint-ink:#1E9E77; --hair:#F0EAF0;
+  --dockbg:rgba(255,255,255,.86);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:#E9E4EA;color:var(--fg);font:15px/1.45 Roboto,"Noto Sans",system-ui,sans-serif}
+.hero{background:linear-gradient(135deg,var(--plum),var(--deep));color:#fff;padding:34px 0 30px}
+.wrap{max-width:1780px;margin:0 auto;padding:0 28px}
+.hero h1{margin:0 0 6px;font-size:34px;letter-spacing:-.4px}
+.hero p{margin:0;opacity:.8;max-width:100ch}
+.hero .hero-row{display:flex;gap:20px;align-items:center}
+.hero img{width:72px;height:72px;border-radius:18px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+section{padding:34px 0 10px;border-bottom:1px solid #D9D1DA}
+section>.wrap>h2{font-size:26px;margin:0 0 4px;letter-spacing:-.3px}
+section>.wrap>.lead{color:var(--dim);margin:0 0 22px;max-width:110ch}
+.row-frames{display:flex;flex-wrap:wrap;gap:36px 34px;align-items:flex-start}
+figure{margin:0;width:413px}
+figcaption{margin-top:14px;font-size:14px;color:var(--dim)}
+figcaption b{display:block;color:var(--fg);font-size:16px;margin-bottom:4px}
+figcaption ul{margin:6px 0 0;padding-left:18px}
+figcaption li{margin-bottom:4px}
+.tag{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.3px;padding:2px 8px;border-radius:10px;margin-left:6px;vertical-align:2px}
+.tag.now{background:#E4E4EA;color:#50505A}
+.tag.new{background:var(--plum);color:#fff}
+.tag.idea{background:var(--gold);color:var(--deep)}
+
+/* ---------- телефон ---------- */
+.phone{width:413px;padding:10px;border-radius:46px;background:#141016;box-shadow:0 18px 50px rgba(40,10,30,.28),inset 0 0 0 1.5px #3a3040}
+.screen{width:393px;height:873px;border-radius:36px;overflow:hidden;position:relative;background:var(--bg);display:flex;flex-direction:column;color:var(--fg)}
+.screen.tall{height:auto}
+.top{flex:none;background:linear-gradient(135deg,var(--plum),var(--deep));color:#fff;position:relative}
+.sb{height:35px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 28px;font-size:13px;font-weight:600;color:#fff}
+.sb .sbi{display:flex;gap:6px;align-items:center}
+.sb .sbi i{display:block;background:currentColor;border-radius:2px}
+.nav{height:16px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.nav::after{content:"";width:118px;height:4px;border-radius:2px;background:var(--fg);opacity:.32}
+.ic{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic.s16{width:16px;height:16px}.ic.s18{width:18px;height:18px}.ic.s20{width:20px;height:20px}
+
+/* шапка */
+.ab{height:56px;display:flex;align-items:center;gap:2px;padding:0 6px 0 4px}
+.ab .ib{width:44px;height:44px;border-radius:22px;display:grid;place-items:center;flex:none}
+.ab .ib.fill{background:rgba(255,255,255,.14)}
+.ab .ttl{flex:1;min-width:0;padding-left:4px}
+.ab .ttl b{display:block;font-size:17px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ab .ttl span{display:block;font-size:12.5px;opacity:.74;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.14)}
+.prog i{display:block;height:100%;background:var(--mint)}
+.prog.steps{display:flex;gap:3px;background:none}
+.prog.steps i{flex:1;background:rgba(255,255,255,.18)}
+.prog.steps i.done{background:var(--mint)}
+
+/* разговор */
+.content{flex:1;position:relative;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.reply{padding:14px 16px 8px;flex:none}
+.who{font-size:12px;color:var(--soft);display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.who i{width:8px;height:8px;border-radius:4px;background:var(--plum)}
+.who.them i{background:var(--gold)}
+.big{font-size:27px;font-weight:700;line-height:1.14;color:var(--fg);letter-spacing:-.2px}
+.big.crib{display:flex;flex-wrap:wrap;column-gap:8px;row-gap:5px}
+.big.crib .w{display:inline-flex;flex-direction:column}
+.big.crib .w i{font-style:normal;font-weight:400;font-size:12px;color:var(--soft);margin-top:1px;letter-spacing:0}
+.ru{font-size:15px;color:var(--dim);margin-top:9px;line-height:1.35}
+.chips{display:flex;gap:8px;margin-top:12px}
+.chip{height:32px;padding:0 12px 0 10px;border-radius:16px;border:1px solid var(--line);display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--fg);background:var(--bg)}
+.chip .ic{color:var(--plum)}
+.chip.only{width:32px;padding:0;justify-content:center}
+.chip.off{opacity:.45}
+.hist{flex:1;overflow:hidden;padding:2px 12px 0;display:flex;flex-direction:column;gap:8px;min-height:0}
+.sep{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--soft);margin:6px 4px 0}
+.sep::before,.sep::after{content:"";flex:1;height:1px;background:var(--line)}
+.bub{max-width:86%;padding:8px 12px 9px;border-radius:16px;background:var(--card);border:1px solid var(--hair);flex:none}
+.bub.them{align-self:flex-start;border-top-left-radius:6px}
+.bub.me{align-self:flex-end;background:var(--plum8);border-color:transparent;border-top-right-radius:6px}
+.bub .pt{font-size:15px;line-height:1.3}
+.bub .rt{font-size:13px;color:var(--dim);line-height:1.3;margin-top:2px}
+.bub .rt .ic{color:var(--mint-ink);vertical-align:-3px;margin-left:3px}
+.bub.photo{display:flex;gap:10px;align-items:flex-start}
+.bub.photo .th{width:40px;height:40px;border-radius:10px;background:var(--gold12);color:#9A6B1F;display:grid;place-items:center;flex:none}
+.dock{height:72px;flex:none;background:var(--dockbg);border-top:1px solid var(--hair);position:relative;z-index:1}
+.dockbtns{position:absolute;left:0;right:0;z-index:3;display:flex;justify-content:space-between;padding:0 20px;pointer-events:none}
+.db{width:86px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--dim)}
+.db .c{width:44px;height:44px;border-radius:22px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;color:var(--plum);position:relative}
+.db.on .c{background:var(--mint);border-color:transparent;color:var(--deep);box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--qc,#46B84A),0 0 16px 8px color-mix(in srgb,var(--qc,#46B84A) 30%,transparent)}
+.db .badge{position:absolute;right:-8px;top:-5px;font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:8px;background:var(--deep);color:#fff;letter-spacing:.2px}
+.layer{position:absolute;pointer-events:none}
+.layer svg{overflow:visible;display:block}
+
+/* ночь */
+.screen.night{--bg:#15101A;--fg:#F2ECF2;--dim:#A79DB0;--soft:#857B8F;--card:#1E1725;--line:#352B3D;--hair:#261D2D;--plum8:#2C1526;--dockbg:rgba(21,16,26,.88);--mint-ink:#6FE0BC}
+.screen.night .top{background:linear-gradient(135deg,#4A1530,#1D0816)}
+.screen.night .chip{color:#EDE4EE}.screen.night .chip .ic{color:var(--gold)}
+.screen.night .db .c{color:var(--gold)}
+.screen.night .bub.photo .th{background:#2E2416;color:var(--gold)}
+
+/* панель разговоров */
+.scrim{position:absolute;inset:0;background:rgba(24,8,20,.5);z-index:10}
+.drawer{position:absolute;left:0;top:35px;bottom:0;width:318px;background:var(--bg);z-index:11;display:flex;flex-direction:column;border-radius:0 24px 24px 0;overflow:hidden;box-shadow:10px 0 34px rgba(0,0,0,.28)}
+.dh{padding:18px 18px 16px;background:linear-gradient(135deg,var(--plum),var(--deep));color:#fff;display:flex;gap:12px;align-items:center}
+.dh img{width:46px;height:46px;border-radius:13px;box-shadow:0 3px 10px rgba(0,0,0,.3)}
+.dh b{display:block;font-size:20px}.dh span{font-size:12.5px;opacity:.75}
+.dnew{margin:14px 14px 6px;height:44px;border-radius:22px;background:var(--plum);color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:15px}
+.dlbl{font-size:12px;color:var(--soft);margin:12px 18px 4px}
+.dlist{flex:1;overflow:hidden}
+.drow{display:flex;align-items:center;gap:10px;padding:9px 16px 9px 18px;position:relative}
+.drow .t{flex:1;min-width:0}
+.drow .t b{display:block;font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drow .t span{font-size:12px;color:var(--soft)}
+.drow .ic{color:var(--mint-ink)}
+.drow.cur{background:var(--plum8)}
+.drow.cur::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:4px;border-radius:0 3px 3px 0;background:var(--plum)}
+.dfoot{border-top:1px solid var(--line);padding:6px 0 10px}
+.dnav{display:flex;align-items:center;gap:14px;padding:11px 18px;font-size:15px}
+.dnav .ic{color:var(--plum)}
+.dnav em{margin-left:auto;font-style:normal;font-size:12px;color:var(--soft)}
+
+/* лицом к лицу */
+.half{flex:1;display:flex;flex-direction:column;padding:74px 18px 16px;min-height:0;overflow:hidden}
+.half.them{transform:rotate(180deg);background:var(--card)}
+.half.me{padding:74px 18px 12px}
+.f2f-note{font-size:12px;color:var(--soft);display:flex;align-items:center;gap:6px}
+.f2f-prev{font-size:14px;color:var(--dim);margin-top:auto;line-height:1.35}
+.seam{position:absolute;left:0;right:0;height:0;border-top:1.5px solid var(--gold);z-index:2}
+.mini{display:flex;justify-content:space-between;align-items:center;margin-top:auto}
+.mini .mb{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--dim);height:36px;padding:0 12px;border-radius:18px;border:1px solid var(--line)}
+.mini .mb .ic{color:var(--plum)}
+
+/* настройки */
+.pg{background:var(--page);flex:1}
+.grp{margin:16px 12px 0}
+.grp>h4{margin:0 8px 7px;font-size:13px;font-weight:600;color:var(--plum)}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.srow{display:flex;align-items:center;gap:14px;padding:12px 14px;min-height:58px}
+.srow+.srow,.srow+.sub,.sub+.srow{border-top:1px solid var(--hair)}
+.srow>.ic{color:var(--plum)}
+.srow .rt{flex:1;min-width:0}
+.srow .rt b{display:block;font-size:15.5px;font-weight:500}
+.srow .rt span{display:block;font-size:12.5px;color:var(--dim);margin-top:1px;line-height:1.35}
+.srow .rt span.one{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow .chev{color:#B4AAB9}
+.srow .val{font-size:14px;color:var(--plum);font-weight:600}
+.sub{padding:0 14px 14px 52px;display:flex;flex-direction:column;gap:10px}
+.sub.full{padding-left:14px}
+.cap{font-size:12px;color:var(--soft);line-height:1.35}
+.sw{width:42px;height:26px;border-radius:13px;background:#D6CED8;position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:10px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.sw.on{background:var(--plum)}.sw.on::after{left:19px}
+.sw.lock{background:#CBB7C2}
+.seg{display:flex;background:#F1ECF1;border-radius:12px;padding:3px;gap:3px}
+.seg span{flex:1;text-align:center;font-size:13px;padding:7px 2px;border-radius:9px;color:var(--dim);white-space:nowrap}
+.seg span.on{background:var(--plum);color:#fff;font-weight:600}
+.sl{position:relative;height:22px;flex:1}
+.sl::before{content:"";position:absolute;left:0;right:0;top:9px;height:4px;border-radius:2px;background:var(--line)}
+.sl i{position:absolute;left:0;top:9px;height:4px;border-radius:2px;background:var(--plum);width:var(--v)}
+.sl b{position:absolute;top:2px;left:calc(var(--v) - 9px);width:18px;height:18px;border-radius:9px;background:var(--plum);box-shadow:0 0 0 3px #fff,0 1px 3px rgba(0,0,0,.3)}
+.sl.off i,.sl.off b{background:#C3BAC6}
+.slrow{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--dim)}
+.slrow>span{min-width:44px}.slrow>em{font-style:normal;width:40px;text-align:right;color:var(--fg);font-weight:600}
+.btn{height:40px;padding:0 16px;border-radius:20px;display:inline-flex;align-items:center;justify-content:center;gap:7px;font-size:14px;font-weight:600;white-space:nowrap}
+.btn.pri{background:var(--plum);color:#fff}
+.btn.out{border:1px solid var(--line);color:var(--plum);background:var(--bg)}
+.btn.txt{color:var(--plum);padding:0 6px}
+.btns{display:flex;gap:10px;flex-wrap:wrap}
+.pill{font-size:11.5px;padding:2px 8px;border-radius:10px;font-weight:600;white-space:nowrap}
+.pill.ok{background:#E2F6EE;color:#18775A}.pill.wait{background:var(--gold12);color:#8A6420}.pill.no{background:#EFEAF0;color:var(--dim)}
+.upd{margin:14px 12px 0;border-radius:16px;background:var(--gold12);border:1px solid #EBD6AE;padding:14px;display:flex;gap:12px;align-items:center}
+.upd .ic{color:#9A6B1F}
+.upd .rt{flex:1}.upd .rt b{display:block;font-size:15.5px}.upd .rt span{font-size:12.5px;color:var(--dim)}
+.prev{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--card)}
+.prev b{display:block;font-size:27px;line-height:1.1}.prev span{font-size:15px;color:var(--dim)}
+.mod{display:flex;gap:12px;padding:13px 14px;align-items:flex-start}
+.mod+.mod{border-top:1px solid var(--hair)}
+.mod .tile{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--plum8);color:var(--plum);flex:none}
+.mod .mt{flex:1;min-width:0}
+.mod .mt b{font-size:15.5px;font-weight:600}
+.mod .mt p{margin:2px 0 0;font-size:12.5px;color:var(--dim);line-height:1.35}
+.mod .meta{display:flex;gap:8px;align-items:center;margin-top:7px;font-size:12px;color:var(--soft)}
+.mod .sw{margin-top:8px}
+.note{margin:14px 12px 0;border-left:3px solid var(--gold);background:var(--bg);border-radius:0 12px 12px 0;padding:10px 12px;font-size:12.5px;color:var(--dim)}
+.field{flex:1;height:44px;border-radius:22px;border:1px solid var(--line);background:var(--card);display:flex;align-items:center;padding:0 16px;color:var(--soft);font-size:14.5px;min-width:0}
+.kstat{display:flex;gap:10px;align-items:flex-start}
+.kstat .dot{width:10px;height:10px;border-radius:5px;background:var(--mint-ink);margin-top:6px;flex:none}
+
+/* слова */
+.wtop{padding:12px 12px 6px;display:flex;flex-direction:column;gap:10px;flex:none}
+.stepper{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--dim)}
+.sbx{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:18px;background:var(--bg)}
+.sbx span{width:34px;height:32px;display:grid;place-items:center;color:var(--plum);font-size:18px;font-weight:600}
+.sbx b{min-width:22px;text-align:center}
+.review{margin:4px 12px 6px;border-radius:18px;padding:14px 14px 14px 16px;color:#fff;background:linear-gradient(135deg,var(--plum),var(--deep));display:flex;align-items:center;gap:12px;flex:none}
+.review .rt{flex:1}.review b{display:block;font-size:16px}.review span{font-size:12.5px;opacity:.8}
+.review .go{height:40px;padding:0 16px;border-radius:20px;background:var(--gold);color:var(--deep);display:flex;align-items:center;gap:6px;font-weight:700;font-size:14px}
+.wlist{flex:1;overflow:hidden}
+.wcard{display:flex;gap:10px;padding:11px 14px 11px 16px;border-bottom:1px solid var(--hair);align-items:flex-start}
+.wcard .wt{flex:1;min-width:0}
+.wcard .w1{display:flex;align-items:baseline;gap:8px}
+.wcard .w1 b{font-size:20px}
+.wcard .cnt{font-size:12px;color:var(--soft)}
+.wcard .tr{font-size:16px;color:var(--plum);margin-top:1px}
+.wcard .ex{font-size:12.5px;color:var(--dim);margin-top:3px;line-height:1.35}
+.wcard .say{width:36px;height:36px;border-radius:18px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;color:var(--plum);flex:none;margin-top:4px}
+.inbar{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--hair);background:var(--bg);flex:none}
+.fab{width:44px;height:44px;border-radius:22px;background:var(--plum);color:#fff;display:grid;place-items:center;flex:none}
+
+/* ---------- как сейчас (0.25.0 на стенде) ---------- */
+.old{--bg:#FBEEEC;background:#FBEEEC;color:#000}
+.old .osb{height:35px;flex:none;background:#201A19;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 28px;font-size:13px;font-weight:600}
+.old .obar{height:56px;flex:none;background:#201A19;color:#fff;font-size:20px;font-weight:500;display:flex;align-items:center;padding-left:16px}
+.old .otabs{height:48px;flex:none;display:flex;gap:1px}
+.obtn{background:#F2F2F4;border:1px solid #BFC3CC;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;color:#1B1B1F;text-align:center;line-height:1.15}
+.obtn.sel{background:#4C7DF0;border-color:#2F5BD0;color:#fff;font-weight:700}
+.old .otabs .obtn{flex:1}.old .otabs .obtn:first-child{flex:none;width:88px}
+.old .ocontent{flex:1;display:flex;flex-direction:column;padding:6px 9px 0;min-height:0;overflow:hidden}
+.old .ohint{font-size:13px;color:#888;padding:3px 0 14px}
+.old .big.crib .w i{color:#888}
+.old .oru{display:flex;font-size:15px;color:#444;margin-top:10px}
+.old .oru span{flex:1}.old .oru em{font-style:normal;color:#33507A;font-size:18px;padding-left:18px}
+.old .ohh{font-size:11px;color:#888;margin:14px 0 4px}
+.old .orow{display:flex;padding:4px 2px 8px}
+.old .orow div{flex:1}.old .orow .p{font-size:15px;color:#444}.old .orow .r{font-size:12px;color:#888}
+.old .orow em{font-style:normal;color:#9AA0AA;font-size:15px;padding-left:12px}
+.old .obottom{height:170px;flex:none;padding:0 9px;display:flex;flex-direction:column}
+.old .obottom .r2{display:flex;gap:2px;height:44px;margin-top:2px}
+.old .obottom .r2 .obtn{flex:1}
+.old .ohear{height:25px;font-size:11px;color:#888;display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.old .nav{background:#000}.old .nav::after{background:#fff;opacity:.9}
+.zone{position:absolute;left:0;right:0;border:2px dashed rgba(214,40,90,.85);background:rgba(214,40,90,.07);z-index:20;pointer-events:none}
+.zone span{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:#C8245A;color:#fff;font-size:11.5px;font-weight:700;padding:2px 7px;border-radius:9px}
+.zone.ok{border-color:rgba(30,158,119,.85);background:rgba(30,158,119,.06)}
+.zone.ok span{background:#1E9E77}
+.old .osys{padding:6px 9px 10px;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.old .osys .obtn{min-height:44px;font-size:13px;padding:4px 8px}
+.old .osys .l{color:#888}.old .osys .b{color:#33507A}
+.old .osys .ln{display:flex;gap:2px}.old .osys .ln .obtn{flex:1}
+.old .ochk{display:flex;align-items:center;gap:8px}
+.old .ochk i{width:18px;height:18px;border-radius:3px;background:#A0413B;display:inline-block}
+.old .osl{height:18px;position:relative}
+.old .osl::before{content:"";position:absolute;left:12px;right:12px;top:8px;height:2px;background:#E2C9C5}
+.old .osl b{position:absolute;top:3px;left:var(--v);width:12px;height:12px;border-radius:6px;background:#A0413B}
+.old .osl.dis b{background:#ccc}
+.old .oin{display:flex;gap:2px;align-items:center}
+.old .oin span{flex:1;border-bottom:1.5px solid #555;color:#999;padding:8px 2px}
+.old .olog{color:#444;display:flex;flex-direction:column;gap:8px;padding-top:4px}
+
+/* ---------- обычная страница ---------- */
+.palette{display:flex;flex-wrap:wrap;gap:14px}
+.sw-c{width:150px;border-radius:14px;overflow:hidden;background:#fff;border:1px solid #DDD5DE}
+.sw-c i{display:block;height:70px}
+.sw-c div{padding:8px 10px 10px;font-size:12.5px;color:var(--dim)}
+.sw-c b{display:block;color:var(--fg);font-size:14px}
+.qscale{height:70px;background:linear-gradient(90deg,hsl(0 75% 55%),hsl(60 80% 50%),hsl(120 60% 42%))}
+.rules{columns:2 520px;column-gap:40px;margin:22px 0 10px;padding-left:20px}
+.rules li{margin-bottom:10px;break-inside:avoid}
+.kit{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start;margin:18px 0 6px}
+.kit .cell{background:#fff;border:1px solid #DDD5DE;border-radius:16px;padding:14px 16px;min-width:230px}
+.kit .cell h5{margin:0 0 10px;font-size:12.5px;color:var(--soft);font-weight:600}
+.states{display:flex;flex-wrap:wrap;gap:18px}
+.state{width:196px;height:230px;background:#fff;border:1px solid #DDD5DE;border-radius:16px;position:relative;overflow:hidden}
+.state .cv{position:absolute;left:0;right:0;top:0;height:176px}
+.state p{position:absolute;left:12px;right:12px;bottom:10px;margin:0;font-size:12.5px;color:var(--dim);line-height:1.3}
+.state p b{display:block;color:var(--fg);font-size:13.5px}
+table.map{border-collapse:collapse;width:100%;max-width:1200px;font-size:14px;background:#fff;border-radius:14px;overflow:hidden;margin:6px 0 26px}
+table.map th,table.map td{text-align:left;padding:9px 14px;border-bottom:1px solid #EEE7EE;vertical-align:top}
+table.map th{background:#F6F1F6;font-size:13px;color:var(--dim);font-weight:600}
+table.map td:first-child{color:var(--dim);width:44%}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:22px;margin-bottom:26px}
+.box{background:#fff;border:1px solid #DDD5DE;border-radius:16px;padding:16px 20px}
+.box h3{margin:0 0 8px;font-size:17px}
+.box ol,.box ul{margin:0;padding-left:20px}.box li{margin-bottom:7px}
+.box p{margin:0 0 8px;color:var(--dim)}
+.muted{color:var(--soft);font-size:13px}
+code{background:#F4EFF4;border:1px solid #E6DFE6;border-radius:6px;padding:0 5px;font-size:.92em}
+</style>
+</head>
+<body>
+
+<!-- Значки: сетка 24, линия 2, как микрофон на кнопке удержания (MicButton.Face). -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="3.2"/></symbol>
+<symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.8l1.4-2h4.6l1.4 2h1.8A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.3"/></symbol>
+<symbol id="i-kbd" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h.01M9.3 10h.01M12.6 10h.01M15.9 10h.01M18.4 10h.01M7.5 14h9"/></symbol>
+<symbol id="i-ear" viewBox="0 0 24 24"><path d="M6.5 9.5a5.5 5.5 0 0 1 11 0c0 2.4-1.4 3.6-2.6 4.8-1.1 1.1-1.3 2.3-1.7 3.5-.5 1.6-1.9 2.5-3.5 2.2"/><path d="M9.6 10a2.4 2.4 0 0 1 4.8 0c0 1.1-.7 1.6-1.4 2.2"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 3.5l1.7 4.3 4.3 1.7-4.3 1.7L11 15.5l-1.7-4.3L5 9.5l4.3-1.7z"/><path d="M18 14.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 3.5h6M10 3.5v5.2L7 12.5h10l-3-3.8V3.5M12 12.5v8"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4.5 19.5l3.8-.9L19 7.9a2 2 0 0 0-2.9-2.9L5.4 15.7z"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.5C10 5 7 4.5 4 5v13c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5V5c-3-.5-6 0-8 1.5zM12 6.5v13"/></symbol>
+<symbol id="i-tune" viewBox="0 0 24 24"><path d="M4 7h8M16 7h4M4 17h3M11 17h9"/><circle cx="14" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7.5 18.5h9.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 10a4.3 4.3 0 0 0 1.3 8.5z"/></symbol>
+<symbol id="i-wand" viewBox="0 0 24 24"><path d="M5 19l10-10M14 4.5l1 2 2 1-2 1-1 2-1-2-2-1 2-1zM18.5 11l.6 1.2 1.2.6-1.2.6-.6 1.2-.6-1.2-1.2-.6 1.2-.6z"/></symbol>
+<symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+<symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V6.5A2.5 2.5 0 0 1 6.5 4H8M16 4h1.5A2.5 2.5 0 0 1 20 6.5V8M20 16v1.5a2.5 2.5 0 0 1-2.5 2.5H16M8 20H6.5A2.5 2.5 0 0 1 4 17.5V16M8 10h8M8 14h5"/></symbol>
+<symbol id="i-voice" viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/></symbol>
+<symbol id="i-books" viewBox="0 0 24 24"><path d="M5 4.5v15M9 4.5v15M13.5 5.5l4 14"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4.5v5h-5"/></symbol>
+<symbol id="i-flip" viewBox="0 0 24 24"><path d="M7 20V4M3.5 7.5L7 4l3.5 3.5M17 4v16M13.5 16.5L17 20l3.5-3.5"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l8.5-8.5M16.5 7l2.5 2.5M14.5 9l2 2"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></symbol>
+<symbol id="i-phones" viewBox="0 0 24 24"><path d="M4 17v-4a8 8 0 0 1 16 0v4"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></symbol>
+<symbol id="i-textsize" viewBox="0 0 24 24"><path d="M3 18L8 6l5 12M4.7 14h6.6M14.5 18l3-7.5 3 7.5M15.4 16h4.2"/></symbol>
+<symbol id="i-type" viewBox="0 0 24 24"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0M16 4.8a3.3 3.3 0 0 1 0 6.4M18 14.2a5.6 5.6 0 0 1 3 5.3"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></symbol>
+<symbol id="i-hush" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M4 3l16 18"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8h.01"/></symbol>
+<symbol id="i-signal" viewBox="0 0 24 24"><path d="M5 18v-3M9.5 18v-6M14 18v-9M18.5 18V6"/></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3 9.5a13 13 0 0 1 18 0M6.3 13a8.3 8.3 0 0 1 11.4 0M9.5 16.4a3.8 3.8 0 0 1 5 0M12 19.5h.01"/></symbol>
+</defs></svg>
+
+<header class="hero"><div class="wrap hero-row">
+  <img src="../falar_icon_512.png" alt="">
+  <div>
+    <h1>Falar — макеты нового оформления</h1>
+    <p>30.09.2026 · черновик для обсуждения, ветка <b>design-mockups</b>. Кнопка удержания осталась какой была.
+       Цвета для всего остального взяты у неё и у иконки: слива, золото, мята. Экраны нарисованы в dp
+       стендового Redmi (393×873). Тексты разговоров придуманы.</p>
+  </div>
+</div></header>
+
+<!-- ============================================================ -->
+<section id="now"><div class="wrap">
+  <h2>Что сейчас</h2>
+  <p class="lead">Экраны 0.25.0 восстановлены по снимкам и разметке стендового Redmi (uiautomator, 30.09). Размеры и цвета
+    измерены, тексты заменены на придуманные. Разметка «сколько места занимает служебное» — пунктиром.</p>
+  <div class="row-frames">
+    <figure>
+      <div class="phone"><div class="screen old" id="oldTalk"></div></div>
+      <figcaption><b>Разговор <span class="tag now">сейчас</span></b>
+        <ul>
+          <li>Сверху <b style="display:inline">104 dp</b> служебного: системная полоса «Falar» (56, её даёт тема
+            по умолчанию) и вкладки (48). Снизу — <b style="display:inline">170 dp</b>: переключатели режима, строка-подсказка,
+            «получше / запомнить / новый», ряд режимов.</li>
+          <li>Тексту и репликам остаётся 547 dp из 821. Крупный текст растёт до половины экрана — тогда на прежние
+            реплики остаётся две строки (так было на стенде 30.09).</li>
+          <li>Фон <code>#FBEEEC</code> и тёмная полоса — из обоев телефона (цвета системы Android 13). На другом
+            телефоне экран будет другого цвета. Выделение — синее <code>#4C7DF0</code>, не из палитры Falar.</li>
+        </ul></figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="screen old tall" id="oldSys"></div></div>
+      <figcaption><b>Система <span class="tag now">сейчас</span> — весь экран прокруткой</b>
+        <ul>
+          <li>Одна колонка: 23 кнопки, переключателя и ползунка вперемешку с подписями — обновления, модули,
+            микрофон, ключ, файлы, контекст, облако, транскрипция, шрифт, журнал.</li>
+          <li>Переключатели — кнопки во всю ширину с «ВКЛ/выкл» в тексте. Интервалы и «облако выбирает»
+            меняются нажатием по кругу, а других значений не видно.</li>
+          <li>Групп нет, поэтому редкое (ключ, файлы моделей) стоит между частым (микрофон, шрифт).</li>
+        </ul></figcaption>
+    </figure>
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="lang"><div class="wrap">
+  <h2>Язык оформления — от кнопки</h2>
+  <p class="lead">Кнопка удержания уже нашла правильный тон: слива, золотая надпись, мятный звук, цвет «как слышно».
+    Предложение — растянуть его на всё приложение, чтобы кнопка перестала быть единственным своим элементом на
+    системном фоне.</p>
+  <div class="palette">
+    <div class="sw-c"><i style="background:#802244"></i><div><b>Слива #802244</b>выбор, главное действие, шапка</div></div>
+    <div class="sw-c"><i style="background:#3D0C2A"></i><div><b>Глубокая #3D0C2A</b>шапка, тёмная тема</div></div>
+    <div class="sw-c"><i style="background:#E0B878"></i><div><b>Золото #E0B878</b>пометки, обновление, стык «лицом к лицу»</div></div>
+    <div class="sw-c"><i style="background:#6FE0BC"></i><div><b>Мята #6FE0BC</b>«слушаю», звук, готово</div></div>
+    <div class="sw-c"><i style="background:#FAF7F9;border-bottom:1px solid #eee"></i><div><b>Бумага #FAF7F9</b>карточки, реплики собеседника</div></div>
+    <div class="sw-c"><i class="qscale"></i><div><b>Как слышно</b>красный → зелёный, только у кнопок микрофона</div></div>
+  </div>
+  <ol class="rules">
+    <li><b>Свой фон и свои цвета.</b> Сейчас фон и полосы подбирает система по обоям. Своя тема делает Falar одинаковым
+      на любом телефоне, а кнопку — частью экрана, а не наклейкой.</li>
+    <li><b>Состояние — цветом и размером, слова и числа — в журнал.</b> Правило разговорного экрана (29.09) остаётся для всех
+      новых элементов: «Слушать» светится мятой, а кольцо вокруг него — тем же цветом «как слышно», что и кнопка.</li>
+    <li><b>Движение — только у кнопки, пока её держат.</b> Любое непрерывное движение перерисовывает весь экран: около
+      0,5 ядра в приложении и 0,4 в SurfaceFlinger на Redmi (results/2026-09-29-mic-button.md). Поэтому полоса
+      «перевожу» — неподвижная, по шагам, без бегущей анимации.</li>
+    <li><b>Значки — линией, как микрофон на кнопке</b> (сетка 24, линия 2). Эмодзи на каждом телефоне нарисованы
+      по-своему, а «▾ ▴» на стенде выходят пустыми квадратами (комментарий в <code>showLog</code>).</li>
+    <li><b>Переключатель выглядит как переключатель</b>, выбор из нескольких значений — как ряд сегментов, где видны все
+      значения. Не кнопка, которая меняет свой текст по кругу.</li>
+    <li><b>Главное на экране разговора — текст.</b> Всё служебное сжимается в шапку сверху и док снизу. Место уходит
+      крупному португальскому и прежним репликам.</li>
+  </ol>
+  <div class="kit">
+    <div class="cell"><h5>Кнопки</h5><div class="btns"><span class="btn pri">Обновить</span><span class="btn out">Проверить</span><span class="btn txt">Убрать ключ</span></div></div>
+    <div class="cell"><h5>Чипы у реплики</h5><div class="chips" style="margin:0"><span class="chip"><svg class="ic s16"><use href="#i-spark"/></svg>Получше</span><span class="chip"><svg class="ic s16"><use href="#i-pin"/></svg>Запомнить</span><span class="chip only"><svg class="ic s16"><use href="#i-more"/></svg></span></div></div>
+    <div class="cell"><h5>Переключатели</h5><div style="display:flex;gap:14px;align-items:center"><span class="sw on"></span><span class="sw"></span><span class="sw lock"></span><span class="muted">вкл · выкл · обязательно</span></div></div>
+    <div class="cell" style="min-width:300px"><h5>Сегменты вместо перебора по кругу</h5><div class="seg"><span>По кнопке</span><span class="on">1</span><span>3</span><span>10</span></div></div>
+    <div class="cell" style="min-width:260px"><h5>Ползунок</h5><div class="slrow"><span>PT</span><div class="sl" style="--v:52%"><i></i><b></b></div><em>27</em></div></div>
+  </div>
+  <h3 style="margin:26px 0 10px;font-size:18px">Кнопка удержания — какой она уже есть</h3>
+  <p class="muted" style="margin:0 0 12px">Нарисована тем же построением, что <code>MicButton.java</code>: доли радиуса, дуги надписей, цвет
+    <code>HSV(120·q)</code>, облако до 2,7 радиуса при обычной речи. Менять в ней ничего не предлагается. Меняется только
+    место: она встаёт в центр дока и видна всегда, а не в одном из трёх режимов.</p>
+  <div class="states" id="states"></div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="talk"><div class="wrap">
+  <h2>Разговор — вариант А: шапка и док с кнопкой</h2>
+  <p class="lead">Сверху одна шапка: название разговора, его состояние, «＋». Снизу один док: ввод, кнопка удержания,
+    «Слушать». Режимы 📷⌨ / 🎙 / 👂 больше не нужны: все три действия доступны сразу. Вкладки уходят в панель ☰.
+    Под текст и реплики — около 694 dp вместо 547, примерно на 27 % больше. Это посчитано по геометрии макета,
+    на телефоне не собиралось.</p>
+  <div class="row-frames">
+    <figure>
+      <div class="phone"><div class="screen" id="tA1"></div></div>
+      <figcaption><b>Ваша реплика <span class="tag new">новое</span></b>
+        <ul>
+          <li>Шапка заменяет три ряда: полосу «Falar», вкладки и серую строку-подсказку. Касание названия, как и
+            раньше, открывает «Память разговора».</li>
+          <li>Под текущей репликой — чипы «Получше», «Запомнить», «⋯». Меню реплики больше не прячется за «•••» в
+            конце строки.</li>
+          <li>Прежние реплики — карточками: собеседник слева, вы справа. Сейчас в списке не видно, кто что сказал.</li>
+          <li>Транскрипция под словами — как сейчас, касание прячет, удержание — «читаю вслух».</li>
+        </ul></figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="screen" id="tA2"></div></div>
+      <figcaption><b>Кнопку держат <span class="tag new">новое место</span></b>
+        <ul>
+          <li>Кнопка та же: 128 dp, облако до 2,7 радиуса. Она стоит в центре дока, под большим пальцем, и крупный
+            текст сверху свечение не закрывает.</li>
+          <li>Облако уходит под полупрозрачный док, а не обрезается его краем: боковые кнопки остаются поверх него.</li>
+          <li>Подсказка «Удерживайте круг и говорите…» не нужна: кнопка сама зовёт FALAR / ГОВОРИ.</li>
+        </ul></figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="screen" id="tA3"></div></div>
+      <figcaption><b>Слушает и переводит <span class="tag new">новое</span></b>
+        <ul>
+          <li>«Слушать» включено — кнопка мятная, кольцо вокруг неё окрашено «как слышно» (как полоса уровня сейчас).
+            Метка «PT·RU» — какие языки слушает; долгое нажатие — только PT или только RU.</li>
+          <li>«Перевожу · 1 из 2» — неподвижная полоса шагами под шапкой и слово в подзаголовке. Бегущей полосы, которая
+            перерисовывает экран каждый кадр, больше нет.</li>
+          <li>Слева «Снимок, текст» — одно касание открывает: камера, галерея, набрать фразу.</li>
+        </ul></figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="screen" id="tA4"></div></div>
+      <figcaption><b>Панель ☰ — разговоры и разделы <span class="tag new">новое</span></b>
+        <ul>
+          <li>Панель выезжает поверх экрана, а не делит его ширину. Сейчас текст сжимается в узкую колонку, а нижние
+            кнопки обрезаются: «получ…», «запо…».</li>
+          <li>Сверху «＋ Новый разговор», текущий отмечен сливовой чертой, ✓ — перевод улучшен.</li>
+          <li>Внизу «Слова» и «Настройки». Во время разговора они не нужны, поэтому на экране разговора их нет.</li>
+          <li>Сделать можно без AndroidX: FrameLayout поверх и сдвиг за 200 мс, один раз при открытии.</li>
+        </ul></figcaption>
+    </figure>
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="more"><div class="wrap">
+  <h2>Ещё два предложения</h2>
+  <p class="lead">Не обязательные, но на том же языке оформления: режим для стола и ночная тема.</p>
+  <div class="row-frames">
+    <figure>
+      <div class="phone"><div class="screen" id="tB"></div></div>
+      <figcaption><b>Лицом к лицу <span class="tag idea">идея</span></b>
+        <ul>
+          <li>Телефон лежит на столе между вами. Верхняя половина повёрнута к собеседнику: португальский крупно, его
+            подсказка — по-португальски. Нижняя — ваша, по-русски.</li>
+          <li>Поворачивать телефон к собеседнику не нужно. Сейчас это единственный способ показать ему фразу, если вы
+            в наушниках: вывести португальский в динамик нельзя (results/2026-09-13-headphones.md).</li>
+          <li>Кнопка на стыке: FALAR читается с его стороны, ГОВОРИ — с вашей. На кнопке меняется только направление
+            верхней надписи.</li>
+          <li>В руке этот режим бесполезен — только для стола.</li>
+        </ul></figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="screen night" id="tN"></div></div>
+      <figcaption><b>Ночная тема <span class="tag idea">идея</span></b>
+        <ul>
+          <li>Тот же экран в тёмных тонах сливы. Кнопке здесь ещё лучше: золотая надпись и облако на тёмном видны
+            сильнее.</li>
+          <li>Нужна, чтобы не светить экраном в лицо собеседнику в баре или вечером. Экран стенда — AMOLED, но
+            экономию батареи никто не мерил, и обещать её нельзя.</li>
+          <li>Для этого все цвета должны браться из одной таблицы. Сейчас <code>Color.BLACK</code>/<code>GRAY</code> разбросаны
+            по коду.</li>
+        </ul></figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="screen" id="tW"></div></div>
+      <figcaption><b>Слова (сейчас «Изучение») <span class="tag new">новое</span></b>
+        <ul>
+          <li>«Учу / Знаю» — сегменты со счётчиками вместо кнопки «показываю: учу».</li>
+          <li>Ползунок без подписи стал счётчиком «встречалось не меньше 3 раз».</li>
+          <li>Повторение на слух — отдельная карточка сверху. Слово произносится кнопкой 🔊, как и сейчас касанием.</li>
+          <li>«Очистить выученное» уходит в меню «⋯»: действие редкое и необратимое.</li>
+        </ul></figcaption>
+    </figure>
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="settings"><div class="wrap">
+  <h2>Настройки (сейчас «Система»)</h2>
+  <p class="lead">Те же настройки, ничего не убрано и не добавлено. Они разложены по группам: частое — на главном
+    экране, редкое (модули, файлы, облако, журнал) — на отдельных экранах. Какой пункт куда переехал — в таблице ниже.</p>
+  <div class="row-frames">
+    <figure>
+      <div class="phone"><div class="screen tall" id="sMain"></div></div>
+      <figcaption><b>Главный экран настроек <span class="tag new">новое</span> — целиком прокруткой</b>
+        <ul>
+          <li>Обновление — первой карточкой, как и сейчас: магазина нет, и это единственное место, где видно новую
+            версию. Золотая, когда версия вышла.</li>
+          <li>Четыре группы: экран разговора, микрофон и звук, перевод, приложение.</li>
+          <li>«ВКЛ/выкл» стали переключателями. «Каждые 1 реплику» по кругу стало сегментами «По кнопке · 1 · 3 · 10».</li>
+          <li>Размер текста — с живым образцом, а не только с числами в подписи.</li>
+          <li>Пункты, которые зависят от модуля, прячутся так же, как сейчас (пауза до озвучки, голоса, облако, уточнитель).</li>
+        </ul></figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="screen tall" id="sMods"></div></div>
+      <figcaption><b>Модули и файлы <span class="tag new">новое</span> — целиком прокруткой</b>
+        <ul>
+          <li>Файлы моделей и модули на одном экране: и то и другое — «что лежит на телефоне».</li>
+          <li>У модуля — плитка со значком, размер по манифесту 0.25.0 и состояние цветной меткой: скачано,
+            докачивается, не скачано, нужен ключ.</li>
+          <li>Выключить модуль и удалить его файлы — по-прежнему разные действия (решение 28.09). Удаление — отдельная
+            кнопка внизу.</li>
+        </ul></figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="screen" id="sCloud"></div></div>
+      <figcaption><b>Облако <span class="tag new">новое</span></b>
+        <ul>
+          <li>Сверху — то, что сейчас мелким синим: какой ключ, сколько бесплатных моделей, куда пойдёт запрос.</li>
+          <li>«Только бесплатные модели» — отдельной заметкой, чтобы ключ вставляли без страха за деньги.</li>
+          <li>Пересмотр разговора и «быстрее / точнее» — сегментами. Согласие на отправку разговора спрашивается
+            как сейчас, один раз.</li>
+        </ul></figcaption>
+    </figure>
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="map"><div class="wrap">
+  <h2>Где что теперь</h2>
+  <p class="lead">Ни одна функция не пропадает. Всё, что сейчас есть на экранах, получает место в новом виде.</p>
+  <table class="map">
+    <tr><th>Сейчас на «Разговоре»</th><th>В варианте А</th></tr>
+    <tr><td>Системная полоса «Falar»</td><td>Убрана — тема без неё</td></tr>
+    <tr><td>Вкладки Разговор · Изучение · Система</td><td>Панель ☰: разговоры, «Слова», «Настройки»</td></tr>
+    <tr><td>Серая строка: тема · кто говорил · «получше недоступно: …»</td><td>Шапка: название и короткое состояние; причина серого «Получше» — по касанию чипа</td></tr>
+    <tr><td>Полоса «что делаю сейчас» с бегущей анимацией</td><td>Неподвижная полоса шагами под шапкой, слово — в подзаголовке</td></tr>
+    <tr><td>«•••» у последней реплики, «☁ получше», «📌 запомнить»</td><td>Чипы под текущей репликой</td></tr>
+    <tr><td>«＋ новый»</td><td>«＋» в шапке и «＋ Новый разговор» в панели</td></tr>
+    <tr><td>Режимы 📷⌨ / 🎙 PT⇄RU / 👂 слушать, их панели и «▾»</td><td>Док: «Снимок, текст» · кнопка удержания · «Слушать» — все сразу, сворачивать нечего</td></tr>
+    <tr><td>«Слушать PT» и «Слушать RU»</td><td>«Слушать» — оба языка; долгое нажатие — только PT или только RU; метка на кнопке</td></tr>
+    <tr><td>Строки «Обе вместе — …» и «Удерживайте круг…», «нажмите на реплику — …»</td><td>Один раз при первом запуске; дальше — вид самих кнопок и карточек</td></tr>
+  </table>
+  <table class="map">
+    <tr><th>Сейчас в «Системе»</th><th>В настройках</th></tr>
+    <tr><td>Строка состояния сервиса</td><td>Подзаголовок шапки разговора; при беде (нет микрофона) — карточка первой в настройках</td></tr>
+    <tr><td>Falar 0.25.0 · «проверить обновления» / «обновить»</td><td>Карточка «Обновление» первой</td></tr>
+    <tr><td>🧩 модули · развернуть, «удалить неиспользуемые модели»</td><td>Приложение → Модули и файлы</td></tr>
+    <tr><td>Чувствительность: авто + ползунок</td><td>Микрофон и звук → «Чувствительность — авто», ползунок — когда авто выключено</td></tr>
+    <tr><td>Пауза до озвучки</td><td>Микрофон и звук → Пауза до озвучки (есть модуль «Озвучка»)</td></tr>
+    <tr><td>«микрофон: телефона / наушников»</td><td>Микрофон и звук → сегменты «Телефона · Наушников», с тем же вопросом про гарнитуру</td></tr>
+    <tr><td>🎤 голоса и авто-направление →</td><td>Микрофон и звук → Голоса и авто-направление ›</td></tr>
+    <tr><td>Ключ OpenRouter, «как получить ключ», «убрать ключ», «сохранить», «модели и маршрут»</td><td>Перевод → Облако ›</td></tr>
+    <tr><td>Файлы моделей, «качать и по мобильной сети», «проверить файлы», «облегчить перевод»</td><td>Модули и файлы → карточка «Файлы моделей»</td></tr>
+    <tr><td>🧠 контекст (LLM в фоне): ВКЛ</td><td>Перевод → «Уточнитель в фоне», переключатель</td></tr>
+    <tr><td>🧠 разбор контекста: каждые N реплик (по кругу)</td><td>Перевод → сегменты «По кнопке · 1 · 3 · 10»</td></tr>
+    <tr><td>☁ пересмотр в облаке: каждые N (по кругу)</td><td>Облако → сегменты «По кнопке · 5 · 10 · 20»</td></tr>
+    <tr><td>☁ облако: точнее / быстрее</td><td>Облако → сегменты «Быстрее · Точнее»</td></tr>
+    <tr><td>Транскрипция и для реплик собеседника</td><td>Экран разговора → переключатель</td></tr>
+    <tr><td>🔇 пока читаю вслух: три положения по кругу</td><td>Экран разговора → три сегмента</td></tr>
+    <tr><td>Размер шрифта: два ползунка</td><td>Экран разговора → «Размер текста» с образцом</td></tr>
+    <tr><td>журнал · развернуть / свернуть</td><td>Приложение → Журнал ›, последняя строка видна прямо в пункте</td></tr>
+    <tr><td>«🧹 очистить выученное» («Изучение»)</td><td>Слова → меню «⋯»</td></tr>
+  </table>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="cost" style="border-bottom:0"><div class="wrap">
+  <h2>Порядок работы и что проверить</h2>
+  <div class="cols">
+    <div class="box"><h3>Быстро: мало кода, виден сразу</h3><ol>
+      <li><b>Тема без системной полосы «Falar»</b>: +56 dp тексту на всех экранах. Одна строка темы в манифесте.</li>
+      <li><b>Свои цвета</b>: фон и слива вместо обоев и синего <code>#4C7DF0</code>. Это цвета в теме и в <code>style()</code>.</li>
+      <li><b>Переключатели и сегменты</b> в «Системе»: <code>android.widget.Switch</code> есть в самом Android, AndroidX не нужен;
+        сегменты — ряд обычных кнопок.</li>
+    </ol></div>
+    <div class="box"><h3>Больше работы</h3><ol start="4">
+      <li>Шапка и док разговора. Уходят <code>mode()</code>, <code>fold()</code> и три панели, <code>MicButton</code> — без изменений.</li>
+      <li>Панель ☰ поверх экрана вместо колонки.</li>
+      <li>Настройки группами и два подэкрана: <code>buildSys()</code> сейчас одна колонка.</li>
+      <li>Ночная тема: все цвета — из одной таблицы.</li>
+      <li>«Лицом к лицу»: поворот верхней половины и второе направление надписи FALAR.</li>
+    </ol></div>
+    <div class="box"><h3>Проверить на телефоне после сборки</h3><ul>
+      <li>Место под текст — той же разметкой uiautomator, что и сейчас: 547 dp → ~694 dp по макету.</li>
+      <li>Цену кадра удержания в доке — <code>measure_mic_anim.sh</code>. Облако теперь рисуется над полупрозрачным доком.</li>
+      <li>Читаемость на солнце: слива на белом и мятная кнопка «Слушать».</li>
+      <li>Энергию тёмной темы на AMOLED не мерили. На зарядке по USB её не измерить (так же с кнопкой, 29.09).</li>
+    </ul></div>
+    <div class="box"><h3>Что решить</h3><ol>
+      <li>«Слова» и «Настройки» — в панель ☰ (как в макете) или значками в шапке рядом с «＋»?</li>
+      <li>Шапка сливовая (как в макете) или светлая, с цветом только на кнопке?</li>
+      <li>Режим «лицом к лицу» — нужен?</li>
+      <li>Ночная тема — вслед за системой или своим переключателем в настройках?</li>
+    </ol></div>
+  </div>
+  <p class="muted">Макеты — HTML, открываются в любом браузере без сети. Исходник: <code>design/mockups/index.html</code>.</p>
+</div></section>
+
+<script>
+/* ---------- кнопка удержания: то же построение, что MicButton.java ---------- */
+const PLUM='#802244', DEEP='#3D0C2A', GOLD='#E0B878', MINT='#6FE0BC';
+function hsv(h,s,v){const f=(n,k=(n+h/60)%6)=>v-v*s*Math.max(Math.min(k,4-k,1),0);
+  return `rgb(${Math.round(f(5)*255)},${Math.round(f(3)*255)},${Math.round(f(1)*255)})`;}
+const qColor=(q,s,v)=>hsv(120*q,s,v);
+let uid=0;
+/* size — сторона вида; active — нажата; q — как слышно 0…1, −1 — речи ещё не было; k — уровень 0…1;
+   part: 'face' (круг и кольцо), 'halo' (облако) или 'all'; flip — FALAR читается с противоположной стороны. */
+function mic({size=128,active=false,q=-1,k=0,part='all',flip=false}){
+  const id='m'+(uid++), R=size/2, c=R;
+  const DISC=.86,TEXT=.68,INNER=.53,ICON=.40,GLOW=2.0,GLOW_MIN=.08;
+  const rD=R*DISC, fs=R*.17, cap=fs*.70, rt=R*TEXT-cap/2, rb=R*TEXT+cap/2;
+  const line=!active?GOLD:(q<0?MINT:'#fff');
+  const halo=active?(q<0?MINT:qColor(q,.75,.80)):null;
+  const ext=GLOW_MIN+(GLOW-GLOW_MIN)*k, r1=rD*(1+ext);
+  let s=`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><defs>`;
+  if(active&&part!=='face') s+=`<radialGradient id="${id}h" cx="${c}" cy="${c}" r="${r1}" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="${halo}" stop-opacity="0"/><stop offset="${(rD/r1-.001).toFixed(4)}" stop-color="${halo}" stop-opacity="0"/>
+      <stop offset="${(rD/r1).toFixed(4)}" stop-color="${halo}" stop-opacity="${(0xA6/255).toFixed(3)}"/><stop offset="1" stop-color="${halo}" stop-opacity="0"/></radialGradient>`;
+  const g0=(!active||q<0)?PLUM:qColor(q,.62,.86), g1=(!active||q<0)?DEEP:qColor(q,.85,.50);
+  s+=`<linearGradient id="${id}d" x1="0" y1="0" x2="${size}" y2="${size}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${g0}"/><stop offset="1" stop-color="${g1}"/></linearGradient>`;
+  const top=flip?`M ${c+rb} ${c} A ${rb} ${rb} 0 0 0 ${c-rb} ${c}`:`M ${c-rt} ${c} A ${rt} ${rt} 0 0 1 ${c+rt} ${c}`;
+  s+=`<path id="${id}t" d="${top}"/><path id="${id}b" d="M ${c-rb} ${c} A ${rb} ${rb} 0 0 0 ${c+rb} ${c}"/></defs>`;
+  if(active&&part!=='face') s+=`<circle cx="${c}" cy="${c}" r="${r1}" fill="url(#${id}h)"/>`;
+  if(part!=='halo'){
+    s+=`<circle cx="${c}" cy="${c}" r="${rD}" fill="url(#${id}d)" fill-opacity="${(0xB8/255).toFixed(3)}"/>`;
+    s+=`<circle cx="${c}" cy="${c}" r="${R*INNER}" fill="none" stroke="${line}" stroke-opacity=".35" stroke-width="${Math.max(.6,R*.012)}"/>`;
+    const u=R*ICON/11;
+    s+=`<g transform="translate(${c-12*u} ${c-12*u}) scale(${u})" stroke="${line}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="13" rx="3" ${active?`fill="${line}"`:''}/><path d="M19 10 L19 12 A7 7 0 0 1 5 12 L5 10"/><path d="M12 19 L12 22"/></g>`;
+    const t=`font-family="Roboto,'Noto Sans',sans-serif" font-weight="700" font-size="${fs}" letter-spacing="${(.18*fs).toFixed(2)}" fill="${line}"`;
+    s+=`<text ${t}><textPath href="#${id}t" startOffset="50%" text-anchor="middle">FALAR</textPath></text>`;
+    s+=`<text ${t}><textPath href="#${id}b" startOffset="50%" text-anchor="middle">ГОВОРИ</textPath></text>`;
+    s+=`<circle cx="${c-R*TEXT}" cy="${c}" r="${R*.03}" fill="${line}"/><circle cx="${c+R*TEXT}" cy="${c}" r="${R*.03}" fill="${line}"/>`;
+  }
+  return s+'</svg>';
+}
+const ic=(n,cls='')=>`<svg class="ic ${cls}"><use href="#i-${n}"/></svg>`;
+const sb=(dark)=>`<div class="sb"><span>13:05</span><span class="sbi">${ic('signal','s16')}${ic('wifi','s16')}<i style="width:22px;height:11px;border-radius:3px;opacity:.9"></i></span></div>`;
+
+/* ---------- разговор: придуманный, «аренда квартиры» ---------- */
+const MINE={who:'me',crib:[['Quanto','Куа́нту'],['custa','ку́ста'],['o','у'],['aluguel','алуге́у'],['por','пор'],['mês?','мес?']],ru:'Сколько стоит аренда в месяц?'};
+const THEIRS={who:'them',pt:'Três mil reais, com o condomínio incluído.',ru:'Три тысячи реалов, сбор за дом включён.'};
+const HIST=[
+  {who:'them',pt:'Pode ser às cinco da tarde?',ru:'Можно в пять вечера?',ok:1},
+  {who:'me',pt:'Eu gostaria de ver o apartamento hoje.',ru:'Я хотел бы посмотреть квартиру сегодня.',fix:1},
+  {who:'them',pt:'Bom dia! O apartamento ainda está disponível.',ru:'Доброе утро! Квартира ещё свободна.',ok:1},
+  {who:'them',photo:1,pt:'ALUGA-SE · 2 QUARTOS · TRATAR AQUI',ru:'СДАЁТСЯ · 2 КОМНАТЫ · ОБРАЩАТЬСЯ ЗДЕСЬ'},
+];
+function replyHtml(r){
+  const who=r.who==='me'?'<div class="who"><i></i>вы · по-португальски</div>':'<div class="who them"><i></i>собеседник</div>';
+  const big=r.crib?`<div class="big crib">${r.crib.map(([w,c])=>`<span class="w">${w}<i>${c}</i></span>`).join('')}</div>`:`<div class="big">${r.pt}</div>`;
+  return who+big+`<div class="ru">${r.ru}</div>
+    <div class="chips"><span class="chip">${ic('spark','s16')}Получше</span><span class="chip">${ic('pin','s16')}Запомнить</span><span class="chip only">${ic('more','s16')}</span></div>`;
+}
+function bubble(b){
+  const mark=b.ok?ic('check','s16'):b.fix?ic('pencil','s16'):'';
+  if(b.photo) return `<div class="bub them photo"><span class="th">${ic('camera','s20')}</span><div><div class="pt">${b.pt}</div><div class="rt">${b.ru}</div></div></div>`;
+  return `<div class="bub ${b.who}"><div class="pt">${b.pt}</div><div class="rt">${b.ru}${mark}</div></div>`;
+}
+/* Док: 72 dp; центр кнопки — на 8 dp ниже верхнего края дока. */
+function talk(o){
+  const H=873,NAV=16,DOCK=72, dockTop=H-NAV-DOCK, cy=dockTop+8, M=128;
+  const qc=o.listen?qColor(o.listen.q,.75,.72):'';
+  const busy=o.busy?`<div class="prog steps">${Array.from({length:o.busy[1]},(_,i)=>`<i class="${i<o.busy[0]?'done':''}"></i>`).join('')}</div>`:'';
+  let h=`<div class="top">${sb()}<div class="ab"><span class="ib">${ic('menu')}</span>
+      <div class="ttl"><b>${o.title||'Аренда квартиры'}</b><span>${o.sub}</span></div>
+      <span class="ib fill">${ic('plus')}</span></div>${busy}</div>
+    <div class="content"><div class="reply">${replyHtml(o.top)}</div>
+      <div class="sep">ранее</div><div class="hist">${o.hist.map(bubble).join('')}</div></div>
+    <div class="dock"></div><div class="nav"></div>`;
+  if(o.mic.active) h+=`<div class="layer" style="left:${393/2-M/2}px;top:${cy-M/2}px;z-index:2">${mic({...o.mic,part:'halo'})}</div>`;
+  h+=`<div class="dockbtns" style="top:${dockTop+4}px">
+      <div class="db"><span class="c">${ic('camera')}</span><span>Снимок, текст</span></div>
+      <div class="db ${o.listen?'on':''}" style="${o.listen?`--qc:${qc}`:''}"><span class="c">${ic('ear')}${o.listen?'<span class="badge">PT·RU</span>':''}</span><span>Слушать</span></div></div>`;
+  h+=`<div class="layer" style="left:${393/2-M/2}px;top:${cy-M/2}px;z-index:4">${mic({...o.mic,part:'face'})}</div>`;
+  return h;
+}
+const $=id=>document.getElementById(id);
+$('tA1').innerHTML=talk({sub:'вы · 6 реплик · уточнено',top:MINE,hist:HIST,mic:{}});
+$('tA2').innerHTML=talk({sub:'запись…',top:MINE,hist:HIST,mic:{active:true,q:1,k:.83}});
+$('tA3').innerHTML=talk({sub:'слушаю · перевожу, 1 из 2',top:THEIRS,busy:[1,2],listen:{q:.92},
+  hist:[{who:'me',pt:'Quanto custa o aluguel por mês?',ru:'Сколько стоит аренда в месяц?'},...HIST],mic:{}});
+$('tN').innerHTML=talk({sub:'вы · 6 реплик · уточнено',top:MINE,hist:HIST,mic:{}});
+
+/* панель разговоров поверх экрана */
+$('tA4').innerHTML=talk({sub:'вы · 6 реплик · уточнено',top:MINE,hist:HIST,mic:{}})+`<div class="scrim"></div>
+  <div class="drawer"><div class="dh"><img src="../falar_icon_512.png" alt=""><div><b>Falar</b><span>0.25.0 · pt-BR ⇄ ru без сети</span></div></div>
+  <div class="dnew">${ic('plus','s20')}Новый разговор</div>
+  <div class="dlbl">Разговоры</div><div class="dlist">
+    <div class="drow cur"><div class="t"><b>Аренда квартиры</b><span>сегодня 13:05 · 6 реплик</span></div>${ic('check','s18')}</div>
+    <div class="drow"><div class="t"><b>Кафе на углу</b><span>27.09 · 14 реплик</span></div>${ic('check','s18')}</div>
+    <div class="drow"><div class="t"><b>Аптека: от кашля</b><span>26.09 · 9 реплик</span></div>${ic('check','s18')}</div>
+    <div class="drow"><div class="t"><b>Такси до аэропорта</b><span>22.09 · 23 реплики</span></div></div>
+    <div class="drow"><div class="t"><b>Рынок: фрукты</b><span>20.09 · 31 реплика</span></div>${ic('check','s18')}</div>
+    <div class="drow"><div class="t"><b>Новый разговор</b><span>19.09 · пока пусто</span></div></div>
+    <div class="drow"><div class="t"><b>Почта: посылка</b><span>15.09 · 12 реплик</span></div>${ic('check','s18')}</div>
+  </div>
+  <div class="dfoot"><div class="dnav">${ic('book')}Слова<em>200 учу</em></div><div class="dnav">${ic('tune')}Настройки</div></div></div>`;
+
+/* лицом к лицу: верх повёрнут к собеседнику, кнопка на стыке */
+(function(){
+  const H=873, seam=Math.round((H-35-16)/2)+35, M=128;
+  $('tB').innerHTML=`<div class="top">${sb()}</div>
+    <div class="half them">
+      <div class="f2f-note">${ic('mic','s16')}Segure o botão e fale em português</div>
+      <div class="big" style="margin-top:14px">Pode ser às cinco da tarde?</div>
+      <div class="f2f-prev">Bom dia! O apartamento ainda está disponível.</div></div>
+    <div class="half me">
+      <div class="f2f-note">собеседник · перевод</div>
+      <div style="font-size:23px;font-weight:600;line-height:1.2;margin-top:8px">Можно в пять вечера?</div>
+      <div class="f2f-prev" style="margin-top:14px">Я хотел бы посмотреть квартиру сегодня.</div>
+      <div class="mini"><span class="mb">${ic('close','s16')}Обычный вид</span><span class="mb">${ic('camera','s16')}Снимок</span><span class="mb">${ic('ear','s16')}Слушать</span></div></div>
+    <div class="nav"></div>
+    <div class="seam" style="top:${seam}px"></div>
+    <div class="layer" style="left:${393/2-M/2}px;top:${seam-M/2}px;z-index:4">${mic({flip:true})}</div>`;
+})();
+
+/* состояния кнопки */
+(function(){
+  const S=[{t:'Отпущена',d:'слива и золото, всё неподвижно',m:{}},
+    {t:'Держат, речи ещё не было',d:'мятное свечение, круг сливовый',m:{active:true,q:-1,k:.25}},
+    {t:'Тихо',d:'жёлтый: громкости мало, возможны ошибки',m:{active:true,q:.45,k:.45}},
+    {t:'Слышно хорошо',d:'зелёный, облако до 2,7 радиуса',m:{active:true,q:1,k:.83}},
+    {t:'Молчат 1,5 с',d:'красный: «не слышу»',m:{active:true,q:0,k:.05}}];
+  $('states').innerHTML=S.map(s=>`<div class="state"><div class="cv" style="display:grid;place-items:center">
+      <div class="layer" style="position:relative">${mic({size:84,...s.m})}</div></div><p><b>${s.t}</b>${s.d}</p></div>`).join('');
+})();
+
+/* ---------- как сейчас ---------- */
+(function(){
+  const crib=MINE.crib.map(([w,c])=>`<span class="w">${w}<i>${c}</i></span>`).join('');
+  const rows=HIST.map(b=>[(b.photo?'📷 ':'')+b.pt,b.ru+(b.ok?'  ✓':b.fix?'  ✎':'')]);
+  $('oldTalk').innerHTML=`<div class="osb"><span>13:05</span><span class="sbi" style="display:flex;gap:6px">${ic('signal','s16')}${ic('wifi','s16')}</span></div>
+    <div class="obar">Falar</div>
+    <div class="otabs"><span class="obtn">☰</span><span class="obtn sel">Разговор</span><span class="obtn">Изучение</span><span class="obtn">Система</span></div>
+    <div class="ocontent"><div class="ohint">Аренда квартиры · продолжаем</div>
+      <div class="big crib">${crib}</div>
+      <div class="oru"><span>Сколько стоит аренда в месяц?</span><em>•••</em></div>
+      <div class="ohh">нажмите на реплику — поправить, удалить, перенести</div>
+      ${rows.map(r=>`<div class="orow"><div><div class="p">${r[0]}</div><div class="r">${r[1]}</div></div><em>•••</em></div>`).join('')}</div>
+    <div class="obottom"><div class="r2" style="height:44px"><span class="obtn">Слушать PT</span><span class="obtn">Слушать RU</span></div>
+      <div class="ohear">Обе вместе — направление по языку каждой реплики. Микрофон откры…</div>
+      <div class="r2"><span class="obtn" style="font-size:13px">☁️ получше</span><span class="obtn" style="font-size:13px">📌 запомнить</span><span class="obtn" style="font-size:13px">＋ новый</span></div>
+      <div class="r2" style="margin-top:4px"><span class="obtn">📷 ⌨</span><span class="obtn">🎙️ PT⇄RU</span><span class="obtn sel">👂 слушать</span><span class="obtn" style="flex:.7">▾</span></div></div>
+    <div class="nav"></div>
+    <div class="zone" style="top:35px;height:56px"><span>системная полоса · 56 dp</span></div>
+    <div class="zone" style="top:91px;height:48px"><span style="top:auto;bottom:-10px;transform:none">вкладки · 48 dp</span></div>
+    <div class="zone ok" style="top:139px;height:548px"><span style="top:auto;bottom:22px;transform:none">текст и реплики · 547 dp</span></div>
+    <div class="zone" style="top:687px;height:170px"><span style="top:-10px;transform:none">режимы и кнопки · 170 dp</span></div>`;
+  const B=t=>`<span class="obtn">${t}</span>`;
+  $('oldSys').innerHTML=`<div class="osb"><span>13:06</span><span class="sbi" style="display:flex;gap:6px">${ic('signal','s16')}${ic('wifi','s16')}</span></div>
+    <div class="obar">Falar</div>
+    <div class="otabs"><span class="obtn">☰</span><span class="obtn">Разговор</span><span class="obtn">Изучение</span><span class="obtn sel">Система</span></div>
+    <div class="osys">
+      <div style="font-size:15px">Микрофон выключен</div>
+      <div class="b">Falar 0.25.0 · обновления проверяются раз в сутки</div>
+      ${B('проверить обновления')}${B('🧩 модули · включено 6 из 6 · развернуть')}
+      <div class="l">Вход: чувствительность и источник</div>
+      <div>Чувствительность микрофона: авто, сейчас −4 дБ</div>
+      <div class="ochk"><i></i>авто — подстраивать под голос (речь к −24 dBFS)</div>
+      <div class="osl dis" style="--v:6%"><b></b></div>
+      <div>Пауза до озвучки: 1.50 с тишины</div><div class="osl" style="--v:24%"><b></b></div>
+      ${B('микрофон: телефона')}${B('🎤 голоса и авто-направление →')}
+      <div class="l">Ключ OpenRouter — только бесплатные модели; нужен для названий разговоров и кнопки «получше».</div>
+      <div class="ln">${B('как получить ключ')}<span class="obtn" style="flex:.45">убрать ключ</span></div>
+      <div class="oin"><span>sk-or-…</span><span class="obtn" style="flex:.4;border-bottom:1px solid #BFC3CC;color:#1B1B1F">сохранить</span></div>
+      <div class="b">ключ sk-or-v1-…a1f3 · бесплатных моделей: 19<br>маршрут авто → gemma-4-31b-it:free</div>
+      ${B('☁️ модели и маршрут')}
+      <div class="b">Файлы моделей 0.25.0: обязательные все на месте · модули на месте</div>
+      ${B('качать и по мобильной сети: выкл')}${B('проверить файлы моделей')}
+      <span class="obtn sel">🧠 контекст (LLM в фоне): ВКЛ</span>
+      ${B('🧠 разбор контекста: каждые 1 реплику')}${B('☁️ пересмотр в облаке: каждые 10 реплик')}
+      ${B('☁️ облако: точнее — сначала крупные модели, ответ дольше')}
+      ${B('транскрипция и для реплик собеседника: выкл')}${B('🔇 пока читаю вслух: молчать, пока держу текст')}
+      <div class="l" style="font-size:14px">Размер шрифта: португальский 27, русский 15</div>
+      <div class="osl" style="--v:54%"><b></b></div><div class="osl" style="--v:29%"><b></b></div>
+      ${B('журнал · свернуть')}
+      <div class="olog"><div>📦 модели 0.25.0: обязательных на месте 14/14</div><div>🧩 модули: 🔊 Озвучка перевода, 📷 Чтение снимков, 🧠 Уточнитель перевода, ☁ Облако, 🎤 Отпечаток голоса, 📚 Корпус фраз</div><div>↩ продолжаем разговор: восстановлено реплик 6</div></div>
+    </div><div class="nav"></div>`;
+})();
+
+/* ---------- слова ---------- */
+(function(){
+  const W=[['quanto','25×','сколько','Quanto custa o aluguel por mês?','Сколько стоит аренда в месяц?'],
+    ['aluguel','12×','аренда','O aluguel vence no dia cinco.','Аренда оплачивается пятого числа.'],
+    ['tarde','9×','вечер; поздно','Pode ser às cinco da tarde?','Можно в пять вечера?'],
+    ['garagem','7×','гараж','Tem garagem no prédio?','В доме есть гараж?'],
+    ['disponível','5×','свободный','O apartamento ainda está disponível.','Квартира ещё свободна.']];
+  $('tW').innerHTML=`<div class="top">${sb()}<div class="ab"><span class="ib">${ic('menu')}</span>
+      <div class="ttl"><b>Слова</b><span>из ваших разговоров</span></div><span class="ib">${ic('more')}</span></div></div>
+    <div class="content" style="background:var(--bg)">
+      <div class="wtop"><div class="seg"><span class="on">Учу · 200</span><span>Знаю · 48</span></div>
+        <div class="stepper">встречалось не меньше <span class="sbx"><span>−</span><b>3</b><span>+</span></span> раз</div></div>
+      <div class="review"><div class="rt"><b>Повторение на слух</b><span>слово звучит — ответ скрыт, пока не попросите</span></div><span class="go">${ic('play','s16')}Начать</span></div>
+      <div class="wlist">${W.map(w=>`<div class="wcard"><div class="wt"><div class="w1"><b>${w[0]}</b><span class="cnt">${w[1]}</span></div>
+        <div class="tr">${w[2]}</div><div class="ex">${w[3]}<br>${w[4]}</div></div><span class="say">${ic('speaker','s18')}</span></div>`).join('')}</div>
+    </div>
+    <div class="inbar"><span class="field">Своё слово: отель, улица, имя</span><span class="fab">${ic('plus')}</span></div><div class="nav"></div>`;
+})();
+
+/* ---------- настройки ---------- */
+const row=(i,t,s,right,one)=>`<div class="srow">${ic(i)}<div class="rt"><b>${t}</b>${s?`<span${one?' class="one"':''}>${s}</span>`:''}</div>${right||''}</div>`;
+const chev=`<svg class="ic chev"><use href="#i-chev"/></svg>`;
+const appbar=(t)=>`<div class="top">${sb()}<div class="ab"><span class="ib">${ic('back')}</span><div class="ttl"><b>${t}</b></div></div></div>`;
+$('sMain').innerHTML=appbar('Настройки')+`<div class="pg">
+  <div class="upd">${ic('download')}<div class="rt"><b>Вышла Falar 0.26.0</b><span>84 МБ · у вас 0.25.0</span></div><span class="btn pri">Обновить</span></div>
+  <div class="grp"><h4>Экран разговора</h4><div class="card">
+    ${row('textsize','Размер текста','',`<span class="val">27 · 15</span>`)}
+    <div class="sub"><div class="prev"><b>Quanto custa?</b><span>Сколько стоит?</span></div>
+      <div class="slrow"><span>PT</span><div class="sl" style="--v:52%"><i></i><b></b></div><em>27</em></div>
+      <div class="slrow"><span>RU</span><div class="sl" style="--v:26%"><i></i><b></b></div><em>15</em></div></div>
+    ${row('type','Транскрипция и у собеседника','русскими буквами под словами его реплик','<span class="sw"></span>')}
+    ${row('hush','Пока вы читаете вслух','микрофон молчит, чтобы не перевести вас же','')}
+    <div class="sub"><div class="seg"><span>Слушать</span><span class="on">Пока держу</span><span>Пока видно</span></div>
+      <div class="cap">«Пока держу» — пока палец на крупном тексте; «пока видно» — пока видна транскрипция.</div></div>
+  </div></div>
+  <div class="grp"><h4>Микрофон и звук</h4><div class="card">
+    ${row('mic','Чувствительность — авто','под голос · сейчас −4 дБ','<span class="sw on"></span>')}
+    <div class="sub"><div class="slrow"><span>вручную</span><div class="sl off" style="--v:0%"><i></i><b></b></div><em style="color:var(--soft)">+0</em></div></div>
+    ${row('phones','Микрофон','','')}
+    <div class="sub"><div class="seg"><span class="on">Телефона</span><span>Наушников</span></div></div>
+    ${row('speaker','Пауза до озвучки','перевод виден сразу, голос ждёт тишины',`<span class="val">1,5 с</span>`)}
+    <div class="sub"><div class="sl" style="--v:25%"><i></i><b></b></div></div>
+    ${row('users','Голоса и авто-направление','мой голос записан · собеседник — нет',chev)}
+  </div></div>
+  <div class="grp"><h4>Перевод</h4><div class="card">
+    ${row('wand','Уточнитель в фоне','переводит заново с учётом разговора','<span class="sw on"></span>')}
+    ${row('refresh','Разбор контекста','как часто уточнитель пересматривает реплики','')}
+    <div class="sub"><div class="seg"><span>По кнопке</span><span class="on">1</span><span>3</span><span>10</span></div><div class="cap">реплик между разборами</div></div>
+    ${row('cloud','Облако','ключ …a1f3 · пересмотр каждые 10 реплик',chev)}
+  </div></div>
+  <div class="grp" style="padding-bottom:18px"><h4>Приложение</h4><div class="card">
+    ${row('scan','Модули и файлы','включено 5 из 6 · все файлы на месте',chev)}
+    ${row('list','Журнал','📦 модели 0.25.0: обязательных на месте 14/14',chev,1)}
+  </div></div>
+</div><div class="nav" style="background:var(--page)"></div>`;
+
+const mod=(i,t,p,size,st,on)=>`<div class="mod"><span class="tile">${ic(i)}</span><div class="mt"><b>${t}</b><p>${p}</p>
+  <div class="meta">${size?`<span>${size}</span>`:''}${st}</div></div><span class="sw${on?' on':''}"></span></div>`;
+$('sMods').innerHTML=appbar('Модули и файлы')+`<div class="pg" style="padding-bottom:18px">
+  <div class="grp"><h4>Файлы моделей</h4><div class="card">
+    ${row('check','Всё на месте','обязательные 14 из 14 · модулям хватает','')}
+    ${row('download','Качать и по мобильной сети','по умолчанию — только Wi-Fi','<span class="sw"></span>')}
+    <div class="sub full"><div class="btns"><span class="btn out">${ic('refresh','s18')}Проверить файлы</span></div></div>
+  </div></div>
+  <div class="grp"><h4>Модули</h4><div class="card">
+    ${mod('mic','Перевод речи','распознавание, перевод pt ↔ ru и словарь','1,4 ГБ','<span class="pill ok">скачано</span>',1).replace('<span class="sw on"></span>','<span class="sw on lock"></span>')}
+    ${mod('speaker','Озвучка перевода','перевод звучит голосом в наушнике; без неё — только на экране','135 МБ','<span class="pill ok">скачано</span>',1)}
+    ${mod('scan','Чтение снимков','вывеска, меню, скрин: перевод поверх фото','18 МБ','<span class="pill ok">скачано</span>',1)}
+    ${mod('wand','Уточнитель перевода','переводит заново с учётом разговора; нужен сильный телефон','1,1 ГБ','<span class="pill ok">скачано</span>',1)}
+    ${mod('cloud','Облако','пересмотр разговора бесплатными моделями OpenRouter','','<span class="pill ok">ключ есть</span>',1)}
+    ${mod('voice','Отпечаток голоса','узнаёт, кто говорит: авто-направление','30 МБ','<span class="pill ok">скачано</span>',1)}
+    ${mod('books','Корпус фраз','190 тыс. готовых пар фраз из Tatoeba','25 МБ','<span class="pill no">выключен · файлы на месте</span>',0)}
+  </div></div>
+  <div style="margin:14px 12px 0" class="btns"><span class="btn out" style="width:100%">${ic('trash','s18')}Удалить неиспользуемые · 25 МБ</span></div>
+</div><div class="nav" style="background:var(--page)"></div>`;
+
+$('sCloud').innerHTML=appbar('Облако')+`<div class="pg">
+  <div class="note">Falar ходит только к бесплатным моделям OpenRouter (<code>:free</code>, цена 0 в каждом запросе). Деньги с ключа не списываются.</div>
+  <div class="grp"><h4>Ключ</h4><div class="card">
+    <div class="srow"><div class="kstat"><span class="dot"></span><div class="rt"><b>Ключ …a1f3 работает</b><span>бесплатных моделей: 19 · последней отвечала gemma-4-31b-it, 4,8 с</span></div></div></div>
+    ${row('cloud','Куда пойдёт запрос','авто → gemma-4-31b-it',chev)}
+    <div class="sub full"><div class="btns"><span class="btn out">${ic('key','s18')}Как получить ключ</span><span class="btn txt">Убрать ключ</span></div></div>
+    <div class="sub full" style="flex-direction:row;gap:8px"><span class="field">новый ключ sk-or-…</span><span class="btn pri">Сохранить</span></div>
+  </div></div>
+  <div class="grp"><h4>Пересмотр разговора</h4><div class="card"><div class="sub full" style="padding-top:14px">
+    <div class="seg"><span>По кнопке</span><span>5</span><span class="on">10</span><span>20</span></div>
+    <div class="cap">реплик между пересмотрами. Разговор уходит в облако целиком, до 6000 знаков с конца; согласие спрашивается один раз.</div></div></div></div>
+  <div class="grp"><h4>Облако выбирает</h4><div class="card"><div class="sub full" style="padding-top:14px">
+    <div class="seg"><span>Быстрее</span><span class="on">Точнее</span></div>
+    <div class="cap">«Точнее» — сначала крупные модели: ответ до полуминуты, зато больше правок и деталей в памяти разговора.</div></div></div></div>
+</div><div class="nav" style="background:var(--page)"></div>`;
+</script>
+</body>
+</html>
