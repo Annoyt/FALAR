@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Своя тема: без системной полосы «Falar» (56 dp уходят тексту) и со своими цветами вместо цветов
+     обоев телефона. Ночной вариант — res/values-night: включается вслед за системой. Цвета, которые
+     код ставит сам, — в Look.java. -->
+<resources>
+  <style name="Falar" parent="@android:style/Theme.Material.Light.NoActionBar">
+    <item name="android:colorPrimary">#802244</item>
+    <item name="android:colorPrimaryDark">#3D0C2A</item>
+    <item name="android:colorAccent">#802244</item>
+    <item name="android:windowBackground">#FFFFFF</item>
+    <item name="android:statusBarColor">#3D0C2A</item>
+    <item name="android:navigationBarColor">#FFFFFF</item>
+    <item name="android:windowLightNavigationBar">true</item>
+  </style>
+</resources>

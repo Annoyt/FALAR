@@ -22,13 +22,17 @@ public class HearingView extends View {
   final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG), tick = new Paint(Paint.ANTI_ALIAS_FLAG);
   final float dp; final RectF r = new RectF();
   boolean bar = false; float level = LO, floor = Float.NaN; int shownPx = -1, shownFloorPx = -1, shownColor = 0;
-  String line = ""; int lineColor = 0xFF808080;
+  String line = ""; int lineColor;
+  /** Полоска в паузе — серая; на ночном фоне серый темнее. */
+  final int idle;
 
   public HearingView(Context c) {
     super(c);
     dp = c.getResources().getDisplayMetrics().density;
     text.setTextSize(11 * c.getResources().getDisplayMetrics().scaledDensity);
-    track.setColor(0x22000000); tick.setColor(0xFF606060);
+    Look look = new Look(c);
+    lineColor = look.soft; idle = look.night ? 0xFF6E6477 : 0xFF9E9E9E;
+    track.setColor(look.night ? 0x33FFFFFF : 0x22000000); tick.setColor(look.night ? 0xFFA79DB0 : 0xFF606060);
   }
 
   /** Полоска видна, только пока слушаем; иначе строка — обычная подсказка во всю ширину. */
@@ -44,7 +48,7 @@ public class HearingView extends View {
   public void setLevel(float db, float floorDb, float q, boolean speech) {
     level = db; floor = floorDb;
     int px = px(db), fpx = Float.isNaN(floorDb) ? -1 : px(floorDb);
-    int col = speech && q >= 0 ? MicButton.qColor(Math.round(q * 24) / 24f, 0.75f, 0.70f) : 0xFF9E9E9E;
+    int col = speech && q >= 0 ? MicButton.qColor(Math.round(q * 24) / 24f, 0.75f, 0.70f) : idle;
     if (px != shownPx || fpx != shownFloorPx || col != shownColor) { shownPx = px; shownFloorPx = fpx; shownColor = col; invalidate(); }
   }
 

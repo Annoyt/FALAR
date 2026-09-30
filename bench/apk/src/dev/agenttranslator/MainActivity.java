@@ -41,6 +41,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   ListView chatList; View sidePanel; Button bMenu, bEnd; SeekBar sPt, sRu;
   TextView sizeLbl, hintSide;
   SharedPreferences prefs;
+  /** Цвета экранов: свои, день и ночь вслед за системой (Look). */
+  Look look;
   float szPt = 34, szRu = 17;
   /** Экран первого запуска: разрешения и загрузка моделей по манифесту; блок моделей в «Системе». */
   View setupView, tabsRow; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
@@ -65,6 +67,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
+    look = new Look(this);
     // Камера занимает много памяти, и пока она открыта, система выгружает Falar; снимок потом
     // приходит в заново созданный экран. Адрес снимка и ждущий снимок — из сохранённого состояния,
     // иначе снимок терялся молча (владелец, 29.09: «реальная картинка из камеры не прилетела»).
@@ -74,7 +77,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (pp != null) pendingPhoto = android.net.Uri.parse(pp);
       cloudPhoto = b.getBoolean(K_CLOUD_PHOTO, false); pendingCloud = b.getBoolean(K_PENDING_CLOUD, false);
     }
-    LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(look.bg);
 
     prefs = getSharedPreferences("at", MODE_PRIVATE);
     szPt = prefs.getFloat("szPt", 34); szRu = prefs.getFloat("szRu", 17);
@@ -255,13 +258,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     cribVisible = crib; syncGuard();
     if (!crib) {
       TextView t = new TextView(this); t.setTextSize(szPt); t.setTypeface(null, Typeface.BOLD);
-      t.setTextColor(Color.BLACK); t.setLineSpacing(0, 1.05f); t.setText(pt);
+      t.setTextColor(look.fg); t.setLineSpacing(0, 1.05f); t.setText(pt);
       bigBox.addView(t); return;
     }
     for (String w : pt.trim().split("\\s+")) {
       LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
-      TextView t = new TextView(this); t.setTextSize(szPt); t.setTypeface(null, Typeface.BOLD); t.setTextColor(Color.BLACK); t.setText(w);
-      TextView c = new TextView(this); c.setTextSize(Math.max(9, szPt * 0.45f)); c.setTextColor(Color.GRAY); c.setText(Translit.say(w));
+      TextView t = new TextView(this); t.setTextSize(szPt); t.setTypeface(null, Typeface.BOLD); t.setTextColor(look.fg); t.setText(w);
+      TextView c = new TextView(this); c.setTextSize(Math.max(9, szPt * 0.45f)); c.setTextColor(look.soft); c.setText(Translit.say(w));
       col.addView(t); col.addView(c); bigBox.addView(col);
     }
   }
@@ -396,7 +399,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     in.setText(svc.chats.memo); in.setMinLines(3); in.setTextSize(16);
     in.setHint("Например: хозяйка квартиры Мария (женщина) показывает мне квартиру; договорились о 2500 реалах в месяц");
     box.addView(in);
-    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(Color.GRAY);
+    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(look.soft);
     note.setText("Кто с кем говорит, где, о чём договорились, имена. Уточнитель читает это перед каждой репликой. "
                + "Вписанное вами облако больше не меняет; пустое поле вернёт память облаку.");
     box.addView(note);
@@ -450,16 +453,16 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         LinearLayout col = new LinearLayout(MainActivity.this);
         col.setOrientation(LinearLayout.VERTICAL);
         TextView pt = new TextView(MainActivity.this);
-        pt.setText((Chats.PHOTO.equals(t[8]) ? "📷 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(Color.DKGRAY);
+        pt.setText((Chats.PHOTO.equals(t[8]) ? "📷 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(look.dim);
         if (Chats.PHOTO.equals(t[8])) pt.setMaxLines(3);
         TextView ru = new TextView(MainActivity.this);
         ru.setText((srcPt ? t[2] : t[1]) + ("1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : ""));
-        ru.setTextSize(Math.max(10, szRu - 3)); ru.setTextColor(Color.GRAY);
+        ru.setTextSize(Math.max(10, szRu - 3)); ru.setTextColor(look.soft);
         col.addView(pt); col.addView(ru);
         // Метка «•••» — только знак того, что у реплики есть меню. Нажимается вся строка:
         // кликабельный потомок внутри ListView отнимает нажатие у самой строки.
         TextView dots = new TextView(MainActivity.this);
-        dots.setText("•••"); dots.setTextSize(16); dots.setTextColor(0xFF9AA0AA); dots.setPadding(16, 2, 4, 2);
+        dots.setText("•••"); dots.setTextSize(16); dots.setTextColor(look.soft); dots.setPadding(16, 2, 4, 2);
         LinearLayout row = new LinearLayout(MainActivity.this);
         row.setOrientation(LinearLayout.HORIZONTAL); row.setPadding(4, 10, 4, 10);
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -518,7 +521,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     was.setText(src + "\n→ " + dst); box.addView(was);
     final EditText in = new EditText(this);
     in.setHint("как надо было перевести"); in.setMinLines(2); in.setTextSize(16); box.addView(in);
-    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(Color.GRAY);
+    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(look.soft);
     note.setText("Откроется страница на GitHub с уже заполненным сообщением — останется нажать «отправить». "
                + "Обсуждение открытое: эта реплика, ваш вариант, версия приложения и модель телефона будут видны всем. "
                + "Остальной разговор не отправляется.");
@@ -554,11 +557,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
   void editTranslation(final int idx, String src, String dst) {
     LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(40, 8, 40, 0);
-    TextView s = new TextView(this); s.setText(src); s.setTextSize(13); s.setTextColor(Color.GRAY); box.addView(s);
+    TextView s = new TextView(this); s.setText(src); s.setTextSize(13); s.setTextColor(look.soft); box.addView(s);
     final EditText in = new EditText(this);
     in.setText(dst); in.setSelection(dst.length()); in.setMinLines(2); in.setTextSize(16); box.addView(in);
     final CheckBox pin = new CheckBox(this); pin.setText("и запомнить как пин"); pin.setChecked(true); box.addView(pin);
-    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(Color.GRAY);
+    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(look.soft);
     note.setText("Пин: та же русская фраза дальше переводится этим текстом мгновенно и без сети. "
                + "Числа и имена в правке должны совпасть с исходником, иначе пин не ляжет, а правка сохранится.");
     box.addView(note);
@@ -597,11 +600,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  фон меняется на время касания, есть рамка и скругление, и телефон коротко отзывается. */
   Button style(Button b) {
     android.graphics.drawable.GradientDrawable up = new android.graphics.drawable.GradientDrawable();
-    up.setColor(0xFFF2F2F4); up.setCornerRadius(22); up.setStroke(2, 0xFFBFC3CC);
+    up.setColor(look.btn); up.setCornerRadius(22); up.setStroke(2, look.btnLine);
     android.graphics.drawable.GradientDrawable down = new android.graphics.drawable.GradientDrawable();
-    down.setColor(0xFF4C7DF0); down.setCornerRadius(22); down.setStroke(2, 0xFF2F5BD0);
+    down.setColor(Look.PLUM); down.setCornerRadius(22); down.setStroke(2, Look.DEEP);   // выбор — сливой, как на кнопке удержания, а не синим
     android.graphics.drawable.GradientDrawable off = new android.graphics.drawable.GradientDrawable();
-    off.setColor(0xFFEDEDF0); off.setCornerRadius(22); off.setStroke(2, 0xFFDDDDE2);
+    off.setColor(look.offBg); off.setCornerRadius(22); off.setStroke(2, look.offLine);
     android.graphics.drawable.StateListDrawable sl = new android.graphics.drawable.StateListDrawable();
     sl.addState(new int[]{-android.R.attr.state_enabled}, off);
     sl.addState(new int[]{android.R.attr.state_pressed}, down);
@@ -612,7 +615,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     b.setTextColor(new android.content.res.ColorStateList(
         new int[][]{{-android.R.attr.state_enabled}, {android.R.attr.state_pressed},
                     {android.R.attr.state_checked}, {android.R.attr.state_selected}, {}},
-        new int[]{0xFF9A9AA0, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFF1B1B1F}));
+        new int[]{look.offText, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, look.fg}));
     b.setPadding(18, 26, 18, 26);
     b.setAllCaps(false);
     b.setHapticFeedbackEnabled(true);
@@ -665,8 +668,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Список разговоров: свежие сверху, галочка — улучшен ли перевод задним числом. */
   View buildSide() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(12, 8, 8, 8);
-    TextView t = new TextView(this); t.setText("Разговоры"); t.setTextSize(14); t.setTextColor(Color.GRAY); v.addView(t);
-    hintSide = new TextView(this); hintSide.setTextSize(11); hintSide.setTextColor(Color.GRAY); v.addView(hintSide);
+    TextView t = new TextView(this); t.setText("Разговоры"); t.setTextSize(14); t.setTextColor(look.soft); v.addView(t);
+    hintSide = new TextView(this); hintSide.setTextSize(11); hintSide.setTextColor(look.soft); v.addView(hintSide);
     chatList = new ListView(this);
     v.addView(chatList, new LinearLayout.LayoutParams(-1, 0, 1f));
     return v;
@@ -800,7 +803,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // список реплик (listClip). В 0.24.0 крупный текст без рамки рисовался поверх названия,
     // подсказки и списка, и список под ним было не прокрутить.
     v.setClipChildren(false);
-    hint = new TextView(this); hint.setTextSize(13); hint.setTextColor(Color.GRAY); hint.setId(app.falar.R.id.hint);
+    hint = new TextView(this); hint.setTextSize(13); hint.setTextColor(look.soft); hint.setId(app.falar.R.id.hint);
     hint.setText("Запуск…"); v.addView(hint);
     // Касание строки с названием — «Память разговора»: что уточнитель знает о разговоре.
     hint.setOnClickListener(x -> memoDialog());
@@ -812,7 +815,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     busyRow.setId(app.falar.R.id.busy);
     busyBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); busyBar.setIndeterminate(true);
     busyRow.addView(busyBar, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-    busyLbl = new TextView(this); busyLbl.setTextSize(12); busyLbl.setTextColor(0xFF33507A); busyLbl.setPadding(16, 0, 0, 0); busyLbl.setSingleLine(true);
+    busyLbl = new TextView(this); busyLbl.setTextSize(12); busyLbl.setTextColor(look.accent); busyLbl.setPadding(16, 0, 0, 0); busyLbl.setSingleLine(true);
     busyRow.addView(busyLbl, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
     busyRow.setVisibility(View.INVISIBLE); v.addView(busyRow);
 
@@ -856,9 +859,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // себе не видно, и «как теперь удалить лишнюю фразу» — первый вопрос, который это вызвало.
     LinearLayout ruRow = new LinearLayout(this); ruRow.setOrientation(LinearLayout.HORIZONTAL);
     ruRow.setPadding(0, 12, 0, 0);
-    smallRu = new TextView(this); smallRu.setTextSize(17); smallRu.setTextColor(Color.DKGRAY);
+    smallRu = new TextView(this); smallRu.setTextSize(17); smallRu.setTextColor(look.dim);
     ruRow.addView(smallRu, new LinearLayout.LayoutParams(0, -2, 1f));
-    bTurn = new TextView(this); bTurn.setText("•••"); bTurn.setTextSize(18); bTurn.setTextColor(0xFF33507A);
+    bTurn = new TextView(this); bTurn.setText("•••"); bTurn.setTextSize(18); bTurn.setTextColor(look.accent);
     bTurn.setPadding(24, 2, 8, 8); ruRow.addView(bTurn);
     turnCol.addView(ruRow);
     View.OnClickListener lastMenu = x -> {
@@ -872,7 +875,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Прежние реплики — список, а не сплошной текст: каждую надо уметь удалить или перенести
     // в другой разговор. Случайная фраза из комнаты иначе остаётся в контексте уточнителя
     // и в разборе слов для заучивания.
-    histHint = new TextView(this); histHint.setTextSize(11); histHint.setTextColor(Color.GRAY);
+    histHint = new TextView(this); histHint.setTextSize(11); histHint.setTextColor(look.soft);
     histHint.setPadding(4, 6, 4, 2); histHint.setText("нажмите на реплику — поправить, удалить, перенести");
     v.addView(histHint);
     histList = new ListView(this);
@@ -937,7 +940,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Удержание. Сама кнопка плавает над репликами (buildTalk), здесь — подсказка к ней. Кнопка
    *  зовёт на обоих языках — FALAR и ГОВОРИ по кольцу: принимает тот, на котором в неё говорят. */
   View buildPtt() {
-    hearPtt = new HearingView(this); hearPtt.setLine(PTT_HINT, Color.GRAY);
+    hearPtt = new HearingView(this); hearPtt.setLine(PTT_HINT, look.soft);
     return hearPtt;
   }
 
@@ -949,7 +952,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     row.addView(tListenPt, new LinearLayout.LayoutParams(0, -2, 1f));
     row.addView(tListenRu, new LinearLayout.LayoutParams(0, -2, 1f));
     v.addView(row);
-    hearListen = new HearingView(this); hearListen.setLine(LISTEN_HINT, Color.GRAY);
+    hearListen = new HearingView(this); hearListen.setLine(LISTEN_HINT, look.soft);
     v.addView(hearListen);
     return v;
   }
@@ -1221,7 +1224,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  Смысл в отборе: показываем не весь словарь, а то, что уже понадобилось несколько раз. */
   View buildLearn() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 12, 24, 12);
-    learnHint = new TextView(this); learnHint.setTextSize(13); learnHint.setTextColor(Color.GRAY);
+    learnHint = new TextView(this); learnHint.setTextSize(13); learnHint.setTextColor(look.soft);
     learnHint.setText("Слова из ваших разговоров, от частых к редким"); v.addView(learnHint);
     tKnown = new ToggleButton(this); tKnown.setTextOff("показываю: учу"); tKnown.setTextOn("показываю: знаю");
     tKnown.setChecked(false); v.addView(tKnown);
@@ -1256,12 +1259,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   View buildReview() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL);
     v.setPadding(18, 18, 18, 18);
-    v.setBackgroundColor(0xFFF4F6FB);
-    revStat = new TextView(this); revStat.setTextSize(12); revStat.setTextColor(Color.GRAY); v.addView(revStat);
+    v.setBackgroundColor(look.tint);
+    revStat = new TextView(this); revStat.setTextSize(12); revStat.setTextColor(look.soft); v.addView(revStat);
     revWord = new TextView(this); revWord.setTextSize(26); revWord.setTypeface(null, Typeface.BOLD);
-    revWord.setTextColor(Color.BLACK); revWord.setText("слушайте"); v.addView(revWord);
-    revRu = new TextView(this); revRu.setTextSize(19); revRu.setTextColor(0xFF33507A); v.addView(revRu);
-    revEx = new TextView(this); revEx.setTextSize(12); revEx.setTextColor(Color.GRAY); revEx.setMaxLines(3); v.addView(revEx);
+    revWord.setTextColor(look.fg); revWord.setText("слушайте"); v.addView(revWord);
+    revRu = new TextView(this); revRu.setTextSize(19); revRu.setTextColor(look.accent); v.addView(revRu);
+    revEx = new TextView(this); revEx.setTextSize(12); revEx.setTextColor(look.soft); revEx.setMaxLines(3); v.addView(revEx);
     LinearLayout r = new LinearLayout(this); r.setOrientation(LinearLayout.HORIZONTAL);
     bRevPlay = new Button(this); bRevPlay.setText("🔊 ещё раз"); r.addView(bRevPlay, new LinearLayout.LayoutParams(0, -2, 1f));
     bRevShow = new Button(this); bRevShow.setText("показать"); r.addView(bRevShow, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -1322,19 +1325,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       LinearLayout top = new LinearLayout(MainActivity.this); top.setOrientation(LinearLayout.HORIZONTAL);
       TextView word = new TextView(MainActivity.this);
       word.setText(w.w); word.setTextSize(Math.max(18, szPt * 0.62f));
-      word.setTypeface(null, Typeface.BOLD); word.setTextColor(Color.BLACK);
+      word.setTypeface(null, Typeface.BOLD); word.setTextColor(look.fg);
       top.addView(word, new LinearLayout.LayoutParams(0, -2, 1f));
       TextView cnt = new TextView(MainActivity.this);
-      cnt.setText(knownMode ? "знаю" : w.n + "×"); cnt.setTextSize(13); cnt.setTextColor(Color.GRAY);
+      cnt.setText(knownMode ? "знаю" : w.n + "×"); cnt.setTextSize(13); cnt.setTextColor(look.soft);
       top.addView(cnt, new LinearLayout.LayoutParams(-2, -2));
       v.addView(top);
       String ru = svc != null && svc.learn != null ? svc.learn.wordRu.get(w.w) : null;
       TextView tr = new TextView(MainActivity.this);
-      tr.setText(ru == null ? "…" : ru); tr.setTextSize(Math.max(14, szRu * 1.1f)); tr.setTextColor(0xFF33507A);
+      tr.setText(ru == null ? "…" : ru); tr.setTextSize(Math.max(14, szRu * 1.1f)); tr.setTextColor(look.accent);
       v.addView(tr);
       if (!w.pt.isEmpty()) {
         TextView ex = new TextView(MainActivity.this);
-        ex.setText(w.pt + "\n" + w.ru); ex.setTextSize(Math.max(10, szRu - 3)); ex.setTextColor(Color.GRAY);
+        ex.setText(w.pt + "\n" + w.ru); ex.setTextSize(Math.max(10, szRu - 3)); ex.setTextColor(look.soft);
         ex.setMaxLines(3); ex.setEllipsize(android.text.TextUtils.TruncateAt.END);
         v.addView(ex);
       }
@@ -1396,7 +1399,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     status = new TextView(this); status.setTextSize(15); status.setText("Запуск сервиса…"); v.addView(status);
     // Обновление приложения. Стоит первым в «Системе»: магазина нет, и это единственное место,
     // где человек вообще может узнать, что вышла новая версия.
-    updLbl = new TextView(this); updLbl.setTextSize(13); updLbl.setTextColor(0xFF33507A); updLbl.setPadding(0, 10, 0, 0); v.addView(updLbl);
+    updLbl = new TextView(this); updLbl.setTextSize(13); updLbl.setTextColor(look.accent); updLbl.setPadding(0, 10, 0, 0); v.addView(updLbl);
     LinearLayout rowU = new LinearLayout(this); rowU.setOrientation(LinearLayout.HORIZONTAL);
     bUpdate = new Button(this); bUpdate.setText("проверить обновления"); bUpdate.setTextSize(13);
     rowU.addView(bUpdate, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -1415,7 +1418,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bModules.setOnClickListener(vv -> showModules(modBox.getVisibility() != View.VISIBLE));
     for (String m : Modules.CHOICE) {
       CheckBox cb = new CheckBox(this); cb.setTextSize(15); cb.setText(Modules.title(m)); modBox.addView(cb); modChecks.put(m, cb);
-      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(Color.GRAY); w.setPadding(dp(32), 0, 0, dp(6)); w.setText(Modules.what(m)); modBox.addView(w);
+      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(look.soft); w.setPadding(dp(32), 0, 0, dp(6)); w.setText(Modules.what(m)); modBox.addView(w);
       cb.setOnCheckedChangeListener((vv, on) -> {
         if (uiSync || svc == null) return;
         if (on && svc.store != null && svc.store.bytes(m) > 0 && !svc.store.onPhone(m))
@@ -1427,7 +1430,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bUnused = new Button(this); bUnused.setTextSize(13); bUnused.setText("удалить неиспользуемые модели"); style(bUnused); modBox.addView(bUnused);
     bUnused.setOnClickListener(vv -> unusedDialog());
     showModules(prefs.getBoolean("mods_open", false));
-    TextView ml = new TextView(this); ml.setTextSize(13); ml.setTextColor(Color.GRAY);
+    TextView ml = new TextView(this); ml.setTextSize(13); ml.setTextColor(look.soft);
     ml.setText("Вход: чувствительность и источник"); v.addView(ml);
     // Ползунок показывает то, что сервис применяет на самом деле. Раньше он всегда рисовал +0 дБ,
     // а работало сохранённое значение — настройка врала о собственном состоянии.
@@ -1485,7 +1488,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // что нажали последним.
     bVoices = new Button(this); bVoices.setText("🎤 голоса и авто-направление →"); v.addView(bVoices);
     cloudBox = new LinearLayout(this); cloudBox.setOrientation(LinearLayout.VERTICAL); v.addView(cloudBox);   // прячется без модуля «Облако»
-    TextView kl = new TextView(this); kl.setTextSize(13); kl.setTextColor(Color.GRAY);
+    TextView kl = new TextView(this); kl.setTextSize(13); kl.setTextColor(look.soft);
     kl.setText("Ключ OpenRouter — только бесплатные модели; нужен для названий разговоров и кнопки «получше».");
     cloudBox.addView(kl);
     LinearLayout rowKH = new LinearLayout(this); rowKH.setOrientation(LinearLayout.HORIZONTAL);
@@ -1502,11 +1505,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     cloudBox.addView(rowK);
     // Состояние ключа видно всегда. Поле после сохранения очищается, и без этой строки отличить
     // «сохранён» от «не сохранился» было нельзя — ключ вводили повторно, думая, что он не дошёл.
-    keyState = new TextView(this); keyState.setTextSize(13); keyState.setTextColor(0xFF33507A); cloudBox.addView(keyState);
+    keyState = new TextView(this); keyState.setTextSize(13); keyState.setTextColor(look.accent); cloudBox.addView(keyState);
     bModels = new Button(this); bModels.setText("☁ модели и маршрут"); bModels.setTextSize(13); bModels.setEnabled(false);
     cloudBox.addView(bModels);
     // Файлы моделей на телефоне: что есть по манифесту, докачка необязательного, полная проверка.
-    modelsLbl = new TextView(this); modelsLbl.setTextSize(13); modelsLbl.setTextColor(0xFF33507A); modelsLbl.setPadding(0, 16, 0, 0); modelsLbl.setText("Файлы моделей: проверяю…"); v.addView(modelsLbl);
+    modelsLbl = new TextView(this); modelsLbl.setTextSize(13); modelsLbl.setTextColor(look.accent); modelsLbl.setPadding(0, 16, 0, 0); modelsLbl.setText("Файлы моделей: проверяю…"); v.addView(modelsLbl);
     // Необязательное больше не отдельной кнопкой: его выбирают модулями выше.
     bModelsStop = new Button(this); bModelsStop.setText("стоп загрузки"); bModelsStop.setTextSize(13); bModelsStop.setVisibility(View.GONE); v.addView(bModelsStop);
     tAnyNet = new ToggleButton(this); tAnyNet.setTextOn("качать и по мобильной сети: ВКЛ"); tAnyNet.setTextOff("качать и по мобильной сети: выкл");
@@ -1545,7 +1548,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // на экране до следующей реплики, и в этом положении ответ собеседника пропускается.
     bReadGuard = new Button(this); bReadGuard.setTextSize(13); bReadGuard.setText("🔇 пока читаю вслух"); style(bReadGuard); v.addView(bReadGuard);
     bReadGuard.setOnClickListener(vv -> { if (svc == null) return; svc.setReadGuard((svc.readGuard + 1) % 3); refreshReadGuard(); syncGuard(); });
-    sizeLbl = new TextView(this); sizeLbl.setTextSize(14); sizeLbl.setTextColor(Color.GRAY); v.addView(sizeLbl);
+    sizeLbl = new TextView(this); sizeLbl.setTextSize(14); sizeLbl.setTextColor(look.soft); v.addView(sizeLbl);
     sPt = new SeekBar(this); sPt.setMax(48); sPt.setProgress((int) szPt); v.addView(sPt);
     sRu = new SeekBar(this); sRu.setMax(48); sRu.setProgress((int) szRu); v.addView(sRu);
     SeekBar.OnSeekBarChangeListener sl = new SeekBar.OnSeekBarChangeListener() {
@@ -1558,10 +1561,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // прятать ответы приложения нельзя, поэтому в свёрнутом виде видна последняя строка — то,
     // что приложение ответило на последнее нажатие.
     bLog = new Button(this); bLog.setTextSize(13); style(bLog); v.addView(bLog);
-    logLast = new TextView(this); logLast.setTextSize(13); logLast.setTextColor(Color.DKGRAY);
+    logLast = new TextView(this); logLast.setTextSize(13); logLast.setTextColor(look.dim);
     logLast.setSingleLine(true); logLast.setEllipsize(android.text.TextUtils.TruncateAt.END);
     logLast.setPadding(0, 2, 0, 0); v.addView(logLast);
-    logView = new TextView(this); logView.setTextSize(13); logView.setMovementMethod(new ScrollingMovementMethod()); logView.setTextColor(Color.DKGRAY);
+    logView = new TextView(this); logView.setTextSize(13); logView.setMovementMethod(new ScrollingMovementMethod()); logView.setTextColor(look.dim);
     logScroll = new ScrollView(this); logScroll.addView(logView);
     v.addView(logScroll, new LinearLayout.LayoutParams(-1, dp(260)));
     bLog.setOnClickListener(vv -> showLog(logScroll.getVisibility() != View.VISIBLE));
@@ -1589,14 +1592,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   View buildVoice() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 12, 24, 12);
     bVoiceBack = new Button(this); bVoiceBack.setText("← система"); bVoiceBack.setTextSize(13); v.addView(bVoiceBack);
-    TextView t = new TextView(this); t.setTextSize(13); t.setTextColor(Color.GRAY);
+    TextView t = new TextView(this); t.setTextSize(13); t.setTextColor(look.soft);
     t.setText("Приложение запоминает голос и язык, на котором этот голос говорит. Дальше направление "
             + "перевода берётся из того, чей голос услышан, а не из кнопок. Держите кнопку и говорите "
             + "две-три секунды обычным голосом.");
     v.addView(t);
-    voiceState = new TextView(this); voiceState.setTextSize(15); voiceState.setTextColor(Color.BLACK);
+    voiceState = new TextView(this); voiceState.setTextSize(15); voiceState.setTextColor(look.fg);
     voiceState.setPadding(0, 14, 0, 4); v.addView(voiceState);
-    voiceMsg = new TextView(this); voiceMsg.setTextSize(13); voiceMsg.setTextColor(0xFF33507A); v.addView(voiceMsg);
+    voiceMsg = new TextView(this); voiceMsg.setTextSize(13); voiceMsg.setTextColor(look.accent); v.addView(voiceMsg);
     tLang = new ToggleButton(this); tLang.setTextOn("я говорю: PT"); tLang.setTextOff("я говорю: RU"); tLang.setChecked(false);
     v.addView(tLang);
     LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1793,11 +1796,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Стенд: полоска «как слышно» под кнопками слушания с уровнем, похожим на речь, — тем же
    *  опросом 5 раз в секунду, но без микрофона. Цена полоски на экране (measure_mic_anim.sh). */
   void meterDemo(long ms, int was, boolean wasFolded) {
-    mode(2); hearListen.setBar(true); hearListen.setLine("стенд: полоска уровня", Color.GRAY);
+    mode(2); hearListen.setBar(true); hearListen.setLine("стенд: полоска уровня", look.soft);
     final long end = android.os.SystemClock.uptimeMillis() + ms; final java.util.Random rnd = new java.util.Random(7);
     ui.post(new Runnable() { float lv = -50; public void run() {
       if (android.os.SystemClock.uptimeMillis() >= end) {
-        hearListen.setBar(false); hearListen.setLine(LISTEN_HINT, Color.GRAY);
+        hearListen.setBar(false); hearListen.setLine(LISTEN_HINT, look.soft);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         mode(was); if (wasFolded) fold(true); markListen(); return;
       }
@@ -2010,7 +2013,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     java.util.Set<String> pre = Modules.defaults(totalRam());
     for (String m : Modules.CHOICE) {
       CheckBox cb = new CheckBox(this); cb.setTextSize(15); cb.setText(Modules.title(m)); cb.setChecked(pre.contains(m)); v.addView(cb); setupChecks.put(m, cb);
-      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(Color.GRAY); w.setPadding(dp(32), 0, 0, dp(4)); w.setText(Modules.what(m)); v.addView(w);
+      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(look.soft); w.setPadding(dp(32), 0, 0, dp(4)); w.setText(Modules.what(m)); v.addView(w);
       cb.setOnCheckedChangeListener((vv, on) -> refreshSetup());
     }
     TextView h2 = new TextView(this); h2.setTextSize(17); h2.setTypeface(null, Typeface.BOLD); h2.setPadding(0, 24, 0, 0); h2.setText("3. Модели"); v.addView(h2);
@@ -2023,7 +2026,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bSetupStop = new Button(this); bSetupStop.setText("стоп"); bSetupStop.setVisibility(View.GONE); row.addView(bSetupStop, new LinearLayout.LayoutParams(-2, -2));
     v.addView(row);
     setupBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); setupBar.setMax(1000); setupBar.setVisibility(View.GONE); v.addView(setupBar);
-    setupProg = new TextView(this); setupProg.setTextSize(14); setupProg.setTextColor(Color.DKGRAY); v.addView(setupProg);
+    setupProg = new TextView(this); setupProg.setTextSize(14); setupProg.setTextColor(look.dim); v.addView(setupProg);
     for (Button b : new Button[]{bSetupMic, bSetupDl, bSetupStop}) style(b);
     bSetupMic.setOnClickListener(vv -> askMic());
     bSetupDl.setOnClickListener(vv -> { if (svc != null) svc.setupModules(setupChoice()); });

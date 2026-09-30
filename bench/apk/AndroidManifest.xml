@@ -11,7 +11,7 @@
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
   <!-- Обновление из приложения: магазина нет, иначе о новой версии человек не узнает никогда. -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
-  <application android:label="Falar" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:extractNativeLibs="true" android:largeHeap="true" android:usesCleartextTraffic="true">
+  <application android:label="Falar" android:theme="@style/Falar" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:extractNativeLibs="true" android:largeHeap="true" android:usesCleartextTraffic="true">
     <activity android:name="dev.agenttranslator.MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|keyboardHidden">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
     </activity>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ночная тема Falar — вслед за системой (решение владельца 01.10). На тёмном слива почти не видна,
+     поэтому переключатели и ползунки золотые. -->
+<resources>
+  <style name="Falar" parent="@android:style/Theme.Material.NoActionBar">
+    <item name="android:colorPrimary">#802244</item>
+    <item name="android:colorPrimaryDark">#1D0816</item>
+    <item name="android:colorAccent">#E0B878</item>
+    <item name="android:windowBackground">#15101A</item>
+    <item name="android:statusBarColor">#1D0816</item>
+    <item name="android:navigationBarColor">#15101A</item>
+    <item name="android:windowLightNavigationBar">false</item>
+  </style>
+</resources>
