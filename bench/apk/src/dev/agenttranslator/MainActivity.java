@@ -31,7 +31,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   static final String LISTEN_HINT = "Обе вместе — направление по языку каждой реплики. Микрофон открыт, только пока включено.";
   final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
   boolean meterOn = false, resumed = false;
-  EditText keyIn; ToggleButton tKnown; SeekBar sMic, sHold; TextView micLbl, holdLbl, micVal; Switch cMicAuto;
+  EditText keyIn; SeekBar sMic, sHold; TextView micLbl, holdLbl, micVal; Switch cMicAuto;
   View reviewBox; TextView revWord, revRu, revEx, revStat; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart;
   String revCur; boolean revOpen;
   Switch tCtx; ToggleButton tAuto, tLang, tListenPt, tListenRu;
@@ -39,7 +39,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Какой раздел открыт: 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск ·
    *  5 модули и файлы · 6 облако · 7 журнал (5–7 открываются из настроек). */
   int screen = 0;
-  ListView wordList; TextView learnHint; SeekBar sMin;
+  ListView wordList; TextView learnHint, minVal;
+  /** «Слова»: учу или знаю, порог «встречалось не меньше», строка порога, карточка повторения. */
+  Rows.Seg segKnown; boolean wordsKnown; int wordsMin = 3; View stepperRow, revCard;
   TranslatorService svc;
   /** Панель ☰ поверх экрана и затемнение под ней. */
   ListView chatList; View sidePanel, scrim; SeekBar sPt, sRu;
@@ -80,7 +82,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
-    look = new Look(this);
+    look = new Look(this); rows = new Rows(this, look);
     // Камера занимает много памяти, и пока она открыта, система выгружает Falar; снимок потом
     // приходит в заново созданный экран. Адрес снимка и ждущий снимок — из сохранённого состояния,
     // иначе снимок терялся молча (владелец, 29.09: «реальная картинка из камеры не прилетела»).
@@ -116,8 +118,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     top.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
     sidePanel = buildSide(); sidePanel.setVisibility(View.GONE);
     top.addView(sidePanel, new FrameLayout.LayoutParams(dp(318), -1, Gravity.START));
-    for (Button btn : new Button[]{bVoice, bVoice2, bWord, bClear, bVoiceBack, bForget}) style(btn);
-    for (ToggleButton tg : new ToggleButton[]{tAuto, tLang, tKnown}) style(tg);
+    for (Button btn : new Button[]{bVoice, bVoice2, bVoiceBack, bForget}) style(btn);
+    for (ToggleButton tg : new ToggleButton[]{tAuto, tLang}) style(tg);
     setContentView(top); rootView = top;
     show(0); applySizes();
 
@@ -288,17 +290,27 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     ttl.setOnClickListener(x -> { if (screen == 0) memoDialog(); });
     ttl.setOnLongClickListener(x -> { if (screen != 0) return false; memoDialog(); return true; });
     abNav.setOnClickListener(x -> { if (screen == 0) drawer(sidePanel.getVisibility() != View.VISIBLE); else onBackPressed(); });
-    abAct.setOnClickListener(x -> { if (screen == 0) newChat(); });
+    abAct.setOnClickListener(x -> { if (screen == 0) newChat(); else if (screen == 1) wordsMenu(); });
     return bar;
   }
 
-  /** Шапка под раздел: у разговора — ☰, название и «＋»; у остальных — «←» и имя раздела. */
+  /** «⋯» в шапке «Слов»: очистить выученное — редкое и необратимое, поэтому не на экране. */
+  void wordsMenu() {
+    PopupMenu pm = new PopupMenu(this, abAct);
+    pm.getMenu().add(0, 1, 0, "Очистить выученное…").setEnabled(bClear != null && bClear.isEnabled());
+    pm.setOnMenuItemClickListener(it -> { if (it.getItemId() == 1) bClear.performClick(); return true; });
+    pm.show();
+  }
+
+  /** Шапка под раздел: у разговора — ☰, название и «＋»; у «Слов» — «←» и «⋯»; у остальных — «←». */
   void refreshAppBar() {
     if (abTitle == null) return;
     boolean talk = screen == 0;
     abNav.setImageDrawable(icon(talk ? app.falar.R.drawable.ic_menu : app.falar.R.drawable.ic_back, 0xFFFFFFFF));
     abNav.setContentDescription(talk ? "Разговоры, слова, настройки" : "Назад");
-    abAct.setVisibility(talk ? View.VISIBLE : View.GONE);
+    abAct.setVisibility(talk || screen == 1 ? View.VISIBLE : View.GONE);
+    abAct.setImageDrawable(icon(talk ? app.falar.R.drawable.ic_plus : app.falar.R.drawable.ic_more, 0xFFFFFFFF));
+    abAct.setContentDescription(talk ? "Новый разговор" : "Ещё");
     if (talk) { refreshHint(); return; }
     abTitle.setText(screen == 1 ? "Слова" : screen == 2 ? "Настройки" : screen == 3 ? "Голоса" : screen == 5 ? "Модули и файлы" : screen == 6 ? "Облако" : screen == 7 ? "Журнал" : "Falar");
     hint.setText(screen == 1 ? "из ваших разговоров" : ""); hint.setVisibility(screen == 1 ? View.VISIBLE : View.GONE);
@@ -1375,65 +1387,124 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     } catch (Throwable t) { return null; }
   }
 
-  /** Экран изучения: частотные слова португальской стороны собственных разговоров.
-   *  Смысл в отборе: показываем не весь словарь, а то, что уже понадобилось несколько раз. */
+  /** «Слова» (прежде «Изучение»): частотные слова португальской стороны собственных разговоров.
+   *  Смысл в отборе: показываем не весь словарь, а то, что уже понадобилось несколько раз.
+   *
+   *  Сверху — «Учу / Знаю» сегментами со счётчиками (прежде кнопка «показываю: учу») и порог
+   *  «встречалось не меньше N раз» кнопками −/+ (прежде ползунок без подписи). Ниже — карточка
+   *  «Повторение на слух», слова карточками, внизу — своё слово. «Очистить выученное» — в «⋯» шапки:
+   *  действие редкое и необратимое. Макет — design/mockups/index.html. */
   View buildLearn() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 12, 24, 12);
-    learnHint = new TextView(this); learnHint.setTextSize(13); learnHint.setTextColor(look.soft);
-    learnHint.setText("Слова из ваших разговоров, от частых к редким"); v.addView(learnHint);
-    tKnown = new ToggleButton(this); tKnown.setTextOff("показываю: учу"); tKnown.setTextOn("показываю: знаю");
-    tKnown.setChecked(false); v.addView(tKnown);
-    tKnown.setOnCheckedChangeListener((vv, on) -> refreshWords());
-    sMin = new SeekBar(this); sMin.setMax(9); sMin.setProgress(2); v.addView(sMin);   // порог: от 1 до 10 повторов
-    sMin.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-      public void onProgressChanged(SeekBar sb, int p, boolean u) { if (u) refreshWords(); }
-      public void onStartTrackingTouch(SeekBar sb) {}
-      public void onStopTrackingTouch(SeekBar sb) {}
-    });
-    bRevStart = new Button(this); bRevStart.setText("▶ повторение на слух"); v.addView(bRevStart);
-    v.addView(reviewBox = buildReview());
-    reviewBox.setVisibility(View.GONE);
-    wordList = new ListView(this);
+    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setBackgroundColor(look.bg);
+    LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.VERTICAL); top.setPadding(dp(12), dp(12), dp(12), dp(4));
+    segKnown = rows.seg(top, new String[]{"Учу", "Знаю"}, i -> { wordsKnown = i == 1; refreshWords(); });
+    segKnown.sel(0);
+    LinearLayout st = new LinearLayout(this); st.setOrientation(LinearLayout.HORIZONTAL); st.setGravity(Gravity.CENTER_VERTICAL);
+    st.setPadding(dp(4), dp(10), 0, 0);
+    TextView a = new TextView(this); a.setText("встречалось не меньше"); a.setTextSize(13.5f); a.setTextColor(look.dim);
+    st.addView(a);
+    LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.HORIZONTAL); box.setGravity(Gravity.CENTER_VERTICAL);
+    box.setBackground(rows.round(look.bg, 18, look.line));
+    TextView minus = stepBtn("−"), plus = stepBtn("+");
+    minVal = new TextView(this); minVal.setTextSize(15); minVal.setTypeface(null, Typeface.BOLD); minVal.setTextColor(look.fg);
+    minVal.setGravity(Gravity.CENTER); minVal.setMinWidth(dp(24)); minVal.setText(String.valueOf(wordsMin));
+    box.addView(minus, new LinearLayout.LayoutParams(dp(36), dp(34))); box.addView(minVal); box.addView(plus, new LinearLayout.LayoutParams(dp(36), dp(34)));
+    LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-2, -2); bp.leftMargin = dp(10); bp.rightMargin = dp(10);
+    st.addView(box, bp);
+    TextView b = new TextView(this); b.setText("раз"); b.setTextSize(13.5f); b.setTextColor(look.dim); st.addView(b);
+    top.addView(st); stepperRow = st;
+    // Порог — от 1 до 10 повторов, как у прежнего ползунка.
+    minus.setOnClickListener(x -> { if (wordsMin > 1) { wordsMin--; minVal.setText(String.valueOf(wordsMin)); refreshWords(); } });
+    plus.setOnClickListener(x -> { if (wordsMin < 10) { wordsMin++; minVal.setText(String.valueOf(wordsMin)); refreshWords(); } });
+    learnHint = new TextView(this); learnHint.setTextSize(12); learnHint.setTextColor(look.soft); learnHint.setPadding(dp(4), dp(8), dp(4), 0);
+    learnHint.setText("Слова из ваших разговоров, от частых к редким"); top.addView(learnHint);
+    v.addView(top);
+    v.addView(revCard = buildReview());
+    wordList = new ListView(this); wordList.setDivider(null);
     v.addView(wordList, new LinearLayout.LayoutParams(-1, 0, 1f));
     // Свои слова — часть словаря, а не настройка приложения: имя, улица, название отеля.
     // Отсюда их видно рядом с тем, что уже выучено.
-    LinearLayout rowW = new LinearLayout(this); rowW.setOrientation(LinearLayout.HORIZONTAL);
-    wordIn = new EditText(this); wordIn.setHint("своё слово: отель, улица, имя"); wordIn.setSingleLine(true); wordIn.setTextSize(15);
-    rowW.addView(wordIn, new LinearLayout.LayoutParams(0, -2, 1f));
-    bWord = new Button(this); bWord.setText("＋"); bWord.setEnabled(false); rowW.addView(bWord, new LinearLayout.LayoutParams(-2, -2));
+    LinearLayout rowW = new LinearLayout(this); rowW.setOrientation(LinearLayout.HORIZONTAL); rowW.setGravity(Gravity.CENTER_VERTICAL);
+    rowW.setPadding(dp(12), dp(10), dp(12), dp(10));
+    android.graphics.drawable.GradientDrawable top1 = rows.round(look.bg, 0, 0);
+    android.graphics.drawable.LayerDrawable bar = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{rows.round(look.hair, 0, 0), top1});
+    bar.setLayerInset(1, 0, Math.max(1, dp(1)), 0, 0); rowW.setBackground(bar);
+    wordIn = new EditText(this); wordIn.setHint("Своё слово: отель, улица, имя"); wordIn.setSingleLine(true); wordIn.setTextSize(14.5f);
+    wordIn.setBackground(rows.round(look.card, 22, look.line)); wordIn.setPadding(dp(16), dp(8), dp(16), dp(8));
+    rowW.addView(wordIn, new LinearLayout.LayoutParams(0, dp(44), 1f));
+    bWord = new Button(this); bWord.setText("+"); bWord.setTextSize(22); bWord.setTextColor(0xFFFFFFFF); bWord.setEnabled(false);
+    bWord.setPadding(0, 0, 0, dp(2)); bWord.setStateListAnimator(null); bWord.setMinWidth(0); bWord.setMinimumWidth(0); bWord.setMinHeight(0); bWord.setMinimumHeight(0);
+    android.graphics.drawable.StateListDrawable wb = new android.graphics.drawable.StateListDrawable();
+    wb.addState(new int[]{-android.R.attr.state_enabled}, rows.round(look.offBg, 22, look.offLine));
+    wb.addState(new int[]{android.R.attr.state_pressed}, rows.round(Look.DEEP, 22, 0));
+    wb.addState(new int[]{}, rows.round(Look.PLUM, 22, 0));
+    bWord.setBackground(wb); bWord.setContentDescription("Добавить своё слово");
+    LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(dp(44), dp(44)); wp.leftMargin = dp(8);
+    rowW.addView(bWord, wp);
     v.addView(rowW);
-    bClear = new Button(this); bClear.setText("🧹 очистить выученное"); bClear.setEnabled(false); bClear.setTextSize(13); v.addView(bClear);
-    bRevStart.setOnClickListener(x -> { revOpen = !revOpen; reviewBox.setVisibility(revOpen ? View.VISIBLE : View.GONE);
-      bRevStart.setText(revOpen ? "✕ закрыть повторение" : "▶ повторение на слух");
-      if (revOpen) nextReview(); });
+    // «Очистить выученное» — из «⋯» шапки; сама кнопка на экране больше не стоит.
+    bClear = new Button(this); bClear.setEnabled(false);
     return v;
+  }
+  TextView stepBtn(String t) {
+    TextView x = new TextView(this); x.setText(t); x.setTextSize(19); x.setTypeface(null, Typeface.BOLD); x.setGravity(Gravity.CENTER);
+    x.setTextColor(look.night ? Look.GOLD : Look.PLUM); x.setBackground(rows.press(0)); x.setClickable(true); x.setOnTouchListener(haptic);
+    return x;
   }
 
   /** Повторение на слух: приложение произносит слово, ответ закрыт, пока не попросят показать.
-   *  Смысл именно в этом порядке — слово надо узнать ухом, а не прочитать. */
+   *  Смысл именно в этом порядке — слово надо узнать ухом, а не прочитать. Карточка — сливовая, как
+   *  шапка: свёрнутая — приглашение и «Начать», развёрнутая — само повторение. */
   View buildReview() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL);
-    v.setPadding(18, 18, 18, 18);
-    v.setBackgroundColor(look.tint);
-    revStat = new TextView(this); revStat.setTextSize(12); revStat.setTextColor(look.soft); v.addView(revStat);
-    revWord = new TextView(this); revWord.setTextSize(26); revWord.setTypeface(null, Typeface.BOLD);
-    revWord.setTextColor(look.fg); revWord.setText("слушайте"); v.addView(revWord);
-    revRu = new TextView(this); revRu.setTextSize(19); revRu.setTextColor(look.accent); v.addView(revRu);
-    revEx = new TextView(this); revEx.setTextSize(12); revEx.setTextColor(look.soft); revEx.setMaxLines(3); v.addView(revEx);
-    LinearLayout r = new LinearLayout(this); r.setOrientation(LinearLayout.HORIZONTAL);
-    bRevPlay = new Button(this); bRevPlay.setText("🔊 ещё раз"); r.addView(bRevPlay, new LinearLayout.LayoutParams(0, -2, 1f));
-    bRevShow = new Button(this); bRevShow.setText("показать"); r.addView(bRevShow, new LinearLayout.LayoutParams(0, -2, 1f));
+    LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
+    android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+        look.night ? new int[]{0xFF4A1530, 0xFF1D0816} : new int[]{Look.PLUM, Look.DEEP});
+    g.setCornerRadius(dp(18)); card.setBackground(g); card.setPadding(dp(16), dp(14), dp(14), dp(14));
+    LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2); cp.setMargins(dp(12), dp(8), dp(12), dp(6)); card.setLayoutParams(cp);
+    LinearLayout head = new LinearLayout(this); head.setOrientation(LinearLayout.HORIZONTAL); head.setGravity(Gravity.CENTER_VERTICAL);
+    LinearLayout ht = new LinearLayout(this); ht.setOrientation(LinearLayout.VERTICAL);
+    TextView t1 = new TextView(this); t1.setText("Повторение на слух"); t1.setTextSize(16); t1.setTypeface(null, Typeface.BOLD); t1.setTextColor(0xFFFFFFFF);
+    TextView t2 = new TextView(this); t2.setText("слово звучит — ответ скрыт, пока не попросите"); t2.setTextSize(12.5f); t2.setTextColor(0xCCFFFFFF);
+    ht.addView(t1); ht.addView(t2);
+    head.addView(ht, new LinearLayout.LayoutParams(0, -2, 1f));
+    bRevStart = cardBtn("▶  Начать", true);
+    head.addView(bRevStart, new LinearLayout.LayoutParams(-2, dp(40)));
+    card.addView(head);
+    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(0, dp(12), 0, 0);
+    revStat = new TextView(this); revStat.setTextSize(12); revStat.setTextColor(0xB3FFFFFF); v.addView(revStat);
+    revWord = new TextView(this); revWord.setTextSize(28); revWord.setTypeface(null, Typeface.BOLD);
+    revWord.setTextColor(0xFFFFFFFF); revWord.setText("слушайте"); v.addView(revWord);
+    revRu = new TextView(this); revRu.setTextSize(19); revRu.setTextColor(Look.GOLD); v.addView(revRu);
+    revEx = new TextView(this); revEx.setTextSize(12.5f); revEx.setTextColor(0xB3FFFFFF); revEx.setMaxLines(3); v.addView(revEx);
+    LinearLayout r = new LinearLayout(this); r.setOrientation(LinearLayout.HORIZONTAL); r.setPadding(0, dp(10), 0, 0);
+    bRevPlay = cardBtn("Ещё раз", false); bRevShow = cardBtn("Показать", false);
+    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(40), 1f); lp.rightMargin = dp(8);
+    r.addView(bRevPlay, lp); r.addView(bRevShow, new LinearLayout.LayoutParams(0, dp(40), 1f));
     v.addView(r);
-    LinearLayout r2 = new LinearLayout(this); r2.setOrientation(LinearLayout.HORIZONTAL);
-    bRevOk = new Button(this); bRevOk.setText("помню"); r2.addView(bRevOk, new LinearLayout.LayoutParams(0, -2, 1f));
-    bRevNo = new Button(this); bRevNo.setText("забыл"); r2.addView(bRevNo, new LinearLayout.LayoutParams(0, -2, 1f));
+    LinearLayout r2 = new LinearLayout(this); r2.setOrientation(LinearLayout.HORIZONTAL); r2.setPadding(0, dp(8), 0, 0);
+    bRevOk = cardBtn("Помню", true); bRevNo = cardBtn("Забыл", false);
+    r2.addView(bRevOk, new LinearLayout.LayoutParams(lp)); r2.addView(bRevNo, new LinearLayout.LayoutParams(0, dp(40), 1f));
     v.addView(r2);
-    for (Button b : new Button[]{bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart}) if (b != null) style(b);
+    card.addView(v);
+    reviewBox = v; reviewBox.setVisibility(View.GONE);
     bRevPlay.setOnClickListener(x -> { if (svc != null && revCur != null) svc.sayWord(revCur, "pt"); });
     bRevShow.setOnClickListener(x -> reveal());
     bRevOk.setOnClickListener(x -> answer(true));
     bRevNo.setOnClickListener(x -> answer(false));
-    return v;
+    bRevStart.setOnClickListener(x -> { revOpen = !revOpen; reviewBox.setVisibility(revOpen ? View.VISIBLE : View.GONE);
+      bRevStart.setText(revOpen ? "Закрыть" : "▶  Начать");
+      if (revOpen) nextReview(); });
+    return card;
+  }
+  /** Кнопка на сливовой карточке: золотая (главная) или белой рамкой. */
+  Button cardBtn(String text, boolean gold) {
+    Button b = new Button(this); b.setAllCaps(false); b.setText(text); b.setTextSize(14); b.setTypeface(null, Typeface.BOLD);
+    b.setStateListAnimator(null); b.setMinHeight(0); b.setMinimumHeight(0); b.setPadding(dp(16), 0, dp(16), 0); b.setOnTouchListener(haptic);
+    android.graphics.drawable.StateListDrawable sl = new android.graphics.drawable.StateListDrawable();
+    sl.addState(new int[]{android.R.attr.state_pressed}, rows.round(gold ? 0xFFC99F5E : 0x33FFFFFF, 20, gold ? 0 : 0x66FFFFFF));
+    sl.addState(new int[]{}, rows.round(gold ? Look.GOLD : 0, 20, gold ? 0 : 0x66FFFFFF));
+    b.setBackground(sl); b.setTextColor(gold ? Look.DEEP : 0xFFFFFFFF);
+    return b;
   }
 
   void nextReview() {
@@ -1468,35 +1539,47 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   final java.util.List<String> shownWords = new java.util.ArrayList<>();
 
-  /** Строка изучения: слово крупно, рядом перевод самого слова, ниже мелко пример из разговора.
-   *  Нажатие произносит слово — заучивают на слух, а не глазами. Долгое отмечает «знаю». */
+  /** Строка «Слов»: слово крупно, рядом сколько раз встретилось, ниже перевод самого слова и мелко —
+   *  пример из разговора. Нажатие произносит слово — заучивают на слух, а не глазами; значок 🔊 справа
+   *  только напоминает об этом (есть, когда есть озвучка): отдельная кнопка в строке списка отнимала
+   *  бы касание у самой строки. Долгое нажатие — «знаю» или назад в изучение. */
   class WordRow extends ArrayAdapter<Learn.Word> {
-    final boolean knownMode;
-    WordRow(java.util.List<Learn.Word> l, boolean km) { super(MainActivity.this, 0, l); knownMode = km; }
+    final boolean knownMode, say;
+    WordRow(java.util.List<Learn.Word> l, boolean km) { super(MainActivity.this, 0, l); knownMode = km; say = svc != null && svc.mod(Modules.TTS); }
     @Override public View getView(int pos, View cv, ViewGroup parent) {
-      LinearLayout v = new LinearLayout(MainActivity.this);
-      v.setOrientation(LinearLayout.VERTICAL); v.setPadding(12, 14, 12, 14);
+      LinearLayout row = new LinearLayout(MainActivity.this); row.setOrientation(LinearLayout.HORIZONTAL);
+      row.setPadding(dp(16), dp(11), dp(14), dp(11));
+      android.graphics.drawable.LayerDrawable bl = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{rows.round(look.hair, 0, 0), rows.round(look.bg, 0, 0)});
+      bl.setLayerInset(1, 0, 0, 0, Math.max(1, dp(1))); row.setBackground(bl);
+      LinearLayout v = new LinearLayout(MainActivity.this); v.setOrientation(LinearLayout.VERTICAL);
       Learn.Word w = getItem(pos);
-      LinearLayout top = new LinearLayout(MainActivity.this); top.setOrientation(LinearLayout.HORIZONTAL);
+      LinearLayout top = new LinearLayout(MainActivity.this); top.setOrientation(LinearLayout.HORIZONTAL); top.setBaselineAligned(true);
       TextView word = new TextView(MainActivity.this);
-      word.setText(w.w); word.setTextSize(Math.max(18, szPt * 0.62f));
-      word.setTypeface(null, Typeface.BOLD); word.setTextColor(look.fg);
-      top.addView(word, new LinearLayout.LayoutParams(0, -2, 1f));
+      word.setText(w.w); word.setTextSize(20); word.setTypeface(null, Typeface.BOLD); word.setTextColor(look.fg);
+      top.addView(word);
       TextView cnt = new TextView(MainActivity.this);
-      cnt.setText(knownMode ? "знаю" : w.n + "×"); cnt.setTextSize(13); cnt.setTextColor(look.soft);
-      top.addView(cnt, new LinearLayout.LayoutParams(-2, -2));
+      cnt.setText(knownMode ? "знаю" : w.n + "×"); cnt.setTextSize(12); cnt.setTextColor(look.soft); cnt.setPadding(dp(8), 0, 0, 0);
+      top.addView(cnt);
       v.addView(top);
       String ru = svc != null && svc.learn != null ? svc.learn.wordRu.get(w.w) : null;
       TextView tr = new TextView(MainActivity.this);
-      tr.setText(ru == null ? "…" : ru); tr.setTextSize(Math.max(14, szRu * 1.1f)); tr.setTextColor(look.accent);
+      tr.setText(ru == null ? "…" : ru); tr.setTextSize(16); tr.setTextColor(look.night ? Look.GOLD : Look.PLUM);
       v.addView(tr);
       if (!w.pt.isEmpty()) {
         TextView ex = new TextView(MainActivity.this);
-        ex.setText(w.pt + "\n" + w.ru); ex.setTextSize(Math.max(10, szRu - 3)); ex.setTextColor(look.soft);
+        ex.setText(w.pt + "\n" + w.ru); ex.setTextSize(12.5f); ex.setTextColor(look.dim); ex.setLineSpacing(0, 1.1f); ex.setPadding(0, dp(3), 0, 0);
         ex.setMaxLines(3); ex.setEllipsize(android.text.TextUtils.TruncateAt.END);
         v.addView(ex);
       }
-      return v;
+      row.addView(v, new LinearLayout.LayoutParams(0, -2, 1f));
+      if (say) {
+        ImageView sp = new ImageView(MainActivity.this); sp.setScaleType(ImageView.ScaleType.CENTER);
+        android.graphics.drawable.Drawable d = icon(app.falar.R.drawable.ic_speaker, look.night ? Look.GOLD : Look.PLUM); d.setBounds(0, 0, dp(18), dp(18));
+        sp.setImageDrawable(d); sp.setBackground(rows.round(look.card, 18, look.line));
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(dp(36), dp(36)); sl.topMargin = dp(4); sl.leftMargin = dp(10);
+        row.addView(sp, sl);
+      }
+      return row;
     }
   }
 
@@ -1505,13 +1588,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  кэш по отпечатку файлов, и ползунок только фильтрует готовые счётчики. */
   void refreshWords() {
     if (svc == null || svc.learn == null) { learnHint.setText("движок ещё грузится"); return; }
-    final boolean knownMode = tKnown != null && tKnown.isChecked();
-    final int min = sMin.getProgress() + 1;
+    final boolean knownMode = wordsKnown;
+    final int min = wordsMin;
     final int req = ++wordsReq;
-    sMin.setVisibility(knownMode ? View.GONE : View.VISIBLE);
+    if (stepperRow != null) stepperRow.setVisibility(knownMode ? View.GONE : View.VISIBLE);
     new Thread(() -> {
       final java.util.List<Learn.Word> l = knownMode ? svc.learn.knownWords() : svc.learn.top(min, 200);
-      runOnUiThread(() -> { if (req == wordsReq) showWords(l, knownMode, min); });
+      // Счётчики на сегментах — «Учу · 200», «Знаю · 48»: второй список тоже из кэша разбора.
+      final int nLearn = knownMode ? svc.learn.top(min, 200).size() : l.size(), nKnown = knownMode ? l.size() : svc.learn.knownWords().size();
+      runOnUiThread(() -> { if (req != wordsReq) return;
+        showWords(l, knownMode, min);
+        Rows.label(segKnown, 0, "Учу · " + nLearn); Rows.label(segKnown, 1, "Знаю · " + nKnown); });
     }, "words").start();
   }
   void showWords(java.util.List<Learn.Word> l, final boolean knownMode, int min) {
@@ -1519,7 +1606,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     shownWords.clear();
     for (Learn.Word w : l) shownWords.add(w.w);
     String say = svc.mod(Modules.TTS) ? "нажатие произносит, " : "";
-    if (knownMode) learnHint.setText(l.isEmpty() ? "Известных слов пока нет — отмечайте их долгим нажатием во вкладке «учу»"
+    if (knownMode) learnHint.setText(l.isEmpty() ? "Известных слов пока нет — отмечайте их долгим нажатием в «Учу»"
                                                  : "Знаю: " + l.size() + " слов · " + say + "долгое возвращает в изучение");
     else learnHint.setText(l.isEmpty()
           ? "Пока нечего показать: нужно, чтобы слово встретилось не меньше " + min + " раз"
@@ -1549,7 +1636,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  из нескольких значений — сегменты. Ничего не убрано: где что теперь — в таблице макета
    *  design/mockups/index.html. Пункты модулей прячутся без модуля, как раньше. */
   View buildSys() {
-    Rows r = rows = new Rows(this, look);
+    Rows r = rows;
     LinearLayout v = r.page();
     // Обновление — первой карточкой: магазина нет, и это единственное место, где видно новую версию.
     updCard = new LinearLayout(this); updCard.setOrientation(LinearLayout.HORIZONTAL); updCard.setGravity(Gravity.CENTER_VERTICAL);
@@ -2273,7 +2360,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (svc == null) return;
     java.util.Set<String> on = svc.modules;
     boolean tts = on.contains(Modules.TTS), cloud = on.contains(Modules.CLOUD), llm = on.contains(Modules.LLM);
-    vis(ttsBox, tts); vis(bRevStart, tts);
+    vis(ttsBox, tts); vis(revCard, tts);
     if (!tts && revOpen && bRevStart != null) bRevStart.performClick();          // повторение на слух без голоса бессмысленно
     vis(cloudBox, cloud); vis(llmBox, llm); vis(grpTr, cloud || llm);
     vis(bVoices, on.contains(Modules.SPEAKER));

@@ -134,6 +134,8 @@ final class Rows {
       }
     }
   }
+  /** Подпись сегмента заново — «Учу · 200»: число меняется, место и выбор остаются. */
+  static void label(Seg s, int i, String text) { if (i >= 0 && i < s.o.length) s.o[i].setText(text); }
   Seg seg(LinearLayout parent, String[] labels, IntConsumer on) {
     Seg s = new Seg(); s.look = look; s.r = this; s.on = on;
     s.v = new LinearLayout(c); s.v.setOrientation(LinearLayout.HORIZONTAL);
