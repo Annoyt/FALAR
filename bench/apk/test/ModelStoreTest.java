@@ -478,6 +478,22 @@ public class ModelStoreTest {
     eq(ModelStore.autoUpgradeBlock(as, false, false, true, -1, 500), null, "A7 место неизвестно — не мешаем");
 
     System.out.println(fails == 0 ? "ModelStore: " + checks + " проверок, все прошли" : "ModelStore: провалов " + fails + " из " + checks);
+    // ---- ход модуля: целые файлы и недокачанные .part — для полосы загрузки у модуля
+    {
+      byte[] ma = rnd(1000, 21), mb2 = rnd(3000, 22);
+      String mman = "{\"manifest_version\":1,\"app\":\"0.25.0\",\"files\":["
+          + file("llm/a.bin", ma, "optional", hf("a.bin")).replace("}", ",\"module\":\"llm\"}") + ","
+          + file("llm/b.bin", mb2, "optional", hf("b.bin")).replace("}", ",\"module\":\"llm\"}") + "]}";
+      File mdir = tmpDir("mod"); mdir.mkdirs(); new File(mdir, "llm").mkdirs();
+      ModelStore ms = new ModelStore(mdir, mman, () -> true, x -> {}, l -> {});
+      eq(ms.doneBytes("llm"), 0L, "D1 ничего нет — 0");
+      Files.write(new File(mdir, "llm/a.bin").toPath(), ma);
+      Files.write(new File(mdir, "llm/b.bin.part").toPath(), Arrays.copyOf(mb2, 1200));
+      eq(ms.doneBytes("llm"), 1000L + 1200L, "D2 целый файл и недокачанный кусок");
+      eq(ms.bytes("llm"), 4000L, "D2 всего по манифесту");
+      eq(ms.doneBytes("tts"), 0L, "D3 чужой модуль — 0");
+    }
+
     return fails;
   }
   public static void main(String[] a) throws Exception { System.exit(run() == 0 ? 0 : 1); }

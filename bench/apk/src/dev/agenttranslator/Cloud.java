@@ -22,13 +22,24 @@ import org.json.*;
  * По той же причине здесь нет «openrouter/auto»: чужая маршрутизация уводит на платную модель.
  *
  * Формат models/openrouter.json:
- *   {"key": "sk-or-...", "models": ["...:free"], "pick": "",
+ *   {"key": "sk-or-...", "keys": ["sk-or-...", "sk-or-..."], "models": ["...:free"], "pick": "",
  *    "m": {"id": {"free":true,"img":false,"txt":true,"caps":true,"ok":3,"fail":0,"ms":1800}}}
  * Старый файл без "m"/"pick" читается как раньше; цены в нём не подтверждены, поэтому первое
  * же обращение к облаку их запрашивает, а до подтверждения ни один запрос не уходит.
+ *
+ * Ключей может быть несколько (владелец 30.09: «сделать возможность добавить несколько ключей»).
+ * Запросы идут с первого; если OpenRouter его не принял (401, 402), тот же запрос уходит со
+ * следующего, а отвергнутый уходит в конец списка с пометкой. На 429 («лимит») не переключаемся:
+ * по справке OpenRouter лимит бесплатных запросов считается на аккаунт, и дополнительные ключи и
+ * аккаунты его не меняют. "key" — всегда первый ключ списка: его читают и сборки до списка ключей.
  */
 public class Cloud {
   public volatile boolean ready; volatile String key; public volatile String[] models;
+  /** Все ключи по порядку; первый — тот, с которого идут запросы (он же key). Под io. */
+  final List<String> keys = new ArrayList<>();
+  /** Пометки ключей, которые OpenRouter не принял: ключ → «не принят: HTTP 401 · 16:05». */
+  final Map<String, String> keyNote = new HashMap<>();
+  volatile int lastAuthCode;
   final File dir;
   /** Замок на состояние и файл. Сеть под ним не держим: configure() ждёт ответа до 20 с,
    *  а choose() вызывается с UI-потока — под общим замком это был бы ANR. */
@@ -90,6 +101,9 @@ public class Cloud {
       if (f.exists()) {
         JSONObject j = new JSONObject(new String(Files.readAllBytes(f.toPath()), "UTF-8"));
         k = j.optString("key", "");
+        JSONArray ka = j.optJSONArray("keys");
+        if (ka != null) for (int i = 0; i < ka.length(); i++) { String x = ka.optString(i, "").trim(); if (!x.isEmpty() && !keys.contains(x)) keys.add(x); }
+        if (k != null && !k.isEmpty()) { keys.remove(k); keys.add(0, k); }   // "key" — первый: так его писали и прежние сборки
         p = j.optString("pick", "");
         JSONArray a = j.optJSONArray("models");
         if (a != null) {
@@ -113,17 +127,55 @@ public class Cloud {
         }
       }
     } catch (Exception e) { e.printStackTrace(); }
-    key = k; models = m; pick = p == null ? "" : p;
+    key = keys.isEmpty() ? null : keys.get(0); models = m; pick = p == null ? "" : p;
     if (!pick.isEmpty() && !has(pick)) pick = "";     // модель исчезла из бесплатных — выбор недействителен
     ready = key != null && !key.isEmpty() && models != null && models.length > 0;
   }
 
   public String keyTail() { return key == null || key.length() < 6 ? "" : "…" + key.substring(key.length() - 6); }
   /** Начало и хвост ключа: по ним свой ключ узнаётся, а целиком он на экране не нужен. */
-  public String keyId() {
-    if (key == null || key.isEmpty()) return "";
-    return key.length() <= 18 ? key.substring(0, Math.min(6, key.length())) + "…"
-                              : key.substring(0, 13) + "…" + key.substring(key.length() - 4);
+  public String keyId() { return idOf(key); }
+  public static String idOf(String k) {
+    if (k == null || k.isEmpty()) return "";
+    return k.length() <= 18 ? k.substring(0, Math.min(6, k.length())) + "…"
+                            : k.substring(0, 13) + "…" + k.substring(k.length() - 4);
+  }
+  /** Ключи по порядку: первый — рабочий. */
+  public List<String> keys() { synchronized (io) { return new ArrayList<>(keys); } }
+  /** Пометка ключа, который OpenRouter не принял; пусто — пометки нет. */
+  public String note(String k) { synchronized (io) { String n = keyNote.get(k); return n == null ? "" : n; } }
+
+  /** Убрать один ключ. Рабочим становится следующий; ключей не осталось — облако выключено. */
+  public String removeKey(String k) {
+    if (k == null) return "ключа нет";
+    String id = idOf(k);
+    synchronized (io) {
+      if (!keys.remove(k)) return "ключа " + id + " нет";
+      keyNote.remove(k);
+      key = keys.isEmpty() ? null : keys.get(0);
+      if (key == null) models = null;
+      ready = key != null && models != null && models.length > 0;
+      save();
+    }
+    return "ключ " + id + " убран" + (key == null ? " — ключей не осталось, облако выключено" : ", запросы идут с " + keyId());
+  }
+
+  /** OpenRouter не принял рабочий ключ (401, 402): пометить его, отправить в конец списка и взять
+   *  следующий без пометки. Нет такого — false, и перебор останавливается, как раньше. */
+  boolean useNextKey(int code) {
+    synchronized (io) {
+      String bad = key; if (bad == null) return false;
+      keyNote.put(bad, "не принят OpenRouter: HTTP " + code + " · " + new java.text.SimpleDateFormat("HH:mm", Locale.ROOT).format(new Date()));
+      String next = null;
+      for (String k : keys) if (!keyNote.containsKey(k)) { next = k; break; }
+      if (next == null) return false;
+      keys.remove(bad); keys.add(bad);
+      keys.remove(next); keys.add(0, next);
+      key = next;
+      save();
+    }
+    lastError = "ключ не принят (HTTP " + code + "), дальше — с " + keyId();
+    return true;
   }
   public int modelCount() { return models == null ? 0 : models.length; }
   /** Сколько моделей с подтверждённой ценой: остальные не отправляются вовсе. */
@@ -249,10 +301,11 @@ public class Cloud {
    *  и опечатка затирала рабочий ключ, оставляя рядом список моделей, полученный под прежним. */
   public String configure(String newKey) {
     if (newKey == null || newKey.trim().isEmpty()) {
-      synchronized (io) { key = null; models = null; ready = false; save(); }
-      return "ключ убран";
+      synchronized (io) { keys.clear(); keyNote.clear(); key = null; models = null; ready = false; save(); }
+      return "ключи убраны";
     }
     String k = newKey.trim();
+    synchronized (io) { if (keys.contains(k)) return "ключ " + idOf(k) + " уже есть — на устройстве ничего не изменилось"; }
     List<Found> found = fetchAll(k);                   // сеть — без замка
     if (found == null) return "ключ не проверен: " + lastError + " — на устройстве ничего не изменилось";
     List<Found> free = new ArrayList<>();
@@ -260,8 +313,14 @@ public class Cloud {
     if (free.isEmpty()) return "ключ принят, но бесплатных моделей не нашлось — прежние настройки оставлены";
     String was;
     boolean saved;
+    boolean spare;
     synchronized (io) {
-      key = k;
+      // Новый ключ — запасной, если рабочий есть и OpenRouter его принимает; иначе он становится рабочим.
+      spare = key != null && !keyNote.containsKey(key);
+      keys.remove(k);
+      if (spare) keys.add(k); else keys.add(0, k);
+      keyNote.remove(k);
+      key = keys.get(0);
       String[] ids = new String[free.size()];
       for (int i = 0; i < free.size(); i++) { ids[i] = free.get(i).id; apply(free.get(i)); }
       models = ids;
@@ -270,7 +329,7 @@ public class Cloud {
       ready = true;
       saved = save();
     }
-    return "ключ сохранён, бесплатных моделей: " + free.size() + ", первой пойдёт " + next()
+    return (spare ? "ключ " + idOf(k) + " сохранён запасным" : "ключ сохранён") + ", бесплатных моделей: " + free.size() + ", первой пойдёт " + next()
          + (saved ? "" : " — ВНИМАНИЕ: записать файл не вышло: " + lastError)
          + (was.isEmpty() || !pick.isEmpty() ? "" : "; закреплённая «" + was + "» из бесплатных пропала, закрепление снято");
   }
@@ -356,6 +415,8 @@ public class Cloud {
     try {
       JSONObject j = new JSONObject();
       if (key != null) j.put("key", key);
+      JSONArray ka = new JSONArray(); for (String x : keys) ka.put(x);
+      j.put("keys", ka);
       j.put("pick", pick);
       JSONArray a = new JSONArray();
       String[] ms = models;
@@ -559,6 +620,8 @@ public class Cloud {
       if (needImage && !m.image) continue;
       long ta = System.currentTimeMillis();
       String r = call(model, sys, user, imageUrl, maxTokens);
+      // Ключ не принят — тот же запрос со следующим ключом, пока есть непомеченные.
+      while (r == null && lastFail == F_AUTH && useNextKey(lastAuthCode)) r = call(model, sys, user, imageUrl, maxTokens);
       if (r != null && check != null && !check.ok(r)) {
         lastError = model + ": ответ не годится («" + r.replace('\n', ' ').trim() + "»)";
         fail(m, imageUrl != null); r = null;
@@ -614,7 +677,7 @@ public class Cloud {
       }
       // 403 — не ключ: OpenRouter отвечает им за одну модель (политика данных, модерация), и на
       // устройстве такой ответ inkling-small обрывал весь перебор. Ключ и кредит — это 401 и 402.
-      if (code == 401 || code == 402) { lastError = "ключ или кредит: HTTP " + code; lastFail = F_AUTH; return null; }
+      if (code == 401 || code == 402) { lastError = "ключ или кредит: HTTP " + code; lastFail = F_AUTH; lastAuthCode = code; return null; }
       if (code == 429) rateLimited = true;
       if (code >= 400) { lastError = model + ": HTTP " + code; return fail(m, imageUrl != null); }
       JSONArray ch = new JSONObject(sb.toString()).optJSONArray("choices");

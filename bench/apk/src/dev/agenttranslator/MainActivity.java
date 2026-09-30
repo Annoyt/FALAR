@@ -20,9 +20,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   TextView status, logView, smallRu, hint, keyState, voiceState, voiceMsg;
   /** Крупный текст словами: под каждым словом транскрипция для чтения вслух. */
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
-  Button bRefineEvery, bCloudEvery, bCloudPrefer; ToggleButton tTranslitOther;
+  /** Настройки: строки и сегменты (Rows), переключатели. */
+  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segReadGuard, segMicSrc; Switch tTranslitOther;
   ListView histList;
-  Button bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bLog;
+  Button bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bVoiceBack, bForget; View bModels, bVoices;
   TextView logLast;
   MicButton bMic;
   /** «Слушать» в доке: половинки PT и RU, кольцо «как слышно». Состояние держат tListenPt/tListenRu. */
@@ -30,18 +31,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   static final String LISTEN_HINT = "Обе вместе — направление по языку каждой реплики. Микрофон открыт, только пока включено.";
   final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
   boolean meterOn = false, resumed = false;
-  EditText keyIn; ToggleButton tKnown, tMicSrc; SeekBar sMic, sHold; TextView micLbl, holdLbl; CheckBox cMicAuto;
+  EditText keyIn; ToggleButton tKnown; SeekBar sMic, sHold; TextView micLbl, holdLbl, micVal; Switch cMicAuto;
   View reviewBox; TextView revWord, revRu, revEx, revStat; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart;
   String revCur; boolean revOpen;
-  ToggleButton tCtx, tAuto, tLang, tListenPt, tListenRu;
-  View talkView, sysView, learnView, voiceView; ScrollView logScroll;
-  /** Какой раздел открыт: 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск. */
+  Switch tCtx; ToggleButton tAuto, tLang, tListenPt, tListenRu;
+  View talkView, sysView, learnView, voiceView, modsView, cloudView, journalView; ScrollView logScroll;
+  /** Какой раздел открыт: 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск ·
+   *  5 модули и файлы · 6 облако · 7 журнал (5–7 открываются из настроек). */
   int screen = 0;
   ListView wordList; TextView learnHint; SeekBar sMin;
   TranslatorService svc;
   /** Панель ☰ поверх экрана и затемнение под ней. */
   ListView chatList; View sidePanel, scrim; SeekBar sPt, sRu;
-  TextView sizeLbl, hintSide;
+  TextView sizeLbl, hintSide, prevPt, prevRu;
   /** Шапка: ☰ или «←», название разговора (строка hint под ним — его состояние), «＋»; полоса хода облака и загрузок. */
   View appBar, rootView; ImageView abNav, abAct; TextView abTitle; ProgressLine abProg;
   /** Док: «Снимок, текст» слева; подпись под ним. */
@@ -54,19 +56,22 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   float szPt = 34, szRu = 17;
   /** Экран первого запуска: разрешения и загрузка моделей по манифесту; блок моделей в «Системе». */
   View setupView; TextView setupMic, setupText, setupProg, modelsLbl; ProgressBar setupBar;
-  Button bSetupMic, bSetupDl, bSetupStop, bModelsStop, bModelsVerify, bModelsUp; ToggleButton tSetupAny, tAnyNet;
+  Button bSetupMic, bSetupDl, bSetupStop, bModelsStop, bModelsVerify, bModelsUp; ToggleButton tSetupAny; Switch tAnyNet;
   /** Модули: переключатели в «Системе» и на экране первого запуска; контейнеры их настроек. */
-  final java.util.Map<String, CheckBox> modChecks = new java.util.HashMap<>(), setupChecks = new java.util.HashMap<>();
-  LinearLayout ttsBox, cloudBox, modBox; Button bUnused, bKeyHelp, bKeyDrop, bModules; boolean setupSynced = false;
+  final java.util.Map<String, Switch> modChecks = new java.util.HashMap<>();
+  final java.util.Map<String, CheckBox> setupChecks = new java.util.HashMap<>();
+  LinearLayout ttsBox, cloudBox, llmBox, modBox, keysBox, addBox; View grpTr, bKeyHelp; Button bUnused; boolean setupSynced = false;
+  Rows.Row rowVoices, rowCloud, rowMods, rowLog, rowRoute; TextView modsSum;
+  final java.util.Map<String, ModRow> modRows = new java.util.HashMap<>();
   ModelStore.State mst; boolean micForever, svcStarted; ScrollView bigScroll;
-  TextView updLbl; Button bUpdate, bUpdateGo;
+  TextView updLbl, updTitle; Button bUpdate, bUpdateGo; LinearLayout updCard;
   /** Экран показывает состояние сервиса галочками, а setChecked дёргает обработчик так же, как
    *  палец. Без этого признака показ «контекст включён» сам же включал контекст ещё раз и
    *  записывал это как выбор человека — LLM стартовал дважды, а «само включилось» становилось
    *  неотличимо от «включил я». */
   boolean uiSync = false;
   /** Держат крупный текст и читают его вслух; и видна ли сейчас транскрипция. */
-  boolean holdingRead = false, cribVisible = false; Button bReadGuard;
+  boolean holdingRead = false, cribVisible = false;
 
   final ServiceConnection conn = new ServiceConnection() {
     public void onServiceConnected(ComponentName n, IBinder b) { svc = ((TranslatorService.LocalBinder) b).get(); svc.setListener(MainActivity.this); }
@@ -101,6 +106,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     box.addView(learnView = buildLearn());
     box.addView(sysView = buildSys());
     box.addView(voiceView = buildVoice());
+    box.addView(modsView = buildMods());
+    box.addView(cloudView = buildCloud());
+    box.addView(journalView = buildLog());
     box.addView(setupView = buildSetup());
     root.addView(box, new LinearLayout.LayoutParams(-1, 0, 1f));
     scrim = new View(this); scrim.setBackgroundColor(0x80180814); scrim.setVisibility(View.GONE);
@@ -108,8 +116,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     top.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
     sidePanel = buildSide(); sidePanel.setVisibility(View.GONE);
     top.addView(sidePanel, new FrameLayout.LayoutParams(dp(318), -1, Gravity.START));
-    for (Button btn : new Button[]{bVoice, bVoice2, bWord, bClear, bKey, bModels, bVoices, bVoiceBack, bForget, bRefineEvery, bCloudEvery}) style(btn);
-    for (ToggleButton tg : new ToggleButton[]{tCtx, tAuto, tLang, tKnown, tMicSrc, tTranslitOther}) style(tg);
+    for (Button btn : new Button[]{bVoice, bVoice2, bWord, bClear, bVoiceBack, bForget}) style(btn);
+    for (ToggleButton tg : new ToggleButton[]{tAuto, tLang, tKnown}) style(tg);
     setContentView(top); rootView = top;
     show(0); applySizes();
 
@@ -173,22 +181,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       // Пустое поле — ничего не делаем. Раньше «сохранить» с пустым полем стирал сохранённый ключ:
       // поле после сохранения очищается, и второе нажатие молча убирало рабочий ключ (владелец, 29.09).
       if (k.isEmpty()) { refreshKey("поле пустое — сохранённый ключ не тронут; ключ — кнопкой «как получить ключ»"); return; }
-      keyState.setText("проверяю ключ у OpenRouter…");
+      refreshKey("проверяю ключ у OpenRouter…");
       bKey.setEnabled(false);
       // Сервис сам пишет итог в журнал, второй раз не дублируем.
       new Thread(() -> { final String r = svc.setCloudKey(k);
-        runOnUiThread(() -> { keyIn.setText(""); bKey.setEnabled(true); refreshKey(r); }); }).start();
+        runOnUiThread(() -> { keyIn.setText(""); bKey.setEnabled(true); if (r.contains("сохранён")) addBox.setVisibility(View.GONE); refreshKey(r); }); }).start();
     });
     bKeyHelp.setOnClickListener(v -> keyHelpDialog());
-    bKeyDrop.setOnClickListener(v -> {
-      if (svc == null) return;
-      new android.app.AlertDialog.Builder(this).setTitle("Убрать ключ OpenRouter?")
-          .setMessage("Облако перестанет работать: «получше» облаком, пересмотр разговора и названия разговоров. "
-                    + "Ключ на сайте OpenRouter останется — его можно вставить снова.")
-          .setPositiveButton("убрать", (d, w) -> new Thread(() -> { final String r = svc.setCloudKey("");
-              runOnUiThread(() -> refreshKey(r)); }).start())
-          .setNegativeButton("отмена", null).show();
-    });
     bClear.setOnClickListener(v -> {
       if (svc == null || svc.pb == null) return;
       new android.app.AlertDialog.Builder(this)
@@ -301,7 +300,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     abNav.setContentDescription(talk ? "Разговоры, слова, настройки" : "Назад");
     abAct.setVisibility(talk ? View.VISIBLE : View.GONE);
     if (talk) { refreshHint(); return; }
-    abTitle.setText(screen == 1 ? "Слова" : screen == 2 ? "Настройки" : screen == 3 ? "Голоса" : "Falar");
+    abTitle.setText(screen == 1 ? "Слова" : screen == 2 ? "Настройки" : screen == 3 ? "Голоса" : screen == 5 ? "Модули и файлы" : screen == 6 ? "Облако" : screen == 7 ? "Журнал" : "Falar");
     hint.setText(screen == 1 ? "из ваших разговоров" : ""); hint.setVisibility(screen == 1 ? View.VISIBLE : View.GONE);
     abProg.setVisibility(View.GONE);
   }
@@ -334,7 +333,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** «Назад»: закрыть панель; из «Голосов» — в настройки; из «Слов» и «Настроек» — к разговору. */
   @Override public void onBackPressed() {
     if (sidePanel != null && sidePanel.getVisibility() == View.VISIBLE) { drawer(false); return; }
-    if (screen == 3) { show(2); return; }
+    if (screen == 3 || screen >= 5) { show(2); return; }
     if (screen == 1 || screen == 2) { show(0); return; }
     super.onBackPressed();
   }
@@ -415,9 +414,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     svc.setReadingAloud(g >= 1 && holdingRead || g == 2 && cribVisible);
   }
   void refreshReadGuard() {
-    if (bReadGuard == null || svc == null) return;
-    bReadGuard.setText("🔇 пока читаю вслух: " + (svc.readGuard == 0 ? "слушать всегда"
-        : svc.readGuard == 1 ? "молчать, пока держу текст" : "молчать, пока видна транскрипция"));
+    if (segReadGuard == null || svc == null) return;
+    segReadGuard.sel(Math.max(0, Math.min(2, svc.readGuard)));
   }
 
   /** Строка под названием в шапке: состояние, пометка о спрятанной транскрипции, тема разговора.
@@ -470,13 +468,22 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     refreshHint();
   }
   void refreshIntervals() {
-    if (bRefineEvery == null || svc == null) return;
-    bRefineEvery.setText("🧠 разбор контекста: " + (svc.refineEvery == 0 ? "по кнопке" : "каждые " + svc.refineEvery + (svc.refineEvery == 1 ? " реплику" : " реплик")));
-    bCloudEvery.setText("☁ пересмотр в облаке: " + (svc.cloudEvery == 0 ? "по кнопке" : "каждые " + svc.cloudEvery + " реплик"));
-    if (bCloudPrefer != null) bCloudPrefer.setText(svc.cloudQuality() ? "☁ облако: точнее — сначала крупные модели, ответ дольше"
-                                                                      : "☁ облако: быстрее — сначала те, что отвечают быстро");
+    if (segRefine == null || svc == null) return;
+    segRefine.sel(indexOf(new int[]{0, 1, 3, 10}, svc.refineEvery));
+    segCloudEvery.sel(indexOf(new int[]{0, 5, 10, 20}, svc.cloudEvery));
+    segPrefer.sel(svc.cloudQuality() ? 1 : 0);
+    refreshCloudRow();
   }
 
+  static int indexOf(int[] a, int v) { for (int k = 0; k < a.length; k++) if (a[k] == v) return k; return 0; }
+  /** Строка «Облако» в настройках: сколько ключей и как часто пересмотр. */
+  void refreshCloudRow() {
+    if (rowCloud == null || svc == null || svc.cloud == null) return;
+    int n = svc.cloud.keys().size();
+    rowCloud.sub.setText((n == 0 ? "ключа нет" : n == 1 ? "1 ключ" : n + (n < 5 ? " ключа" : " ключей"))
+        + " · пересмотр " + (svc.cloudEvery == 0 ? "по кнопке" : "каждые " + svc.cloudEvery + " реплик"));
+    rowCloud.sub.setVisibility(View.VISIBLE);
+  }
   /** «Память разговора» — по касанию строки с названием: что уточнитель знает о разговоре сверх
    *  последних реплик. Сырой перевод понятен редко, итог решает уточнитель, а он видит только
    *  свежий кусок разговора и эту память — поэтому её надо видеть и уметь поправить. Отсюда же
@@ -784,7 +791,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
   }
 
-  /** 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск. «Слова» и «Настройки»
+  /** 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск · 5 модули и файлы · 6 облако · 7 журнал. «Слова» и «Настройки»
    *  открываются из панели ☰, голоса — из настроек: их настраивают один раз. У первого запуска
    *  шапки нет — у него свой заголовок. */
   void show(int tab) {
@@ -794,6 +801,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     sysView.setVisibility(tab == 2 ? View.VISIBLE : View.GONE);
     if (tab == 2) micLabel();
     voiceView.setVisibility(tab == 3 ? View.VISIBLE : View.GONE);
+    if (modsView != null) { modsView.setVisibility(tab == 5 ? View.VISIBLE : View.GONE); cloudView.setVisibility(tab == 6 ? View.VISIBLE : View.GONE); journalView.setVisibility(tab == 7 ? View.VISIBLE : View.GONE); }
+    if (tab == 6) refreshKey(null);
+    if (tab == 7 && logScroll != null) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     if (setupView != null) setupView.setVisibility(tab == 4 ? View.VISIBLE : View.GONE);
     if (appBar != null) appBar.setVisibility(tab == 4 ? View.GONE : View.VISIBLE);
     refreshAppBar();
@@ -1133,9 +1143,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Подпись чувствительности: в авто — сколько она сейчас, вручную — положение ползунка. */
   void micLabel() {
     if (micLbl == null) return;
-    micLbl.setText(cMicAuto.isChecked()
-        ? "Чувствительность микрофона: авто" + (svc == null ? "" : String.format(java.util.Locale.ROOT, ", сейчас %+.0f дБ", svc.autoDb))
-        : "Чувствительность микрофона: +" + sMic.getProgress() + " дБ");
+    boolean auto = cMicAuto.isChecked();
+    micLbl.setText(auto ? "под голос" + (svc == null ? "" : String.format(java.util.Locale.ROOT, " · сейчас %+.0f дБ", svc.autoDb)) : "выключено — действует ползунок");
+    if (micVal != null) micVal.setText("+" + sMic.getProgress());
   }
 
   /** Что слушаем — на самой кнопке «Слушать»: мятные половинки PT и RU. */
@@ -1531,61 +1541,77 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (!miss.isEmpty()) svc.translateWords(miss, this::refreshWords);
   }
 
-  /** Экран системы: только то, что действительно настраивается, плюс состояние и журнал.
-   *  Всё, что было здесь вперемешку, разъехалось по смыслу: «получше» и «запомнить» — к реплике,
-   *  на экран разговора; свои слова и очистка — в «Изучение»; голоса — в отдельный режим.
-   *  Причина не в красоте: среди восьми кнопок действия настройку не находили вовсе. */
-  /** «Система» прокручивается целиком. Раньше это была колонка без прокрутки с журналом на
-   *  остатке высоты: всё, что не влезало, молча обрезалось снизу — и при каждом новом переключателе
-   *  «пропадали» настройки размера шрифта и журнал вместе с ответами приложения на нажатия.
-   *  Теперь список настроек прокручивается, а журналу дана своя высота, а не остаток. */
+  /** Настройки (прежде «Система»): четыре группы на главном экране — экран разговора, микрофон и
+   *  звук, перевод, приложение — и отдельные экраны для редкого: «Модули и файлы», «Облако»,
+   *  «Журнал». Раньше это была одна колонка из 23 кнопок, переключателей и ползунков вперемешку с
+   *  подписями: «ВКЛ/выкл» — текстом на кнопке во всю ширину, интервалы — нажатием по кругу, и
+   *  других значений было не видно (стенд, 30.09). Теперь переключатель — это переключатель, а выбор
+   *  из нескольких значений — сегменты. Ничего не убрано: где что теперь — в таблице макета
+   *  design/mockups/index.html. Пункты модулей прячутся без модуля, как раньше. */
   View buildSys() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 12, 24, 12);
-    status = new TextView(this); status.setTextSize(15); status.setText("Запуск сервиса…"); v.addView(status);
-    // Обновление приложения. Стоит первым в «Системе»: магазина нет, и это единственное место,
-    // где человек вообще может узнать, что вышла новая версия.
-    updLbl = new TextView(this); updLbl.setTextSize(13); updLbl.setTextColor(look.accent); updLbl.setPadding(0, 10, 0, 0); v.addView(updLbl);
-    LinearLayout rowU = new LinearLayout(this); rowU.setOrientation(LinearLayout.HORIZONTAL);
-    bUpdate = new Button(this); bUpdate.setText("проверить обновления"); bUpdate.setTextSize(13);
-    rowU.addView(bUpdate, new LinearLayout.LayoutParams(0, -2, 1f));
-    bUpdateGo = new Button(this); bUpdateGo.setText("обновить"); bUpdateGo.setTextSize(13); bUpdateGo.setVisibility(View.GONE);
-    rowU.addView(bUpdateGo, new LinearLayout.LayoutParams(-2, -2));
-    v.addView(rowU);
-    for (Button b : new Button[]{bUpdate, bUpdateGo}) style(b);
+    Rows r = rows = new Rows(this, look);
+    LinearLayout v = r.page();
+    // Обновление — первой карточкой: магазина нет, и это единственное место, где видно новую версию.
+    updCard = new LinearLayout(this); updCard.setOrientation(LinearLayout.HORIZONTAL); updCard.setGravity(Gravity.CENTER_VERTICAL);
+    updCard.setPadding(dp(14), dp(12), dp(12), dp(12));
+    ImageView ui = new ImageView(this); ui.setImageDrawable(icon(app.falar.R.drawable.ic_download, look.night ? Look.GOLD : 0xFF9A6B1F));
+    updCard.addView(ui, new LinearLayout.LayoutParams(dp(24), dp(24)));
+    LinearLayout ut = new LinearLayout(this); ut.setOrientation(LinearLayout.VERTICAL); ut.setPadding(dp(14), 0, dp(8), 0);
+    updTitle = new TextView(this); updTitle.setTextSize(15.5f); updTitle.setTextColor(look.fg); updTitle.setTypeface(null, Typeface.BOLD); updTitle.setText("Falar");
+    updLbl = new TextView(this); updLbl.setTextSize(12.5f); updLbl.setTextColor(look.dim);
+    ut.addView(updTitle); ut.addView(updLbl);
+    updCard.addView(ut, new LinearLayout.LayoutParams(0, -2, 1f));
+    bUpdate = r.button("Проверить", false); bUpdateGo = r.button("Обновить", true); bUpdateGo.setVisibility(View.GONE);
+    updCard.addView(bUpdate, new LinearLayout.LayoutParams(-2, dp(40))); updCard.addView(bUpdateGo, new LinearLayout.LayoutParams(-2, dp(40)));
+    LinearLayout.LayoutParams up = new LinearLayout.LayoutParams(-1, -2); up.topMargin = dp(12);
+    v.addView(updCard, up);
     bUpdate.setOnClickListener(vv -> { if (svc != null) svc.checkUpdates(true); });
     bUpdateGo.setOnClickListener(vv -> { if (svc != null) svc.installUpdate(); });
-    // Модули: что приложение делает на этом телефоне. Выключенный модуль спрятан и не держит
-    // память; его файлы остаются — удаляются отдельной кнопкой (решение владельца 28.09).
-    // Список спрятан за кнопкой и свёрнут по умолчанию, как журнал (владелец, 29.09): модули
-    // выбирают редко, а «Система» и без них длинная. Свёрнутая кнопка показывает, сколько включено.
-    bModules = new Button(this); bModules.setTextSize(13); style(bModules); v.addView(bModules);
-    modBox = new LinearLayout(this); modBox.setOrientation(LinearLayout.VERTICAL); v.addView(modBox);
-    bModules.setOnClickListener(vv -> showModules(modBox.getVisibility() != View.VISIBLE));
-    for (String m : Modules.CHOICE) {
-      CheckBox cb = new CheckBox(this); cb.setTextSize(15); cb.setText(Modules.title(m)); modBox.addView(cb); modChecks.put(m, cb);
-      TextView w = new TextView(this); w.setTextSize(12); w.setTextColor(look.soft); w.setPadding(dp(32), 0, 0, dp(6)); w.setText(Modules.what(m)); modBox.addView(w);
-      cb.setOnCheckedChangeListener((vv, on) -> {
-        if (uiSync || svc == null) return;
-        if (on && svc.store != null && svc.store.bytes(m) > 0 && !svc.store.onPhone(m))
-          onLog("🧩 " + Modules.title(m) + ": включён, докачивается " + ModelStore.mb(svc.store.bytes(m)) + " МБ"
-                + (prefs.getBoolean("models_any_net", false) ? "" : " — по Wi-Fi"));
-        svc.setModule(m, on); applyModules();
-      });
-    }
-    bUnused = new Button(this); bUnused.setTextSize(13); bUnused.setText("удалить неиспользуемые модели"); style(bUnused); modBox.addView(bUnused);
-    bUnused.setOnClickListener(vv -> unusedDialog());
-    showModules(prefs.getBoolean("mods_open", false));
-    TextView ml = new TextView(this); ml.setTextSize(13); ml.setTextColor(look.soft);
-    ml.setText("Вход: чувствительность и источник"); v.addView(ml);
-    // Ползунок показывает то, что сервис применяет на самом деле. Раньше он всегда рисовал +0 дБ,
-    // а работало сохранённое значение — настройка врала о собственном состоянии.
-    int mg = (int) prefs.getFloat("micgain", 0);
-    micLbl = new TextView(this); micLbl.setTextSize(13); v.addView(micLbl);
+    status = new TextView(this); status.setTextSize(12); status.setTextColor(look.soft); status.setPadding(dp(8), dp(8), dp(8), 0);
+    status.setText("Запуск сервиса…"); v.addView(status);
+
+    // ---- экран разговора
+    LinearLayout c1 = r.group(v, "Экран разговора");
+    sizeLbl = r.value("");
+    r.row(c1, app.falar.R.drawable.ic_textsize, "Размер текста", null, sizeLbl);
+    LinearLayout s1 = r.sub(c1, true);
+    LinearLayout prev = new LinearLayout(this); prev.setOrientation(LinearLayout.VERTICAL); prev.setBackground(r.round(look.card, 12, look.line));
+    prev.setPadding(dp(12), dp(8), dp(12), dp(10));
+    prevPt = new TextView(this); prevPt.setText("Quanto custa?"); prevPt.setTypeface(null, Typeface.BOLD); prevPt.setTextColor(look.fg);
+    prevRu = new TextView(this); prevRu.setText("Сколько стоит?"); prevRu.setTextColor(look.dim);
+    prev.addView(prevPt); prev.addView(prevRu); s1.addView(prev);
+    sPt = new SeekBar(this); sPt.setMax(48); sPt.setProgress((int) szPt);
+    sRu = new SeekBar(this); sRu.setMax(48); sRu.setProgress((int) szRu);
+    s1.addView(sliderRow("PT", sPt)); s1.addView(sliderRow("RU", sRu));
+    SeekBar.OnSeekBarChangeListener sl = new SeekBar.OnSeekBarChangeListener() {
+      public void onProgressChanged(SeekBar sb, int p, boolean u) { applySizes(); }
+      public void onStartTrackingTouch(SeekBar sb) {}
+      public void onStopTrackingTouch(SeekBar sb) { prefs.edit().putFloat("szPt", szPt).putFloat("szRu", szRu).apply(); }
+    };
+    sPt.setOnSeekBarChangeListener(sl); sRu.setOnSeekBarChangeListener(sl);
+    tTranslitOther = r.sw(); tTranslitOther.setChecked(prefs.getBoolean("translit_other", false));
+    r.row(c1, app.falar.R.drawable.ic_type, "Транскрипция и у собеседника", "русскими буквами под словами его реплик", tTranslitOther);
+    tTranslitOther.setOnCheckedChangeListener((vv, on) -> { prefs.edit().putBoolean("translit_other", on).apply(); cribManual = false; showBig(bigText, bigDir, bigRefined); refreshHint(); });
+    // Что считать чтением вслух. «Пока видно» по умолчанию не ставим: транскрипция висит на экране
+    // до следующей реплики, и в этом положении ответ собеседника пропускается.
+    r.row(c1, app.falar.R.drawable.ic_hush, "Пока вы читаете вслух", "микрофон молчит, чтобы не перевести вас же", null);
+    LinearLayout s2 = r.sub(c1, true);
+    segReadGuard = r.seg(s2, new String[]{"Слушать", "Пока держу", "Пока видно"}, i -> { if (svc == null) return; svc.setReadGuard(i); refreshReadGuard(); syncGuard(); });
+    r.caption(s2, "«Пока держу» — пока палец на крупном тексте; «пока видно» — пока видна транскрипция.");
+
+    // ---- микрофон и звук
+    LinearLayout c2 = r.group(v, "Микрофон и звук");
     // Авто по умолчанию: одна ручка не подходит разом тихому и обычному собеседнику — +24 дБ
     // спасают тихого и портят обычного (results/2026-09-29-mic-gain.md). Ручная остаётся.
-    cMicAuto = new CheckBox(this); cMicAuto.setText("авто — подстраивать под голос (речь к −24 dBFS)");
-    cMicAuto.setTextSize(13); cMicAuto.setChecked(prefs.getBoolean("micauto", true)); v.addView(cMicAuto);
-    sMic = new SeekBar(this); sMic.setMax(24); sMic.setProgress(mg); sMic.setEnabled(!cMicAuto.isChecked()); v.addView(sMic);   // 0…+24 дБ
+    cMicAuto = r.sw(); cMicAuto.setChecked(prefs.getBoolean("micauto", true));
+    Rows.Row sens = r.row(c2, app.falar.R.drawable.ic_mic, "Чувствительность — авто", "", cMicAuto);
+    micLbl = sens.sub; micLbl.setVisibility(View.VISIBLE);
+    LinearLayout s3 = r.sub(c2, true);
+    // Ползунок показывает то, что сервис применяет на самом деле: раньше он рисовал +0 дБ, а
+    // работало сохранённое значение — настройка врала о собственном состоянии.
+    sMic = new SeekBar(this); sMic.setMax(24); sMic.setProgress((int) prefs.getFloat("micgain", 0)); sMic.setEnabled(!cMicAuto.isChecked());   // 0…+24 дБ
+    micVal = new TextView(this);
+    s3.addView(sliderRow("вручную", sMic, micVal));
     micLabel();
     cMicAuto.setOnCheckedChangeListener((b, on) -> {
       sMic.setEnabled(!on); micLabel();
@@ -1597,16 +1623,28 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       public void onStopTrackingTouch(SeekBar sb) { if (svc != null) startService(new Intent(MainActivity.this, TranslatorService.class)
           .putExtra("micgain", String.valueOf(sb.getProgress()))); }
     });
-    tMicSrc = new ToggleButton(this);
-    tMicSrc.setTextOff("микрофон: телефона"); tMicSrc.setTextOn("микрофон: наушников");
+    r.row(c2, app.falar.R.drawable.ic_phones, "Микрофон", null, null);
+    LinearLayout s4 = r.sub(c2, true);
+    segMicSrc = r.seg(s4, new String[]{"Телефона", "Наушников"}, i -> {
+      if (i == 0) { startService(new Intent(this, TranslatorService.class).putExtra("micsrc", "builtin")); return; }
+      new android.app.AlertDialog.Builder(this)
+          .setTitle("Микрофон наушников?")
+          .setMessage("Наушники берут звук по профилю гарнитуры, и тогда вывод в них падает "
+                    + "до телефонного качества. Годится, если телефон в кармане, а собеседник рядом с вами.")
+          .setPositiveButton("включить", (d, w) -> startService(new Intent(this, TranslatorService.class).putExtra("micsrc", "headset")))
+          .setNegativeButton("отмена", (d, w) -> segMicSrc.sel(0))
+          .setOnCancelListener(d -> segMicSrc.sel(0))   // «назад» тоже отмена, иначе выбор врёт
+          .show();
+    });
+    segMicSrc.sel("headset".equals(prefs.getString("micsrc", "builtin")) ? 1 : 0);
     // Пауза до озвучки. Перевод готовится сразу и сразу виден на экране — ждёт только голос,
     // иначе на длинном монологе перевод начинает звучать собеседнику в лицо посреди фразы.
-    // Одна настройка на оба языка: длинная фраза бывает и по-русски, и по-португальски.
+    ttsBox = r.part(c2);
     int hold = prefs.getInt("hold", 1500);
-    ttsBox = new LinearLayout(this); ttsBox.setOrientation(LinearLayout.VERTICAL); v.addView(ttsBox);   // прячется без модуля «Озвучка»
-    holdLbl = new TextView(this); holdLbl.setTextSize(13); ttsBox.addView(holdLbl);
-    sHold = new SeekBar(this); sHold.setMax(24); sHold.setProgress(hold / 250); ttsBox.addView(sHold);   // 0…6,0 с шагом 0,25
-    holdLbl.setText(holdText(hold));
+    holdLbl = r.value(holdText(hold));
+    r.row(ttsBox, app.falar.R.drawable.ic_speaker, "Пауза до озвучки", "перевод виден сразу, голос ждёт тишины", holdLbl);
+    LinearLayout s5 = r.sub(ttsBox, true);
+    sHold = new SeekBar(this); sHold.setMax(24); sHold.setProgress(hold / 250); s5.addView(sHold);   // 0…6,0 с шагом 0,25
     sHold.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
       public void onProgressChanged(SeekBar sb, int p, boolean u) { holdLbl.setText(holdText(p * 250)); }
       public void onStartTrackingTouch(SeekBar sb) {}
@@ -1615,120 +1653,212 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         startService(new Intent(MainActivity.this, TranslatorService.class).putExtra("hold", String.valueOf(sb.getProgress() * 250)));
       }
     });
-    tMicSrc.setChecked("headset".equals(prefs.getString("micsrc", "builtin")));   // состояние ставим до слушателя, иначе он спросит подтверждение на ровном месте
-    v.addView(tMicSrc);
-    tMicSrc.setOnCheckedChangeListener((vv, on) -> {
-      if (on) new android.app.AlertDialog.Builder(this)
-          .setTitle("Микрофон наушников?")
-          .setMessage("Наушники берут звук по профилю гарнитуры, и тогда вывод в них падает "
-                    + "до телефонного качества. Годится, если телефон в кармане, а собеседник рядом с вами.")
-          .setPositiveButton("включить", (d, w) -> startService(new Intent(this, TranslatorService.class).putExtra("micsrc", "headset")))
-          .setNegativeButton("отмена", (d, w) -> tMicSrc.setChecked(false))
-          .setOnCancelListener(d -> tMicSrc.setChecked(false))   // «назад» тоже отмена, иначе переключатель врёт
-          .show();
-      else startService(new Intent(this, TranslatorService.class).putExtra("micsrc", "builtin"));
-    });
-    // Направление здесь больше не настраивается: его задают кнопки «Слушать PT» и «Слушать RU»
-    // на экране разговора. Два места для одного решения давали противоречие, и побеждало то,
-    // что нажали последним.
-    bVoices = new Button(this); bVoices.setText("🎤 голоса и авто-направление →"); v.addView(bVoices);
-    cloudBox = new LinearLayout(this); cloudBox.setOrientation(LinearLayout.VERTICAL); v.addView(cloudBox);   // прячется без модуля «Облако»
-    TextView kl = new TextView(this); kl.setTextSize(13); kl.setTextColor(look.soft);
-    kl.setText("Ключ OpenRouter — только бесплатные модели; нужен для названий разговоров и кнопки «получше».");
-    cloudBox.addView(kl);
-    LinearLayout rowKH = new LinearLayout(this); rowKH.setOrientation(LinearLayout.HORIZONTAL);
-    bKeyHelp = new Button(this); bKeyHelp.setText("как получить ключ"); bKeyHelp.setTextSize(13); style(bKeyHelp);
-    rowKH.addView(bKeyHelp, new LinearLayout.LayoutParams(0, -2, 1f));
-    bKeyDrop = new Button(this); bKeyDrop.setText("убрать ключ"); bKeyDrop.setTextSize(13); style(bKeyDrop); bKeyDrop.setVisibility(View.GONE);
-    rowKH.addView(bKeyDrop, new LinearLayout.LayoutParams(-2, -2));
-    cloudBox.addView(rowKH);
-    LinearLayout rowK = new LinearLayout(this); rowK.setOrientation(LinearLayout.HORIZONTAL);
-    keyIn = new EditText(this); keyIn.setHint("sk-or-…"); keyIn.setSingleLine(true); keyIn.setTextSize(14);
-    rowK.addView(keyIn, new LinearLayout.LayoutParams(0, -2, 1f));
-    bKey = new Button(this); bKey.setText("сохранить"); bKey.setEnabled(false);
-    rowK.addView(bKey, new LinearLayout.LayoutParams(-2, -2));
-    cloudBox.addView(rowK);
-    // Состояние ключа видно всегда. Поле после сохранения очищается, и без этой строки отличить
-    // «сохранён» от «не сохранился» было нельзя — ключ вводили повторно, думая, что он не дошёл.
-    keyState = new TextView(this); keyState.setTextSize(13); keyState.setTextColor(look.accent); cloudBox.addView(keyState);
-    bModels = new Button(this); bModels.setText("☁ модели и маршрут"); bModels.setTextSize(13); bModels.setEnabled(false);
-    cloudBox.addView(bModels);
-    // Файлы моделей на телефоне: что есть по манифесту, докачка необязательного, полная проверка.
-    modelsLbl = new TextView(this); modelsLbl.setTextSize(13); modelsLbl.setTextColor(look.accent); modelsLbl.setPadding(0, 16, 0, 0); modelsLbl.setText("Файлы моделей: проверяю…"); v.addView(modelsLbl);
-    // Необязательное больше не отдельной кнопкой: его выбирают модулями выше.
-    bModelsStop = new Button(this); bModelsStop.setText("стоп загрузки"); bModelsStop.setTextSize(13); bModelsStop.setVisibility(View.GONE); v.addView(bModelsStop);
-    tAnyNet = new ToggleButton(this); tAnyNet.setTextOn("качать и по мобильной сети: ВКЛ"); tAnyNet.setTextOff("качать и по мобильной сети: выкл");
-    tAnyNet.setChecked(prefs.getBoolean("models_any_net", false)); v.addView(tAnyNet);
-    tAnyNet.setOnCheckedChangeListener((vv, on) -> setAnyNet(on));
-    bModelsVerify = new Button(this); bModelsVerify.setText("проверить файлы моделей"); bModelsVerify.setTextSize(13); bModelsVerify.setEnabled(false); v.addView(bModelsVerify);
-    // Появляется, когда у перевода есть файлы полегче, а на телефоне — прежние (обновление 0.23).
-    bModelsUp = new Button(this); bModelsUp.setTextSize(13); bModelsUp.setVisibility(View.GONE); v.addView(bModelsUp);
-    for (Button b : new Button[]{bModelsStop, bModelsVerify, bModelsUp}) style(b);
-    bModelsUp.setOnClickListener(vv -> upgradeDialog());
-    style(tAnyNet);
-    bModelsStop.setOnClickListener(vv -> { if (svc != null) svc.cancelModels(); });
-    bModelsVerify.setOnClickListener(vv -> { if (svc != null) svc.verifyModels(); });
-    tCtx = new ToggleButton(this); tCtx.setTextOn("🧠 контекст (LLM в фоне): ВКЛ"); tCtx.setTextOff("🧠 контекст (LLM в фоне): выкл"); tCtx.setChecked(false); tCtx.setEnabled(false); v.addView(tCtx);
-    // Как часто разбирать контекст: локально (уточнитель 🧠) и в облаке (пересмотр всего разговора).
-    // 0 — только по кнопке «получше». Кнопки перебирают значения по кругу: без AndroidX это проще
-    // выпадающего списка и читается так же.
-    bRefineEvery = new Button(this); bRefineEvery.setTextSize(13); bRefineEvery.setText("🧠 разбор контекста"); v.addView(bRefineEvery);
-    bRefineEvery.setOnClickListener(vv -> { if (svc == null) return; svc.setRefineEvery(cycle(svc.refineEvery, new int[]{0, 1, 3, 10})); refreshIntervals(); });
-    bCloudEvery = new Button(this); bCloudEvery.setTextSize(13); bCloudEvery.setText("☁ пересмотр в облаке"); v.addView(bCloudEvery);
-    bCloudEvery.setOnClickListener(vv -> {
-      if (svc == null) return;
-      final int next = cycle(svc.cloudEvery, new int[]{0, 5, 10, 20});
-      if (next > 0 && !svc.cloudConsent()) consentDialog(() -> { svc.setCloudEvery(next); refreshIntervals(); });
-      else { svc.setCloudEvery(next); refreshIntervals(); }
-    });
-    // Что важнее облаку: быстрый ответ или точный. «Точнее» ставит вперёд крупные модели — ответ
-    // приходит за полминуты, зато правок и деталей в памяти больше.
-    bCloudPrefer = new Button(this); bCloudPrefer.setTextSize(13); bCloudPrefer.setText("☁ облако выбирает"); style(bCloudPrefer); v.addView(bCloudPrefer);
-    bCloudPrefer.setOnClickListener(vv -> { if (svc == null) return; svc.setCloudQuality(!svc.cloudQuality()); refreshIntervals(); });
-    tTranslitOther = new ToggleButton(this);
-    tTranslitOther.setTextOn("транскрипция и для реплик собеседника: ВКЛ"); tTranslitOther.setTextOff("транскрипция и для реплик собеседника: выкл");
-    tTranslitOther.setChecked(prefs.getBoolean("translit_other", false)); v.addView(tTranslitOther);
-    tTranslitOther.setOnCheckedChangeListener((vv, on) -> { prefs.edit().putBoolean("translit_other", on).apply(); cribManual = false; showBig(bigText, bigDir, bigRefined); refreshHint(); });
-    // Что считать чтением вслух. «Пока видна транскрипция» по умолчанию не ставим: она висит
-    // на экране до следующей реплики, и в этом положении ответ собеседника пропускается.
-    bReadGuard = new Button(this); bReadGuard.setTextSize(13); bReadGuard.setText("🔇 пока читаю вслух"); style(bReadGuard); v.addView(bReadGuard);
-    bReadGuard.setOnClickListener(vv -> { if (svc == null) return; svc.setReadGuard((svc.readGuard + 1) % 3); refreshReadGuard(); syncGuard(); });
-    sizeLbl = new TextView(this); sizeLbl.setTextSize(14); sizeLbl.setTextColor(look.soft); v.addView(sizeLbl);
-    sPt = new SeekBar(this); sPt.setMax(48); sPt.setProgress((int) szPt); v.addView(sPt);
-    sRu = new SeekBar(this); sRu.setMax(48); sRu.setProgress((int) szRu); v.addView(sRu);
-    SeekBar.OnSeekBarChangeListener sl = new SeekBar.OnSeekBarChangeListener() {
-      public void onProgressChanged(SeekBar sb, int p, boolean u) { applySizes(); }
-      public void onStartTrackingTouch(SeekBar sb) {}
-      public void onStopTrackingTouch(SeekBar sb) { prefs.edit().putFloat("szPt", szPt).putFloat("szRu", szRu).apply(); }
-    };
-    sPt.setOnSeekBarChangeListener(sl); sRu.setOnSeekBarChangeListener(sl);
-    // Журнал свёрнут: это отладочная простыня, которая занимала пол-экрана настроек. Но совсем
-    // прятать ответы приложения нельзя, поэтому в свёрнутом виде видна последняя строка — то,
-    // что приложение ответило на последнее нажатие.
-    bLog = new Button(this); bLog.setTextSize(13); style(bLog); v.addView(bLog);
-    logLast = new TextView(this); logLast.setTextSize(13); logLast.setTextColor(look.dim);
-    logLast.setSingleLine(true); logLast.setEllipsize(android.text.TextUtils.TruncateAt.END);
-    logLast.setPadding(0, 2, 0, 0); v.addView(logLast);
-    logView = new TextView(this); logView.setTextSize(13); logView.setMovementMethod(new ScrollingMovementMethod()); logView.setTextColor(look.dim);
-    logScroll = new ScrollView(this); logScroll.addView(logView);
-    v.addView(logScroll, new LinearLayout.LayoutParams(-1, dp(260)));
-    bLog.setOnClickListener(vv -> showLog(logScroll.getVisibility() != View.VISIBLE));
-    showLog(prefs.getBoolean("log_open", false));
-    ScrollView outer = new ScrollView(this); outer.addView(v);
+    rowVoices = r.nav(c2, app.falar.R.drawable.ic_users, "Голоса и авто-направление", "", null);
+    bVoices = rowVoices.v;
+
+    // ---- перевод
+    LinearLayout c3 = r.group(v, "Перевод"); grpTr = (View) c3.getTag();
+    llmBox = r.part(c3);
+    tCtx = r.sw(); tCtx.setEnabled(false);
+    r.row(llmBox, app.falar.R.drawable.ic_wand, "Уточнитель в фоне", "переводит заново с учётом разговора", tCtx);
+    r.row(llmBox, app.falar.R.drawable.ic_refresh, "Разбор контекста", "как часто уточнитель пересматривает реплики", null);
+    LinearLayout s6 = r.sub(llmBox, true);
+    final int[] refVals = {0, 1, 3, 10};
+    segRefine = r.seg(s6, new String[]{"По кнопке", "1", "3", "10"}, i -> { if (svc == null) return; svc.setRefineEvery(refVals[i]); refreshIntervals(); });
+    r.caption(s6, "реплик между разборами");
+    cloudBox = r.part(c3);
+    rowCloud = r.nav(cloudBox, app.falar.R.drawable.ic_cloud, "Облако", "", x -> show(6));
+
+    // ---- приложение
+    LinearLayout c4 = r.group(v, "Приложение");
+    rowMods = r.nav(c4, app.falar.R.drawable.ic_scan, "Модули и файлы", "", x -> { show(5); refreshModules(); refreshModels(); });
+    rowLog = r.nav(c4, app.falar.R.drawable.ic_list, "Журнал", "", x -> show(7));
+    logLast = rowLog.sub; logLast.setVisibility(View.VISIBLE); logLast.setSingleLine(true); logLast.setEllipsize(android.text.TextUtils.TruncateAt.END);
+
+    ScrollView outer = new ScrollView(this); outer.setBackgroundColor(look.page); outer.addView(v);
     return outer;
   }
-  int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
-  /** Журнал под катом. Свёрнут — видна последняя строка; развёрнут — вся лента с прокруткой. */
-  void showLog(boolean open) {
-    if (logScroll == null) return;
-    prefs.edit().putBoolean("log_open", open).apply();
-    logScroll.setVisibility(open ? View.VISIBLE : View.GONE);
-    logLast.setVisibility(open ? View.GONE : View.VISIBLE);
-    // Треугольники ▾▴ на стендовом телефоне рисуются пустым квадратом: в системном шрифте их нет.
-    // Точка-разделитель встречается по всему интерфейсу и отображается везде.
-    bLog.setText(open ? "журнал · свернуть" : "журнал · развернуть");
-    if (open) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
+
+  /** Ползунок с подписью слева и значением справа. */
+  View sliderRow(String label, SeekBar sb) { return sliderRow(label, sb, null); }
+  View sliderRow(String label, SeekBar sb, TextView val) {
+    LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.CENTER_VERTICAL);
+    row.setPadding(0, dp(6), 0, 0);
+    TextView l = new TextView(this); l.setText(label); l.setTextSize(13); l.setTextColor(look.dim); l.setMinWidth(dp(36));
+    row.addView(l);
+    row.addView(sb, new LinearLayout.LayoutParams(0, -2, 1f));
+    if (val != null) { val.setTextSize(13); val.setTypeface(null, Typeface.BOLD); val.setTextColor(look.fg); val.setMinWidth(dp(44)); val.setGravity(Gravity.END); row.addView(val); }
+    return row;
   }
+
+  /** Строки модулей в «Модулях и файлах»: переключатель, размер, метка состояния, полоса загрузки. */
+  static final class ModRow { Switch sw; TextView size, pill, barLbl; ProgressLine bar; View barBox; }
+  static int modIcon(String m) {
+    switch (m) {
+      case Modules.TTS: return app.falar.R.drawable.ic_speaker;
+      case Modules.OCR: return app.falar.R.drawable.ic_scan;
+      case Modules.LLM: return app.falar.R.drawable.ic_wand;
+      case Modules.CLOUD: return app.falar.R.drawable.ic_cloud;
+      case Modules.SPEAKER: return app.falar.R.drawable.ic_voice;
+      case Modules.CORPUS: return app.falar.R.drawable.ic_books;
+      default: return app.falar.R.drawable.ic_mic;
+    }
+  }
+
+  /** «Модули и файлы»: что лежит на телефоне. Сверху одна строка — «Все модели установлены ·
+   *  14 из 14» или ход докачки со «Стоп» (владелец 30.09: пояснения «всё на месте» отдельной
+   *  карточкой не нужны). У каждого модуля — своя полоса загрузки. Выключенный модуль прячет свои
+   *  кнопки и не держит память; его файлы остаются, пока их не удалить отдельной кнопкой
+   *  (решение владельца 28.09). */
+  View buildMods() {
+    Rows r = rows;
+    LinearLayout v = r.page();
+    TextView h = new TextView(this); h.setText("Модули"); h.setTextSize(13); h.setTypeface(null, Typeface.BOLD); h.setTextColor(r.ink());
+    h.setPadding(dp(8), dp(16), dp(8), dp(6)); v.addView(h);
+    LinearLayout sum = new LinearLayout(this); sum.setOrientation(LinearLayout.HORIZONTAL); sum.setGravity(Gravity.CENTER_VERTICAL);
+    sum.setPadding(dp(8), 0, dp(4), dp(8));
+    modsSum = new TextView(this); modsSum.setTextSize(13); modsSum.setTextColor(look.dim); modsSum.setCompoundDrawablePadding(dp(8));
+    sum.addView(modsSum, new LinearLayout.LayoutParams(0, -2, 1f));
+    bModelsStop = r.button("Стоп", false); bModelsStop.setVisibility(View.GONE);
+    sum.addView(bModelsStop, new LinearLayout.LayoutParams(-2, dp(34)));
+    v.addView(sum);
+    modelsLbl = new TextView(this); modelsLbl.setTextSize(12); modelsLbl.setTextColor(look.soft); modelsLbl.setPadding(dp(8), 0, dp(8), dp(8));
+    modelsLbl.setVisibility(View.GONE); v.addView(modelsLbl);
+    modBox = new LinearLayout(this); modBox.setOrientation(LinearLayout.VERTICAL); modBox.setBackground(r.round(look.bg, 16, look.line));
+    v.addView(modBox);
+    java.util.List<String> all = new java.util.ArrayList<>(); all.add(Modules.BASE); all.addAll(Modules.CHOICE);
+    for (final String m : all) {
+      if (modBox.getChildCount() > 0) r.divider(modBox);
+      ModRow mr = new ModRow();
+      LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); row.setPadding(dp(14), dp(13), dp(12), dp(13));
+      ImageView tile = new ImageView(this); tile.setScaleType(ImageView.ScaleType.CENTER);
+      tile.setImageDrawable(icon(modIcon(m), r.ink())); tile.setBackground(r.round(look.tint, 12, 0));
+      row.addView(tile, new LinearLayout.LayoutParams(dp(40), dp(40)));
+      LinearLayout t = new LinearLayout(this); t.setOrientation(LinearLayout.VERTICAL); t.setPadding(dp(12), 0, dp(8), 0);
+      TextView name = new TextView(this); name.setText(Modules.title(m).replaceFirst("^[^\\p{L}]+", "")); name.setTextSize(15.5f); name.setTypeface(null, Typeface.BOLD); name.setTextColor(look.fg);
+      TextView what = new TextView(this); what.setText(Modules.what(m)); what.setTextSize(12.5f); what.setTextColor(look.dim); what.setLineSpacing(0, 1.1f);
+      t.addView(name); t.addView(what);
+      LinearLayout meta = new LinearLayout(this); meta.setOrientation(LinearLayout.HORIZONTAL); meta.setGravity(Gravity.CENTER_VERTICAL); meta.setPadding(0, dp(7), 0, 0);
+      mr.size = new TextView(this); mr.size.setTextSize(12); mr.size.setTextColor(look.soft); mr.size.setPadding(0, 0, dp(8), 0);
+      mr.pill = r.pill();
+      meta.addView(mr.size); meta.addView(mr.pill); t.addView(meta);
+      LinearLayout bb = new LinearLayout(this); bb.setOrientation(LinearLayout.VERTICAL); bb.setPadding(0, dp(9), 0, 0);
+      mr.bar = new ProgressLine(this).colors(r.ink(), look.line, r.ink(), look.line);
+      bb.addView(mr.bar, new LinearLayout.LayoutParams(-1, dp(7)));
+      mr.barLbl = new TextView(this); mr.barLbl.setTextSize(12); mr.barLbl.setTextColor(look.soft); mr.barLbl.setPadding(0, dp(4), 0, 0);
+      bb.addView(mr.barLbl); bb.setVisibility(View.GONE); mr.barBox = bb;
+      t.addView(bb);
+      row.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
+      mr.sw = r.sw();
+      LinearLayout.LayoutParams swp = new LinearLayout.LayoutParams(-2, -2); swp.topMargin = dp(6);
+      row.addView(mr.sw, swp);
+      modBox.addView(row);
+      modRows.put(m, mr);
+      if (Modules.BASE.equals(m)) { mr.sw.setChecked(true); mr.sw.setEnabled(false); continue; }   // перевод речи нужен всегда
+      modChecks.put(m, mr.sw);
+      mr.sw.setOnCheckedChangeListener((vv, on) -> {
+        if (uiSync || svc == null) return;
+        if (on && svc.store != null && svc.store.bytes(m) > 0 && !svc.store.onPhone(m))
+          onLog("🧩 " + Modules.title(m) + ": включён, докачивается " + ModelStore.mb(svc.store.bytes(m)) + " МБ"
+                + (prefs.getBoolean("models_any_net", false) ? "" : " — по Wi-Fi"));
+        svc.setModule(m, on); applyModules();
+      });
+    }
+    LinearLayout c = r.group(v, "Загрузка");
+    tAnyNet = r.sw(); tAnyNet.setChecked(prefs.getBoolean("models_any_net", false));
+    r.row(c, app.falar.R.drawable.ic_download, "Качать и по мобильной сети", "иначе — только по Wi-Fi", tAnyNet);
+    tAnyNet.setOnCheckedChangeListener((vv, on) -> setAnyNet(on));
+    LinearLayout s = r.sub(c, false);
+    FlowLayout btns = new FlowLayout(this);
+    bModelsVerify = r.button("Проверить файлы", false); bModelsVerify.setEnabled(false);
+    bUnused = r.button("Удалить неиспользуемые", false);
+    // Появляется, когда у перевода есть файлы полегче, а на телефоне — прежние (обновление 0.23).
+    bModelsUp = r.button("Облегчить перевод", false); bModelsUp.setVisibility(View.GONE);
+    for (Button b : new Button[]{bModelsVerify, bUnused, bModelsUp}) {
+      FrameLayout w = new FrameLayout(this); w.setPadding(0, dp(4), dp(8), dp(4));
+      w.addView(b, new FrameLayout.LayoutParams(-2, dp(40))); btns.addView(w);
+    }
+    s.addView(btns);
+    bModelsUp.setOnClickListener(vv -> upgradeDialog());
+    bModelsStop.setOnClickListener(vv -> { if (svc != null) svc.cancelModels(); });
+    bModelsVerify.setOnClickListener(vv -> { if (svc != null) svc.verifyModels(); });
+    bUnused.setOnClickListener(vv -> unusedDialog());
+    ScrollView outer = new ScrollView(this); outer.setBackgroundColor(look.page); outer.addView(v);
+    return outer;
+  }
+
+  /** «Облако»: ключи OpenRouter — у каждого своё состояние и своя кнопка «убрать» (владелец 30.09:
+   *  «удалить ключ перенести к ключу, сделать возможность добавить несколько ключей»), куда пойдёт
+   *  запрос, как часто пересматривать разговор и что облаку важнее. */
+  View buildCloud() {
+    Rows r = rows;
+    LinearLayout v = r.page();
+    TextView note = new TextView(this); note.setTextSize(12.5f); note.setTextColor(look.dim); note.setLineSpacing(0, 1.1f);
+    note.setText("Falar ходит только к бесплатным моделям OpenRouter (:free, цена 0 в каждом запросе). Деньги с ключей не списываются.");
+    note.setPadding(dp(12), dp(10), dp(12), dp(10));
+    android.graphics.drawable.GradientDrawable nb = r.round(look.bg, 12, 0);
+    android.graphics.drawable.LayerDrawable nl = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{r.round(Look.GOLD, 12, 0), nb});
+    nl.setLayerInset(1, dp(3), 0, 0, 0); note.setBackground(nl);
+    LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, -2); np.topMargin = dp(12);
+    v.addView(note, np);
+    LinearLayout c = r.group(v, "Ключи");
+    keysBox = new LinearLayout(this); keysBox.setOrientation(LinearLayout.VERTICAL); c.addView(keysBox);
+    r.divider(c);
+    TextView add = new TextView(this); add.setText("Добавить ключ"); add.setTextSize(15); add.setTypeface(null, Typeface.BOLD); add.setTextColor(r.ink());
+    add.setCompoundDrawablePadding(dp(12)); add.setCompoundDrawables(r.icon(app.falar.R.drawable.ic_plus, r.ink(), 22), null, null, null);
+    add.setPadding(dp(14), dp(13), dp(14), dp(13)); add.setBackground(r.press(0)); add.setClickable(true);
+    c.addView(add);
+    addBox = new LinearLayout(this); addBox.setOrientation(LinearLayout.HORIZONTAL); addBox.setGravity(Gravity.CENTER_VERTICAL);
+    addBox.setPadding(dp(14), 0, dp(14), dp(12));
+    keyIn = new EditText(this); keyIn.setHint("sk-or-…"); keyIn.setSingleLine(true); keyIn.setTextSize(14.5f);
+    keyIn.setBackground(r.round(look.card, 22, look.line)); keyIn.setPadding(dp(16), dp(8), dp(16), dp(8));
+    addBox.addView(keyIn, new LinearLayout.LayoutParams(0, dp(44), 1f));
+    bKey = r.button("Сохранить", true); bKey.setEnabled(false);
+    LinearLayout.LayoutParams kp = new LinearLayout.LayoutParams(-2, dp(44)); kp.leftMargin = dp(8);
+    addBox.addView(bKey, kp);
+    addBox.setVisibility(View.GONE); c.addView(addBox);
+    add.setOnClickListener(x -> addBox.setVisibility(addBox.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
+    // Состояние ключей и ответ на последнее действие видны всегда. Поле после сохранения очищается,
+    // и без этой строки отличить «сохранён» от «не сохранился» было нельзя — ключ вводили повторно.
+    LinearLayout ks = r.sub(c, false);
+    keyState = new TextView(this); keyState.setTextSize(12.5f); keyState.setTextColor(look.accent); ks.addView(keyState);
+    r.caption(ks, "Запрос идёт с первого рабочего ключа; если OpenRouter его не принял — со следующего. "
+        + "Лимит бесплатных запросов OpenRouter считает на аккаунт: второй ключ его не поднимет.");
+    bKeyHelp = r.nav(c, app.falar.R.drawable.ic_key, "Как получить ключ", "openrouter.ai → Keys → Create Key", null).v;
+    LinearLayout c2 = r.group(v, "Куда пойдёт запрос");
+    rowRoute = r.nav(c2, app.falar.R.drawable.ic_cloud, "Модели и маршрут", "", null);
+    bModels = rowRoute.v;
+    // Как часто разбирать разговор в облаке. 0 — только по кнопке «Получше».
+    LinearLayout c3 = r.group(v, "Пересмотр разговора");
+    LinearLayout s3 = r.sub(c3, false); s3.setPadding(dp(14), dp(14), dp(14), dp(14));
+    final int[] cloudVals = {0, 5, 10, 20};
+    segCloudEvery = r.seg(s3, new String[]{"По кнопке", "5", "10", "20"}, i -> {
+      if (svc == null) return;
+      final int next = cloudVals[i];
+      if (next > 0 && !svc.cloudConsent()) { consentDialog(() -> { svc.setCloudEvery(next); refreshIntervals(); }); refreshIntervals(); }
+      else { svc.setCloudEvery(next); refreshIntervals(); }
+    });
+    r.caption(s3, "реплик между пересмотрами. Разговор уходит в облако целиком, до 6000 знаков с конца; согласие спрашивается один раз.");
+    // Что важнее облаку: быстрый ответ или точный. «Точнее» ставит вперёд крупные модели — ответ
+    // приходит за полминуты, зато правок и деталей в памяти больше.
+    LinearLayout c4 = r.group(v, "Облако выбирает");
+    LinearLayout s4 = r.sub(c4, false); s4.setPadding(dp(14), dp(14), dp(14), dp(14));
+    segPrefer = r.seg(s4, new String[]{"Быстрее", "Точнее"}, i -> { if (svc == null) return; svc.setCloudQuality(i == 1); refreshIntervals(); });
+    r.caption(s4, "«Точнее» — сначала крупные модели: ответ до полуминуты, зато больше правок и деталей в памяти разговора.");
+    ScrollView outer = new ScrollView(this); outer.setBackgroundColor(look.page); outer.addView(v);
+    return outer;
+  }
+
+  /** «Журнал» — отдельным экраном: это отладочная лента, а ответ приложения на последнее действие
+   *  виден и без него — последней строкой в пункте «Журнал» настроек. */
+  View buildLog() {
+    logView = new TextView(this); logView.setTextSize(13); logView.setTextColor(look.dim); logView.setTextIsSelectable(true);
+    logView.setPadding(dp(16), dp(12), dp(16), dp(24)); logView.setLineSpacing(0, 1.1f);
+    logScroll = new ScrollView(this); logScroll.setBackgroundColor(look.bg); logScroll.addView(logView);
+    return logScroll;
+  }
+  int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
+  int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
   /** Режим настройки голосов. Отдельный экран потому, что это разовая настройка со своим смыслом:
    *  приложение запоминает, как звучите вы и собеседник, и дальше выводит направление перевода
@@ -1736,7 +1866,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  в журнале, и снаружи запись голоса выглядела как кнопка, которая ничего не делает. */
   View buildVoice() {
     LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 12, 24, 12);
-    bVoiceBack = new Button(this); bVoiceBack.setText("← система"); bVoiceBack.setTextSize(13); v.addView(bVoiceBack);
+    bVoiceBack = new Button(this); bVoiceBack.setText("← настройки"); bVoiceBack.setTextSize(13); bVoiceBack.setVisibility(View.GONE);   // назад — стрелкой шапки
     TextView t = new TextView(this); t.setTextSize(13); t.setTextColor(look.soft);
     t.setText("Приложение запоминает голос и язык, на котором этот голос говорит. Дальше направление "
             + "перевода берётся из того, чей голос услышан, а не из кнопок. Держите кнопку и говорите "
@@ -1769,6 +1899,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       return;
     }
     boolean me = svc.spk.has(Speaker.ME), other = svc.spk.has(Speaker.OTHER);
+    if (rowVoices != null) { rowVoices.sub.setText((me ? "мой голос записан" : "мой голос не записан") + " · собеседник — " + (other ? "записан" : "нет")); rowVoices.sub.setVisibility(View.VISIBLE); }
     voiceState.setText("мой голос: " + (me ? "записан" : "не записан")
                      + "\nсобеседник: " + (other ? "записан" : "не записан")
                      + (me || other ? "\nпрофили: " + svc.spk.describe() : ""));
@@ -1776,22 +1907,57 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     tAuto.setChecked(svc.autoDir);
   }
 
-  /** Строка состояния ключа: по началу и хвосту его можно опознать, не показывая целиком.
-   *  Рядом — куда пойдёт следующий запрос: маршрут считается сам, и не видеть его результат нельзя. */
+  /** Ключи: у каждого — состояние и своя корзина. Опознаётся по началу и хвосту, целиком на экране
+   *  не нужен. Первый — рабочий, остальные — запасные; ключ, который OpenRouter не принял, — с
+   *  пометкой. Ниже — куда пойдёт следующий запрос: маршрут считается сам, и не видеть его нельзя. */
+  String keyNoteText = "";
   void refreshKey(String note) {
     if (keyState == null) return;
     Cloud c = svc == null ? null : svc.cloud;
-    String id = c == null ? "" : c.keyId();
-    String base;
-    if (id.isEmpty()) base = "ключа нет — названия разговоров и «получше» выключены";
-    else {
-      base = "ключ " + id + " · бесплатных моделей: " + c.modelCount()
-           + "\n" + (c.auto() ? "маршрут авто → " : "закреплена ") + c.next();
-      if (!c.lastUsed.isEmpty()) base += "\nпоследней отвечала " + c.lastUsed;
+    java.util.List<String> ks = c == null ? new java.util.ArrayList<>() : c.keys();
+    keysBox.removeAllViews();
+    for (int i = 0; i < ks.size(); i++) {
+      final String k = ks.get(i); String n = c.note(k);
+      if (i > 0) rows.divider(keysBox);
+      LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.CENTER_VERTICAL);
+      row.setPadding(dp(14), dp(10), dp(6), dp(10));
+      View dot = new View(this); dot.setBackground(rows.round(!n.isEmpty() ? 0xFFC8245A : i == 0 ? (look.night ? Look.MINT : 0xFF1E9E77) : Look.GOLD, 5, 0));
+      row.addView(dot, new LinearLayout.LayoutParams(dp(10), dp(10)));
+      LinearLayout t = new LinearLayout(this); t.setOrientation(LinearLayout.VERTICAL); t.setPadding(dp(14), 0, dp(8), 0);
+      TextView a = new TextView(this); a.setText("Ключ " + Cloud.idOf(k)); a.setTextSize(15.5f); a.setTextColor(look.fg);
+      TextView b = new TextView(this); b.setTextSize(12.5f); b.setTextColor(look.dim);
+      b.setText(!n.isEmpty() ? n : i == 0 ? "рабочий · запросы идут с него" : "запасной");
+      t.addView(a); t.addView(b);
+      row.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
+      ImageView del = new ImageView(this); del.setScaleType(ImageView.ScaleType.CENTER); del.setContentDescription("Убрать ключ");
+      del.setImageDrawable(icon(app.falar.R.drawable.ic_trash, rows.ink())); del.setBackground(rows.press(0)); del.setClickable(true);
+      del.setOnClickListener(x -> new android.app.AlertDialog.Builder(this).setTitle("Убрать ключ " + Cloud.idOf(k) + "?")
+          .setMessage(ks.size() > 1 ? "Запросы пойдут со следующего ключа. Ключ на сайте OpenRouter останется — его можно вставить снова."
+                                    : "Облако перестанет работать: «Получше» облаком, пересмотр разговора и названия разговоров. "
+                                    + "Ключ на сайте OpenRouter останется — его можно вставить снова.")
+          .setPositiveButton("убрать", (d, w) -> new Thread(() -> { final String r = svc.removeCloudKey(k);
+              runOnUiThread(() -> refreshKey(r)); }).start())
+          .setNegativeButton("отмена", null).show());
+      row.addView(del, new LinearLayout.LayoutParams(dp(44), dp(44)));
+      keysBox.addView(row);
     }
-    keyState.setText(note == null ? base : base + "\n" + note);
-    if (bModels != null) bModels.setEnabled(c != null && c.modelCount() > 0);
-    if (bKeyDrop != null) bKeyDrop.setVisibility(id.isEmpty() ? View.GONE : View.VISIBLE);
+    if (ks.isEmpty()) {
+      TextView none = new TextView(this); none.setText("Ключа нет — названия разговоров и «Получше» облаком выключены");
+      none.setTextSize(13); none.setTextColor(look.dim); none.setPadding(dp(14), dp(12), dp(14), dp(12));
+      keysBox.addView(none);
+      if (addBox != null) addBox.setVisibility(View.VISIBLE);
+    }
+    // Ответ на последнее действие с ключом держится до следующего: журнал облака его не стирает.
+    if (note != null) keyNoteText = note;
+    keyState.setText(keyNoteText); keyState.setVisibility(keyNoteText.isEmpty() ? View.GONE : View.VISIBLE);
+    if (rowRoute != null) {
+      boolean any = c != null && c.modelCount() > 0;
+      rowRoute.title.setText(!any ? "Моделей нет — сначала ключ" : (c.auto() ? "Авто → " : "Закреплена ") + c.next().replace(":free", ""));
+      rowRoute.sub.setText(!any ? "" : "бесплатных моделей: " + c.modelCount() + (c.lastUsed.isEmpty() ? "" : " · последней отвечала " + c.lastUsed.replace(":free", "")));
+      rowRoute.sub.setVisibility(any ? View.VISIBLE : View.GONE);
+      bModels.setEnabled(any);
+    }
+    refreshCloudRow();
   }
 
   /** Как получить ключ OpenRouter и что даёт пополнение. Лимиты — по справке OpenRouter на
@@ -1858,7 +2024,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     szPt = Math.max(12, sPt.getProgress()); szRu = Math.max(10, sRu.getProgress());
     showBig(bigText, bigDir, bigRefined); smallRu.setTextSize(szRu);
     if (histList != null && histList.getAdapter() != null) refreshHist();
-    sizeLbl.setText("Размер шрифта: португальский " + (int) szPt + ", русский " + (int) szRu);
+    sizeLbl.setText((int) szPt + " · " + (int) szRu);
+    if (prevPt != null) { prevPt.setTextSize(szPt); prevRu.setTextSize(szRu); }
   }
 
   void startSvc() {
@@ -1936,7 +2103,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if ("live".equals(kind)) { liveDemo(ms); return; }
     bMic.demo(kind, ms, () -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
   }
-  /** Стенд: снимок экрана самим приложением (--es uishot <имя> [--es uiscreen talk|drawer|words|settings]).
+  /** Стенд: снимок экрана самим приложением (--es uishot <имя> [--es uiscreen talk|drawer|words|settings|mods|cloud|log]).
    *  Вид раскладывается на размер окна и рисуется в files/<имя>.png. Работает и при погашенном
    *  заблокированном экране, когда системе снимать нечего, а разблокировать чужой телефон нельзя.
    *  Тени и остальное, что рисует только видеокарта, в снимок не попадают. Разговор на снимке —
@@ -1948,7 +2115,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final boolean tmp = !bound;
     if (tmp) bindSvc();
     boolean dr = "drawer".equals(which); final int was = screen;
-    show("words".equals(which) ? 1 : "settings".equals(which) ? 2 : 0);
+    show("words".equals(which) ? 1 : "settings".equals(which) ? 2 : "mods".equals(which) ? 5 : "cloud".equals(which) ? 6 : "log".equals(which) ? 7 : 0);
+    if (screen == 5) { refreshModules(); refreshModels(); }
     if (screen == 1) refreshWords();
     if (sidePanel != null) {
       sidePanel.animate().cancel(); scrim.animate().cancel();
@@ -2059,7 +2227,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   @Override public void onLog(String s) {
     logView.append(s + "\n\n");
     if (logLast != null) logLast.setText(s.replace('\n', ' '));   // свёрнутый журнал всё равно показывает последний ответ
-    if (logScroll != null && logScroll.getVisibility() == View.VISIBLE) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
+    if (logScroll != null && screen == 7) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     if (s.startsWith("🎤") && voiceMsg != null) { voiceMsg.setText(s); refreshVoice(); }
     if (s.startsWith("🧠") && tCtx != null && svc != null && tCtx.isChecked() != svc.contextMode) { uiSync = true; tCtx.setChecked(svc.contextMode); uiSync = false; }
     if (s.startsWith("☁") && keyState != null && svc != null && svc.cloud != null) refreshKey(null);
@@ -2080,10 +2248,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     String line = state == null || state.isEmpty()
         ? (has ? Updates.describe(svc.myCode(), svc.update) : "обновления проверяются раз в сутки")
         : state;
-    updLbl.setText("Falar " + (svc == null ? "" : svc.myName()) + " · " + line);
+    // Вышла новая версия — карточка золотая, кнопка «Обновить»; иначе — «Проверить».
+    updTitle.setText(has ? "Вышла Falar " + svc.update.name : "Falar " + (svc == null ? "" : svc.myName()));
+    updLbl.setText(line);
     bUpdateGo.setVisibility(has && !svc.updateBusy ? View.VISIBLE : View.GONE);
-    bUpdateGo.setText(has ? "обновить до " + svc.update.name : "обновить");
+    bUpdate.setVisibility(has && !svc.updateBusy ? View.GONE : View.VISIBLE);
     bUpdate.setEnabled(svc != null && !svc.updateBusy);
+    updCard.setBackground(rows.round(has ? (look.night ? 0xFF2E2416 : 0xFFFBF3E4) : look.bg, 16, has ? (look.night ? 0xFF5A4520 : 0xFFEBD6AE) : look.line));
   }
   @Override public void onModels(ModelStore.State s) {
     mst = s; refreshSetup(); refreshModels(); refreshModules();
@@ -2104,8 +2275,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     boolean tts = on.contains(Modules.TTS), cloud = on.contains(Modules.CLOUD), llm = on.contains(Modules.LLM);
     vis(ttsBox, tts); vis(bRevStart, tts);
     if (!tts && revOpen && bRevStart != null) bRevStart.performClick();          // повторение на слух без голоса бессмысленно
-    vis(cloudBox, cloud); vis(bCloudEvery, cloud); vis(bCloudPrefer, cloud);
-    vis(tCtx, llm); vis(bRefineEvery, llm);
+    vis(cloudBox, cloud); vis(llmBox, llm); vis(grpTr, cloud || llm);
     vis(bVoices, on.contains(Modules.SPEAKER));
     // Без чтения снимков и облака снимать нечем — кнопка дока только набирает фразу.
     boolean photo = Modules.photo(on);
@@ -2117,38 +2287,47 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     refreshModules(); refreshBetter();
   }
 
-  /** Модули под кнопкой: развернуть — переключатели и «удалить неиспользуемые», свернуть — одна строка. */
-  void showModules(boolean open) {
-    if (modBox == null) return;
-    prefs.edit().putBoolean("mods_open", open).apply();
-    modBox.setVisibility(open ? View.VISIBLE : View.GONE);
-    refreshModulesButton();
-  }
-  void refreshModulesButton() {
-    if (bModules == null) return;
-    boolean open = modBox != null && modBox.getVisibility() == View.VISIBLE;
-    String on = svc == null ? "" : " · включено " + svc.modules.size() + " из " + Modules.CHOICE.size();
-    bModules.setText("🧩 модули" + on + (open ? " · свернуть" : " · развернуть"));
-  }
-
-  /** Переключатели модулей: состояние, размер, скачано ли. Только по размеру файлов — без хэшей. */
+  /** Модули: переключатель, размер по манифесту, метка состояния и полоса загрузки — по размерам
+   *  файлов на диске, без хэшей: экран перерисовывается часто. */
   void refreshModules() {
-    refreshModulesButton();
-    if (svc == null || svc.store == null || modChecks.isEmpty()) return;
+    if (svc == null || svc.store == null || modRows.isEmpty()) return;
+    ModelStore.State s = mst; boolean busy = s != null && s.busy(), wait = s != null && ModelStore.WAIT.equals(s.phase);
+    ModelStore.Item cur = s == null || s.file == null || s.file.isEmpty() ? null : svc.store.byPath(s.file);
+    int keys = svc.cloud == null ? 0 : svc.cloud.keys().size();
     uiSync = true;
-    for (String m : Modules.CHOICE) {
-      CheckBox cb = modChecks.get(m); if (cb == null) continue;
-      cb.setChecked(svc.mod(m));
+    for (java.util.Map.Entry<String, ModRow> e : modRows.entrySet()) {
+      String m = e.getKey(); ModRow r = e.getValue();
+      boolean on = Modules.BASE.equals(m) || svc.mod(m);
+      if (!Modules.BASE.equals(m)) r.sw.setChecked(on);
       long b = svc.store.bytes(m);
-      String st = b == 0 ? (svc.cloud != null && svc.cloud.ready ? "ключ есть" : "нужен ключ OpenRouter")
-                : svc.store.onPhone(m) ? "скачано" : svc.mod(m) ? "докачивается" : "не скачано";
-      cb.setText(Modules.title(m) + (b > 0 ? " · " + ModelStore.mb(b) + " МБ" : "") + " · " + st);
+      r.size.setText(b == 0 ? "" : b >= 1_000_000_000L ? String.format(java.util.Locale.ROOT, "%.1f ГБ", b / 1e9).replace('.', ',') : Math.round(b / 1e6) + " МБ");
+      r.size.setVisibility(b == 0 ? View.GONE : View.VISIBLE);
+      boolean onPhone = b > 0 && svc.store.onPhone(m), loading = cur != null && m.equals(cur.module) && busy;
+      if (b == 0) rows.pill(r.pill, keys == 0 ? "нужен ключ" : keys == 1 ? "ключ есть" : "ключей: " + keys, keys == 0 ? "no" : "ok");
+      else if (!on) rows.pill(r.pill, onPhone ? "выключен · файлы на месте" : "выключен", "no");
+      else if (onPhone) rows.pill(r.pill, "установлено", "ok");
+      else if (loading && !wait) rows.pill(r.pill, "качается", "go");
+      else if (wait) rows.pill(r.pill, "ждёт Wi-Fi", "wait");
+      else rows.pill(r.pill, busy ? "в очереди" : "не скачано", "no");
+      // Полоса — у включённого модуля, файлов которого ещё нет: сколько уже на телефоне.
+      boolean bar = on && b > 0 && !onPhone;
+      r.barBox.setVisibility(bar ? View.VISIBLE : View.GONE);
+      if (bar) {
+        long d = Math.min(b, svc.store.doneBytes(m));
+        r.bar.set(1, 0, d / (float) b);
+        r.barLbl.setText(Math.round(d / 1e6) + " из " + Math.round(b / 1e6) + " МБ · " + (int) (d * 100 / b) + " %");
+      }
     }
     uiSync = false;
     long unused = svc.unusedBytes();
     if (bUnused != null) {
       bUnused.setEnabled(unused > 0);
-      bUnused.setText(unused > 0 ? "удалить неиспользуемые модели · " + ModelStore.mb(unused) + " МБ" : "неиспользуемых моделей нет");
+      bUnused.setText(unused > 0 ? "Удалить неиспользуемые · " + ModelStore.mb(unused) + " МБ" : "Неиспользуемых нет");
+    }
+    if (rowMods != null) {
+      int n = 0; for (String m : Modules.CHOICE) if (svc.mod(m)) n++;
+      rowMods.sub.setText("включено " + n + " из " + Modules.CHOICE.size() + (s == null || !s.checked ? "" : busy ? " · докачивается" : s.coreMissing == 0 && s.autoMissing == 0 ? " · все модели установлены" : " · не всё скачано"));
+      rowMods.sub.setVisibility(View.VISIBLE);
     }
   }
 
@@ -2272,21 +2451,38 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (s != null && s.total > 0) setupBar.setProgress((int) (s.done * 1000 / s.total));
     setupProg.setText(s == null ? "" : progressLine(s));
   }
+  /** Строка над модулями: «Все модели установлены · 14 из 14» или ход докачки со «Стоп». */
   void refreshModels() {
-    if (modelsLbl == null) return;
+    if (modsSum == null) return;
     ModelStore.State s = mst;
-    if (s == null || !s.checked) { modelsLbl.setText("Файлы моделей: проверяю…"); bModelsVerify.setEnabled(false); bModelsStop.setVisibility(View.GONE); return; }
-    StringBuilder sb = new StringBuilder("Файлы моделей " + (svc != null && svc.store != null ? svc.store.app : "") + ": обязательные "
-      + (s.coreMissing == 0 ? "все на месте" : "нет " + s.coreMissing + " (" + ModelStore.mb(s.coreBytes) + " МБ)")
-      + (s.autoMissing == 0 ? " · модули на месте" : " · модулям не хватает " + ModelStore.mb(s.autoBytes) + " МБ — докачается само"));
-    if (s.busy() || !s.message.isEmpty()) sb.append("\n").append(progressLine(s));
-    if (s.upgrade > 0) sb.append("\nМожно облегчить перевод: скачать ").append(ModelStore.mb(s.upgradeBytes)).append(" МБ");
-    modelsLbl.setText(sb);
-    bModelsUp.setVisibility(s.upgrade > 0 && !s.busy() ? View.VISIBLE : View.GONE);
-    bModelsUp.setText("⬇ облегчить перевод · " + ModelStore.mb(s.upgradeBytes) + " МБ");
-    bModelsStop.setVisibility(ModelStore.CHECK.equals(s.phase) ? View.GONE : s.busy() ? View.VISIBLE : View.GONE);
-    bModelsVerify.setEnabled(!s.busy());
-    bModelsVerify.setText(ModelStore.CHECK.equals(s.phase) ? "проверяю…" : "проверить файлы моделей");
+    int core = svc == null || svc.store == null ? 0 : svc.store.tier("core").size();
+    int col = look.night ? Look.MINT : 0xFF1E9E77;
+    android.graphics.drawable.Drawable ok = icon(app.falar.R.drawable.ic_check, col), dl = icon(app.falar.R.drawable.ic_download, rows.ink());
+    ok.setBounds(0, 0, dp(18), dp(18)); dl.setBounds(0, 0, dp(18), dp(18));
+    if (s == null || !s.checked) {
+      modsSum.setText("Проверяю файлы…"); modsSum.setCompoundDrawables(null, null, null, null);
+      bModelsVerify.setEnabled(false); bModelsStop.setVisibility(View.GONE); modelsLbl.setVisibility(View.GONE); return;
+    }
+    boolean busy = s.busy(), check = ModelStore.CHECK.equals(s.phase);
+    if (check) { modsSum.setText("Проверяю файлы…"); modsSum.setCompoundDrawables(dl, null, null, null); }
+    else if (busy) {
+      modsSum.setText(ModelStore.WAIT.equals(s.phase) ? "Жду Wi-Fi · осталось " + ModelStore.mb(Math.max(0, s.total - s.done)) + " МБ"
+          : "Качаю · " + ModelStore.mb(s.done) + " из " + ModelStore.mb(s.total) + " МБ");
+      modsSum.setCompoundDrawables(dl, null, null, null);
+    } else if (s.coreMissing == 0 && s.autoMissing == 0) {
+      modsSum.setText("Все модели установлены · " + core + " из " + core); modsSum.setCompoundDrawables(ok, null, null, null);
+    } else if (s.coreMissing > 0) {
+      modsSum.setText("Обязательных нет: " + s.coreMissing + " из " + core + " · " + ModelStore.mb(s.coreBytes) + " МБ"); modsSum.setCompoundDrawables(dl, null, null, null);
+    } else { modsSum.setText("Модулям не хватает " + ModelStore.mb(s.autoBytes) + " МБ — докачается само"); modsSum.setCompoundDrawables(dl, null, null, null); }
+    // Ошибки и остановка — строкой под ней: причина видна там, где смотрят.
+    String extra = !s.errors.isEmpty() && !busy ? String.join("\n", s.errors) : ModelStore.PAUSED.equals(s.phase) ? s.message : "";
+    modelsLbl.setText(extra); modelsLbl.setVisibility(extra.isEmpty() ? View.GONE : View.VISIBLE);
+    bModelsUp.setVisibility(s.upgrade > 0 && !busy ? View.VISIBLE : View.GONE);
+    bModelsUp.setText("Облегчить перевод · " + ModelStore.mb(s.upgradeBytes) + " МБ");
+    bModelsStop.setVisibility(busy && !check ? View.VISIBLE : View.GONE);
+    bModelsVerify.setEnabled(!busy);
+    bModelsVerify.setText(check ? "Проверяю…" : "Проверить файлы");
+    refreshModules();
   }
   /** «Облегчить перевод»: новые файлы перевода вместо прежних — перевод занимает на полгигабайта меньше
    *  памяти, и уточнитель чаще помещается рядом. Качается по выбору: 305 МБ — не мелочь. */

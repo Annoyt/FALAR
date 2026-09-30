@@ -1307,9 +1307,17 @@ public class TranslatorService extends Service {
     log("☁ разговор " + id + " назван: «" + name + "» · " + cloud.lastUsed + " · реплик " + t.length());
   }
 
+  /** Добавить ключ OpenRouter: он проверяется у OpenRouter и встаёт запасным, если рабочий ключ уже
+   *  есть. Пустая строка убирает все ключи. */
   public String setCloudKey(String k) {
     if (cloud == null) return "движок не готов";
     String r = cloud.configure(k);
+    log("☁ " + r); return r;
+  }
+  /** Убрать один ключ — кнопкой у самого ключа в «Облаке». */
+  public String removeCloudKey(String k) {
+    if (cloud == null) return "движок не готов";
+    String r = cloud.removeKey(k);
     log("☁ " + r); return r;
   }
 

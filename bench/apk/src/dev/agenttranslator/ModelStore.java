@@ -341,6 +341,18 @@ public class ModelStore {
   /** Размер файлов модуля по манифесту, байт. */
   public long bytes(String module) { long b = 0; for (Item it : items) if (module.equals(it.module)) b += it.size; return b; }
 
+  /** Сколько байт модуля уже на телефоне: целые файлы и недокачанные .part — для полосы загрузки
+   *  у модуля в «Модулях» (владелец 30.09: «у каждого модуля прогресс бар загрузки»). По размерам на
+   *  диске, без хэша: экран спрашивает часто. */
+  public long doneBytes(String module) {
+    long b = 0;
+    for (Item it : items) if (module.equals(it.module)) {
+      if (present(it, 0)) b += it.size;
+      else { File pt = part(it.target(dir)); if (pt.exists()) b += Math.min(it.size, pt.length()); }
+    }
+    return b;
+  }
+
   /** Все файлы модуля на месте (по кэшу сверки). У модуля без файлов (облако) — да. */
   public boolean installed(String module) {
     for (Item it : items) if (module.equals(it.module) && !present(it, 1)) return false;

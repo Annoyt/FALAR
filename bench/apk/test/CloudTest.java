@@ -125,6 +125,31 @@ public class CloudTest {
     ok(!c3.ready && c3.order().length == 0 && c3.next().isEmpty(), "T4 без файла — моделей нет, порядок пуст");
 
     System.out.println(fails == 0 ? "Cloud: " + checks + " проверок, все прошли" : "Cloud: провалов " + fails + " из " + checks);
+    // ---- несколько ключей: прежний файл с одним ключом, порядок, удаление, переход на следующий
+    File kd = Files.createTempDirectory("cloudkeys").toFile(); kd.deleteOnExit();
+    File kf = new File(kd, "openrouter.json");
+    Files.write(kf.toPath(), "{\"key\":\"sk-or-v1-aaaaaaaaaaaaaaaaaaaa1111\",\"pick\":\"\",\"models\":[\"x/m-8b:free\"]}".getBytes("UTF-8"));
+    Cloud k1 = new Cloud(kd);
+    eq(k1.keys(), Arrays.asList("sk-or-v1-aaaaaaaaaaaaaaaaaaaa1111"), "K1 файл до списка ключей: один ключ");
+    eq(k1.keyId(), "sk-or-v1-aaaa…1111", "K1 ключ опознаётся по началу и хвосту");
+    Files.write(kf.toPath(), ("{\"key\":\"kB-bbbbbbbbbbbbbbbbbbbbb\",\"keys\":[\"kA-aaaaaaaaaaaaaaaaaaaaa\",\"kB-bbbbbbbbbbbbbbbbbbbbb\",\"kA-aaaaaaaaaaaaaaaaaaaaa\"],"
+        + "\"pick\":\"\",\"models\":[\"x/m-8b:free\"]}").getBytes("UTF-8"));
+    Cloud k2 = new Cloud(kd);
+    eq(k2.keys(), Arrays.asList("kB-bbbbbbbbbbbbbbbbbbbbb", "kA-aaaaaaaaaaaaaaaaaaaaa"), "K2 «key» первым, повтор в списке — один раз");
+    ok(k2.useNextKey(401), "K3 ключ не принят — переход на следующий");
+    eq(k2.keys(), Arrays.asList("kA-aaaaaaaaaaaaaaaaaaaaa", "kB-bbbbbbbbbbbbbbbbbbbbb"), "K3 отвергнутый — в конец");
+    ok(k2.note("kB-bbbbbbbbbbbbbbbbbbbbb").contains("HTTP 401"), "K3 у отвергнутого — пометка");
+    ok(!k2.useNextKey(401), "K4 все помечены — дальше перебора нет");
+    String saved = new String(Files.readAllBytes(kf.toPath()), "UTF-8");
+    ok(saved.contains("\"key\":\"kA-aaaaaaaaaaaaaaaaaaaaa\""), "K5 в файле «key» — новый первый: его читают прежние сборки");
+    eq(new Cloud(kd).keys(), Arrays.asList("kA-aaaaaaaaaaaaaaaaaaaaa", "kB-bbbbbbbbbbbbbbbbbbbbb"), "K5 порядок переживает перезапуск");
+    k2.removeKey("kA-aaaaaaaaaaaaaaaaaaaaa");
+    eq(k2.keys(), Arrays.asList("kB-bbbbbbbbbbbbbbbbbbbbb"), "K6 убран один ключ");
+    ok(k2.ready, "K6 второй ключ остался — облако работает");
+    k2.removeKey("kB-bbbbbbbbbbbbbbbbbbbbb");
+    ok(!k2.ready && k2.keys().isEmpty(), "K7 ключей не осталось — облако выключено");
+    ok(!new Cloud(kd).ready, "K7 и после перезапуска");
+
     return fails;
   }
   public static void main(String[] a) throws Exception { System.exit(run() == 0 ? 0 : 1); }
