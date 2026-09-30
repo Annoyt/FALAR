@@ -180,6 +180,10 @@ public class OcrCoreTest {
         "003 1310 FEIJAO PRETO", "1 UN 8,99 8,99", "004 309 CEBOLA", "3 UN 1,99 5,97")),
         "T1 чек читается позициями: код с названием, количество с ценами, по порядку: " + texts(tb));
     ok(tb.size() == 1, "T1 таблица — один блок: " + tb.size());
+    boolean allTab = true; for (OcrCore.Para pp : OcrCore.paragraphs(tb.get(0))) allTab &= pp.table;
+    List<OcrCore.Item> plain = new ArrayList<>(Arrays.asList(item(10, 10, 110, 30, "Adulto R$ 25,00"), item(10, 60, 300, 80, "Crianças até 5 anos não pagam")));
+    boolean noneTab = true; for (List<OcrCore.Row> pb : OcrCore.layout(plain)) for (OcrCore.Para pp : OcrCore.paragraphs(pb)) noneTab &= !pp.table;
+    ok(allTab && noneTab, "T5 абзацы таблицы помечены — язык у них не судится; у обычной вывески — нет");
     List<OcrCore.Item> menu = new ArrayList<>();
     String[][] mp = {{"Café", "5,00"}, {"Pão de queijo", "7,50"}, {"Suco natural", "9,00"}};
     for (int k = 0; k < 3; k++) { menu.add(item(10, 10 + 40 * k, 150, 40 + 40 * k, mp[k][0])); menu.add(item(400, 10 + 40 * k, 450, 40 + 40 * k, mp[k][1])); }

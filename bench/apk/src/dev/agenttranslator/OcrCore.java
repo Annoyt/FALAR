@@ -520,7 +520,10 @@ public final class OcrCore {
    *  направлению первой строки: центр (x, y), направление (ux, uy), ширина, высота. */
   public static final class Para {
     public final String text; public final List<Row> rows;
-    Para(String t, List<Row> r) { text = t; rows = r; }
+    /** Строка таблицы (tables): в ней сокращения и марки — обычное дело («… PRATINHO BCO 5KG»), и по
+     *  доле знакомых слов её язык не судится. */
+    public final boolean table;
+    Para(String t, List<Row> r) { text = t; rows = r; boolean tb = false; for (Row x : r) tb |= x.table; table = tb; }
     /** Уверенность абзаца: средняя уверенность распознавателя по его рамкам с весом длины текста
      *  (tools/ocr_ref.py: para_conf). Ниже CONF_MIN абзац не переводится. */
     public double score() {
