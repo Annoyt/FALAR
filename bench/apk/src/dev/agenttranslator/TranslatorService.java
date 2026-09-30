@@ -2423,10 +2423,10 @@ public class TranslatorService extends Service {
       busy("live", "перевожу снимок…", i, pg.paras.size());
       OcrCore.Para p = pg.paras.get(i);
       List<String[]> fx = new ArrayList<>();
-      String text = ow == null ? p.text : ow.fix(p.text, fx);
+      String text = ow == null ? p.text : ow.fix(p.text, fx, p.table && OcrWords.bare(p.text));   // чек — без знаков над буквами
       // Абзац, который распознаватель сам прочитал неуверенно, — каша («Porções por ombalad m •
       // or:o: 1lm»): её перевод закрыл бы собой настоящий текст на снимке. Такой остаётся как есть.
-      String ru = null, why = p.score() < OcrCore.CONF_MIN ? "плохо прочитано" : photoSkip(text);
+      String ru = null, why = p.score() < OcrCore.CONF_MIN ? "плохо прочитано" : photoSkip(text, p.table);
       if (why != null) text = p.text;                  // не переводится — показываем как прочитано, без правки
       else d.fixes.addAll(fx);
       if (why == null) {
@@ -2488,7 +2488,12 @@ public class TranslatorService extends Service {
    *  как есть: английский абзац на табличке переводчик pt→ru превращал в мусор («⁇ 2019 ⁇ Все
    *  права защищены»). Одиночные служебные слова («DO») и обрывки без букв — тоже: переводчик
    *  на них выдумывает. Короткое название («SAÍDA», «Guapíara») переводится — это и нужно. */
-  String photoSkip(String t) {
+  String photoSkip(String t) { return photoSkip(t, false); }
+  /** table — строка таблицы (чек, прейскурант): язык по доле знакомых слов не судится. Позиция чека
+   *  «002 7890000000017 ARROZ PRATINHO BCO 5KG» — марка и сокращение, знакомо одно слово из трёх,
+   *  и она уходила в «не португальский». Везде проверку не снять: на наборе вывесок тогда в перевод
+   *  пошли бы список фамилий на табличке (5 строк) и мусор распознавания (3). */
+  String photoSkip(String t, boolean table) {
     String letters = t.replaceAll("[^\\p{L}]", "");
     if (letters.length() < 2) return "без букв";
     // адрес сайта или почты переводчик дополнял выдумкой: «2019 Cepera.com. Все права защищены.»
@@ -2499,6 +2504,7 @@ public class TranslatorService extends Service {
     // Доля знакомых слов — по словарю снимков (72 тыс. форм), а не по словарю речи (17 тыс.): на
     // этикетке «espessante», «carboidratos», «corante» — обычные слова, которых в речи не бывает,
     // и абзац состава уходил в «не португальский». Английский абзац таблички набирает 0,2–0,33.
+    if (table) return null;
     OcrWords ow = ocrWords();
     double lk = ow != null ? ow.share(t) : words != null ? words.looksLike(t, "pt") : -1;
     if (lk >= 0 && lk < (ow != null ? OcrWords.LANG_MIN : LANG_MIN)) return "не португальский";

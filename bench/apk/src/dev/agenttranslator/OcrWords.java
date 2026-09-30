@@ -18,6 +18,19 @@ public class OcrWords {
   /** Абзац снимка с долей знакомых слов ниже этой — не португальский и не переводится: английский
    *  абзац таблички набирает 0,2–0,33, список фамилий — 0–0,33, искажённый состав этикетки — 0,45. */
   public static final double LANG_MIN = 0.40;
+  /** Чек печатается без знаков над буквами: «MACA» — maçã (яблоко), но «maca» (носилки) — тоже слово,
+   *  и ударения не возвращались (переводчик писал «мак»). В строке таблицы прописными без единого знака берётся
+   *  форма со знаками, если она в BARE_RATIO раз чаще (maçã 386 против maca 7); до 10 раз пары
+   *  двусмысленны (faca «нож» 276 против faça 1162, esta и está, coco и cocô). Эталон и замер —
+   *  tools/ocr_words.py. */
+  static final double BARE_RATIO = 10; static final int BARE_MIN = 4;
+  /** Цифра вместо буквы: распознаватель путает похожие знаки (0 и O, 1 и I/l, 5 и S, 8 и B, 6 и G, 2 и Z).
+   *  Слово из букв с одной цифрой, где похожая буква даёт слово из словаря («F0ne» → «Fone», «FEIJ0ADA»
+   *  → «FEIJOADA»), — это слово, а не два обрывка для переводчика. Букв хотя бы три, цифра одна:
+   *  «500g», «30un», «B12», «4G», «PORTÃO7» не трогаются. Эталон и замер — tools/ocr_words.py. */
+  static final Pattern MIXED = Pattern.compile("(?<![\\p{L}\\p{N}])(\\p{L}*)(\\d)(\\p{L}*)(?![\\p{L}\\p{N}])");
+  static final String[] LOOK = new String[10];
+  static { LOOK[0] = "o"; LOOK[1] = "il"; LOOK[5] = "s"; LOOK[8] = "b"; LOOK[6] = "g"; LOOK[2] = "z"; }
   static final Set<String> FUNC2 = new HashSet<>(Arrays.asList("de", "da", "do", "as", "os", "em", "no", "na", "um", "ao"));
   // Буквы — как [^\W\d_] в Python: буквы и числовые знаки не из цифр («²»).
   static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{Nl}\\p{No}]+"),
@@ -91,8 +104,15 @@ public class OcrWords {
   boolean target(int i, boolean capital, int fmin) { return freq[i] >= fmin && (capital || !name[i]) && !english[i]; }
 
   /** Замена для слова w (строчными) или null. */
-  String best(String w, boolean title, boolean capital) {
-    if (exact(w) >= 0) return null;
+  String best(String w, boolean title, boolean capital) { return best(w, title, capital, false); }
+  /** bare — строка чека без знаков над буквами (bare()). */
+  String best(String w, boolean title, boolean capital, boolean bare) {
+    int ex = exact(w);
+    if (ex >= 0) {
+      if (!bare || w.length() < BARE_MIN) return null;
+      int a = find(plain(w));                                   // самая частая форма с теми же буквами
+      return a >= 0 && !forms[a].equals(w) && freq[a] >= BARE_RATIO * Math.max(1, freq[ex]) && target(a, capital, ACCENT_MIN) ? forms[a] : null;
+    }
     String p = plain(w); int fmin = title ? TITLE_MIN : MIN_FREQ;
     int a = p.length() >= 3 ? find(p) : -1;
     if (a >= 0) return target(a, capital, Math.max(ACCENT_MIN, fmin)) ? forms[a] : null;
@@ -168,13 +188,37 @@ public class OcrWords {
   }
 
   /** Текст с исправленными словами; changes (если не null) — пары «было, стало». */
-  public String fix(String text, List<String[]> changes) {
+  public String fix(String text, List<String[]> changes) { return fix(text, changes, false); }
+  /** Строка прописными без единого знака над буквами — как печатает кассовый аппарат. Единицы («kg»,
+   *  «un», «ml») бывают строчными — в счёт идут слова от трёх букв. */
+  public static boolean bare(String t) {
+    Matcher m = TOKEN.matcher(t); boolean any = false;
+    while (m.find()) { String w = m.group(); if (w.length() < 3) continue; any = true; if (!isUpper(w)) return false; }
+    return any && plain(t).equals(t.toLowerCase(Locale.ROOT));
+  }
+  /** bare — строка чека без знаков над буквами: знакомое слово получает знаки, если их форма намного чаще. */
+  public String fix(String text, List<String[]> changes, boolean bare) {
+    Matcher dm = MIXED.matcher(text); StringBuffer db = new StringBuffer();
+    while (dm.find()) {
+      String b = dm.group(1), a = dm.group(3), look = LOOK[dm.group(2).charAt(0) - '0'], r = null;
+      if (b.length() + a.length() >= 3 && look != null) {
+        int bc = -1; char best = 0;
+        for (char c : look.toCharArray()) {
+          String w = (b + c + a).toLowerCase(Locale.ROOT); int i = exact(w), n = count(w);
+          if (known(w) && !(i >= 0 && english[i]) && n >= MIN_FREQ && n > bc) { bc = n; best = c; }
+        }
+        if (best != 0) r = b + (isUpper(b + a) ? Character.toUpperCase(best) : best) + a;
+      }
+      if (r != null && changes != null) changes.add(new String[]{dm.group(), r});
+      dm.appendReplacement(db, Matcher.quoteReplacement(r != null ? r : dm.group()));
+    }
+    dm.appendTail(db); text = db.toString();
     Matcher m = TOKEN.matcher(text); StringBuffer sb = new StringBuffer();
     while (m.find()) {
       String t = m.group(), lw = t.toLowerCase(Locale.ROOT), r = null;
       if (lw.length() >= 3) {
         boolean capital = Character.isUpperCase(t.charAt(0)), title = capital && !isUpper(t);
-        String b = best(lw, title, capital);
+        String b = best(lw, title, capital, bare);
         if (b != null && !b.equals(lw)) r = caseAs(t, b);
         else if (!known(lw)) {
           List<String> s = split(t);
