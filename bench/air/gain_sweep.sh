@@ -50,7 +50,9 @@ AUTO0=$(sh "grep -E '🎚 (чувствительность: авто, сейч�
 restore() {
   say "== возврат: разбор каждые $REF, облако каждые $CLOUD, авто-чувствительность $AUTO0 дБ"
   $ADB shell "am force-stop $PKG"; sleep 2      # подача могла не кончиться — после сброса она подстроила бы авто снова
-  $ADB shell "am start -n $ACT --es vad 0 --es silent 0 --es refineevery $REF --es cloudevery $CLOUD --es micautodb $AUTO0" >/dev/null 2>&1; sleep 3
+  $ADB shell "am start -n $ACT --es vad 0 --es silent 0 --es refineevery $REF --es cloudevery $CLOUD --es micautodb $AUTO0 $([ -n "${NOSPK:-}" ] && echo "--es modules '$MODS0'")" >/dev/null 2>&1; sleep 3
+  if [ -n "${NOSPK:-}" ]; then local mm; mm=$(count $LOG); $ADB shell "am start -n $ACT --es modules show" >/dev/null 2>&1; sleep 3
+    say "  модули: $(sh "tail -n +$((mm+1)) $LOG | grep -m1 '🧩 модули сейчас'" | sed 's/.*модули сейчас: //') (было до замера: [$MODS0])"; fi
   $ADB shell "am force-stop $PKG"; sleep 2
   for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do
     [ -f "$SNAP/$(basename $f)" ] && $ADB push "$SNAP/$(basename $f)" "$F/$f" >/dev/null 2>&1; done
@@ -65,6 +67,17 @@ $ADB wait-for-device; free_phone
 for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do $ADB pull "$F/$f" "$SNAP/" >/dev/null 2>&1; done
 printf '{"id": %s, "name": "ТЕСТ чувствительность", "named": true, "saved": %s, "turns": []}\n' $TID $TID > $D/t.json
 $ADB shell "am force-stop $PKG"; sleep 1; $ADB push $D/t.json "$F/chats/$TID.json" >/dev/null 2>&1
+# Голоса разговора (ветка voices): слушание переводит только голоса, записанные кнопкой FALAR, а в
+# тестовом разговоре их нет — замер не услышал бы ничего (02.10: все 73 куска «в разговоре ещё нет
+# голосов»). Модуль отпечатка голоса на время прогона выключен, в конце — как был.
+MODS0=; NOSPK=; m0=$(count $LOG); $ADB shell "am start -n $ACT --es modules show" >/dev/null 2>&1
+for _ in $(seq 30); do sleep 1; ml=$(sh "tail -n +$((m0+1)) $LOG | grep -m1 '🧩 модули сейчас'"); [ -n "$ml" ] && break; done
+MODS0=$(printf '%s' "$ml" | sed -n 's/.*модули сейчас: \[\([a-z,]*\)\].*/\1/p')
+if printf ',%s,' "$MODS0" | grep -q ',speaker,'; then
+  NOSPK=$(printf '%s' "$MODS0" | tr ',' '\n' | grep -vx speaker | paste -sd, -)
+  $ADB shell "am start -n $ACT --es modules '$NOSPK'" >/dev/null 2>&1; sleep 3
+  say "  модуль «отпечаток голоса» на время замера выключен (модули были: [$MODS0])"
+fi
 printf 'запись\tусиление\tрежим\tнарезка\tWER\tчисто\tWER_чистых\tпотеряно\tкусков\tречь_дБ\tфон_дБ\tперегруз_%%\tограничитель_%%\tсрез_%%\tшумодав_%%ядра\n' > $SUM
 
 for rec in $RECS; do
