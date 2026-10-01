@@ -131,7 +131,10 @@ with open(f'{D}/feed.tsv', 'w', encoding='utf-8') as f:
     f.write('none\t' + open(A[5] + '.txt', encoding='utf-8').read().strip() + '\n')
     f.write('off\t' + open(C[2] + '.txt', encoding='utf-8').read().strip() + '\n')
 EOF
-WAVS="vt_A1.wav vt_A2.wav vt_B1.wav vt_feed.wav vt_none.wav vt_off.wav"
+WAVS="vt_A1.wav vt_A2.wav vt_B1.wav vt_feed.wav vt_none.wav vt_off.wav vt_gold.json"
+GOLD=$R/bench/apk/test/voiceprint_golden.json
+cp "$GOLD" "$D/vt_gold.json"
+for w in $("$PY" -c "import json,sys; print(' '.join(o['wav'] for o in json.load(open(sys.argv[1]))))" "$GOLD"); do cp "$R/$w" "$D/"; WAVS="$WAVS $(basename $w)"; done
 say "  $(cut -f1 "$D/feed.tsv" | tr '\n' ' ')· $(du -ch $(printf "$D/%s " $WAVS) | tail -1 | cut -f1)"
 
 # ---- снимок, модули, тестовые разговоры -----------------------------------------------------------
@@ -175,6 +178,12 @@ ready "$m"
 wl "$m" '🎤 отпечаток голоса (готов|подключён)' 60 >/dev/null || { res 1 "V· отпечаток голоса не поднялся"; exit 1; }
 cur=$(sh "ls -t $F/chats/ | head -1")
 [ "$cur" = "$TID.json" ] || { res 1 "V· текущий разговор не тестовый: $cur"; exit 1; }
+
+say "== V·: отпечаток на телефоне — тот же, что у эталона со стола"
+m=$(mark); launch --es voicegold "$F/vt_gold.json"
+l=$(wl "$m" '🎤 эталон отпечатка' 60); say "  ${l:-нет строки}"
+w=$(printf '%s' "$l" | sed -n 's/.*худший \([-0-9.]*\).*/\1/p')
+"$PY" -c "import sys; sys.exit(0 if float('${w:--9}') >= 0.999 else 1)" && res 0 "V· Java-признаки и ORT дают эталонный отпечаток (худший косинус $w)" || res 1 "V· отпечаток не эталонный: ${w:-нет}"
 
 say "== V0: общий файл голосов прежних версий"
 l=$(wl "$m" 'общие голоса прежних версий удалены' 5)

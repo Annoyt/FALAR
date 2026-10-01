@@ -302,6 +302,24 @@ public class TranslatorService extends Service {
         Voices.Voice v = chats.enroll(e, lang, System.currentTimeMillis());
         log("🎤 стенд: " + new File(wav).getName() + " → " + voiceNote(v, m, chats.voices.size() > before) + " (" + (System.nanoTime() - t) / 1000000 + " мс)");
         Listener l = listener; if (l != null) main.post(l::onHistory); } catch (Throwable t) { log("🎤 стенд: ошибка записи голоса — " + t); } }); }
+    // Стенд: отпечаток на телефоне против эталона со стола (tools/voiceprint_ref.py golden):
+    // --es voicegold <json>, записи — рядом с json по имени файла. Java-признаки и ORT на телефоне
+    // должны дать тот же отпечаток (косинус ≈ 1); заодно — сколько он стоит на фразу.
+    if (i != null && i.hasExtra("voicegold")) { final File gp = new File(i.getStringExtra("voicegold"));
+      worker.submit(() -> { try {
+        org.json.JSONArray g = new org.json.JSONArray(new String(java.nio.file.Files.readAllBytes(gp.toPath()), "UTF-8"));
+        StringBuilder b = new StringBuilder("🎤 эталон отпечатка:"); float worst = 2;
+        for (int k = 0; k < g.length(); k++) {
+          org.json.JSONObject o = g.getJSONObject(k); File w = new File(gp.getParentFile(), new File(o.getString("wav")).getName());
+          WaveReader wr = new WaveReader(w.getAbsolutePath()); long t = System.nanoTime();
+          float[] e = spk == null ? null : spk.embed(wr.getSamples(), wr.getSampleRate()); long ms = (System.nanoTime() - t) / 1000000;
+          org.json.JSONArray ge = o.getJSONArray("emb"); float c = -2;
+          if (e != null && e.length == ge.length()) { c = 0; for (int j = 0; j < e.length; j++) c += e[j] * (float) ge.getDouble(j); }
+          worst = Math.min(worst, c);
+          b.append(String.format(Locale.ROOT, " %s %.4f (%d мс, %.1f с)", w.getName(), c, ms, wr.getSamples().length / 16000.0));
+        }
+        log(b.append(String.format(Locale.ROOT, " · худший %.4f", worst)).toString());
+      } catch (Throwable t) { log("🎤 эталон отпечатка: ошибка — " + t); } }); }
     if (i != null && i.hasExtra("voiceid")) { final String wav = i.getStringExtra("voiceid");
       worker.submit(() -> { try { WaveReader wr = new WaveReader(wav); long t = System.nanoTime();
         float[] e = spk == null ? null : spk.embed(wr.getSamples(), wr.getSampleRate()); long ms = (System.nanoTime() - t) / 1000000;
