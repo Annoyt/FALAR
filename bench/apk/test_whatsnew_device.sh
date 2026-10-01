@@ -118,7 +118,7 @@ dlg_is() {   # dlg_is <from> <имя from или ""> "что проверяем"
   dump; got=$(python3 $D/dlg.py $D/ui.xml); title=$(printf '%s\n' "$got" | sed -n 1p); body=$(printf '%s\n' "$got" | sed -n 2p)
   want=$(exp "$1" "$CUR" "$NAME" "$2" text)
   chk '[ "$title" = "Что нового в Falar $NAME" ]' "$3: заголовок «$title»"
-  if [ "$body" = "$want" ]; then res 0 "$3: текст окна — по whatsnew.txt ($(printf '%s' "$want" | grep -o '·\|Новое\|Исправлено' | wc -l) меток)"
+  if [ "$body" = "$want" ]; then res 0 "$3: текст окна — по whatsnew.txt, ${#want} знаков"
   else res 1 "$3: текст окна"; say "    ждал: ${want:0:300}"; say "    было: ${body:0:300}"; fi
 }
 no_dlg() { dump; ! has --rid android:id/alertTitle; }
