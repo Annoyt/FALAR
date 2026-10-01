@@ -156,7 +156,7 @@ wr('vt_off.wav', np.concatenate([sil(1.0), rd(C[2]), sil(2.5)]))
 def speech(x, f=320):
     n = len(x) // f; e = 20 * np.log10(np.array([np.sqrt(np.mean(x[i*f:(i+1)*f] ** 2)) for i in range(n)]) + 1e-9)
     k = np.where(e > e.max() - 35)[0]; return x[max(0, k[0] - 2) * f:min(n, k[-1] + 3) * f]
-wr('vt_two.wav', np.concatenate([sil(1.0), speech(rd(A[7])), speech(rd(B[12])), sil(2.5)]))
+wr('vt_two.wav', np.concatenate([sil(1.0), speech(rd(A[7])), speech(rd(B[12])), sil(0.3)]))   # как режет нарезка: подпор 1 с, хвост 0,3 с
 with open(f'{D}/feed.tsv', 'w', encoding='utf-8') as f:
     for who, p in feed: f.write(who + '\t' + open(p + '.txt', encoding='utf-8').read().strip() + '\n')
     f.write('none\t' + open(A[5] + '.txt', encoding='utf-8').read().strip() + '\n')
@@ -273,9 +273,11 @@ read okn badn need < "$D/v4"
 [ "$skips" -ge 1 ] && res 0 "V4 чужие обрывки отброшены по голосу: $skips" || res 1 "V4 строк «чужой голос» нет"
 
 say "== V7: двое подряд в одном куске — разрез по голосам, каждый кусок своим языком"
+# Кусок подаётся прямо в решение по голосу (--es segwav), мимо нарезки: её разрез от прогона к прогону
+# разный (01.10 она один раз отрезала начало фразы A отдельным обрывком), а проверяется разрез голосом.
 n0=$(cj "$TID" "len(o['turns'])")
-m=$(mark); launch --es feedwav "$F/vt_two.wav"
-wl "$m" 'подача закончена' 60 >/dev/null; sleep 10
+m=$(mark); launch --es segwav "$F/vt_two.wav"
+wl "$m" '🎤 (двое в одном сегменте|сегмент похож на двоих|чужой голос)' 60 >/dev/null; sleep 12
 l=$(since "$m" | grep -m1 'двое в одном сегменте'); say "  ${l:-нет строки о разрезе}"
 cj "$TID" "'\n'.join((t.get('who','-') + '\t' + t['src']) for t in o['turns'][$n0:])" > "$D/two.tsv"
 sed 's/^/  реплика: /' "$D/two.tsv"

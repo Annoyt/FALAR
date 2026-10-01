@@ -326,6 +326,12 @@ public class TranslatorService extends Service {
         }
         log(b.append(String.format(Locale.ROOT, " · худший %.4f", worst)).toString());
       } catch (Throwable t) { log("🎤 эталон отпечатка: ошибка — " + t); } }); }
+    // Стенд: кусок слушания как есть — прямо в решение по голосу (route), минуя нарезку VAD: её разрез
+    // от прогона к прогону разный, а проверить надо голос и разрез двоих (--es segwav <wav 16 кГц>).
+    if (i != null && i.hasExtra("segwav")) { final String wav = i.getStringExtra("segwav");
+      worker.submit(() -> { try { WaveReader wr = new WaveReader(wav); log("▷ стенд: кусок слушания " + new File(wav).getName()
+          + String.format(Locale.ROOT, ", %.1f с", wr.getSamples().length / 16000.0)); route(wr.getSamples()); }
+        catch (Throwable t) { log("▷ стенд: кусок не прочёлся — " + t); } }); }
     if (i != null && i.hasExtra("voiceid")) { final String wav = i.getStringExtra("voiceid");
       worker.submit(() -> { try { WaveReader wr = new WaveReader(wav); long t = System.nanoTime();
         float[] e = spk == null ? null : spk.embed(wr.getSamples(), wr.getSampleRate()); long ms = (System.nanoTime() - t) / 1000000;
@@ -2879,6 +2885,7 @@ public class TranslatorService extends Service {
     try {
       long t1 = System.nanoTime();
       String who = null, spkTag = null;
+      Voices.Voice alt = null;                 // второй голос сегмента, похожего на двоих, если разрез не нашёлся
       // Слушание: голос разговора или чужой — после распознавания и до перевода. Отпечаток считался
       // рядом с распознаванием; обычно он готов, и ждать не приходится (ждал — в журнале).
       if (whoIn != null && whoIn.n != null) {                    // кусок разрезанного сегмента: голос уже решён
@@ -2918,6 +2925,7 @@ public class TranslatorService extends Service {
             return;
           }
           log(String.format(Locale.ROOT, "🎤 сегмент похож на двоих (%.2f и %.2f), но окна разреза не нашли — одной репликой", m.score, m.nextScore));
+          alt = m.next;
         }
         who = String.valueOf(m.v.n);
         spkTag = String.format(Locale.ROOT, " · 🎤 голос %s %.2f (отпечаток %d мс, ждал %d мс)", who, m.score, total, waited);
@@ -2926,7 +2934,14 @@ public class TranslatorService extends Service {
       Once r = translateOnce(dirIn, asrIn, auto, gate);
       busy("live", null, 0, 0);                    // перевод готов; озвучка слышна сама
       if (r.skip != null) { log(r.skip); tsvSeg(r.skipKind, r.dir, r.asr, "", r.lkTag, durMs, srcMs, 0); return; }
-      String guard = readSkip(r.dir, r.asr, who, kind);
+      // Двое без разреза: номер — тому из двоих, чей язык совпал с текстом; «читает вслух» по голосу такой
+      // сегмент не судим — в нём говорили оба (стенд 01.10: остаток фразы A с фразой B ушёл голосу B и
+      // был отброшен как «русский голос читает португальскую фразу»).
+      if (alt != null && chats != null) {
+        Voices.Voice cur = chats.voices.get(who);
+        if (cur != null && !r.src.equals(cur.lang) && r.src.equals(alt.lang)) { who = String.valueOf(alt.n); spkTag += " · номер по языку текста"; }
+      }
+      String guard = readSkip(r.dir, r.asr, alt != null ? null : who, kind);
       if (guard != null) { log(guard); hint(guard); status(guard); tsvSeg("skip_read", r.dir, r.asr, "", "", durMs, srcMs, 0); return; }
       // Снимок и набранная фраза — реплики владельца телефона: их вводит тот, кто держит телефон.
       if (who == null && (kind.equals("фото") || kind.equals("набрано"))) who = Voices.OWNER;
