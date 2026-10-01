@@ -150,12 +150,16 @@ for who, p in feed: x += [rd(p), sil(2.5)]
 wr('vt_feed.wav', np.concatenate(x))
 wr('vt_none.wav', np.concatenate([sil(1.0), rd(A[5]), sil(2.5)]))
 wr('vt_off.wav', np.concatenate([sil(1.0), rd(C[2]), sil(2.5)]))
+# двое подряд без паузы (0,1 с): весь кусок похож на обоих (эталон: 0,59 и 0,60) — режется по голосам
+wr('vt_two.wav', np.concatenate([sil(1.0), rd(A[7]), sil(0.1), rd(B[12]), sil(2.5)]))
 with open(f'{D}/feed.tsv', 'w', encoding='utf-8') as f:
     for who, p in feed: f.write(who + '\t' + open(p + '.txt', encoding='utf-8').read().strip() + '\n')
     f.write('none\t' + open(A[5] + '.txt', encoding='utf-8').read().strip() + '\n')
     f.write('off\t' + open(C[2] + '.txt', encoding='utf-8').read().strip() + '\n')
+    f.write('two_a\t' + open(A[7] + '.txt', encoding='utf-8').read().strip() + '\n')
+    f.write('two_b\t' + open(B[12] + '.txt', encoding='utf-8').read().strip() + '\n')
 EOF
-WAVS="vt_A1.wav vt_A2.wav vt_B1.wav vt_feed.wav vt_none.wav vt_off.wav vt_gold.json"
+WAVS="vt_A1.wav vt_A2.wav vt_B1.wav vt_feed.wav vt_none.wav vt_off.wav vt_two.wav vt_gold.json"
 GOLD=$R/bench/apk/test/voiceprint_golden.json
 cp "$GOLD" "$D/vt_gold.json"
 for w in $("$PY" -c "import json,sys; print(' '.join(o['wav'] for o in json.load(open(sys.argv[1]))))" "$GOLD"); do cp "$R/$w" "$D/"; WAVS="$WAVS $(basename $w)"; done
@@ -262,6 +266,27 @@ read okn badn need < "$D/v4"
 [ "${badn:-1}" = 0 ] && res 0 "V4 ни одной реплики третьего человека и ни одной с чужим номером" || res 1 "V4 неверных реплик: $badn"
 [ "${okn:-0}" -ge $((need - 1)) ] && res 0 "V4 голоса разговора переведены со своими номерами: $okn из $need" || res 1 "V4 переведено голосов разговора: $okn из $need"
 [ "$skips" -ge 1 ] && res 0 "V4 чужие обрывки отброшены по голосу: $skips" || res 1 "V4 строк «чужой голос» нет"
+
+say "== V7: двое подряд в одном куске — разрез по голосам, каждый кусок своим языком"
+n0=$(cj "$TID" "len(o['turns'])")
+m=$(mark); launch --es feedwav "$F/vt_two.wav"
+wl "$m" 'подача закончена' 60 >/dev/null; sleep 10
+l=$(since "$m" | grep -m1 'двое в одном сегменте'); say "  ${l:-нет строки о разрезе}"
+cj "$TID" "'\n'.join((t.get('who','-') + '\t' + t['src']) for t in o['turns'][$n0:])" > "$D/two.tsv"
+sed 's/^/  реплика: /' "$D/two.tsv"
+"$PY" - "$D/feed.tsv" "$D/two.tsv" > "$D/v7" <<'EOF'
+import sys, re, difflib
+want = dict(l.rstrip('\n').split('\t', 1) for l in open(sys.argv[1], encoding='utf-8'))
+got = [l.rstrip('\n').split('\t', 1) for l in open(sys.argv[2], encoding='utf-8') if '\t' in l]
+norm = lambda s: re.sub(r'[^\w ]', '', s.lower())
+r = lambda a, b: difflib.SequenceMatcher(None, norm(a), norm(b)).ratio()
+a = any(w == '1' and r(want['two_a'], t) >= 0.5 for w, t in got)
+b = any(w == '2' and r(want['two_b'], t) >= 0.5 for w, t in got)
+print(int(a), int(b), len(got))
+EOF
+read va vb vn < "$D/v7"
+[ -n "$l" ] && res 0 "V7 кусок двоих разрезан по голосам" || res 1 "V7 строки о разрезе нет"
+[ "$va" = 1 ] && [ "$vb" = 1 ] && res 0 "V7 обе фразы переведены, каждая со своим номером и на своём языке (реплик: $vn)" || res 1 "V7 фраза собеседника 1: $va, собеседника 2: $vb (реплик: $vn)"
 
 say "== V5: разговор без голосов"
 "$PY" -c "import json; json.dump({'id': $TID2, 'name': 'ТЕСТ голоса 2', 'named': True, 'saved': $TID2, 'turns': []}, open('$D/t2.json','w',encoding='utf-8'), ensure_ascii=False)"

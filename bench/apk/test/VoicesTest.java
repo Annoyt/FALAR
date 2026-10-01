@@ -101,6 +101,30 @@ public class VoicesTest {
     eq(Voices.fromJson(null).size(), 0, "V14 поля нет — голосов нет");
     eq(vs.clear(), 3, "V15 забыть — сколько было"); ok(vs.isEmpty(), "V15 пусто");
 
+    // Двое подряд в одном сегменте: окна, сглаживание, куски
+    eq(Voices.windows(1.4) + " " + Voices.windows(1.5) + " " + Voices.windows(4.7), "0 1 7", "W1 окон в сегменте");
+    eq(Arrays.toString(Voices.smooth(new int[]{1, 2, 1, 1, 0, 2, 2, 2})), "[1, 1, 1, 1, 0, 2, 2, 2]", "W2 одиночная метка среди чужих — соседей");
+    List<double[]> pp = Voices.parts(new int[]{1, 1, 1, 0, 2, 2, 2}, 4.7);
+    eq(pp.size(), 2, "W3 «A A A · B B B» — два куска");
+    ok(pp.get(0)[2] == 1 && pp.get(1)[2] == 2 && pp.get(0)[0] == 0 && pp.get(1)[1] == 4.7, "W3 голоса и края");
+    ok(Math.abs(pp.get(0)[1] - 2.25) < 1e-9 && pp.get(1)[0] == pp.get(0)[1], "W3 граница — посередине между центрами окон 2 и 4 (1,75 и 2,75 с): 2,25 с");
+    eq(Voices.parts(new int[]{1, 1, 2, 1, 1, 1}, 3.5).size(), 1, "W4 одно окно другого голоса — не кусок");
+    eq(Voices.parts(new int[]{0, 0, 0}, 2.5).size(), 0, "W4 никого — кусков нет");
+    eq(Voices.parts(new int[]{0, 2, 2, 2, 0}, 3.5).size(), 1, "W4 один голос — один кусок");
+    List<double[]> p3 = Voices.parts(new int[]{1, 1, 2, 2, 1, 1, 3, 3}, 5.0);
+    eq(p3.size(), 3, "W5 не больше трёх кусков");
+    ok(p3.get(2)[1] == 5.0, "W5 последний кусок — до конца сегмента");
+    // граница — в тишину рядом
+    float[] tone = new float[16000 * 3];
+    for (int i = 0; i < tone.length; i++) tone[i] = (float) (0.3 * Math.sin(i * 0.2));
+    for (int i = (int) (1.30 * 16000); i < (int) (1.36 * 16000); i++) tone[i] = 0.001f;   // пауза 60 мс на 1,30–1,36 с
+    double sn = Voices.snap(tone, 16000, 1.55, 0.4);
+    ok(sn > 1.30 && sn < 1.36, "W7 граница 1,55 с сдвинута в паузу 1,30–1,36 с: " + sn);
+    ok(Voices.snap(tone, 16000, 2.5, 0.1) > 2.39 && Voices.snap(tone, 16000, 2.5, 0.1) < 2.61, "W7 паузы рядом нет — в пределах радиуса");
+    // метки по отпечаткам окон
+    Voices lw = new Voices(); lw.enroll(a, "pt", 0, 1); lw.enroll(b, "ru", 0, 2);
+    eq(Arrays.toString(lw.labels(Arrays.asList(a, a2, ab, c))), "[1, 1, 2, 0]", "W6 окно — ближайшему от 0,35, иначе никому");
+
     // Общий файл голосов прежних версий: удаляется, а в журнал — сколько в нём было
     java.io.File md = java.nio.file.Files.createTempDirectory("voices").toFile(), pf = new java.io.File(md, "speaker_profiles.json");
     eq(Voices.retireOld(md)[0], -1, "V16 файла нет — нечего удалять");

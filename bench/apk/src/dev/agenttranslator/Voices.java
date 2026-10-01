@@ -154,6 +154,69 @@ public class Voices {
     return who == null || !who.trim().matches("\\d+") ? "" : "собеседник " + who.trim();
   }
 
+  // ---- двое подряд в одном сегменте слушания (results/2026-10-01-voices.md, E4)
+
+  /** Окно отпечатка и шаг, с, и порог окна: окно 1,5 с с шагом 0,5 с и порогом 0,35 находит разрез «A, затем
+   *  B» в 78 % сегментов, ошибка места — медиана 0,2 с; окно в 1 с теряет 41 % речи, в 2 с чаще ошибается. */
+  public static final double WIN = 1.5, HOP = 0.5;
+  public static final float T_WIN = 0.35f;
+  /** Пуск: весь сегмент похож сразу на двоих не ниже 0,40 (так в 53 % сегментов двоих и в 4–8 % — одного). */
+  public static final float SPLIT = 0.40f;
+  /** Сколько окон в сегменте длиной total, с. */
+  public static int windows(double total) { return total < WIN ? 0 : 1 + (int) Math.floor((total - WIN) / HOP + 1e-9); }
+  /** Метки окон: номер голоса с наибольшим косинусом, если он не ниже T_WIN, иначе 0. */
+  public synchronized int[] labels(List<float[]> win) {
+    int[] l = new int[win.size()];
+    for (int i = 0; i < l.length; i++) { Match m = best(win.get(i)); l[i] = m.hit(T_WIN) ? m.v.n : 0; }
+    return l;
+  }
+  /** Большинство из трёх соседних окон; у краёв — из двух, при разногласии метка своя. */
+  public static int[] smooth(int[] l) {
+    int[] o = l.clone();
+    for (int i = 1; i + 1 < l.length; i++) { if (l[i - 1] == l[i + 1]) o[i] = l[i - 1]; }
+    return o;
+  }
+  /** Куски сегмента по голосам: {от, до (с), номер голоса}. Голос держит кусок, только если у него не меньше
+   *  двух окон подряд после сглаживания; окна «никто» отходят соседям — сегмент целиком уже признан речью
+   *  участников. Граница — посередине между центрами последнего окна одного голоса и первого окна другого.
+   *  Один голос — один кусок; не больше трёх кусков. */
+  public static List<double[]> parts(int[] smoothed, double total) {
+    List<int[]> runs = new ArrayList<>();                        // {голос, первое окно, последнее}
+    for (int i = 0; i < smoothed.length; i++) {
+      int v = smoothed[i];
+      if (v == 0) continue;
+      int[] last = runs.isEmpty() ? null : runs.get(runs.size() - 1);
+      if (last != null && last[0] == v) last[2] = i; else runs.add(new int[]{v, i, i});
+    }
+    runs.removeIf(r -> r[2] - r[1] + 1 < 2);                    // одно окно — не голос, а шум метки
+    for (int i = 1; i < runs.size(); ) {                         // после выброса соседи могли совпасть
+      if (runs.get(i)[0] == runs.get(i - 1)[0]) { runs.get(i - 1)[2] = runs.get(i)[2]; runs.remove(i); } else i++;
+    }
+    List<double[]> out = new ArrayList<>();
+    if (runs.isEmpty()) return out;
+    if (runs.size() > 3) runs = runs.subList(0, 3);
+    double from = 0;
+    for (int i = 0; i < runs.size(); i++) {
+      double to = i + 1 < runs.size() ? (runs.get(i)[2] * HOP + WIN / 2 + runs.get(i + 1)[1] * HOP + WIN / 2) / 2 : total;
+      out.add(new double[]{from, to, runs.get(i)[0]});
+      from = to;
+    }
+    return out;
+  }
+
+  /** Граница кусков — в самое тихое место рядом: окна дают её с ошибкой около 0,2 с (E4), а между
+   *  репликами почти всегда есть пауза хотя бы в несколько десятков мс; резать слово пополам хуже.
+   *  Кадр 20 мс с наименьшей громкостью в пределах ±radius с от cut; возвращает его середину, с. */
+  public static double snap(float[] x, int sr, double cut, double radius) {
+    int f = sr / 50, from = Math.max(0, (int) ((cut - radius) * sr)), to = Math.min(x.length - f, (int) ((cut + radius) * sr));
+    double best = Double.MAX_VALUE; int at = -1;
+    for (int o = from; o <= to; o += f / 2) {
+      double e = 0; for (int i = o; i < o + f; i++) e += x[i] * x[i];
+      if (e < best) { best = e; at = o; }
+    }
+    return at < 0 ? cut : (at + f / 2.0) / sr;
+  }
+
   /** До 0.27 голоса «я» и «собеседник» хранились одни на все разговоры (models/speaker_profiles.json,
    *  записывались на отдельном экране настроек). Теперь голос запоминается в разговоре кнопкой FALAR,
    *  и общий файл — чужая биометрия без дела: удаляем. Сколько голосов в нём было — чтобы сказать

@@ -997,7 +997,13 @@ public class TranslatorService extends Service {
    *  звучит (enrollLater), — шум, отбитый проверкой языка, голосом не становится. */
   static final class Who {
     final java.util.concurrent.Future<float[]> print; final boolean listen; final long t0 = System.nanoTime();
-    Who(java.util.concurrent.Future<float[]> print, boolean listen) { this.print = print; this.listen = listen; }
+    /** Звук сегмента слушания — для окон, если в нём двое подряд. */
+    final float[] seg;
+    /** Голос уже решён: кусок сегмента, разрезанного по голосам (splitSeg). */
+    final String n;
+    Who(java.util.concurrent.Future<float[]> print, boolean listen) { this(print, listen, null); }
+    Who(java.util.concurrent.Future<float[]> print, boolean listen, float[] seg) { this.print = print; this.listen = listen; this.seg = seg; n = null; }
+    Who(String n) { print = null; listen = true; seg = null; this.n = n; }
   }
   /** Голоса разговора работают: модуль включён, модель поднята, разговоры открыты. */
   boolean voicesOn() { Speaker s = spk; return s != null && s.ready && chats != null; }
@@ -2427,7 +2433,7 @@ public class TranslatorService extends Service {
       if (seg.length < Speaker.MIN_SECONDS * 16000) { skipVoice("skip_short", "🎤 обрывок короче " + Speaker.MIN_SECONDS + " с — по голосу не узнать, не перевожу", ms, Float.NaN, false); return; }
       // Отпечаток — рядом с распознаванием, своим потоком; решение — до перевода (processText).
       final Speaker sp = spk;
-      w = new Who(spkExec.submit(() -> sp.embed(seg, 16000)), true);
+      w = new Who(spkExec.submit(() -> sp.embed(seg, 16000)), true, seg);
     }
     process(dir, seg, 16000, autoLang && fixedDir == null, w);
   }
@@ -2440,6 +2446,27 @@ public class TranslatorService extends Service {
     if (show && now - noVoiceHintAt > 20_000) { noVoiceHintAt = now; hint("скажите фразу кнопкой FALAR — голос запомнится"); }
   }
 
+  /** Сегмент двоих по голосам: отпечатки окон (Voices.WIN/HOP) своим потоком, метки, сглаживание, куски;
+   *  границы — в тишину рядом (Voices.snap). Меньше четырёх окон — не режем: на голос нужно хотя бы два. */
+  List<double[]> splitSeg(final float[] seg, Voices vs) {
+    final double total = seg.length / 16000.0; final int n = Voices.windows(total);
+    if (n < 4) return new ArrayList<>();
+    final Speaker sp = spk;
+    List<float[]> win;
+    try {
+      win = spkExec.submit(() -> {
+        List<float[]> out = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+          int a = (int) Math.round(i * Voices.HOP * 16000), b = Math.min(seg.length, a + (int) Math.round(Voices.WIN * 16000));
+          out.add(sp.embed(Arrays.copyOfRange(seg, a, b), 16000));
+        }
+        return out;
+      }).get(15, java.util.concurrent.TimeUnit.SECONDS);
+    } catch (Exception e) { log("🎤 разрез по голосам не посчитался: " + e); return new ArrayList<>(); }
+    List<double[]> parts = Voices.parts(Voices.smooth(vs.labels(win)), total);
+    for (int i = 1; i < parts.size(); i++) { double c = Voices.snap(seg, 16000, parts.get(i)[0], 0.4); parts.get(i - 1)[1] = c; parts.get(i)[0] = c; }
+    return parts;
+  }
   /** Голос фразы кнопкой FALAR — в голоса разговора, когда реплика уже на экране и звучит: перевод
    *  отпечатка не ждёт. Новый человек получает номер, знакомый подстраивает слепок; номер ложится в
    *  реплику по её метке, подпись на экране дорисовывается. Только в разговоре, где фраза сказана.
@@ -2854,7 +2881,11 @@ public class TranslatorService extends Service {
       String who = null, spkTag = null;
       // Слушание: голос разговора или чужой — после распознавания и до перевода. Отпечаток считался
       // рядом с распознаванием; обычно он готов, и ждать не приходится (ждал — в журнале).
-      if (whoIn != null && whoIn.listen) {
+      if (whoIn != null && whoIn.n != null) {                    // кусок разрезанного сегмента: голос уже решён
+        who = whoIn.n; spkTag = " · 🎤 голос " + who + " (кусок сегмента двоих)";
+        Voices.Voice v = chats == null ? null : chats.voices.get(who);
+        if (auto && v != null) dirIn = "ru".equals(v.lang) ? "ru2pt" : "pt2ru";
+      } else if (whoIn != null && whoIn.listen) {
         float[] e = null; long tw = System.nanoTime();
         try { e = whoIn.print.get(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignore) {}
         long waited = (System.nanoTime() - tw) / 1000000, total = (tw - whoIn.t0) / 1000000 + waited;
@@ -2865,6 +2896,28 @@ public class TranslatorService extends Service {
               : String.format(Locale.ROOT, "🎤 чужой голос: ближе всех «%s» — %.2f, нужно %.2f · не перевожу (отпечаток %d мс, ждал %d мс)",
                   Voices.label(m.v), m.score, m.thr, total, waited), durMs, m.score, false);
           return;
+        }
+        // Двое подряд: сегмент похож сразу на двоих — режем по окнам и распознаём куски отдельно.
+        // Распознавание по одному куску на язык: смешанный сегмент оно пишет на языке начала
+        // («Кто эта девочка? Это Кейко» после португальской фразы вышло «É Keiko.»).
+        if (whoIn.seg != null && m.next != null && m.nextScore >= Voices.SPLIT && whoIn.seg.length >= 2 * 16000) {
+          long ts = System.nanoTime();
+          List<double[]> parts = splitSeg(whoIn.seg, vs);
+          if (parts.size() >= 2) {
+            StringBuilder pl = new StringBuilder();
+            for (double[] pt : parts) pl.append(String.format(Locale.ROOT, " · %s %.1f–%.1f с", Voices.label(vs.get((int) pt[2])), pt[0], pt[1]));
+            log(String.format(Locale.ROOT, "🎤 двое в одном сегменте (%.2f и %.2f к «%s» и «%s»), разрез за %d мс:%s",
+                m.score, m.nextScore, Voices.label(m.v), Voices.label(m.next), (System.nanoTime() - ts) / 1000000, pl));
+            busy("live", null, 0, 0);
+            for (double[] pt : parts) {
+              int a = (int) Math.round(pt[0] * 16000), b = Math.min(whoIn.seg.length, (int) Math.round(pt[1] * 16000));
+              if (b - a < 0.4 * 16000) continue;                 // меньше 0,4 с — распознавать нечего
+              Voices.Voice v = vs.get((int) pt[2]);
+              process(v != null && "ru".equals(v.lang) ? "ru2pt" : "pt2ru", Arrays.copyOfRange(whoIn.seg, a, b), 16000, auto, new Who(String.valueOf((int) pt[2])));
+            }
+            return;
+          }
+          log(String.format(Locale.ROOT, "🎤 сегмент похож на двоих (%.2f и %.2f), но окна разреза не нашли — одной репликой", m.score, m.nextScore));
         }
         who = String.valueOf(m.v.n);
         spkTag = String.format(Locale.ROOT, " · 🎤 голос %s %.2f (отпечаток %d мс, ждал %d мс)", who, m.score, total, waited);
