@@ -140,6 +140,52 @@ def recall(ref, hyp):
     return sum(w in h for w in r) / max(1, len(r))
 
 
+def near(d, meta, ref16):
+    """4. Живой голос из колонок ПК (NEAR=1): поверх озвучки и в тишине, по каждому режиму записи."""
+    rows = [l.rstrip('\n').split('\t') for l in open(os.path.join(d, 'near.tsv'), encoding='utf-8') if l.strip()]
+    tts_words = asr(ref16)
+    print('\n## 4. Человек из колонок ПК: поверх озвучки и в тишине\n')
+    print('| запись | озвучка | его слов распознано | слов озвучки в распознанном | уровень записи, dBFS |')
+    print('|---|---|---|---|---|')
+    agg = {}
+    for cfg, clip, _ in rows:
+        p = os.path.join(d, f'aec_{cfg}.wav')
+        if not os.path.exists(p) or cfg not in meta:
+            continue
+        mic, _ = read(p); at = int(meta[cfg]['play_sample'])
+        hyp = asr(mic[max(0, at - 1600):])
+        txt = open(clip + '.txt', encoding='utf-8').read().strip()
+        rc, lk = recall(txt, hyp), recall(tts_words, hyp)
+        quiet = '_q' in cfg
+        print(f'| {cfg} | {"нет" if quiet else "есть"} | {rc * 100:.0f} % | {"—" if quiet else f"{lk * 100:.0f} %"} | {db(mic[at:]):.1f} |')
+        key = ('vc' if cfg.startswith('vc') else 'vr', quiet)
+        agg.setdefault(key, []).append((rc, lk))
+    print('\n| режим записи | озвучка | фраз | его слов, среднее | слов озвучки, среднее |')
+    print('|---|---|---|---|---|')
+    for (src, quiet), v in sorted(agg.items()):
+        print(f'| {src} | {"нет" if quiet else "есть"} | {len(v)} | {np.mean([a for a, _ in v]) * 100:.0f} % | {"—" if quiet else f"{np.mean([b for _, b in v]) * 100:.0f} %"} |')
+    pc = os.path.join(d, 'pc_mic.wav')
+    if os.path.exists(pc):
+        x, _ = read(pc)
+        print('\nОзвучка телефона у микрофона ПК — не тише ли она в другом режиме записи (первая секунда фразы, до голоса из колонок):\n')
+        k, rho = delay(x, ref16[:16000], 0, 0.0, max(0.0, len(x) / 16000 - 2))
+        levels = []
+        for i in range(0, len(x) - len(ref16), 1600):
+            pass
+        # каждую озвучку ищем корреляцией первой секунды фразы по всей записи ПК
+        r1 = ref16[:16000]
+        n = 1 << int(np.ceil(np.log2(len(x) + len(r1))))
+        c = np.fft.irfft(np.fft.rfft(x, n) * np.conj(np.fft.rfft(r1, n)), n)[:len(x) - len(r1)]
+        c = np.abs(c); found = []
+        for _ in range(8):
+            j = int(np.argmax(c))
+            if c[j] <= 0: break
+            found.append(j); c[max(0, j - 8 * 16000):j + 8 * 16000] = 0
+        for j in sorted(found):
+            levels.append(db(x[j:j + 16000]))
+        print('  уровни (по времени):', ' · '.join(f'{v:.1f}' for v in levels), 'dBFS')
+
+
 def main():
     d = sys.argv[1]
     meta = json.load(open(os.path.join(d, 'aec.json'), encoding='utf-8'))
@@ -150,7 +196,7 @@ def main():
     print('| запись | подавитель Android | задержка, мс | сходство с озвучкой | фон до, dBFS | эхо, dBFS | эхо над фоном, дБ |')
     print('|---|---|---|---|---|---|---|')
     base = None
-    for cfg in ('vr', 'vr_aec', 'vc', 'vc_aec'):
+    for cfg in [c for c in meta if c.startswith(('vr', 'vc'))]:
         p = os.path.join(d, f'aec_{cfg}.wav')
         if not os.path.exists(p) or cfg not in meta:
             continue
@@ -161,6 +207,9 @@ def main():
         print(f'| {cfg} | {meta[cfg]["aec"]} | {k / 16:.0f} | {rho:.2f} | {fon:.1f} | {eco:.1f} | {eco - fon:.1f} |')
         if cfg == 'vr':
             base = (mic, at, k)
+    if os.path.exists(os.path.join(d, 'near.tsv')):
+        near(d, meta, ref16)
+        return
     if base is None:
         return
     mic, at, k = base
