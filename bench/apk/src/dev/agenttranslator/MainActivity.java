@@ -2208,6 +2208,25 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (tmp && !started) unbindSvc();
     }, tmp ? 2500 : 700);
   }
+  /** Стенд: что видно на экране сейчас — подписи видимых видов одной строкой в журнал
+   *  («🧪 на экране: …», --es uitexts 1); у выключенного вида — «[выкл]» («Улучшить [выкл]»).
+   *  uiautomator снимает дерево, только когда экран затих, а во время загрузки он обновляется дважды
+   *  в секунду: снимок приходил уже после конца хода (test_modules D4). Журнал («Журнал») не
+   *  перечисляется — он и так в at.log. */
+  void uiTexts() {
+    StringBuilder b = new StringBuilder();
+    texts(rootView, b);
+    String line = "🧪 на экране: " + b;
+    if (svc != null) svc.log(line); else onLog(line);
+  }
+  void texts(View v, StringBuilder b) {
+    if (v == null || !v.isShown() || v == logView) return;
+    if (v instanceof TextView) {
+      CharSequence t = ((TextView) v).getText();
+      if (t != null && t.length() > 0) b.append(b.length() == 0 ? "" : " | ").append(t.toString().replace('\n', ' ')).append(v.isEnabled() ? "" : " [выкл]");
+    }
+    if (v instanceof ViewGroup) { ViewGroup g = (ViewGroup) v; for (int k = 0; k < g.getChildCount(); k++) texts(g.getChildAt(k), b); }
+  }
   /** Стенд: кольцо «как слышно» вокруг «Слушать» с уровнем, похожим на речь, — тем же опросом
    *  5 раз в секунду, но без микрофона. Цена кольца на экране (measure_mic_anim.sh, вид meter). */
   void meterDemo(long ms) {
@@ -2277,6 +2296,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // раз прошла на сборке с ошибкой. Целиком — вылезшее видно всегда.
     if (i.hasExtra("redraw")) { getWindow().getDecorView().invalidate(); return; }
     if (i.hasExtra("uishot")) { uiShot(i.getStringExtra("uishot"), i.getStringExtra("uiscreen")); return; }
+    if (i.hasExtra("uitexts")) { uiTexts(); return; }
     if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }

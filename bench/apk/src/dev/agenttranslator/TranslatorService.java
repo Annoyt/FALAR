@@ -113,6 +113,11 @@ public class TranslatorService extends Service {
    *  сброс слушания извне — флагом, его делает сам поток нарезки. */
   final Hearing.Live pttLive = new Hearing.Live(), listenLive = new Hearing.Live();
   volatile boolean listenLiveReset = true;
+  /** Сброс VAD извне — тоже флагом: Silero живёт в потоке нарезки, и reset() из другого потока
+   *  посреди acceptWaveform() ронял приложение («Vad_acceptWaveform: vector», поток vad) — так
+   *  выключали «Слушать», пока шёл звук (test_hearing_device.sh на Redmi 01.10: два прогона из трёх,
+   *  в том числе на 0.26.0 как вышла). */
+  volatile boolean vadReset = false;
   /** Фон комнаты по слушанию, dBFS до усиления, и когда он мерился (uptime). Удержанию он нужен,
    *  когда в самой записи тишины нет — заговорили сразу, отпустили сразу. Годен ROOM_MS: комната
    *  за пару минут меняется редко, а устаревший фон занизил бы шум. */
@@ -890,7 +895,7 @@ public class TranslatorService extends Service {
   }
   public void setVad(boolean on) { vadMode = on; if (!on) scheduleIdleStop();
     getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("vad", on).apply();   // START_STICKY поднимает сервис с vadMode=false
-    if (eng != null) eng.vad.reset();
+    vadReset = true;                                    // сделает поток нарезки перед следующим кадром
     if (on) listenLiveReset = true;
     if (on && !capturing) { capturing = true; startCapture(); }
     else if (!on) capturing = false;                       // поток сам выйдет и отпустит микрофон
@@ -1282,7 +1287,7 @@ public class TranslatorService extends Service {
     int dropped = sayQ.size(); sayQ.clear();
     if (dropped > 0) log("🔊 отброшено из очереди озвучки: " + dropped);
     history.clear(); turnNo = 0; resetPassCounters();
-    if (eng != null) eng.vad.reset();
+    vadReset = true;                                    // сделает поток нарезки перед следующим кадром
     log("＋ новый разговор" + (who == null || who.isEmpty() ? "" : " с «" + who + "»"));
     status("Новый разговор");
     if (left != 0) llmWorker.submit(() -> refineSession(left));
@@ -1295,7 +1300,7 @@ public class TranslatorService extends Service {
     long left = chats.open(id);
     sayQ.clear();
     rebuildHistory(); resetPassCounters();
-    if (eng != null) eng.vad.reset();
+    vadReset = true;                                    // сделает поток нарезки перед следующим кадром
     log("↩ разговор " + id + " продолжен, восстановлено реплик: " + history.size()
         + (chats.name.isEmpty() ? "" : " · «" + chats.name + "»"));
     if (left != 0) llmWorker.submit(() -> refineSession(left));
@@ -2282,6 +2287,7 @@ public class TranslatorService extends Service {
         levelDb = (float) Math.max(db(frame), levelDb - 1.5); levelOver = fs.over > 0; levelAt = System.currentTimeMillis();
         listenLive.frame(db(frame), noiseRms > 0 ? db(noiseRms) : Double.NaN);
         liveQ = (float) listenLive.q(listenLive.speechDb()); liveSpeech = listenLive.voiced();
+        if (vadReset) { vadReset = false; eng.vad.reset(); }
         eng.vad.acceptWaveform(win);
         boolean sp = eng.vad.isSpeechDetected();
         while (!eng.vad.empty()) eng.vad.pop();          // внутренняя сборка sherpa не используется
