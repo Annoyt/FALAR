@@ -44,7 +44,7 @@ public class MicButton extends FrameLayout {
   static final int GLASS = 0xB8;
   static final long PULSE_MS = 1200, SPIN_MS = 4000, STEP_NS = 30_000_000L;
 
-  final Halo halo; final Face face; final Ring ring;
+  final Halo halo; final Face face; final Ring ring; final Charge charge;
   boolean active = false;
   /** Как двигаться в нажатой позиции. pulse30 — рабочий: свечение по уровню входа, а без уровня
    *  (стенд) — ровный пульс. spin — кольцо надписей вращается, none — без движения; оба только
@@ -87,7 +87,7 @@ public class MicButton extends FrameLayout {
 
   public MicButton(Context c) {
     super(c);
-    addView(halo = new Halo(c)); addView(face = new Face(c)); addView(ring = new Ring(c));
+    addView(halo = new Halo(c)); addView(face = new Face(c)); addView(ring = new Ring(c)); addView(charge = new Charge(c));
     setClickable(true); setClipChildren(false);
   }
 
@@ -108,11 +108,17 @@ public class MicButton extends FrameLayout {
 
   @Override protected void onDetachedFromWindow() { stop(); super.onDetachedFromWindow(); }
 
+  /** Выключенная кнопка (движки ещё грузятся) — тусклые круг и надписи; кольцо хода загрузки поверх
+   *  них остаётся ярким: по нему видно, что кнопка вот-вот включится. */
   @Override public void setEnabled(boolean on) {
     super.setEnabled(on);
-    setAlpha(on ? 1f : 0.4f);
+    face.setAlpha(on ? 1f : 0.4f); ring.setAlpha(on ? 1f : 0.4f);
     if (!on) setActive(false);
   }
+
+  /** Ход загрузки движков, 0…1: золотое кольцо вокруг круга замыкается к готовности (владелец 01.10:
+   *  «чтобы было понятно, что вот-вот скоро включится»). Меньше нуля — кольца нет. */
+  public void setLoad(float f) { charge.set(f); }
 
   /** Нажата или отпущена. Движение идёт только в нажатой позиции: запись длится секунды, а
    *  распознаванию после отпускания ничто не должно мешать. */
@@ -231,6 +237,27 @@ public class MicButton extends FrameLayout {
       cv.drawTextOnPath(RU, bottom, bottomAt, 0, ink);
       cv.drawCircle(cx - r * TEXT, cy, r * 0.03f, ink); cv.drawCircle(cx + r * TEXT, cy, r * 0.03f, ink);
       cv.restore();
+    }
+  }
+
+  /** Кольцо хода загрузки: бледная дорожка и золотая дуга от верха по часовой. Перерисовывается,
+   *  только когда доля сдвинулась на процент: экран спрашивает дважды в секунду. */
+  final class Charge extends View {
+    final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG); final RectF r = new RectF();
+    float f = -1;
+    Charge(Context c) { super(c); p.setStyle(Paint.Style.STROKE); p.setStrokeCap(Paint.Cap.ROUND); }
+    void set(float v) {
+      v = v < 0 ? -1 : Math.round(Math.min(1, v) * 100) / 100f;
+      if (v == f) return;
+      f = v; invalidate();
+    }
+    @Override protected void onDraw(Canvas cv) {
+      if (f < 0) return;
+      float cx = getWidth() / 2f, cy = getHeight() / 2f, half = Math.min(cx, cy), w = half * 0.06f, rr = half * DISC + half * 0.07f;
+      r.set(cx - rr, cy - rr, cx + rr, cy + rr);
+      p.setStrokeWidth(w);
+      p.setColor(GOLD); p.setAlpha(0x40); cv.drawOval(r, p);
+      p.setAlpha(0xFF); cv.drawArc(r, -90, 360 * f, false, p);
     }
   }
 

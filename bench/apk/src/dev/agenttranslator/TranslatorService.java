@@ -215,7 +215,17 @@ public class TranslatorService extends Service {
         log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
       Engine.withTts = mod(Modules.TTS);
-      eng = new Engine(models, this::log); pb = new Phrasebook(models, mod(Modules.CORPUS));
+      // Ход загрузки — экрану: этапы «распознавание · перевод · озвучка · словарь и разговоры»,
+      // сколько каждый шёл в прошлый раз экран берёт из load_ms (владелец 01.10: «не хватает
+      // индикации загрузки моделей, чтобы было понятно, что вот-вот скоро включится»).
+      final int nStages = Engine.withTts ? 4 : 3;
+      Engine.stage = w -> busy("load", "asr".equals(w) ? "распознавание" : "mt".equals(w) ? "перевод" : "озвучка",
+          "asr".equals(w) ? 0 : "mt".equals(w) ? 1 : 2, nStages);
+      eng = new Engine(models, this::log);
+      Engine.stage = null;
+      final long restFrom = System.nanoTime();
+      busy("load", "словарь и разговоры", nStages - 1, nStages);
+      pb = new Phrasebook(models, mod(Modules.CORPUS));
       spk = new Speaker(models, mod(Modules.SPEAKER)); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
       log("🧩 модули: " + modulesLine());
       // По умолчанию «точнее»: сырой перевод понятен редко, и от облака ждут прежде всего качества.
@@ -247,9 +257,13 @@ public class TranslatorService extends Service {
       heartbeat(); startWarm(); startSay(); watchNetwork();
       boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
       if (lp || lr) setListen(lp, lr); else { log("🎚 микрофон выключен: включите «Слушать PT» или «Слушать RU»"); status("Микрофон выключен"); }
+      // Сколько шёл каждый этап — для хода загрузки в следующий раз: распознавание, перевод, озвучка, остальное.
+      long rest = (System.nanoTime() - restFrom) / 1000000;
+      getSharedPreferences("at", MODE_PRIVATE).edit().putString("load_ms", eng.loadAsrMs + "," + eng.loadMtMs + "," + eng.loadTtsMs + "," + rest).apply();
+      busy("load", null, 0, 0);
       notify("Готов. " + pb.stats()); Listener l = listener; if (l != null) main.post(l::onReady);
       maybeAutoUpgrade("");
-    } catch (Throwable t) { Log.e(TAG, "init", t); status("Ошибка: " + t); }
+    } catch (Throwable t) { Log.e(TAG, "init", t); status("Ошибка: " + t); Engine.stage = null; busy("load", null, 0, 0); }
   }
   Notification notif(String text) {
     PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -832,7 +846,7 @@ public class TranslatorService extends Service {
    *  главную из идущих — живой перевод важнее фонового уточнения, уточнение важнее облака.
    *  Раньше снаружи не было видно ничего: сырой перевод появлялся, а потом через десяток секунд
    *  молча менялся на уточнённый — или не менялся, и было не понять, ждать ли. */
-  static final String[] BUSY_ORDER = {"live", "refine", "cloud", "models"};
+  static final String[] BUSY_ORDER = {"load", "live", "refine", "cloud", "models"};
   final Map<String, Object[]> busyNow = new java.util.concurrent.ConcurrentHashMap<>();   // вид → {подпись, сделано, всего}
   void busy(String kind, String what, int done, int total) {
     if (what == null) { if (busyNow.remove(kind) == null) return; }

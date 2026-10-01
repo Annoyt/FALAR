@@ -2600,6 +2600,30 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  строки состояния и полоса по её нижнему краю. Полосы стоят на месте и меняются только с ходом:
    *  бегущая полоса перерисовывала весь экран на каждом кадре. */
   String convBusy; long cloudFrom; long cloudTypical;
+  /** Загрузка движков: этап, их число, что грузится, когда этап начался; сколько этапы шли в прошлый
+   *  раз (load_ms, пишет сервис): по ним полоса идёт и внутри этапа, а в шапке — «ещё ≈ N с». */
+  int loadK = -1, loadN; String loadWhat; long loadFrom; long[] loadMs;
+  final Runnable loadTick = new Runnable() { public void run() {
+    if (loadK < 0) return;
+    long[] ms = loadMs; int n = loadN, k = Math.min(loadK, n - 1);
+    long el = android.os.SystemClock.uptimeMillis() - loadFrom, cur = ms[Math.min(k, ms.length - 1)], before = 0, after = 0, all = 0;
+    for (int i = 0; i < n; i++) { long x = ms[Math.min(i, ms.length - 1)]; all += x; if (i < k) before += x; else if (i > k) after += x; }
+    float f = (before + Math.min(0.95f * cur, el)) / (float) Math.max(1, all);
+    long left = Math.max(cur - el, 500) + after;
+    convBusy = "Загружаю модели · " + loadWhat + " · ещё ≈ " + Math.max(1, Math.round(left / 1000.0)) + " с";
+    abProg.set(1, 0, f);
+    if (bMic != null) bMic.setLoad(f);
+    refreshHint();
+    ui.postDelayed(this, 500);
+  }};
+  /** Сколько шли этапы загрузки в прошлый раз: распознавание, перевод, [озвучка,] словарь и разговоры.
+   *  Нет замера — Redmi Note 10 Pro, 30.09: 3,7 · 3,7 · 3,0 · 1,5 с. */
+  long[] loadExpect(int n) {
+    long[] d = {3700, 3700, 3000, 1500};
+    try { String[] x = prefs.getString("load_ms", "").split(","); if (x.length == 4) for (int i = 0; i < 4; i++) { long v = Long.parseLong(x[i].trim()); if (v > 0) d[i] = v; } }
+    catch (Exception ignore) {}
+    return n == 4 ? d : new long[]{d[0], d[1], d[3]};            // без озвучки третьего этапа нет
+  }
   final Runnable cloudTick = new Runnable() { public void run() {
     if (convBusy == null || cloudFrom == 0) return;
     long ms = android.os.SystemClock.uptimeMillis() - cloudFrom;
@@ -2612,6 +2636,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }};
   @Override public void onBusy(String kind, String what, int done, int total) {
     if (busyRow == null) return;
+    // Загрузка движков — в шапке и кольцом на кнопке удержания, пока она тусклая.
+    if (what != null && "load".equals(kind)) {
+      if (loadK < 0) { loadMs = loadExpect(total); ui.post(loadTick); }
+      if (done != loadK) { loadK = done; loadFrom = android.os.SystemClock.uptimeMillis(); }
+      loadN = Math.max(1, total); loadWhat = what;
+      return;
+    }
+    if (loadK >= 0) { loadK = -1; ui.removeCallbacks(loadTick); convBusy = null; if (bMic != null) bMic.setLoad(-1); }
     boolean reply = what != null && ("live".equals(kind) || "refine".equals(kind));
     busyRow.setVisibility(reply ? View.VISIBLE : View.INVISIBLE);
     chipsRow.setVisibility(reply ? View.INVISIBLE : View.VISIBLE);

@@ -54,8 +54,15 @@ public class Engine {
     } catch (Throwable e) { return -1; }
   }
 
+  /** Этап загрузки — экрану, чтобы было видно, что вот-вот включится: «asr», «mt», «tts». Статическое
+   *  поле, как mtVariant: сервис ставит его до конструктора. */
+  public interface Stage { void at(String what); }
+  public static volatile Stage stage;
+  static void stage(String what) { Stage s = stage; if (s != null) try { s.at(what); } catch (Throwable ignore) {} }
+
   public Engine(File modelsDir, Log log) throws Exception {
     this.m = modelsDir; this.log = log;
+    stage("asr");
     System.loadLibrary("onnxruntime_sherpa"); System.loadLibrary("sherpa-onnx-jni");
     long t = System.nanoTime(), r0 = rssMb();
     File multi = new File(m, "asr_multi");
@@ -81,6 +88,7 @@ public class Engine {
           .setNumThreads(2).setDebug(false).build()).build());
     }
     loadAsrMs = (System.nanoTime() - t) / 1000000; log.log("ASR+VAD загружены за " + loadAsrMs + " мс (" + asrName + (denoiser != null ? ", шумоподавитель есть" : "") + ") · +" + (rssMb() - r0) + " МБ резидентно");
+    stage("mt");
     t = System.nanoTime(); long rss0 = rssMb();
     env = OrtEnvironment.getEnvironment();
     boolean legacy = "legacy".equals(mtVariant); int kvDirs = 0;
@@ -95,7 +103,7 @@ public class Engine {
     log.log("MT загружен за " + loadMtMs + " мс · +" + (rss1 - rss0) + " МБ резидентно, всего " + rss1 + " МБ · "
         + (kvDirs == 2 ? "две сессии на направление" : kvDirs == 0 ? "три сессии на направление" : "две сессии в одном направлении, три в другом")
         + (legacy ? " (стенд: прежний путь)" : ""));
-    if (withTts) loadTts(); else log.log("TTS не загружается: модуль «Озвучка» выключен");
+    if (withTts) { stage("tts"); loadTts(); } else log.log("TTS не загружается: модуль «Озвучка» выключен");
   }
 
   /** Поднимать ли голоса при создании движка: модуль «Озвучка» (Modules.TTS). Статическое поле,
