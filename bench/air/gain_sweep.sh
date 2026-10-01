@@ -3,14 +3,16 @@
 # против ограничителя. Нужен один телефон; разговоры владельца не трогаются.
 #
 #   bash bench/air/gain_sweep.sh [--rec "near-pt near-ru"] [--gains "0 12 24 auto"] [--modes "cut limit"]
-#                                [--att <дБ>] [--autostart <дБ>] [--speed 4]
+#                                [--att <дБ>] [--autostart <дБ>] [--speed 4] [--vaddn "raw dn dn_sil"]
 #
 # Каждый прогон: приложение перезапускается с --es micgaintest <дБ> --es limiter <0|1> (в настройки
 # не пишется; auto — вместо числа: чувствительность подбирается сама, --es micauto 1), запись комнаты
 # подаётся вместо микрофона (feedwav) тем же путём, что живой звук, —
 # через чувствительность, VAD и распознавание. --att ослабляет запись перед подачей (тихий
 # собеседник при том же отношении речи к фону). --autostart — с какого усиления начинает авто
-# (запомненное с прошлой сессии); по умолчанию 0, чтобы прогоны не зависели от предыдущих. Реплики ложатся в отдельный тестовый разговор;
+# (запомненное с прошлой сессии); по умолчанию 0, чтобы прогоны не зависели от предыдущих. --vaddn — нарезка по
+# очищенному звуку (--es vaddenoise, results/2026-10-02-vad-denoise.md): raw — как всегда, dn, dn_sil; во что
+# обошёлся шумодав — колонка «шумодав_%ядра». Реплики ложатся в отдельный тестовый разговор;
 # уточнитель и облако на время выключены — иначе семьдесят реплик подряд будили бы уточнитель и
 # отправляли тестовый разговор в облако. В конце всё как было: частота разбора и облака, выученное
 # и словари из снимка, тестовый разговор и запись удалены.
@@ -19,10 +21,10 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log; TSV=$F/at.tsv
-RECS="near-pt"; GAINS="0 12 24"; MODES="cut limit"; ATT=0; SPEED=4; AUTOSTART=0
+RECS="near-pt"; GAINS="0 12 24"; MODES="cut limit"; ATT=0; SPEED=4; AUTOSTART=0; VADDN=raw
 while [ $# -gt 0 ]; do
   case "$1" in --rec) RECS=$2; shift 2;; --gains) GAINS=$2; shift 2;; --modes) MODES=$2; shift 2;;
-    --att) ATT=$2; shift 2;; --speed) SPEED=$2; shift 2;; --autostart) AUTOSTART=$2; shift 2;;
+    --att) ATT=$2; shift 2;; --speed) SPEED=$2; shift 2;; --autostart) AUTOSTART=$2; shift 2;; --vaddn) VADDN=$2; shift 2;;
     *) echo "не знаю ключ: $1"; exit 2;; esac
 done
 D=$(mktemp -d /tmp/falar-gain.XXXX); SNAP=$D/snap; mkdir -p $SNAP; TID=$(date +%s%3N); SUM=$D/summary.tsv
@@ -63,7 +65,7 @@ $ADB wait-for-device; free_phone
 for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do $ADB pull "$F/$f" "$SNAP/" >/dev/null 2>&1; done
 printf '{"id": %s, "name": "ТЕСТ чувствительность", "named": true, "saved": %s, "turns": []}\n' $TID $TID > $D/t.json
 $ADB shell "am force-stop $PKG"; sleep 1; $ADB push $D/t.json "$F/chats/$TID.json" >/dev/null 2>&1
-printf 'запись\tусиление\tрежим\tWER\tчисто\tWER_чистых\tречь_дБ\tфон_дБ\tперегруз_%%\tограничитель_%%\tсрез_%%\n' > $SUM
+printf 'запись\tусиление\tрежим\tнарезка\tWER\tчисто\tWER_чистых\tпотеряно\tкусков\tречь_дБ\tфон_дБ\tперегруз_%%\tограничитель_%%\tсрез_%%\tшумодав_%%ядра\n' > $SUM
 
 for rec in $RECS; do
   REC=$R/bench/air/rec/$rec; LANG_=${rec##*-}; DIR=$([ "$LANG_" = ru ] && echo ru2pt || echo pt2ru)
@@ -79,15 +81,15 @@ o = wave.open(dst, "wb"); o.setparams(p); o.writeframes(a.tobytes()); o.close()
 PY
   $ADB push "$D/feed.wav" "$F/replay.wav" >/dev/null
   SEC=$(python3 -c "import wave; w=wave.open('$D/feed.wav'); print(int(w.getnframes()/w.getframerate()))")
-  for g in $GAINS; do for m in $MODES; do
+  for g in $GAINS; do for m in $MODES; do for v in $VADDN; do
     [ "$g" = 0 ] && [ "$m" != "$(echo $MODES | awk '{print $NF}')" ] && continue   # при 0 дБ режимы совпадают
     GX=$([ "$g" = auto ] && echo "--es micauto 1 --es micautodb $AUTOSTART" || echo "--es micgaintest $g")
-    L=$([ "$m" = cut ] && echo 0 || echo 1); OUT=$D/$rec-a$ATT-g$g-$m; mkdir -p $OUT
-    say "== $rec · ослабление $ATT дБ · усиление +$g дБ$([ "$g" = auto ] && echo " с $AUTOSTART") · $m"
+    L=$([ "$m" = cut ] && echo 0 || echo 1); OUT=$D/$rec-a$ATT-g$g-$m-$v; mkdir -p $OUT
+    say "== $rec · ослабление $ATT дБ · усиление +$g дБ$([ "$g" = auto ] && echo " с $AUTOSTART") · $m · нарезка $v"
     free_phone
     $ADB shell "am force-stop $PKG"; sleep 2
     m0=$(count $LOG)
-    $ADB shell "am start -n $ACT --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 --es refineevery 0 --es cloudevery 0 $GX --es limiter $L" >/dev/null 2>&1
+    $ADB shell "am start -n $ACT --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 --es vaddenoise $v --es refineevery 0 --es cloudevery 0 $GX --es limiter $L" >/dev/null 2>&1
     # Готов, когда движки подняты («🧩 модули:» пишется сразу после них) и захват идёт: подача
     # раньше движков теряла бы начало записи — поток нарезки выбрасывает кадры, пока движка нет.
     ok=0; for _ in $(seq 60); do sleep 2; [ "$(seen $m0 'микрофон:')" != 0 ] && [ "$(seen $m0 '🧩 модули:')" != 0 ] && { ok=1; break; }; done
@@ -98,11 +100,12 @@ PY
     for _ in $(seq $(( (SEC / SPEED + 240) / 5 ))); do sleep 5; [ "$(seen $m1 'подача закончена')" != 0 ] && break; done
     # Распознавание догоняет подачу: ждём, пока журнал 20 с не растёт.
     last=-1; for _ in $(seq 60); do c=$(count $TSV); [ "$c" = "$last" ] && break; last=$c; sleep 20; done
-    sh "tail -n +$((n0+1)) $TSV" > $OUT/listener.tsv; echo $off > $OUT/listener.offset; echo "g=$g $m att=$ATT" > $OUT/seg.txt
+    sh "tail -n +$((n0+1)) $TSV" > $OUT/listener.tsv; echo $off > $OUT/listener.offset; echo "g=$g $m att=$ATT vaddn=$v" > $OUT/seg.txt
+    sh "tail -n +$((m1+1)) $LOG | grep '🔇 шумодав нарезки' | tail -1" > $OUT/dncost.txt
     python3 $R/bench/air/air_wer.py $OUT --lang $LANG_ --mode replay --rec $REC > $OUT/wer.txt 2>&1
-    python3 - $OUT "$rec" "$g" "$m" >> $SUM <<'PY'
+    python3 - $OUT "$rec" "$g" "$m" "$v" >> $SUM <<'PY'
 import re, sys, statistics as st
-out, rec, g, m = sys.argv[1:5]
+out, rec, g, m, v = sys.argv[1:6]
 t = open(out + "/wer.txt", encoding="utf-8").read()
 def f(rx):
     x = re.search(rx, t, re.M); return x.group(1) if x else "?"
@@ -111,9 +114,11 @@ seg = [p for p in seg if len(p) >= 20 and p[1] in ("asr", "silence", "skip_short
 num = lambda i: [float(p[i]) for p in seg if p[i] not in ("", "NaN")]
 med = lambda xs: "%.1f" % st.median(xs) if xs else "?"
 avg = lambda xs: "%.3f" % (sum(xs) / len(xs)) if xs else "?"
-print("\t".join([rec, "+" + g, m, f(r"^WER ([\d.]+)%"), f(r"чисто \d+ \(([\d.]+)%\)"), f(r"на чисто нарезанных: WER ([\d.]+)%"),
-                 med(num(15)), med(num(16)), avg(num(17)), avg(num(18)), avg(num(19))]))
+cost = re.search(r"это ([\d.]+) % ядра", open(out + "/dncost.txt", encoding="utf-8").read())
+print("\t".join([rec, "+" + g, m, v, f(r"^WER ([\d.]+)%"), f(r"чисто \d+ \(([\d.]+)%\)"), f(r"на чисто нарезанных: WER ([\d.]+)%"),
+                 f(r"не дошло (\d+) \("), str(sum(1 for p in seg if p[1] == "asr")),
+                 med(num(15)), med(num(16)), avg(num(17)), avg(num(18)), avg(num(19)), cost.group(1) if cost else "-"]))
 PY
     tail -1 $SUM | column -t -s$'\t'
-  done; done
+  done; done; done
 done

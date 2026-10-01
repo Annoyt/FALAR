@@ -164,6 +164,17 @@ public class Engine {
     return new OfflineTts(OfflineTtsConfig.builder().setModel(OfflineTtsModelConfig.builder().setVits(v).setNumThreads(4).setDebug(false).build()).build());
   }
 
+  /** Потоковый шумодав для нарезки (стенд --es vaddenoise): очищенный звук получает только детектор
+   *  речи и порог по энергии, распознаватель слышит исходный кусок — перед распознаванием очистка
+   *  вредит (results/2026-10-02-vad-denoise.md). По требованию: живёт в потоке нарезки, ему же и
+   *  освобождать. Нет модели — null. */
+  public OnlineSpeechDenoiser onlineDenoiser() {
+    File f = new File(new File(m, "denoiser"), "gtcrn_simple.onnx");
+    if (!f.exists()) return null;
+    return new OnlineSpeechDenoiser(OnlineSpeechDenoiserConfig.builder().setModel(
+        OfflineSpeechDenoiserModelConfig.builder().setGtcrn(OfflineSpeechDenoiserGtcrnModelConfig.builder().setModel(f.getAbsolutePath()).build())
+            .setNumThreads(1).setDebug(false).build()).build());
+  }
   /** Шумоподавитель GTCRN: работает на 16 кГц, возвращает очищенный сигнал. */
   public float[] denoise(float[] s, int sr) {
     if (denoiser == null) return s;

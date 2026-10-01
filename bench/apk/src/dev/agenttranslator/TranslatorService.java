@@ -118,6 +118,16 @@ public class TranslatorService extends Service {
    *  выключали «Слушать», пока шёл звук (test_hearing_device.sh на Redmi 01.10: два прогона из трёх,
    *  в том числе на 0.26.0 как вышла). */
   volatile boolean vadReset = false;
+  /** Подача записи началась — шумодав нарезки с чистого листа, счёт его времени тоже; кончилась — поток
+   *  нарезки пишет, во что он обошёлся (стенд --es vaddenoise). */
+  volatile boolean feedDone = false, dnReset = false;
+  void logDn(String mode, long ns, long frames) {
+    if (frames == 0) return;
+    double sec = frames * FRAME_MS / 1000.0;
+    log(String.format(Locale.ROOT, "🔇 шумодав нарезки (%s): %d кадров, %.0f мс на %.0f с звука — RTF %.3f, это %.1f %% ядра",
+        mode, frames, ns / 1e6, sec, ns / 1e9 / sec, 100 * ns / 1e9 / sec));
+    tsv("vaddn_cost", mode, "" + frames, "" + (ns / 1000000));
+  }
   /** Фон комнаты по слушанию, dBFS до усиления, и когда он мерился (uptime). Удержанию он нужен,
    *  когда в самой записи тишины нет — заговорили сразу, отпустили сразу. Годен ROOM_MS: комната
    *  за пару минут меняется редко, а устаревший фон занизил бы шум. */
@@ -456,6 +466,7 @@ public class TranslatorService extends Service {
     }
     if (i != null && i.hasExtra("auto")) setAutoDir("1".equals(i.getStringExtra("auto")));
     if (i != null && i.hasExtra("denoise")) setDenoise("1".equals(i.getStringExtra("denoise")));
+    if (i != null && i.hasExtra("vaddenoise")) setVadDenoise(i.getStringExtra("vaddenoise"));
     if (i != null && i.hasExtra("word")) addWord(i.getStringExtra("word"));
     if (i != null && i.hasExtra("vad")) setVad("1".equals(i.getStringExtra("vad")));
     // Каталоги под модели создаёт приложение, а не adb: на Android 16 каталог, созданный shell,
@@ -506,7 +517,7 @@ public class TranslatorService extends Service {
       final int speed = i.getStringExtra("speed") == null ? 1 : Integer.parseInt(i.getStringExtra("speed"));
       new Thread(() -> { try {
         WaveReader wr = new WaveReader(wav); float[] s2 = wr.getSamples();
-        feeding = true; capQ.clear(); noiseRms = 0; vadSamples = 0; listenLiveReset = true;
+        feeding = true; capQ.clear(); noiseRms = 0; vadSamples = 0; listenLiveReset = true; dnReset = true;
         log("▷ подаю " + new File(wav).getName() + ": " + String.format(Locale.ROOT, "%.1f", s2.length / 16000.0) + " с, скорость ×" + speed);
         tsv("feed_begin", new File(wav).getName(), "" + s2.length, "" + speed);
         for (int o = 0; o + 512 <= s2.length && running; o += 512) {
@@ -516,7 +527,7 @@ public class TranslatorService extends Service {
         while (!capQ.isEmpty() && running) Thread.sleep(50);
         Thread.sleep(1500);
         feeding = false;
-        log("▷ подача закончена"); tsv("feed_end", new File(wav).getName());
+        log("▷ подача закончена"); tsv("feed_end", new File(wav).getName()); feedDone = true;
       } catch (Throwable t) { feeding = false; log("▷ ошибка подачи: " + t); } }, "feed").start();
     }
     // Проверка наушников: куда уходит вывод, какова задержка, и слышит ли микрофон озвучку.
@@ -1017,6 +1028,17 @@ public class TranslatorService extends Service {
     WordList.Entry e = words.entries.get(words.entries.size() - 1);
     String m = "📝 добавлено: " + e.pt + " ↔ " + e.ru + " · " + words.stats();
     log(m); return m;
+  }
+  /** Стенд: нарезка по очищенному звуку. raw — как всегда; dn — детектор речи, порог по энергии и его
+   *  фон — по очищенному; dn_sil — детектор по очищенному, порог по исходному. Распознавание — всегда
+   *  по исходному куску. Не сохраняется: замер results/2026-10-02-vad-denoise.md. */
+  volatile String vadDn = "raw";
+  public void setVadDenoise(String v) {
+    String m = v == null ? "raw" : v.trim();
+    if (m.equals("0") || m.equals("off")) m = "raw";
+    if (!m.equals("raw") && !m.equals("dn") && !m.equals("dn_sil")) { log("🔇 нарезка: не знаю «" + v + "» — raw, dn или dn_sil"); return; }
+    vadDn = m; log("🔇 нарезка " + (m.equals("raw") ? "по исходному звуку" : "по очищенному: " + m + " (распознавание — по исходному)"));
+    tsv("vaddn", m);
   }
   public void setDenoise(boolean on) { if (eng != null) { eng.denoiseOn = on && eng.denoiser != null; log("🔇 шумоподавитель " + (eng.denoiseOn ? "включён" : "выключен")); } }
   public void setAutoDir(boolean on) {
@@ -2266,6 +2288,9 @@ public class TranslatorService extends Service {
       // Счётчики входа по кадрам — рядом с самими кадрами: после усиления исходного звука уже нет.
       ArrayDeque<Gain.Stats> preSt = new ArrayDeque<>(); List<Gain.Stats> segSt = new ArrayList<>();
       boolean inSpeech = false; int silent = 0, voiced = 0;
+      // Шумодав нарезки (стенд --es vaddenoise): свой выход копится и отдаётся кадрами по 512.
+      OnlineSpeechDenoiser dn = null; String dnMode = "raw"; float[] dnBuf = new float[4096]; int dnLen = 0;
+      double dnNoise = 0; long dnNs = 0, dnFrames = 0;
       while (running) {
         if (probing) { try { Thread.sleep(20); } catch (InterruptedException e) { return; } continue; }
         float[] win;
@@ -2287,8 +2312,26 @@ public class TranslatorService extends Service {
         levelDb = (float) Math.max(db(frame), levelDb - 1.5); levelOver = fs.over > 0; levelAt = System.currentTimeMillis();
         listenLive.frame(db(frame), noiseRms > 0 ? db(noiseRms) : Double.NaN);
         liveQ = (float) listenLive.q(listenLive.speechDb()); liveSpeech = listenLive.voiced();
-        if (vadReset) { vadReset = false; eng.vad.reset(); }
-        eng.vad.acceptWaveform(win);
+        String mode = vadDn;
+        if (!mode.equals(dnMode)) {
+          if (dn != null) { logDn(dnMode, dnNs, dnFrames); dn.release(); dn = null; }
+          dnMode = mode; dnLen = 0; dnNoise = 0; dnNs = 0; dnFrames = 0;
+          if (!mode.equals("raw") && (dn = eng.onlineDenoiser()) == null) { log("🔇 нет models/denoiser/gtcrn_simple.onnx — нарезка по исходному"); vadDn = dnMode = "raw"; }
+        }
+        if (dnReset) { dnReset = false; if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; dnNs = 0; dnFrames = 0; } }
+        float[] dwin = win;
+        if (dn != null) {
+          long t0 = System.nanoTime();
+          float[] o = dn.run(win, 16000).getSamples();
+          if (dnLen + o.length > dnBuf.length) dnBuf = Arrays.copyOf(dnBuf, 2 * (dnLen + o.length));
+          System.arraycopy(o, 0, dnBuf, dnLen, o.length); dnLen += o.length;
+          dwin = new float[win.length];                   // выхода ещё нет (задержка шумодава) — тишина
+          if (dnLen >= win.length) { System.arraycopy(dnBuf, 0, dwin, 0, win.length); System.arraycopy(dnBuf, win.length, dnBuf, 0, dnLen - win.length); dnLen -= win.length; }
+          dnNs += System.nanoTime() - t0; dnFrames++;
+          if (feedDone) { feedDone = false; logDn(dnMode, dnNs, dnFrames); }
+        }
+        if (vadReset) { vadReset = false; eng.vad.reset(); if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; } }
+        eng.vad.acceptWaveform(dwin);
         boolean sp = eng.vad.isSpeechDetected();
         while (!eng.vad.empty()) eng.vad.pop();          // внутренняя сборка sherpa не используется
         // Фон копим только в тишине: без этого «SNR» мерил бы речь относительно самой себя.
@@ -2304,6 +2347,11 @@ public class TranslatorService extends Service {
         }
         if (noiseRms > 0) { roomDb = db(noiseRms) - gainListen.db; roomAt = android.os.SystemClock.uptimeMillis(); }
         boolean loud = noiseRms == 0 || frame >= noiseRms * Math.pow(10, gateDb / 20);
+        if (dnMode.equals("dn")) {                        // порог и его фон — по очищенному; фон для экрана и журнала — прежний
+          double df = rms(dwin, dwin.length);
+          if (!sp) { if (dnNoise == 0) dnNoise = df; else if (df < dnNoise) dnNoise = 0.9 * dnNoise + 0.1 * df; else dnNoise = 0.999 * dnNoise + 0.001 * Math.min(df, 2 * dnNoise); }
+          loud = dnNoise == 0 || df >= dnNoise * Math.pow(10, gateDb / 20);
+        }
         boolean speech = sp && loud;
         if (speech) lastSpeechAt = System.currentTimeMillis();   // отсюда отсчитывается пауза до озвучки
 
