@@ -15,7 +15,7 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=${SER:-f6lnlrorgi59xwge}; ADB="$R/tools/platform-tools/adb -s $SER"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
-CFGS=${1:-vr,vr_aec,vc,vc_aec}
+CFGS=${1:-vr,vr_aec,vc,vc_aec}; [ "$CFGS" = "--restore" ] && CFGS=vr
 STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"; OUT=$STATE/aec-$(date +%Y%m%d-%H%M%S)
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }
@@ -32,10 +32,21 @@ free3() {
 }
 wait_free() { local n=0; until free3; do n=$((n+1)); [ $n -eq 1 ] && say "  жду, пока телефон свободен ($(focus | sed 's/.*{//; s/}.*//'))"; sleep 20; done; }
 
+PENDV=$STATE/aec-volume-pending
+# Вернуть громкость из $PENDV и сверить; файл убирается, только если громкость на телефоне та самая.
+putvol() {
+  [ -f "$PENDV" ] || return 0
+  local v now; v=$(cat "$PENDV")
+  sh "cmd media_session volume --stream 3 --set $v" >/dev/null
+  now=$(sh "cmd media_session volume --stream 3 --get" | sed -n 's/.*volume is \([0-9]*\).*/\1/p')
+  if [ "$now" = "$v" ]; then rm -f "$PENDV"; say "  громкость возвращена: $v"; else say "  ГРОМКОСТЬ НЕ ВОЗВРАЩЕНА (нужно $v, сейчас ${now:-нет связи}) — вернёт следующий запуск или --restore"; fi
+}
 if [ -z "$FALAR_STAND_LOCK" ]; then
   exec 9>"$STATE/lock"; flock -n 9 || { say "на телефоне уже идёт проверка (замок) — не начинаю"; exit 1; }
 fi
 $ADB wait-for-device
+putvol
+[ "$1" = "--restore" ] && exit 0
 wait_free
 
 if [ "${INSTALL:-0}" = 1 ]; then
@@ -47,10 +58,14 @@ if [ "${INSTALL:-0}" = 1 ]; then
   case "$out" in Success*) ;; *) exit 1;; esac
 fi
 mkdir -p "$OUT"
-# Громкость — как при разговоре через стол (VOL из 15, по умолчанию 10); прежняя возвращается в конце.
+# Громкость — как при разговоре через стол (VOL из 15, по умолчанию 10); прежняя возвращается в конце и
+# сверяется. Телефон отключили посреди прогона — прежняя громкость остаётся в $PENDV, и её вернёт
+# следующий запуск (или --restore), как только телефон снова на связи.
 VOL0=$(sh "cmd media_session volume --stream 3 --get" | sed -n 's/.*volume is \([0-9]*\).*/\1/p')
-trap '[ -n "$VOL0" ] && sh "cmd media_session volume --stream 3 --set $VOL0" >/dev/null && say "  громкость возвращена: $VOL0"' EXIT
-sh "cmd media_session volume --stream 3 --set ${VOL:-10}" >/dev/null; say "  громкость: ${VOL:-10} из 15 (была ${VOL0:-?})"
+[ -n "$VOL0" ] || { say "громкость не прочлась — не начинаю"; exit 1; }
+echo "$VOL0" > "$PENDV"
+trap 'putvol' EXIT
+sh "cmd media_session volume --stream 3 --set ${VOL:-10}" >/dev/null; say "  громкость: ${VOL:-10} из 15 (была $VOL0)"
 m=$(mark); $ADB shell "am start -n $ACT" >/dev/null 2>&1
 wl "$m" '🧩 модули:' 150 >/dev/null; sleep 3
 m=$(mark); $ADB shell "am start -n $ACT --es aectest $CFGS" >/dev/null 2>&1
