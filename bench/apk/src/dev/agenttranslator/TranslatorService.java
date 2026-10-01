@@ -1523,7 +1523,7 @@ public class TranslatorService extends Service {
       log("🧠 разбор контекста: реплик " + todo.size() + ", правок " + changed + (hy ? ", пары не извлекаются: переводная модель" : ", пар " + pairs) + " · тема: " + tp
           + " · память " + memo.length() + " зн." + (chats == null || chats.memo.isEmpty() ? "" : Chats.BY_USER.equals(chats.memoBy) ? " (ваша)" : " (" + chats.memoBy + ")") + " (" + ms + " мс)");
       tsv("local_pass", "" + todo.size(), "" + changed, "" + pairs, "" + ms);
-      hint("🧠 разбор: реплик " + todo.size() + ", правок " + changed + (hy ? "" : ", пар " + pairs));
+      // Итог разбора — в журнале (строка ниже); на экране его видно по самим репликам (✓), шапку не трогаем.
     } } catch (Throwable e) { Log.e(TAG, "refine", e); log("🔁 ошибка уточнения: " + e); }
     finally {
       refineRunning = false; busy("refine", null, 0, 0);
@@ -1955,7 +1955,8 @@ public class TranslatorService extends Service {
         String trail = String.join(" · ", new ArrayList<>(cloud.trail));
         if (!trail.isEmpty()) { log("☁ след перебора: " + trail); tsv("cloud_trail", trail); }
         if (out == null) {
-          log("☁ не вышло за " + ms + " мс: " + cloud.lastError); hint("☁ не вышло: " + cloud.lastError);
+          log("☁ не вышло за " + ms + " мс: " + cloud.lastError);
+          hint("улучшить не вышло" + (cloud.rateLimited ? " — лимит запросов на сегодня" : cloud.lastFail == Cloud.F_NET ? " — нет связи" : ""));
           tsv("cloud_review_fail", "" + rows.size(), "" + chars, "" + ms, cloud.lastError);
           if (!manual && (cloud.rateLimited || cloud.lastFail == Cloud.F_NET)) { cloudBackoff = Math.min(8, cloudBackoff * 2); log("☁ интервал пересмотра удвоен: " + (cloudEvery * cloudBackoff) + " реплик до следующего ручного нажатия"); }
           return;
@@ -1998,9 +1999,9 @@ public class TranslatorService extends Service {
             + (wrongLang.length() > 0 ? " · не на языке цели: " + wrongLang : "") + ", пар " + pairs
             + (r.names.isEmpty() ? "" : ", имён " + r.names.size()) + (r.topic.isEmpty() ? "" : " · тема: " + r.topic) + (named ? " (стала названием)" : "") + memoNote;
         log(sum); tsv("cloud_review", "" + rows.size(), "" + chars, cloud.lastUsed, "" + ms, "" + fixed, "" + pairs, "" + r.names.size(), r.topic, "" + r.memo.length());
-        // На экране — коротко: список отброшенных номеров нужен стенду, а не собеседнику, который читает этот экран.
-        hint("☁ " + rows.size() + " реплик, " + chars + " зн. · " + cloud.lastUsed.replace(":free", "") + " · " + (ms / 1000) + " с · правок " + fixed + ", пар " + pairs
-            + (r.names.isEmpty() ? "" : ", имён " + r.names.size()) + (r.topic.isEmpty() ? "" : " · " + r.topic) + memoNote);
+        // На экране — только итог для человека: модель, знаки, пары и память — в журнале (строка выше),
+        // а не в шапке, которую видит и собеседник (владелец 01.10).
+        hint(fixed > 0 ? "улучшено · исправлено фраз: " + fixed : "улучшено · исправлять нечего");
         final String fLastFix = lastFix; final String[] lastRow = all.isEmpty() ? null : all.get(all.size() - 1);
         final Listener l = listener;
         if (l != null) main.post(() -> { l.onHistory(); if (fLastFix != null && lastRow != null) l.onTurn(lastRow[0], lastRow[1], fLastFix, true); if (!r.names.isEmpty()) l.onNames(new ArrayList<>(r.names), manual); });

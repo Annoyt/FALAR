@@ -497,46 +497,42 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         + " · пересмотр " + (svc.cloudEvery == 0 ? "по кнопке" : "каждые " + svc.cloudEvery + " реплик"));
     rowCloud.sub.setVisibility(View.VISIBLE);
   }
-  /** «Память разговора» — по касанию строки с названием: что уточнитель знает о разговоре сверх
-   *  последних реплик. Сырой перевод понятен редко, итог решает уточнитель, а он видит только
-   *  свежий кусок разговора и эту память — поэтому её надо видеть и уметь поправить. Отсюда же
-   *  глоссарий, «убрать подсказки» и имена-кандидаты в свои слова. */
+  /** «Память разговора» — по касанию названия разговора в шапке: что Falar знает о разговоре сверх
+   *  последних реплик. Только то, что понятно без знания устройства приложения (владелец 01.10:
+   *  «зачем простому пользователю информация, что от облака»): кто говорит, имена, ключевые детали.
+   *  Откуда детали, глоссарий, тема и как их читает уточнитель — не здесь. Действия — «ещё…». */
   void memoDialog() {
     if (svc == null || svc.chats == null) return;
     final Chats c = svc.chats;
     StringBuilder b = new StringBuilder();
-    String who = svc.whoLine(), kw = c.topic.isEmpty() ? svc.topicLine() : "";
-    b.append(who.isEmpty() ? "Кто говорит — пока не ясно: нет реплик, где человек говорит о себе («obrigada», «я поняла»)."
-                           : who + " Посчитано по тому, как люди говорят о себе: «obrigada», «estou cansada», «я понял».").append("\n\n");
-    if (c.memo.isEmpty()) b.append("Ключевые детали — пока нет. Их пишет облачный пересмотр («Улучшить» или по интервалу) и дополняет каждый раз; можно вписать самому.");
-    else b.append("Ключевые детали ").append(Chats.BY_USER.equals(c.memoBy) ? "(ваши — автоматика их не меняет)" : Chats.BY_CLOUD.equals(c.memoBy) ? "(от облака)" : "(от модели)")
-          .append(":\n").append(c.memo);
-    b.append("\n\nТема: ").append(!c.topic.isEmpty() ? c.topic : kw.isEmpty() ? "нет" : "нет, вместо неё частые слова: " + kw);
-    b.append("\n\nУточнитель получает эту память и последние реплики, до ").append(Brief.FRESH_CHARS)
-     .append(" знаков. Всё, что раньше, он знает только отсюда.\n\n");
-    final java.util.List<String[]> ts = c.terms();
-    if (ts.isEmpty()) b.append("Глоссарий разговора пуст.");
-    else {
-      b.append("Глоссарий разговора — подсказка уточнителю и облаку, OPUS-MT его не видит:\n");
-      for (String[] t : ts) b.append("• ").append(t[0]).append(" = ").append(t[1]).append("  ·  ").append("cloud".equals(t[2]) ? "от облака" : "от модели").append('\n');
-    }
+    String who = svc.whoLine();
+    b.append(who.isEmpty() ? "Кто говорит — пока не ясно." : who);
+    // Имена из разговора — рядом с тем, кто говорит; добавить их в свои слова — «ещё…».
     final java.util.List<String[]> names = new java.util.ArrayList<>(svc.pendingNames);
-    if (!names.isEmpty()) b.append("\nИмена от модели, которые можно добавить в свои слова: ").append(names.size());
+    if (!names.isEmpty()) {
+      b.append("\nИмена: ");
+      for (int k = 0; k < names.size(); k++) {
+        String[] n = names.get(k); b.append(k > 0 ? ", " : "").append(n[0]);
+        if (n.length > 1 && !n[1].isEmpty() && !n[1].equalsIgnoreCase(n[0])) b.append(" (").append(n[1]).append(')');
+      }
+    }
+    b.append("\n\nКлючевые детали").append(c.memo.isEmpty() ? " — пока нет." : ":\n" + c.memo);
     TextView tv = new TextView(this); tv.setText(b.toString()); tv.setTextSize(15); tv.setPadding(48, 24, 48, 8); tv.setTextIsSelectable(true);
     ScrollView sv = new ScrollView(this); sv.addView(tv);
+    final java.util.List<String[]> ts = c.terms();
     final java.util.List<String> more = new java.util.ArrayList<>();
-    if (Chats.BY_USER.equals(c.memoBy)) more.add("вернуть память облаку");
-    if (!ts.isEmpty()) more.add("убрать подсказки (" + ts.size() + ")");
-    if (!names.isEmpty()) more.add("имена → свои слова (" + names.size() + ")");
+    if (Chats.BY_USER.equals(c.memoBy)) more.add("вернуть память автоматике");
+    if (!names.isEmpty()) more.add("добавить имена в свои слова (" + names.size() + ")");
+    if (!ts.isEmpty()) more.add("забыть подсказки разговора (" + ts.size() + ")");
     android.app.AlertDialog.Builder d = new android.app.AlertDialog.Builder(this)
         .setTitle("Память разговора").setView(sv)
-        .setPositiveButton("изменить память", (dd, w) -> editMemo())
+        .setPositiveButton("изменить", (dd, w) -> editMemo())
         .setNegativeButton("закрыть", null);
     if (!more.isEmpty()) d.setNeutralButton("ещё…", (dd, w) -> new android.app.AlertDialog.Builder(this)
         .setItems(more.toArray(new String[0]), (d2, k) -> {
           String it = more.get(k);
           if (it.startsWith("вернуть")) { svc.setMemoByUser(""); refreshHint(); }
-          else if (it.startsWith("убрать")) { int n = c.clearTerms(); onLog("🗑 подсказки разговора убраны: " + n); refreshHint(); }
+          else if (it.startsWith("забыть")) { int n = c.clearTerms(); onLog("🗑 подсказки разговора убраны: " + n); refreshHint(); }
           else namesDialog(names);
         }).setNegativeButton("отмена", null).show());
     d.show();
@@ -551,8 +547,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     in.setHint("Например: хозяйка квартиры Мария (женщина) показывает мне квартиру; договорились о 2500 реалах в месяц");
     box.addView(in);
     TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(look.soft);
-    note.setText("Кто с кем говорит, где, о чём договорились, имена. Уточнитель читает это перед каждой репликой. "
-               + "Вписанное вами облако больше не меняет; пустое поле вернёт память облаку.");
+    note.setText("Кто с кем говорит, где, о чём договорились, имена — с этим перевод точнее. "
+               + "Вписанное вами автоматика не меняет; пустое поле вернёт ей память.");
     box.addView(note);
     new android.app.AlertDialog.Builder(this)
         .setTitle("Память разговора").setView(box)
