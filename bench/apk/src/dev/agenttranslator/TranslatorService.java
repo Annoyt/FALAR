@@ -609,6 +609,14 @@ public class TranslatorService extends Service {
     // в разных наушниках. Оговорка, которую надо проверить ухом: многие TWS сводят каналы в моно,
     // когда надет один вкладыш, — тогда разведение не сработает.
     // Длинный тон в один канал: короткие фразы на слух не локализуются, а три секунды — да.
+    // Стенд: эхо озвучки в микрофоне (--es aectest vr,vr_aec,vc,vc_aec). Телефон говорит фразу через
+    // динамик и сам же её записывает — по конфигурации за раз: источник VOICE_RECOGNITION (как у
+    // приложения) или VOICE_COMMUNICATION, со встроенным эхоподавителем Android
+    // (AcousticEchoCanceler на сессии записи) или без. Режим звука и маршрут не трогаются. Пишет
+    // files/aec_<cfg>.wav (16 кГц), aec_ref.wav (что играли) и aec.json (когда начали играть по
+    // каждой записи) — разбор на столе (tools/aec_eval.py). Слушание на время стенда выключается.
+    if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
+      new Thread(() -> { try { aecStand(cfgs); } catch (Throwable t) { log("🔁 эхо-стенд: ошибка — " + t); } }, "aec").start(); }
     if (i != null && i.hasExtra("devtest") && !voice()) log("🔇 devtest: озвучка выключена или голосов нет");
     else if (i != null && i.hasExtra("devtest")) {
       new Thread(() -> { try {
@@ -2164,6 +2172,59 @@ public class TranslatorService extends Service {
     String[] t = chats.turn(idx); if (t == null) return;
     final String tgt = t[0].substring(3), text = t[2];
     worker.submit(() -> { try { speakOut(tgt, text); } catch (Throwable e) { log("🔊 " + e); } });
+  }
+  void aecStand(String cfgs) throws Exception {
+    if (eng == null || !voice()) { log("🔁 эхо-стенд: движок или озвучка не готовы"); return; }
+    if (listenPt || listenRu) setListen(false, false);
+    Thread.sleep(800);
+    String lang = "pt", text = "Olha, o carro chegou ontem com um barulho estranho na frente, e quando a gente levantou vimos que a correia dentada estava muito gasta.";
+    final List<float[]> parts = new ArrayList<>();
+    GeneratedAudio ga = eng.speak(lang, text, chunk -> { parts.add(chunk.clone()); return 1; });
+    final int rate = ga.getSampleRate(); final float[] ref = ga.getSamples();
+    File dir = getExternalFilesDir(null);
+    new DenoisedAudio(ref, rate).save(new File(dir, "aec_ref.wav").getAbsolutePath());
+    boolean bt = false;
+    for (AudioDeviceInfo d : getSystemService(AudioManager.class).getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+      int t = d.getType(); if (t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_BLE_HEADSET) bt = true; }
+    log(String.format(Locale.ROOT, "🔁 эхо-стенд: фраза %.1f с, %d Гц · AcousticEchoCanceler %s · NoiseSuppressor %s%s", ref.length / (double) rate, rate,
+        android.media.audiofx.AcousticEchoCanceler.isAvailable() ? "есть" : "нет", android.media.audiofx.NoiseSuppressor.isAvailable() ? "есть" : "нет",
+        bt ? " · подключён Bluetooth — VOICE_COMMUNICATION пропускаю (§5 плана)" : ""));
+    org.json.JSONObject meta = new org.json.JSONObject().put("ref_rate", rate).put("text", text);
+    for (String cfg : cfgs.split(",")) {
+      cfg = cfg.trim(); if (cfg.isEmpty()) continue;
+      boolean vc = cfg.startsWith("vc"), aec = cfg.endsWith("_aec");
+      if (vc && bt) continue;
+      int min = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT);
+      AudioRecord rec = new AudioRecord.Builder().setAudioSource(vc ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.VOICE_RECOGNITION)
+          .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(16000).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
+          .setBufferSizeInBytes(Math.max(min, 16000 * 4 * 8)).build();
+      for (AudioDeviceInfo d : getSystemService(AudioManager.class).getDevices(AudioManager.GET_DEVICES_INPUTS))
+        if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) { rec.setPreferredDevice(d); break; }
+      android.media.audiofx.AcousticEchoCanceler ec = null; String ecState = "выкл";
+      if (aec) try { ec = android.media.audiofx.AcousticEchoCanceler.create(rec.getAudioSessionId());
+        if (ec == null) ecState = "не создался"; else { ec.setEnabled(true); ecState = ec.getEnabled() ? "вкл" : "не включился"; } } catch (Throwable t) { ecState = "ошибка " + t.getMessage(); }
+      final float[] buf = new float[(int) (16000 * (ref.length / (double) rate + 3.0))];
+      final int[] got = {0}; final long[] recStart = {0};
+      rec.startRecording(); recStart[0] = System.nanoTime();
+      Thread rt = new Thread(() -> { float[] w = new float[512];
+        while (got[0] < buf.length) { int n = rec.read(w, 0, Math.min(512, buf.length - got[0]), AudioRecord.READ_BLOCKING); if (n <= 0) break; System.arraycopy(w, 0, buf, got[0], n); got[0] += n; } }, "aecrec");
+      rt.start();
+      Thread.sleep(700);
+      long playAt; double playOff;
+      synchronized (tts) {
+        ensureTrack(rate);
+        playAt = System.nanoTime(); playOff = got[0];
+        for (float[] c : parts) writeOut(c, c.length, lang);
+      }
+      rt.join(15000);
+      rec.stop(); rec.release(); if (ec != null) try { ec.release(); } catch (Throwable ignore) {}
+      new DenoisedAudio(Arrays.copyOf(buf, got[0]), 16000).save(new File(dir, "aec_" + cfg + ".wav").getAbsolutePath());
+      meta.put(cfg, new org.json.JSONObject().put("play_sample", playOff).put("play_ms_after_start", (playAt - recStart[0]) / 1e6).put("aec", ecState).put("samples", got[0]));
+      log("🔁 эхо-стенд: " + cfg + " · эхоподавитель " + ecState + String.format(Locale.ROOT, " · записано %.1f с", got[0] / 16000.0));
+      Thread.sleep(800);
+    }
+    java.nio.file.Files.write(new File(dir, "aec.json").toPath(), meta.toString(1).getBytes("UTF-8"));
+    log("🔁 эхо-стенд: готово");
   }
   /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). */
   void speakOut(String tgt, String text) throws Exception {
