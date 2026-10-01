@@ -20,5 +20,7 @@ public class SuitesTest {
   @Test void modules() { assertEquals(0, ModulesTest.run()); }
   @Test void textRules() { assertEquals(0, TextRulesTest.run()); }
   @Test void screen() { assertEquals(0, ScreenTest.run()); }
+  @Test void voices() throws Exception { assertEquals(0, VoicesTest.run()); }
+  @Test void fbank() throws Exception { assertEquals(0, FbankTest.run(System.getProperty("falar.vpgold", "/нет"), new java.io.File(System.getProperty("falar.root", ".")))); }
   @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
 }
