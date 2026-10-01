@@ -36,8 +36,9 @@ STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"; PEND=$STAT
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json"
 SPK=speaker/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx
 PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3
-pass=0; fail=0
+pass=0; fail=0; skip=0
 say() { printf '%s\n' "$*"; }
+sk() { skip=$((skip+1)); say "ПРОПУСК $1"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
@@ -112,7 +113,7 @@ if [ "${INSTALL:-0}" = 1 ]; then
   [ $front = 1 ] && $ADB shell "am start -n $ACT" >/dev/null 2>&1
 fi
 D=$(mktemp -d "$STATE/voices-run.XXXX")
-trap 'restore; rm -rf "$D"; say; say "итог: PASS $pass, FAIL $fail"' EXIT
+trap 'restore; rm -rf "$D"; say; say "итог: PASS $pass, FAIL $fail, пропущено $skip"' EXIT
 
 # ---- записи: три живых голоса из Tatoeba --------------------------------------------------------------
 say "== записи"
@@ -291,6 +292,17 @@ EOF
 read va vb vn < "$D/v7"
 [ -n "$l" ] && res 0 "V7 кусок двоих разрезан по голосам" || res 1 "V7 строки о разрезе нет"
 [ "$va" = 1 ] && [ "$vb" = 1 ] && res 0 "V7 обе фразы переведены, каждая со своим номером и на своём языке (реплик: $vn)" || res 1 "V7 фраза собеседника 1: $va, собеседника 2: $vb (реплик: $vn)"
+
+say "== V8: подписи на экране — над репликой и в карточках"
+# Только при включённом экране и Falar впереди: uiautomator видит лишь то, что на экране; касаний нет.
+if ! asleep && focus | grep -q "$PKG/"; then
+  launch; sleep 3
+  T=$(sh "uiautomator dump /sdcard/falar-vt.xml >/dev/null; cat /sdcard/falar-vt.xml; rm -f /sdcard/falar-vt.xml" | "$PY" -c "
+import re,sys,html
+print('\n'.join(html.unescape(t) for t in re.findall(r'text=\"([^\"]*)\"', sys.stdin.read()) if t))")
+  printf '%s\n' "$T" | grep -qx 'Собеседник 2' && res 0 "V8 над текущей репликой — «Собеседник 2»" || res 1 "V8 подписи «Собеседник 2» нет: $(printf '%s' "$T" | head -c 300 | tr '\n' '|')"
+  printf '%s\n' "$T" | grep -qx 'Собеседник 1' && res 0 "V8 в карточках — «Собеседник 1»" || res 1 "V8 подписи «Собеседник 1» в карточках нет"
+else sk "V8 экран погашен или впереди не Falar ($(focus | sed 's/.*{//; s/}.*//'))"; fi
 
 say "== V5: разговор без голосов"
 "$PY" -c "import json; json.dump({'id': $TID2, 'name': 'ТЕСТ голоса 2', 'named': True, 'saved': $TID2, 'turns': []}, open('$D/t2.json','w',encoding='utf-8'), ensure_ascii=False)"
