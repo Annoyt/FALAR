@@ -2172,10 +2172,10 @@ public class TranslatorService extends Service {
     if (!voice()) return;
     int rate = eng.ttsSampleRate(tgt); ensureTrack(rate);
     final boolean dup = btDuplex(); if (!dup) muteUntil = Long.MAX_VALUE;
-    double sec = 0;
-    try { GeneratedAudio ga = eng.speak(tgt, text, chunk -> { writeOut(chunk, chunk.length, tgt); return 1; });
+    double sec = 0; final long[] w0 = {0};
+    try { GeneratedAudio ga = eng.speak(tgt, text, chunk -> { if (w0[0] == 0) w0[0] = System.currentTimeMillis(); writeOut(chunk, chunk.length, tgt); return 1; });
       sec = ga.getSamples().length / (double) rate;
-    } finally { if (!dup) muteUntil = System.currentTimeMillis() + (long) (sec * 1000) + 400; }
+    } finally { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec); if (!dup) muteUntil = until; }
     }
   }
   /** Очистка выученного. Ярус копится сам и молча, поэтому убрать его должно быть можно
@@ -3015,6 +3015,18 @@ public class TranslatorService extends Service {
    *  в разных потоках, а AudioTrack один: без этого замка две озвучки писали в него вперемешку,
    *  и первая же закончившаяся снимала заглушку с микрофона под второй. */
   final Object tts = new Object();
+  /** Когда, по оценке, доиграет всё, что уже отдано на вывод (System.currentTimeMillis). */
+  volatile long playEndMs = 0;
+  /** Заглушка микрофона — до конца звучания плюс 400 мс на хвост и отражения. Раньше конец считался
+   *  от момента, когда синтез отдал последний кусок: запись в буфер на 3 с возвращается заранее, и
+   *  к оставшимся секундам прибавлялась ещё вся длина фразы — фраза в 6 с глушила микрофон на 9,4 с,
+   *  а очередь из нескольких — на десятки секунд (владелец 01.10: «перестаёт записывать диалог»).
+   *  Теперь звучание начинается с первого отданного куска, но не раньше, чем доиграет предыдущее. */
+  long muteAfter(long firstWriteMs, double audioS) {
+    long start = Math.max(firstWriteMs, playEndMs);
+    playEndMs = start + (long) (audioS * 1000);
+    return playEndMs + 400;
+  }
 
   double speakTurn(String dir, String tgt, String mt, boolean cacheable, long[] first) throws Exception {
     if (!voice()) return 0;                            // модуль «Озвучка» выключен или голосов ещё нет: перевод на экране
@@ -3027,13 +3039,17 @@ public class TranslatorService extends Service {
     final boolean dup = btDuplex();
     if (!dup) muteUntil = Long.MAX_VALUE;
     double audioS = 0;
+    final long[] w0 = {0};                 // когда отдан первый кусок — с него фраза и звучит
     float[] cached = pb.audio(dir, mt);
     try {                                  // без finally одно исключение в синтезе делало приложение глухим навсегда
-      if (cached != null) { if (first != null && first[0] == 0) first[0] = System.nanoTime(); writeOut(cached, cached.length, tgt); audioS = cached.length / (double) rate; }
-      else { GeneratedAudio ga = eng.speak(tgt, mt, chunk -> { if (first != null && first[0] == 0) first[0] = System.nanoTime(); writeOut(chunk, chunk.length, tgt); return 1; });
+      if (cached != null) { if (first != null && first[0] == 0) first[0] = System.nanoTime(); w0[0] = System.currentTimeMillis(); writeOut(cached, cached.length, tgt); audioS = cached.length / (double) rate; }
+      else { GeneratedAudio ga = eng.speak(tgt, mt, chunk -> { if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) w0[0] = System.currentTimeMillis(); writeOut(chunk, chunk.length, tgt); return 1; });
         audioS = ga.getSamples().length / (double) rate; if (cacheable) pb.putAudio(dir, mt, ga.getSamples(), rate); }
     } finally {
-      if (!dup) muteUntil = System.currentTimeMillis() + (long) (audioS * 1000) + 400;
+      long now = System.currentTimeMillis(), until = muteAfter(w0[0] == 0 ? now : w0[0], audioS);
+      if (!dup) muteUntil = until;
+      if (audioS >= 3) log(String.format(Locale.ROOT, "🔊 %.1f с звука · микрофон глух до %+.1f с от отдачи последнего куска (прежний расчёт: %+.1f с)",
+          audioS, (until - now) / 1000.0, audioS + 0.4));
       // Что и когда проговорено по-португальски — для отсева эха: хвост озвучки и отражение от стен
       // доходят до микрофона и после этих 400 мс.
       if ("pt".equals(tgt)) { spokenPt = mt; spokenPtEnd = System.currentTimeMillis() + (long) (audioS * 1000); }

@@ -314,6 +314,17 @@ print('\n'.join(html.unescape(t) for t in re.findall(r'text=\"([^\"]*)\"', sys.s
   printf '%s\n' "$T" | grep -qx 'Собеседник 1' && res 0 "V8 в карточках — «Собеседник 1»" || res 1 "V8 подписи «Собеседник 1» в карточках нет"
 else sk "V8 экран погашен или впереди не Falar ($(focus | sed 's/.*{//; s/}.*//'))"; fi
 
+say "== V9: заглушка микрофона — ровно на время звучания, а не дольше"
+# Одна фраза вслух (до этого всё молча): прежний расчёт держал микрофон глухим ещё на всю длину фразы
+# после того, как синтез отдал последний кусок. Текст — пример из кода (CPT_PT), не данные владельца.
+m=$(mark); launch "--es silent 0"; sleep 1
+launch "--es feedtext 'Olha, o carro chegou ontem com um barulho estranho na frente, e quando a gente levantou vimos que a correia dentada estava muito gasta.'"
+l=$(wl "$m" '🔊 [0-9.]+ с звука · микрофон глух' 40); say "  ${l:-нет строки}"
+launch "--es silent 1"
+read au ne ol <<< "$(printf '%s' "$l" | sed -n 's/.*🔊 \([0-9.]*\) с звука · микрофон глух до +\([0-9.]*\) с .*прежний расчёт: +\([0-9.]*\) с.*/\1 \2 \3/p')"
+"$PY" -c "import sys; a,n,o=map(float,sys.argv[1:4]); sys.exit(0 if n < o and n <= a + 0.6 else 1)" "${au:-0}" "${ne:-99}" "${ol:-0}" \
+  && res 0 "V9 фраза ${au} с: микрофон глух ещё ${ne} с после отдачи (было бы ${ol} с)" || res 1 "V9 заглушка: ${l:-нет строки}"
+
 say "== V5: разговор без голосов"
 "$PY" -c "import json; json.dump({'id': $TID2, 'name': 'ТЕСТ голоса 2', 'named': True, 'saved': $TID2, 'turns': []}, open('$D/t2.json','w',encoding='utf-8'), ensure_ascii=False)"
 $ADB push "$D/t2.json" "$F/chats/$TID2.json" >/dev/null 2>&1
