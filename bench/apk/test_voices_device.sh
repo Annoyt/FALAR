@@ -197,7 +197,7 @@ $ADB push "$D/t.json" "$F/chats/$TID.json" >/dev/null 2>&1
 echo started >> "$PEND"
 MODS_ON=$(printf '%s' ",$MODS,speaker," | tr ',' '\n' | grep -v '^$' | sort -u | paste -sd,)
 MODS_OFF=$(printf '%s' ",$MODS," | tr ',' '\n' | grep -v -e '^$' -e '^speaker$' | paste -sd,)
-m=$(mark); launch "--es modules '$MODS_ON' --es silent 1"
+m=$(mark); m0=$m; launch "--es modules '$MODS_ON' --es silent 1"
 ready "$m"
 wl "$m" '🎤 отпечаток голоса (готов|подключён)' 60 >/dev/null || { res 1 "V· отпечаток голоса не поднялся"; exit 1; }
 cur=$(sh "ls -t $F/chats/ | head -1")
@@ -210,7 +210,7 @@ w=$(printf '%s' "$l" | sed -n 's/.*худший \([-0-9.]*\).*/\1/p')
 "$PY" -c "import sys; sys.exit(0 if float('${w:--9}') >= 0.999 else 1)" && res 0 "V· Java-признаки и ORT дают эталонный отпечаток (худший косинус $w)" || res 1 "V· отпечаток не эталонный: ${w:-нет}"
 
 say "== V0: общий файл голосов прежних версий"
-l=$(wl "$m" 'общие голоса прежних версий удалены' 5)
+l=$(wl "$m0" 'общие голоса прежних версий удалены' 5); say "  ${l:-нет строки}"
 printf '%s' "$l" | grep -q "удалены: ${OLDN:-?} " && res 0 "V0 удалён, в журнале — сколько было ($OLDN)" || res 1 "V0 строка: ${l:-нет}"
 [ -z "$(sh "ls $M/speaker_profiles.json 2>/dev/null")" ] && res 0 "V0 файла больше нет" || res 1 "V0 файл остался"
 
@@ -278,5 +278,6 @@ $ADB push "$D/t3.json" "$F/chats/$TID3.json" >/dev/null 2>&1
 m=$(mark); launch "--es openchat $TID3 --es modules '$MODS_OFF'"; sleep 3; launch --es feedwav "$F/vt_off.wav"
 wl "$m" 'подача закончена' 60 >/dev/null; sleep 8
 got=$(cj "$TID3" "len(o['turns']), o['turns'][0].get('who','-') if o['turns'] else ''")
-case "$got" in "1 -") res 0 "V6 без отпечатка фраза переведена, номера нет";; *) res 1 "V6 в разговоре: $got";; esac
+# без отпечатка нарезка та же, что до 0.27: фраза может лечь и двумя репликами — важно, что легла и без номера
+case "$got" in [1-9]*" -") res 0 "V6 без отпечатка фраза переведена, номера нет (реплик: ${got%% *})";; *) res 1 "V6 в разговоре: $got";; esac
 launch --es listen off

@@ -88,6 +88,16 @@ public class VoicesTest {
     eq(Voices.fromJson(null).size(), 0, "V14 поля нет — голосов нет");
     eq(vs.clear(), 3, "V15 забыть — сколько было"); ok(vs.isEmpty(), "V15 пусто");
 
+    // Общий файл голосов прежних версий: удаляется, а в журнал — сколько в нём было
+    java.io.File md = java.nio.file.Files.createTempDirectory("voices").toFile(), pf = new java.io.File(md, "speaker_profiles.json");
+    eq(Voices.retireOld(md)[0], -1, "V16 файла нет — нечего удалять");
+    java.nio.file.Files.write(pf.toPath(), "{\"я\":{\"lang\":\"ru\",\"e\":[0.6,0.8]},\"собеседник\":{\"lang\":\"pt\",\"e\":[0.8,0.6]}}".getBytes("UTF-8"));
+    Object[] r = Voices.retireOld(md);
+    ok((int) r[0] == 2 && "".equals(r[1]) && !pf.exists(), "V16 два голоса — удалены, счёт 2: " + r[0] + " " + r[1]);
+    java.nio.file.Files.write(pf.toPath(), "мусор".getBytes("UTF-8"));
+    r = Voices.retireOld(md);
+    ok((int) r[0] == 0 && !"".equals(r[1]) && !pf.exists(), "V16 битый файл — всё равно удалён, причина названа");
+
     System.out.println(fails == 0 ? "Voices: " + checks + " проверок, все прошли" : "Voices: провалов " + fails + " из " + checks);
     return fails;
   }

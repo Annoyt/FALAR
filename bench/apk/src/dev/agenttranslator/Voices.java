@@ -135,6 +135,20 @@ public class Voices {
     return who == null || !who.trim().matches("\\d+") ? "" : "собеседник " + who.trim();
   }
 
+  /** До 0.27 голоса «я» и «собеседник» хранились одни на все разговоры (models/speaker_profiles.json,
+   *  записывались на отдельном экране настроек). Теперь голос запоминается в разговоре кнопкой FALAR,
+   *  и общий файл — чужая биометрия без дела: удаляем. Сколько голосов в нём было — чтобы сказать
+   *  числом, а не молча: {число или -1, если файла нет; почему не прочёлся, или ""}. Не прочёлся —
+   *  всё равно удаляем. */
+  public static Object[] retireOld(java.io.File modelsDir) {
+    java.io.File f = new java.io.File(modelsDir, "speaker_profiles.json");
+    if (!f.exists()) return new Object[]{-1, ""};
+    int n = 0; String why = "";
+    try { n = new JSONObject(new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8")).length(); }
+    catch (Exception e) { why = String.valueOf(e); }
+    return new Object[]{f.delete() ? n : -1, f.exists() ? "не удалился" : why};
+  }
+
   public static float[] unit(float[] v) {
     if (v == null) return null;
     double n = 0; for (float x : v) n += x * x; n = Math.sqrt(n);

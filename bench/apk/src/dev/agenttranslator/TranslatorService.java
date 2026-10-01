@@ -235,8 +235,9 @@ public class TranslatorService extends Service {
       busy("load", "словарь и разговоры", nStages - 1, nStages);
       pb = new Phrasebook(models, mod(Modules.CORPUS));
       spk = new Speaker(models, mod(Modules.SPEAKER)); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
-      int oldVoices = Speaker.retire(models);
-      if (oldVoices >= 0) log("🎤 общие голоса прежних версий удалены: " + oldVoices + " — теперь голос запоминается в каждом разговоре фразой кнопкой FALAR");
+      Object[] old = Voices.retireOld(models);
+      if ((int) old[0] >= 0) log("🎤 общие голоса прежних версий удалены: " + old[0] + " — теперь голос запоминается в каждом разговоре фразой кнопкой FALAR"
+          + (((String) old[1]).isEmpty() ? "" : " (файл не прочёлся: " + old[1] + ")"));
       log("🧩 модули: " + modulesLine());
       // По умолчанию «точнее»: сырой перевод понятен редко, и от облака ждут прежде всего качества.
       cloud.preferQuality = getSharedPreferences("at", MODE_PRIVATE).getBoolean("cloud_quality", true);

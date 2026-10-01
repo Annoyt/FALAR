@@ -5,9 +5,7 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import java.io.File;
 import java.nio.FloatBuffer;
-import java.nio.file.Files;
 import java.util.Collections;
-import org.json.*;
 
 /**
  * Отпечаток голоса: 3D-Speaker CAM++ через ONNX Runtime, признаки — свои (Fbank, рецепт 3D-Speaker).
@@ -70,15 +68,4 @@ public class Speaker {
   /** Отдать модель отпечатка: без этого она оставалась в нативной памяти после остановки сервиса. */
   public synchronized void release() { ready = false; if (sess != null) try { sess.close(); } catch (Throwable ignore) {} sess = null; }
 
-  /** До 0.27 голоса «я» и «собеседник» хранились одни на все разговоры (models/speaker_profiles.json,
-   *  записывались на отдельном экране настроек). Теперь голос запоминается в разговоре кнопкой
-   *  FALAR, и общий файл — чужая биометрия без дела: удаляем. Возвращает, сколько голосов в нём было
-   *  (-1 — файла нет), чтобы сказать об этом числом, а не молча. */
-  public static int retire(File modelsDir) {
-    File f = new File(modelsDir, "speaker_profiles.json");
-    if (!f.exists()) return -1;
-    int n = 0;
-    try { n = new JSONObject(new String(Files.readAllBytes(f.toPath()), "UTF-8")).length(); } catch (Exception ignore) {}
-    return f.delete() ? n : -1;
-  }
 }
