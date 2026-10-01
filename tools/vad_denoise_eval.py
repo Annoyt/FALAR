@@ -25,6 +25,9 @@ parakeet на очищенном звуке ошибается в разы ча�
 
   .venv/bin/python tools/vad_denoise_eval.py near-pt noisy-pt far-pt near-ru [--model gtcrn] [--att 0]
       [--variants raw,dn,dn_sil] [--out results/vad_denoise]
+
+С какого фона очистка начинает помогать: --mix noisy-pt --mixdb -50,-45,-40 — к записи подмешивается фон
+другой записи (её отрезки вне окон фраз, по кругу) с таким уровнем RMS, dBFS. Речь та же, меняется только фон.
 """
 import argparse
 import json
@@ -95,38 +98,68 @@ def denoiser(model, att):
     return so.OnlineSpeechDenoiser(so.OnlineSpeechDenoiserConfig(model=mc))
 
 
-def stream_denoise(x, model, att):
-    """Очищенный поток кадрами нарезки: на каждый входной кадр — 512 отсчётов из накопленного выхода
-    (пока его нет — нули). Возвращает поток той же длины, задержку шумодава в отсчётах и время."""
-    dn = denoiser(model, att)
-    assert dn.sample_rate == SR, dn.sample_rate
-    fifo, out, t0, lagged = deque(), np.zeros_like(x), time.time(), 0
-    buf = np.zeros(0, np.float32)
-    for i in range(len(x) // FRAME):
-        a = dn.run(np.ascontiguousarray(x[i * FRAME:(i + 1) * FRAME]), SR)
-        buf = np.concatenate([buf, np.asarray(a.samples, np.float32)])
-        if len(buf) >= FRAME:
-            out[i * FRAME:(i + 1) * FRAME] = buf[:FRAME]; buf = buf[FRAME:]
-        else:
-            lagged += 1
-    return out, lagged * FRAME, time.time() - t0
+def room_noise(name, margin=0.5):
+    """Фон записи без речи: отрезки вне окон проигрывания (с запасом margin с по краям), подряд."""
+    x, plays, gap = load_rec(name)
+    keep = np.ones(len(x), bool)
+    for _, at, dur in plays:
+        keep[max(0, int((at - margin) * SR)):min(len(x), int((at + dur + margin) * SR))] = False
+    return x[keep]
 
 
-def segment(sil_in, gate_in):
-    """TranslatorService.startVad при 0 дБ: silero по sil_in, порог по энергии и фон по gate_in.
-    Куски — (начало, конец, место нарезки) в отсчётах."""
+def mix(x, noise, level_db):
+    """x плюс фон по кругу, приведённый к RMS level_db."""
+    n = np.resize(noise, len(x)).astype(np.float64)
+    n *= 10 ** (level_db / 20) / (np.sqrt(np.mean(n ** 2)) + 1e-12)
+    return np.clip(x + n, -1, 1).astype(np.float32)
+
+
+def segment(x, variant, model='gtcrn', att=0.0, gate=None):
+    """TranslatorService.startVad при 0 дБ. variant: raw — silero и порог по исходному; dn — silero, порог и
+    его фон по очищенному; dn_sil — silero по очищенному, порог по исходному. Шумодав — потоком, кадр за
+    кадром, как в приложении: его выход копится и отдаётся по 512 отсчётов, пока выхода нет — тишина.
+
+    gate — «только при шуме», порог фона в dBFS: оценка фона (по исходному звуку, как roomDb в приложении)
+    держится не ниже порога 2 с — шумодав создаётся заново и нарезка идёт как dn_sil; 10 с ниже порога
+    на 3 дБ — шумодав выключается, нарезка как raw. В тишине шумодав не работает вовсе.
+
+    Куски — (начало, конец, место нарезки) в отсчётах; плюс счёт: кадров со включённым шумодавом,
+    включений, медиана и 90-й процентиль оценки фона."""
     cfg = so.VadModelConfig(silero_vad=so.SileroVadModelConfig(model=os.path.join(MODELS, 'silero_vad.onnx'), threshold=0.5,
                             min_silence_duration=0.05, min_speech_duration=0.25, window_size=FRAME, max_speech_duration=15),
                             sample_rate=SR, num_threads=1)
     vad = so.VoiceActivityDetector(cfg, buffer_size_in_seconds=60)
     F, PRE, TAIL, HANG, MINSP, MAXSP, GATE = 32, 1000 // 32, 300 // 32, 600, 250, 15000, 6.0
+    ON_FR, OFF_FR, HYST = 2000 // 32, 10000 // 32, 3.0
     pre, seg, out = deque(), [], []
-    in_sp, silent, voiced, noise = False, 0, 0, 0.0
-    for i in range(len(sil_in) // FRAME):
-        win = sil_in[i * FRAME:(i + 1) * FRAME]
-        g = gate_in[i * FRAME:(i + 1) * FRAME]
-        fr = float(np.sqrt(np.mean(g.astype(np.float64) ** 2)))
-        vad.accept_waveform(win)
+    in_sp, silent, voiced, noise, dnoise = False, 0, 0, 0.0, 0.0
+    on = gate is None and variant != 'raw'
+    dn = denoiser(model, att) if on else None
+    buf = np.zeros(0, np.float32)
+    on_cnt = off_cnt = on_frames = switches = 0; rooms = []
+    k = 10 ** (GATE / 20)
+    for i in range(len(x) // FRAME):
+        win = x[i * FRAME:(i + 1) * FRAME]
+        fr = float(np.sqrt(np.mean(win.astype(np.float64) ** 2)))
+        room = 20 * np.log10(noise) if noise > 0 else -999.0
+        if noise > 0: rooms.append(room)
+        if gate is not None:
+            if not on:
+                on_cnt = on_cnt + 1 if room >= gate else 0
+                if on_cnt >= ON_FR:
+                    on, dn, buf, off_cnt, switches = True, denoiser(model, att), np.zeros(0, np.float32), 0, switches + 1
+            else:
+                off_cnt = off_cnt + 1 if room < gate - HYST else 0
+                if off_cnt >= OFF_FR:
+                    on, dn, on_cnt = False, None, 0
+        dwin = win
+        if on:
+            buf = np.concatenate([buf, np.asarray(dn.run(np.ascontiguousarray(win), SR).samples, np.float32)])
+            if len(buf) >= FRAME: dwin, buf = buf[:FRAME], buf[FRAME:]
+            else: dwin = np.zeros(FRAME, np.float32)
+            on_frames += 1
+        mode = variant if gate is None else ('dn_sil' if on else 'raw')
+        vad.accept_waveform(np.ascontiguousarray(dwin if mode in ('dn', 'dn_sil') else win))
         sp = vad.is_speech_detected()
         while not vad.empty():
             vad.pop()
@@ -134,7 +167,15 @@ def segment(sil_in, gate_in):
             if noise == 0: noise = fr
             elif fr < noise: noise = 0.9 * noise + 0.1 * fr
             else: noise = 0.999 * noise + 0.001 * min(fr, 2 * noise)
-        speech = sp and (noise == 0 or fr >= noise * 10 ** (GATE / 20))
+        if mode == 'dn':
+            df = float(np.sqrt(np.mean(dwin.astype(np.float64) ** 2)))
+            if not sp:
+                if dnoise == 0: dnoise = df
+                elif df < dnoise: dnoise = 0.9 * dnoise + 0.1 * df
+                else: dnoise = 0.999 * dnoise + 0.001 * min(df, 2 * dnoise)
+            speech = sp and (dnoise == 0 or df >= dnoise * k)
+        else:
+            speech = sp and (noise == 0 or fr >= noise * k)
         if not in_sp:
             pre.append(i)
             while len(pre) > max(1, PRE): pre.popleft()
@@ -150,7 +191,11 @@ def segment(sil_in, gate_in):
         if voiced * F >= MINSP and keep > 0:
             out.append((seg[0] * FRAME, (seg[keep - 1] + 1) * FRAME, (i + 1) * FRAME))
         in_sp, seg, silent, voiced = False, [], 0, 0
-    return out
+    n = len(x) // FRAME
+    stat = dict(on_share=round(on_frames / max(1, n), 3), switches=switches,
+                room_med=round(float(np.median(rooms)), 1) if rooms else None,
+                room_p90=round(float(np.percentile(rooms, 90)), 1) if rooms else None)
+    return out, stat
 
 
 def score(segs, texts, plays, gap, lang):
@@ -165,8 +210,9 @@ def score(segs, texts, plays, gap, lang):
         hit = next((w for w in wins if w[1] <= s[2] / SR <= w[2]), None)
         if hit is None: outside += 1
         else: hit[3].append(t)
-    err = tot = nothing = merged = 0; clean = []
+    err = tot = nothing = merged = split = 0; clean = []
     for name, _, _, heard_l in wins:
+        split += len(heard_l) > 1
         ref = open(os.path.join(R, 'bench', 'air', 'corpus', lang, name[:-4] + '.txt'), encoding='utf-8').read().strip()
         heard = ' '.join(t for t in heard_l if t)
         e, n = wer(ref, heard); err += e; tot += n
@@ -174,7 +220,7 @@ def score(segs, texts, plays, gap, lang):
         elif len(norm(heard)) > len(norm(ref)) * 1.6: merged += 1
         else: clean.append((e, n))
     ce, ct = sum(c[0] for c in clean), sum(c[1] for c in clean)
-    return dict(wer=round(100 * err / tot, 1), lost=nothing, merged=merged, clean=round(100 * len(clean) / len(wins), 1),
+    return dict(wer=round(100 * err / tot, 1), lost=nothing, merged=merged, split=split, clean=round(100 * len(clean) / len(wins), 1),
                 wer_clean=round(100 * ce / max(1, ct), 1), segments=len(segs), outside=outside, phrases=len(wins), words=tot)
 
 
@@ -183,28 +229,34 @@ def main():
     ap.add_argument('recs', nargs='+')
     ap.add_argument('--model', default='gtcrn', help='gtcrn | dpdfnet_baseline | dpdfnet2 …')
     ap.add_argument('--att', type=float, default=0.0, help='предел подавления DPDFNet, дБ (0 — без предела)')
-    ap.add_argument('--variants', default='raw,dn,dn_sil')
+    ap.add_argument('--variants', default='raw,dn,dn_sil', help='raw, dn, dn_sil, auto<порог dBFS> — например auto-47')
     ap.add_argument('--out', default=os.path.join(R, 'results', 'vad_denoise'))
+    ap.add_argument('--mix', help='запись, чей фон подмешивать')
+    ap.add_argument('--mixdb', default='', help='уровни фона, dBFS, через запятую')
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    asr = Asr()
     tag = a.model + ('' if not a.att else '-att%g' % a.att)
-    for name in a.recs:
+    jobs = [(n, None) for n in a.recs] if not a.mix else [(n, float(d)) for n in a.recs for d in a.mixdb.split(',')]
+    noise = room_noise(a.mix) if a.mix else None
+    for name, level in jobs:
+        asr = Asr()                                         # кэш кусков — свой у каждого звука
         lang = name.split('-')[-1]
         x, plays, gap = load_rec(name)
+        if level is not None:
+            x = mix(x, noise, level); name = '%s+%s%g' % (name, a.mix, level)
         plays = [p for p in plays if os.path.exists(os.path.join(R, 'bench', 'air', 'corpus', lang, p[0][:-4] + '.txt'))]
-        y, lag, sec = stream_denoise(x, a.model, a.att)
-        res = {'rec': name, 'model': a.model, 'att': a.att, 'lag_samples': lag,
-               'rtf': round(sec / (len(x) / SR), 4), 'variants': {}}
+        res = {'rec': name, 'model': a.model, 'att': a.att, 'variants': {}}
         for v in a.variants.split(','):
-            sil_in, gate_in = {'raw': (x, x), 'dn': (y, y), 'dn_sil': (y, x)}[v]
-            segs = segment(sil_in, gate_in)
-            texts = [asr(x, s[0], s[1]) for s in segs]
-            res['variants'][v] = score(segs, texts, plays, gap, lang)
-            r = res['variants'][v]
-            print('%-9s %-7s WER %5.1f %% · потеряно %2d из %d · склеено %d · кусков %3d (вне окон %d) · WER чистых %5.1f %%'
-                  % (name, v, r['wer'], r['lost'], r['phrases'], r['merged'], r['segments'], r['outside'], r['wer_clean']), flush=True)
-        print('%-9s шумодав %s: задержка %d отсчётов, RTF %.3f на ПК (один поток)' % (name, tag, lag, res['rtf']), flush=True)
+            gate = float(v[4:]) if v.startswith('auto') else None
+            t0 = time.time()
+            segs, stat = segment(x, 'dn_sil' if gate is not None else v, a.model, a.att, gate)
+            texts = [asr(x, s_[0], s_[1]) for s_ in segs]
+            r = score(segs, texts, plays, gap, lang); r.update(stat); r['seconds'] = round(time.time() - t0)
+            res['variants'][v] = r
+            print('%-22s %-9s WER %5.1f %% · потеряно %2d из %d · склеено %d · разрезано %2d · кусков %3d (вне окон %2d) · '
+                  'WER чистых %5.1f %% · шумодав %3.0f %% времени, включений %d · фон %s / %s dBFS'
+                  % (name, v, r['wer'], r['lost'], r['phrases'], r['merged'], r['split'], r['segments'], r['outside'],
+                     r['wer_clean'], 100 * r['on_share'], r['switches'], r['room_med'], r['room_p90']), flush=True)
         json.dump(res, open(os.path.join(a.out, '%s-%s.json' % (name, tag)), 'w'), ensure_ascii=False, indent=1)
 
 
