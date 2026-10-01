@@ -106,6 +106,10 @@ if [ "${INSTALL:-0}" = 1 ]; then
     if [ "$listening" = 0 ] && [ "$quiet" -ge 180 ] && { asleep || { case "$(focus)" in *$PKG*|*com.miui.home*|*launcher*) true;; *) false;; esac && [ "${a:-0}" -ge 180000 ]; }; }; then break; fi
     n=$((n+1)); [ $n -eq 1 ] && say "  жду, пока телефон свободен для установки ($(focus | sed 's/.*{//; s/}.*//'), журнал молчит $quiet с, слушание: $listening)"; sleep 20
   done
+  # Понижение versionCode — это удаление с разговорами и моделями: не ставим, а говорим.
+  vnew=$(sed -n 's/.*android:versionCode="\([0-9]*\)".*/\1/p' "$R/bench/apk/AndroidManifest.xml" | head -1)
+  vold=$(sh "dumpsys package $PKG" | sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' | head -1)
+  [ -n "$vold" ] && [ "${vnew:-0}" -lt "$vold" ] && { say "сборка $vnew старше той, что на телефоне ($vold): понижение = удаление с данными — не ставлю; влейте main"; exit 1; }
   front=0; case "$(focus)" in *$PKG*) asleep || front=1;; esac
   free=$(sh "df /data" | awk 'NR==2{print $4}'); say "  свободно на /data: $free КБ"
   [ "${free:-0}" -ge 1500000 ] || { say "мало места для установки — попросите владельца перезагрузить телефон"; exit 1; }
