@@ -16,6 +16,12 @@
 # самым свежим временем и в конце удаляется, выученное и словари возвращаются из снимка. В облако
 # уходит только синтетический разговор ниже (1–5 бесплатных запросов OpenRouter).
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 SER=${1:-f6lnlrorgi59xwge}; ADB="$R/tools/platform-tools/adb -s $SER"
 ACT=app.falar/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/app.falar/files; LOG=$F/at.log
@@ -24,34 +30,39 @@ TID=$(date +%s%3N)
 pass=0; fail=0; skip=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
 wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
 state() { local m; m=$(mark); $ADB shell "am start -n $ACT --es betterstate 1" >/dev/null 2>&1; wl "$m" '🧪 «Улучшить»' 15; }
 front() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys window" | grep -m1 mCurrentFocus | grep -q "app.falar/"; }
 dump() { sh "uiautomator dump /sdcard/falar-ui.xml >/dev/null; cat /sdcard/falar-ui.xml; rm -f /sdcard/falar-ui.xml" > $D/ui.xml; }
 ui() { local c=$1; shift; python3 $R/bench/apk/ui.py "$c" $D/ui.xml "$@"; }
-chip() { dump; ui find --text Улучшить | cut -d' ' -f7; }     # true / false / пусто — кнопки нет на экране
-# Кнопка на экране против решения службы: «можно» — горит, иначе погашена.
+# Что видно на экране — стендом --es uitexts (подписи видимых видов строкой в журнал, у выключенного —
+# «[выкл]»): он не ждёт, пока экран затихнет, как uiautomator, и ход облака успевает попасть в снимок.
+uitexts() { local m; m=$(mark); $ADB shell "am start -n $ACT --es uitexts 1" >/dev/null 2>&1; wl "$m" '🧪 на экране:' 5; }
+chip() { printf '%s' "$1" | grep -oE '(^|\| )Улучшить( \[выкл\])?( \||$)' | head -1 | grep -q 'выкл' && echo false || { printf '%s' "$1" | grep -qE '(^|\| )Улучшить( \||$)' && echo true; }; }
+# Кнопка на экране против решения службы. Сначала ждём кнопки реплики: после новой фразы на их месте
+# идёт ход уточнителя. Решение службы спрашиваем сразу после снимка экрана — оба об одном и том же.
 screen_chip() {
   front || { say "  (экран выключен или впереди не Falar — кнопку на экране не проверить)"; return; }
-  local e w; e=$(chip); w=$(printf '%s' "$2" | grep -q ': можно' && echo true || echo false)
-  [ "$e" = "$w" ] && res 0 "$1 на экране кнопка $([ $w = true ] && echo горит || echo погашена)" || res 1 "$1 на экране кнопка enabled=${e:-нет}, а служба: $2"
+  local t k e l w
+  for k in $(seq 45); do t=$(uitexts); printf '%s' "$t" | grep -q 'Запомнить' && break; sleep 2; done
+  l=$(state); e=$(chip "$t"); w=$(printf '%s' "$l" | grep -q ': можно' && echo true || echo false)
+  [ "$e" = "$w" ] && res 0 "$1 на экране кнопка $([ $w = true ] && echo горит || echo погашена)" || res 1 "$1 на экране кнопка enabled=${e:-нет}, а служба: $l"
 }
 # «Улучшить» касанием: ждём, пока кнопка горит (облако бывает занято своим пересмотром), жмём и
-# смотрим ход в реплике, пока не придёт ответ. Пишет строку ответа; ход — в $D/cloud.
+# снимаем экран, пока не придёт ответ. Пишет строку ответа; ход — в $D/cloud.
 better_tap() {
-  local k m c
-  for k in $(seq 12); do [ "$(chip)" = true ] && break; sleep 5; done
+  local k m c t x y
+  for k in $(seq 24); do t=$(uitexts); [ "$(chip "$t")" = true ] && break; sleep 5; done
   front || return 1
-  read -r x y <<< "$(ui find --text Улучшить | awk '{print $5, $6}')"
-  m=$(mark); : > $D/cloud; $ADB shell "input tap $x $y"; sleep 0.5
+  dump; read -r x y <<< "$(ui find --text Улучшить | awk '{print $5, $6}')"
+  m=$(mark); : > $D/cloud; $ADB shell "input tap $x $y"; sleep 0.3
   dump; ui find --text "Отправить разговор в облако?" >/dev/null && { $ADB shell "input keyevent 4"; echo "нет согласия (окно согласия на экране — решение владельца, не нажимаю)"; return 0; }
-  for k in $(seq 120); do
-    c=$(ui sub --rid busy | head -1)
-    case "$c" in "Улучшаю в облаке"*) printf '%s\t%s\n' "$c" "$(ui find --text Запомнить >/dev/null && echo видны || echo скрыты)" >> $D/cloud;; esac
+  for k in $(seq 150); do
+    t=$(uitexts); c=$(printf '%s' "$t" | grep -oE 'Улучшаю в облаке · [^|]*[^ |]')
+    [ -n "$c" ] && printf '%s\t%s\n' "$c" "$(printf '%s' "$t" | grep -q 'Запомнить' && echo видны || echo скрыты)" >> $D/cloud
     since "$m" | grep -qE '☁ ушло|☁ не вышло|нет согласия|улучшить нельзя' && break
-    sleep 0.3; dump
   done
   wl "$m" '☁ ушло|☁ не вышло|нет согласия|улучшить нельзя' 5
 }
@@ -135,4 +146,12 @@ if printf '%s' "$l" | grep -q "☁ ушло"; then
   l=$(state); say "  $l"
   printf '%s' "$l" | grep -q "можно" && res 0 "B3 новая фраза — доступна" || res 1 "B3 после новой фразы: $l"
   screen_chip B3 "$l"
-else skip=$((skip+1)); say "ПРОПУСК B2–B3: облако не ответило"; fi
+else
+  skip=$((skip+1)); say "ПРОПУСК B2–B3: облако не ответило"
+  # Неудача тоже видна словами в шапке, без модели и кода ошибки: «улучшить не вышло — нет связи».
+  if [ -n "$ui_b2" ] && printf '%s' "$l" | grep -q "☁ не вышло" && front; then
+    sleep 1; dump; h=$(ui sub --rid hint | sed -n 2p)
+    printf '%s' "$h" | grep -qE '^улучшить не вышло' && ! printf '%s' "$h" | grep -qE ':free|Exception|мс' \
+      && res 0 "B2 неудача облака — в шапке словами: «$h»" || res 1 "B2 после неудачи облака в шапке: «$h»"
+  fi
+fi

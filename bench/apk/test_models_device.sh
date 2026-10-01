@@ -10,6 +10,12 @@
 # Телефон — рабочий телефон человека: перед каждым запуском приложения ждём, пока на экране
 # не чужое приложение. Файлы удаляются только те, что скрипт сам потом докачивает.
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; M=$F/models; LOG=$F/at.log
@@ -18,7 +24,7 @@ SPK=speaker/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx; DN=denoiser/gtcrn
 pass=0; fail=0; SRV=""
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 # Экран: ждём, пока в фокусе не чужое приложение (наше, рабочий стол или экран погашен).
 free_phone() {
   local n=0

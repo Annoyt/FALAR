@@ -13,6 +13,12 @@
 # целиком (--es redraw 1): перерисовка обычно частичная, и вылезший текст виден не на каждом кадре —
 # без этого проверка один раз прошла на сборке с ошибкой. Разговоры владельца не трогаются.
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
@@ -20,7 +26,7 @@ D=$(mktemp -d /tmp/falar-scroll.XXXX); TID=$(date +%s%3N)
 pass=0; fail=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 front() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys window" | grep -m1 mCurrentFocus | grep -q "$PKG/"; }
 free_phone() {
   local n=0

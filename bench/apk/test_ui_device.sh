@@ -32,6 +32,12 @@
 # экрана не касались FREE_S секунд (60) и журнал Falar столько же молчит; касаемся, только пока
 # впереди Falar.
 R=$(cd "$(dirname "$0")/../.." && pwd); A=$R/bench/apk
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
@@ -43,11 +49,19 @@ say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 chk() { if eval "$1"; then res 0 "$2"; else res 1 "$2"; fi; }      # chk 'условие' "что проверяем"
 sk() { skip=$((skip+1)); say "ПРОПУСК $1"; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
 wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
 since() { sh "tail -n +$(($1+1)) $LOG"; }
-start() { $ADB shell "am start -n $ACT $*" >/dev/null 2>&1; }
+launch() { $ADB shell "am start -n $ACT $*" >/dev/null 2>&1; }
+# Посреди проверки — только поверх самого Falar: телефон могут взять в руки, и запуск вытащил бы
+# Falar поверх чужого приложения.
+start() { front || { say "  (впереди не Falar — запуск пропущен: $(focus))"; return 1; }; launch "$@"; }
+# Телефон свободен для запуска Falar: экран погашен — или впереди Falar либо рабочий стол.
+idle() {
+  sh "dumpsys power" | grep -qE "mWakefulness=(Asleep|Dozing)" && return 0
+  case "$(focus)" in *$PKG*|*com.miui.home*|*launcher*) return 0;; esac; return 1
+}
 # Впереди Falar — его экран или его всплывающее меню («⋯» шапки — отдельное окно PopupWindow).
 front() {
   sh "dumpsys power" | grep -q "mWakefulness=Awake" || return 1
@@ -104,11 +118,9 @@ C = {'пройден': [(224, 184, 120), (128, 34, 68)], 'текущий': [(111
 d = lambda a, b: sum((x - y) ** 2 for x, y in zip(a, b))
 print(*[min(C, key=lambda k: min(d(v[i * 3:i * 3 + 3], c) for c in C[k])) for i in range(len(v) // 3)])
 PY
-segs() {
-  local bar pts; bar=$(ui kids --rid busy | awk '$5 == "android.view.View" {print $1, $2, $3, $4; exit}')
-  [ -n "$bar" ] || return
-  pts=$(python3 -c "
-x0,y0,x1,y1=map(int,'$bar'.split()); d=(y1-y0)/8; n=$1; g=4*d; w=(x1-x0-g*(n-1))/n
+segsat() {   # segsat "x0 y0 x1 y1" n — отрезки полосы с этими границами
+  local pts; pts=$(python3 -c "
+x0,y0,x1,y1=map(int,'$1'.split()); d=(y1-y0)/8; n=$2; g=4*d; w=(x1-x0-g*(n-1))/n
 print(*[v for i in range(n) for v in (round(x0+i*(w+g)+w-2*d), (y0+y1)//2)])")
   sh "sh /data/local/tmp/falar_px.sh 0 $pts" | python3 $D/segs.py
 }
@@ -125,24 +137,30 @@ halves() { sh "sh /data/local/tmp/falar_px.sh 0 $HP" | python3 $D/halves.py; }
 restore() {
   say "== возврат"
   $ADB shell "am force-stop $PKG"; sleep 2              # тема стенда, слушание, молчаливый режим — вместе с процессом
-  while read -r f st; do
+  local lines line; mapfile -t lines 2>/dev/null < "$D/files"
+  for line in "${lines[@]}"; do read -r f st <<< "$line"
     b=$(basename $f)
     if [ "$st" = есть ]; then [ -s "$SNAP/$b" ] && $ADB push "$SNAP/$b" "$F/$f" >/dev/null 2>&1 && say "  вернул $f"
     else sh "ls $F/$f" | grep -q . && $ADB shell "rm -f $F/$f" && say "  убрал $f — до проверки его не было"; fi
-  done < $D/files 2>/dev/null
+  done
   if [ -s $D/chats.before ]; then
     for c in $(sh "ls $F/chats/"); do grep -qxF "$c" $D/chats.before || { $ADB shell "rm -f $F/chats/$c"; say "  убран разговор $c"; }; done
   fi
   $ADB shell "rm -f /data/local/tmp/falar_px.sh /sdcard/falar-ui.xml"
+  local n=0
+  until idle; do n=$((n+1)); [ $n -eq 1 ] && say "  телефон занят ($(focus)) — настройки верну, когда освободится"; sleep 15; done
   if [ -n "$REF" ]; then
-    start --es listen ${LST:-off} --es refineevery $REF --es cloudevery $CLOUD --es readguard $RG; sleep 3
+    launch --es listen ${LST:-off} --es refineevery $REF --es cloudevery $CLOUD --es readguard $RG; sleep 3
     $ADB shell "am force-stop $PKG"; sleep 1
     say "  настройки: разбор $REF, облако $CLOUD, чтение вслух $RG, слушание ${LST:-off}"
   fi
   say "  текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
-  start; rm -rf "$D"
+  idle && launch; rm -rf "$D"
   say; say "итог: PASS $pass, FAIL $fail, пропущено $skip"
 }
+# Падения Falar за проверку — по logcat с начала прогона (падения самого uiautomator не в счёт).
+T0=$($ADB shell "date '+%m-%d %H:%M:%S.000'" 2>/dev/null | tr -d '\r')
+crashed() { $ADB shell "logcat -d -v time -t '$T0'" 2>/dev/null | tr -d '\r' | grep -A3 'FATAL EXCEPTION' | grep -A1 'Process: app.falar' | grep -vE 'Process:|^--' | head -1 | cut -c1-160; }
 trap restore EXIT
 
 $ADB wait-for-device
@@ -159,13 +177,13 @@ for f in models/learned.json models/phrasebook_user.json word_ru.json known_word
     echo "$f есть" >> $D/files
   else echo "$f нет" >> $D/files; fi
 done
-m=$(mark); start --es settings show
+m=$(mark); launch --es settings show
 st=$(wl "$m" '🧪 настройки:' 20)
 [ -n "$st" ] || { say "у сборки нет стенда --es settings — настройки потом не вернуть, проверку не начинаю"; exit 1; }
 REF=$(printf '%s' "$st" | sed -n 's/.*разбор \([0-9][0-9]*\).*/\1/p'); CLOUD=$(printf '%s' "$st" | sed -n 's/.*облако \([0-9][0-9]*\).*/\1/p')
 RG=$(printf '%s' "$st" | sed -n 's/.*чтение вслух \([0-9]\).*/\1/p'); QUAL=$(printf '%s' "$st" | sed -n 's/.*облако точнее \([01]\).*/\1/p')
 L=$(printf '%s' "$st" | sed -n 's/.*слушаю \([a-z]*\) ·.*/\1/p'); LST=$(case "$L" in ptru) echo both;; pt|ru) echo $L;; *) echo off;; esac)
-m=$(mark); start --es modules show
+m=$(mark); launch --es modules show
 MODS=$(wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]')
 mod() { printf ',%s,' "$MODS" | grep -q ",$1,"; }
 NLOAD=$(mod tts && echo 4 || echo 3)
@@ -202,12 +220,20 @@ say "== U0: загрузка движков — ход в реплике"
 $ADB shell "am force-stop $PKG"; sleep 1
 $ADB push $D/t.json $F/chats/$TID.json >/dev/null 2>&1
 [ -s $D/or.json ] && $ADB push $D/or.json $F/models/openrouter.json >/dev/null 2>&1
-m=$(mark); start; : > $D/load; last=""
-for i in $(seq 50); do
+# Подписи хода — стендом --es uitexts (строка видимого экрана в журнал): uiautomator снимает дерево,
+# только когда экран затих, а загрузка обновляет его дважды в секунду. Полосу этапов берём из первого
+# же дерева, где она есть, и снимаем её цвета до и после подписи: совпали — этап за это время не
+# сменился, и отрезки сверяются с подписью.
+m=$(mark); launch; : > $D/load; last=""; bar=""
+for i in $(seq 80); do
   front || { sleep 1; continue; }
-  dump; c=$(ui sub --rid busy | head -1)
-  case "$c" in "Загружаю модели"*) [ "$c" = "$last" ] || printf '%s\t%s\n' "$c" "$(segs $NLOAD)" >> $D/load; last=$c;; esac
-  since $m | grep -q '🧩 модули:' && case "$c" in "Загружаю модели"*) false;; *) true;; esac && break
+  [ -n "$bar" ] || { dump; bar=$(ui kids --rid busy | awk '$5 == "android.view.View" {print $1, $2, $3, $4; exit}'); }
+  s1=""; [ -n "$bar" ] && s1=$(segsat "$bar" $NLOAD)
+  mm=$(mark); start --es uitexts 1; t=$(wl "$mm" '🧪 на экране:' 5)
+  s2=""; [ -n "$bar" ] && s2=$(segsat "$bar" $NLOAD)
+  c=$(printf '%s' "$t" | grep -oE 'Загружаю модели · [^|]*[^ |]')
+  if [ -n "$c" ] && [ "$c" != "$last" ]; then printf '%s\t%s\n' "$c" "$([ "$s1" = "$s2" ] && printf '%s' "$s1")" >> $D/load; last=$c; fi
+  since $m | grep -q '🧩 модули:' && [ -z "$c" ] && break
 done
 wl "$m" 'микрофон выключен|▶ слушаю' 60 >/dev/null; sleep 1
 sed 's/^/    /' $D/load
@@ -220,11 +246,8 @@ for cap, seg in rows:
     m = re.fullmatch(r'Загружаю модели · (.+) · ещё ≈ (\d+) с', cap)
     if not m or m.group(1) not in names: bad_cap.append(cap); continue
     k = names.index(m.group(1)); stages.append(k); etas.append(int(m.group(2)))
-    # Цвета снимаются после дерева экрана — загрузка за это время могла уйти на этап вперёд.
-    pat = lambda j: ' '.join(['пройден'] * j + ['текущий'] + ['впереди'] * (n - j - 1))
-    ok = [pat(j) for j in (k, k + 1) if j < n]
-    # «ещё ≈ 1 с» — загрузка кончается, и к снимку цветов полосы может уже не быть.
-    if seg and int(m.group(2)) > 1 and seg not in ok: bad_seg.append('%s: %s вместо %s' % (m.group(1), seg, ' или '.join(ok)))
+    want = ' '.join(['пройден'] * k + ['текущий'] + ['впереди'] * (n - k - 1))   # цвета — только устоявшиеся
+    if seg and seg != want: bad_seg.append('%s: %s вместо %s' % (m.group(1), seg, want))
 print(len(rows))
 print('; '.join(bad_cap))
 print(int(all(a <= b for a, b in zip(stages, stages[1:]))), len(set(stages)))
@@ -237,7 +260,7 @@ if [ "${nl:-0}" -ge 1 ]; then
   chk '[ -z "$badcap" ]' "U0 подпись «Загружаю модели · этап · ещё ≈ N с»${badcap:+ — не так: $badcap}"
   chk '[ "$ord" = 1 ]' "U0 этапы идут по порядку"
   chk '[ "$mono" = 1 ]' "U0 «ещё ≈ N с» не растёт: $etas"
-  if [ "$anyseg" = 1 ]; then chk '[ -z "$badseg" ]' "U0 отрезки по этапу${badseg:+ — $badseg}"; else sk "U0 полосы этапов в дереве нет — отрезки не проверены"; fi
+  if [ "$anyseg" = 1 ]; then chk '[ -z "$badseg" ]' "U0 отрезки по этапу${badseg:+ — $badseg}"; else sk "U0 устоявшихся цветов полосы не поймано — отрезки не проверены"; fi
 else res 1 "U0 ход загрузки не пойман (впереди: $(focus))"; fi
 dump
 chk '! has --rid busy && has --text Запомнить' "U0 после загрузки хода нет — на его месте кнопки реплики"
@@ -418,7 +441,12 @@ d=($x1-$x0)/108; print(round($x0+17*d), round($y0+27*d), round($x0+91*d), round(
   LX=$((x0 + (x1 - x0) * 3 / 10)); RX=$((x0 + (x1 - x0) * 7 / 10))
   step() {   # касание, строка журнала, строка в шапке, половинки, подпись
     local m l wline=$3 whalves=$4; m=$(mark); tapxy $1 $cy 0.3; l=$(wl "$m" "$2" 10); sleep 1; dump
-    chk '[ -n "$l" ] && line2 | grep -qF "$wline" && [ "$(halves)" = "$whalves" ]' "U6 $5: служба «$(printf '%s' "$l" | cut -c10-)», в шапке «$(line2)», половинки $(halves)"
+    if since "$m" | grep -qE '#[0-9]+ (pt2ru|ru2pt) \|'; then
+      # Пока слушаем, в комнате могли заговорить: реплика ставит в шапку «вы» или «собеседник».
+      chk '[ -n "$l" ] && [ "$(halves)" = "$whalves" ]' "U6 $5: служба «$(printf '%s' "$l" | cut -c10-)», половинки $(halves) (строку в шапке сменила реплика из комнаты)"
+    else
+      chk '[ -n "$l" ] && line2 | grep -qF "$wline" && [ "$(halves)" = "$whalves" ]' "U6 $5: служба «$(printf '%s' "$l" | cut -c10-)», в шапке «$(line2)», половинки $(halves)"
+    fi
   }
   step $LX '▶ слушаю только португальский' 'слушаю португальский' 'PT -' 'PT'
   step $RX '▶ слушаю оба языка' 'слушаю оба языка' 'PT RU' 'PT + RU'
@@ -429,12 +457,20 @@ else res 1 "U6 нет кнопки «Слушать»"; fi
 say "== U7: кнопки реплики"
 dump; m=$(mark); tapon --text Запомнить; l=$(wl "$m" '📌 запомнено:' 10)
 chk '[ -n "$l" ]' "U7 «Запомнить» — пин: $(printf '%s' "$l" | cut -c10-100)"
+# Последняя и предпоследняя реплики — из самого разговора: пока слушали (U6), в комнате могли заговорить.
+turns() { sh "cat $F/chats/$TID.json" | python3 -c "
+import json,sys; t=json.load(sys.stdin)['turns']; pt=lambda x: x['src'] if x['dir'].startswith('pt') else x['dst']
+print(len(t), t[-1]['dir'], (pt(t[-2]) if len(t) > 1 else '').split()[0] if len(t) > 1 else '-')"; }
+read n0 d0 w0 <<< "$(turns)"
 tapon --desc "Меню реплики"; dump
-chk 'has --text "Удалить реплику" && has --text "Сообщить о переводе" && has --text "Перенести в другой разговор" && ! has --text "Исправить текст"' "U7 «⋯» у реплики собеседника — без «Исправить текст»"
-n0=$(sh "cat $F/chats/$TID.json" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['turns']))")
+if [ "${d0#ru}" != "$d0" ]; then
+  chk 'has --text "Удалить реплику" && has --text "Исправить текст" && has --text "Исправить перевод"' "U7 «⋯» у вашей реплики — с правкой текста и перевода"
+else
+  chk 'has --text "Удалить реплику" && has --text "Сообщить о переводе" && has --text "Перенести в другой разговор" && ! has --text "Исправить текст"' "U7 «⋯» у реплики собеседника — без «Исправить текст»"
+fi
 m=$(mark); tapon --text "Удалить реплику"; l=$(wl "$m" '✂ реплика' 10); sleep 1.5; dump
-n1=$(sh "cat $F/chats/$TID.json" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['turns']))")
-chk '[ -n "$l" ] && [ "$n1" = $((n0 - 1)) ] && { has --text "São trezentos reais por noite." || has --text São; }' "U7 «Удалить реплику»: реплик $n0 → $n1, наверху снова прежняя"
+read n1 _ _ <<< "$(turns)"
+chk '[ -n "$l" ] && [ "$n1" = $((n0 - 1)) ] && ui texts | grep -qF -- "$w0"' "U7 «Удалить реплику»: реплик $n0 → $n1, наверху снова прежняя («$w0…»)"
 tapon --text "Preciso de um quarto para duas noites."; dump
 chk 'has --text "Исправить текст" && has --text "Исправить перевод"' "U7 касание вашей карточки — меню с правкой"
 press
@@ -476,7 +512,7 @@ if big:
     px = [im.getpixel((x, y)) for x in range(big[0], big[2], 2) for y in range(big[1], big[3], 2)]
     L = [0.299 * r + 0.587 * g + 0.114 * b for r, g, b in px]
     ink = sum(1 for v in L if (v < 90 if day else v > 170)) / max(1, len(L))
-    out.append('текст %.0f%% %s' % (ink * 100, 'ok' if 0.02 <= ink <= 0.6 else 'НЕ ' + ('тёмный' if day else 'светлый')))
+    out.append('текст %.0f%% %s [%d,%d–%d,%d]' % (ink * 100, 'ok' if 0.02 <= ink <= 0.6 else 'НЕ ' + ('тёмный' if day else 'светлый'), *big))
 print(' · '.join(out))
 PY
 }
@@ -505,6 +541,8 @@ PY
 for t in day night; do
   if theme $t; then
     v=$(look $t); say "  $t: $v"
+    printf '%s' "$v" | grep -q "НЕ " && { mkdir -p /tmp/falar-ui-fail; cp $D/$t.png /tmp/falar-ui-fail/$t.png; cp $D/ui.xml /tmp/falar-ui-fail/$t.xml
+      say "  снимок и дерево экрана при провале: /tmp/falar-ui-fail/$t.* (разговор тестовый)"; }
     chk '! printf "%s" "$v" | grep -q "НЕ "' "U9 тема «$t» на экране: шапка, фон, крупный текст"
     if [ $t = day ]; then   # смена темы пересоздала экран: состояние службы должно доехать и до нового
       tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5; dump
@@ -516,4 +554,6 @@ for t in day night; do
     chk '! printf "%s" "$sv" | grep -qE "!|нет"' "U9 тема «$t» на всех экранах — $([ $t = day ] && echo светлые || echo тёмные)"
   else res 1 "U9 стенд --es uitheme не ответил"; fi
 done
-theme system; [ "$KEEP" = 1 ] && say "  снимки экранов: $SHOTS (в них слова и журнал владельца — не в репозиторий)"
+theme system
+c=$(crashed); chk '[ -z "$c" ]' "U10 за проверку Falar не падал${c:+: $c}"
+[ "$KEEP" = 1 ] && say "  снимки экранов: $SHOTS (в них слова и журнал владельца — не в репозиторий)"

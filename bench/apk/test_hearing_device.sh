@@ -14,6 +14,12 @@
 # В конце всё как было: слушание выключено, частота разбора и облака, выученное и словари из
 # снимка, тестовый разговор удалён. Частоту можно задать: REFINE_EVERY=1 CLOUD_EVERY=5 bash …
 R=$(cd "$(dirname "$0")/../.." && pwd); A=$R/bench/apk
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
@@ -22,7 +28,7 @@ D=$(mktemp -d /tmp/falar-hear.XXXX); SNAP=$D/snap; mkdir -p $SNAP; TID=$(date +%
 pass=0; fail=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 front() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys window" | grep -m1 mCurrentFocus | grep -q "$PKG/"; }
 free_phone() {
   local n=0
@@ -87,6 +93,9 @@ restore() {
   $ADB shell "am start -n $ACT" >/dev/null 2>&1; rm -rf "$D"
   say; say "итог: PASS $pass, FAIL $fail"
 }
+# Падения Falar за проверку — по logcat с начала прогона (падения самого uiautomator не в счёт).
+T0=$($ADB shell "date '+%m-%d %H:%M:%S.000'" 2>/dev/null | tr -d '\r')
+crashed() { $ADB shell "logcat -d -v time -t '$T0'" 2>/dev/null | tr -d '\r' | grep -A3 'FATAL EXCEPTION' | grep -A1 'Process: app.falar' | grep -vE 'Process:|^--' | head -1 | cut -c1-160; }
 trap restore EXIT
 
 $ADB wait-for-device; free_phone; orig_settings
@@ -155,3 +164,4 @@ if front; then
   [ "$c1" = фон ] && res 0 "L6 кольца нет" || res 1 "L6 кольцо осталось: $c1"
   [ "$c2" != мята ] && [ "$c3" != мята ] && res 0 "L6 обе половинки погасли" || res 1 "L6 половинка горит: PT $c2, RU $c3"
 else say "  (впереди не Falar — не проверить: $(sh "dumpsys window | grep -m1 mCurrentFocus"))"; fi
+c=$(crashed); [ -z "$c" ] && res 0 "L7 за проверку Falar не падал" || res 1 "L7 Falar упал: $c"

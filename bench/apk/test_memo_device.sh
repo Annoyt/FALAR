@@ -16,6 +16,12 @@
 #
 # Экран: касания — только когда он включён и впереди Falar; экран блокировки не трогаем никогда.
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 SER=${1:-f6lnlrorgi59xwge}; ADB="$R/tools/platform-tools/adb -s $SER"
 ACT=app.falar/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/app.falar/files; LOG=$F/at.log
@@ -26,7 +32,7 @@ pass=0; fail=0; skip=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 sk() { skip=$((skip+1)); say "ПРОПУСК $1"; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
 # ждать строку журнала после отметки; шаблон — расширенный (grep -E): у toybox «\|» в простом не работает
 wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }

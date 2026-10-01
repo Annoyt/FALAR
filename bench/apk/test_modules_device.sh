@@ -18,6 +18,12 @@
 # возвращаются из снимка. Телефон — рабочий телефон человека: запуск только когда впереди Falar,
 # рабочий стол или экран погашен.
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 SER=${1:-}; ADB="$R/tools/platform-tools/adb${SER:+ -s $SER}"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
@@ -27,7 +33,7 @@ pass=0; fail=0; skip=0; ORIG=""
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 sk() { skip=$((skip+1)); say "ПРОПУСК $1"; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 free_phone() {
   local n=0
   while :; do
@@ -70,8 +76,12 @@ restore() {
   $ADB shell "rm -f $F/chats/$TID.json $F/modtest.jpg"
   say "  тестовый разговор удалён · текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
   start_app; rm -rf "$D"
+  c=$(crashed); [ -z "$c" ] && res 0 "D5 за проверку Falar не падал" || res 1 "D5 Falar упал: $c"
   say; say "итог: PASS $pass, FAIL $fail, пропущено $skip"
 }
+# Падения Falar за проверку — по logcat с начала прогона (падения самого uiautomator не в счёт).
+T0=$($ADB shell "date '+%m-%d %H:%M:%S.000'" 2>/dev/null | tr -d '\r')
+crashed() { $ADB shell "logcat -d -v time -t '$T0'" 2>/dev/null | tr -d '\r' | grep -A3 'FATAL EXCEPTION' | grep -A1 'Process: app.falar' | grep -vE 'Process:|^--' | head -1 | cut -c1-160; }
 trap restore EXIT
 
 $ADB wait-for-device; free_phone
@@ -125,18 +135,23 @@ else
   if [ -n "$ui4" ]; then serve --slow 60; else serve; fi
   m=$(mark); start_app --es modelsbase $BASE; sleep 2
   [ -n "$ui4" ] && { mods_screen || { ui4=""; say "  (экран «Модули и файлы» не открылся — ход на экране не проверить)"; }; }
-  setmods "$(without cloud),ocr"
+  m2=$(mark); setmods "$(without cloud),ocr"
   if [ -n "$ui4" ]; then
+    # Ход на экране — стендом --es uitexts (подписи видимого экрана строкой в журнал): uiautomator
+    # снимает дерево, только когда экран затих, а во время докачки он обновляется, и снимок приходил
+    # уже после конца хода. Ловим от «📦 докачиваю» до «модули докачаны» после него: строка «докачаны»
+    # бывает и раньше — после удаления файлов служба сверяет включённые модули.
     : > $D/dl
     for i in $(seq 90); do
-      dump; printf '%s\t%s\n' "$(ui texts | grep -m1 -E '^(Качаю · |Жду Wi-Fi|Все модели установлены|Модулям не хватает|Проверяю файлы)')" \
-        "$(ui up --text 'Чтение снимков' --levels 1 | grep -E '^(качается|в очереди|ждёт Wi-Fi|не скачано|установлено|[0-9]+ из [0-9]+ МБ · [0-9]+ %)$' | paste -sd' ' -)" >> $D/dl
-      since "$m" | grep -q 'модули докачаны' && break
+      mm=$(mark); start_app --es uitexts 1; wl "$mm" '🧪 на экране:' 5 >> $D/dl
+      since "$m2" | grep -q 'докачиваю' && since "$m2" | grep -q 'модули докачаны' && break
       sleep 0.5
     done
-    sort -u $D/dl | head -8 | sed 's/^/    /'
-    grep -qE $'^Качаю · [0-9.]+ из [0-9.]+ МБ\t' $D/dl && res 0 "D4 над модулями — ход докачки «Качаю · … из … МБ»" || res 1 "D4 хода докачки над модулями не видно"
-    grep -qE $'\t(качается|в очереди) [0-9]+ из [0-9]+ МБ · [0-9]+ %' $D/dl && res 0 "D4 у «Чтения снимков» — «качается» и своя полоса «N из M МБ · P %»" || res 1 "D4 у модуля не видно метки и полосы загрузки"
+    say "  снимков экрана за докачку: $(grep -c 'на экране' $D/dl)"
+    grep -oE 'Качаю · [0-9.]+ из [0-9.]+ МБ|Чтение снимков \| [^|]+ \| [^|]+ \| [^|]+( \| [0-9]+ из [0-9]+ МБ · [0-9]+ %)?' $D/dl | sed 's/Чтение снимков | [^|]* | /Чтение снимков | … | /' | sort -u | head -6 | sed 's/^/    /'
+    grep -qE 'Качаю · [0-9.]+ из [0-9.]+ МБ' $D/dl && res 0 "D4 над модулями — ход докачки «Качаю · … из … МБ»" || res 1 "D4 хода докачки над модулями не видно"
+    grep -qE 'Чтение снимков \| [^|]+ \| [0-9,]+ [МГ]Б \| (качается|в очереди) \| [0-9]+ из [0-9]+ МБ · [0-9]+ %' $D/dl \
+      && res 0 "D4 у «Чтения снимков» — «качается» и своя полоса «N из M МБ · P %»" || res 1 "D4 у модуля не видно метки и полосы загрузки"
   fi
   l=$(wl "$m" 'модули докачаны|докачиваю' 120); say "  $l"
   d=$(wl "$m" 'модули докачаны' 240); say "  $d"

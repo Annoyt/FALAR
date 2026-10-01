@@ -15,6 +15,12 @@
 # Телефон — рабочий аппарат владельца: Falar впереди ещё не значит «свободен». Ждём, пока журнал
 # приложения молчит три минуты (29.09 владелец разговаривал через Falar, а экран был включён).
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
@@ -22,7 +28,7 @@ D=$(mktemp -d /tmp/falar-mic.XXXX); SNAP=$D/snap; mkdir -p $SNAP; TID=$(date +%s
 pass=0; fail=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 # Сколько секунд журнал приложения молчит.
 quiet_s() { sh "echo \$(( \$(date +%s) - \$(stat -c %Y $LOG 2>/dev/null || echo 0) ))"; }
 free_phone() {
