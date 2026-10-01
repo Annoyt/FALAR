@@ -8,7 +8,10 @@
 # D2 «Озвучка» выключена: голоса отданы, реплика переводится «· озвучка выключена»; включена — голоса снова.
 # D3 «Чтение снимков» и «Облако» выключены: снимок не читается (--es photofile), файлы моделей остались.
 # D4 «удалить неиспользуемые»: файлы выключенного модуля снимков удалены; включили — докачались
-#    сами с локального источника (tools/models_serve.py через adb reverse).
+#    сами с локального источника (tools/models_serve.py через adb reverse). Если экран включён и
+#    впереди Falar, докачка идёт медленно (--slow, около 1 МБ/с) при открытом экране «Модули и файлы»
+#    (0.26.0): строка над модулями — ход докачки, у «Чтения снимков» — метка «качается» и своя полоса
+#    «N из M МБ · P %», после — «установлено» и полосы нет.
 # В конце набор модулей возвращается к тому, что был. Удаление (D4) идёт, только если у других
 # выключенных модулей нет файлов на телефоне: чужие скачанные модели тест не удаляет.
 # Разговоры владельца не трогаются: реплика — в отдельном тестовом разговоре, выученное и словари
@@ -40,9 +43,20 @@ wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LO
 since() { sh "tail -n +$(($1+1)) $LOG"; }
 mods() { local m; m=$(mark); start_app --es modules show; wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]'; }
 setmods() { local m; m=$(mark); start_app --es modules "'$1'"; sleep 4; }
-serve() { stop_serve; python3 $R/tools/models_serve.py > $D/serve.log 2>&1 & SRV=$!; sleep 0.7; grep -q "источник моделей" $D/serve.log || { say "  сервер не поднялся"; exit 2; }; }
+serve() { stop_serve; python3 $R/tools/models_serve.py "$@" > $D/serve.log 2>&1 & SRV=$!; sleep 0.7; grep -q "источник моделей" $D/serve.log || { say "  сервер не поднялся"; exit 2; }; }
 stop_serve() { [ -n "$SRV" ] && kill $SRV 2>/dev/null; SRV=""; for p in $(ss -ltnp 2>/dev/null | grep ':8765 ' | grep -o 'pid=[0-9]*' | cut -d= -f2); do kill $p 2>/dev/null; done; sleep 0.3; }
 size() { sh "stat -c %s $F/models/$1 2>/dev/null || echo 0" | awk '{print $1+0}'; }
+# Экран «Модули и файлы» касаниями (bench/apk/ui.py): ☰ → «Настройки» → листать до пункта → он.
+front() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys window" | grep -m1 mCurrentFocus | grep -q "$PKG/"; }
+dump() { sh "uiautomator dump /sdcard/falar-ui.xml >/dev/null; cat /sdcard/falar-ui.xml; rm -f /sdcard/falar-ui.xml" > $D/ui.xml; }
+ui() { local c=$1; shift; python3 $R/bench/apk/ui.py "$c" $D/ui.xml "$@"; }
+tapon() { local p; dump; p=$(ui find "$@" | head -1 | awk '{print $5, $6}'); [ -n "$p" ] && front && $ADB shell "input tap $p" && sleep 1.5; }
+mods_screen() {
+  local i
+  tapon --desc "Разговоры, слова, настройки" && tapon --text Настройки || return 1
+  for i in 1 2 3 4 5; do dump; ui find --text "Модули и файлы" >/dev/null && break; front && $ADB shell "input swipe 540 1600 540 700 350"; sleep 1.2; done
+  tapon --text "Модули и файлы" && dump && [ "$(ui sub --rid hint | sed -n 1p)" = "Модули и файлы" ]
+}
 
 restore() {
   say "== возврат"
@@ -106,10 +120,32 @@ else
   m=$(mark); start_app --es modules unused-delete
   l=$(wl "$m" 'удалены модели выключенных' 30); say "  $l"
   [ "$(size ocr/det.onnx)" = 0 ] && [ "$(size ocr/rec.onnx)" = 0 ] && res 0 "D4 файлы выключенного модуля удалены" || res 1 "D4 файлы на месте"
-  $ADB reverse tcp:8765 tcp:8765 >/dev/null; serve
-  m=$(mark); start_app --es modelsbase $BASE; sleep 2; setmods "$(without cloud),ocr"
+  $ADB reverse tcp:8765 tcp:8765 >/dev/null
+  ui4=""; front && ui4=1
+  if [ -n "$ui4" ]; then serve --slow 60; else serve; fi
+  m=$(mark); start_app --es modelsbase $BASE; sleep 2
+  [ -n "$ui4" ] && { mods_screen || { ui4=""; say "  (экран «Модули и файлы» не открылся — ход на экране не проверить)"; }; }
+  setmods "$(without cloud),ocr"
+  if [ -n "$ui4" ]; then
+    : > $D/dl
+    for i in $(seq 90); do
+      dump; printf '%s\t%s\n' "$(ui texts | grep -m1 -E '^(Качаю · |Жду Wi-Fi|Все модели установлены|Модулям не хватает|Проверяю файлы)')" \
+        "$(ui up --text 'Чтение снимков' --levels 1 | grep -E '^(качается|в очереди|ждёт Wi-Fi|не скачано|установлено|[0-9]+ из [0-9]+ МБ · [0-9]+ %)$' | paste -sd' ' -)" >> $D/dl
+      since "$m" | grep -q 'модули докачаны' && break
+      sleep 0.5
+    done
+    sort -u $D/dl | head -8 | sed 's/^/    /'
+    grep -qE $'^Качаю · [0-9.]+ из [0-9.]+ МБ\t' $D/dl && res 0 "D4 над модулями — ход докачки «Качаю · … из … МБ»" || res 1 "D4 хода докачки над модулями не видно"
+    grep -qE $'\t(качается|в очереди) [0-9]+ из [0-9]+ МБ · [0-9]+ %' $D/dl && res 0 "D4 у «Чтения снимков» — «качается» и своя полоса «N из M МБ · P %»" || res 1 "D4 у модуля не видно метки и полосы загрузки"
+  fi
   l=$(wl "$m" 'модули докачаны|докачиваю' 120); say "  $l"
   d=$(wl "$m" 'модули докачаны' 240); say "  $d"
   [ "$(size ocr/det.onnx)" = "$(stat -c %s $R/models/ocr/det.onnx)" ] && res 0 "D4 включили — модели снимков докачались сами" || res 1 "D4 не докачались"
+  if [ -n "$ui4" ]; then
+    sleep 2; dump; r=$(ui up --text 'Чтение снимков' --levels 1 | paste -sd'|' -)
+    printf '%s' "$r" | grep -q '|установлено' && ! printf '%s' "$r" | grep -qE '[0-9]+ из [0-9]+ МБ · ' \
+      && res 0 "D4 после докачки — «установлено», полосы нет" || res 1 "D4 после докачки у модуля: $r"
+    front && { $ADB shell "input keyevent 4"; sleep 1; $ADB shell "input keyevent 4"; sleep 1; }
+  fi
   stop_serve
 fi

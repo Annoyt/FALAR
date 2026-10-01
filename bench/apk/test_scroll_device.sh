@@ -2,6 +2,7 @@
 # Крупный текст не наплывает на соседние строки — на телефоне, в отдельном тестовом разговоре.
 #
 #   bash bench/apk/test_scroll_device.sh
+#   THEME=day bash bench/apk/test_scroll_device.sh    # то же в дневной теме (или night), как бы ни стояла система
 #
 # Последняя реплика длинная — крупный текст прокручивается. Прокручиваем его до середины и по
 # снимку экрана считаем точки крупного шрифта там, где их быть не должно: выше прокрутки (между
@@ -57,6 +58,13 @@ $ADB shell "am force-stop $PKG"; sleep 1; $ADB push "$D/t.json" "$F/chats/$TID.j
 m=$(count $LOG); $ADB shell "am start -n $ACT" >/dev/null 2>&1
 for _ in $(seq 60); do sleep 2; sh "tail -n +$((m+1)) $LOG" | grep -qE '🎚 (микрофон выключен|чувствительность)' && break; done; sleep 3
 front || { say "впереди не Falar или экран погашен — проверять нечем"; exit 1; }
+# Тема на время проверки — стендом приложения (--es uitheme), ночной режим телефона не трогаем.
+if [ -n "$THEME" ]; then
+  m=$(count $LOG); $ADB shell "am start -n $ACT --es uitheme $THEME" >/dev/null 2>&1
+  for _ in $(seq 10); do sleep 1; sh "tail -n +$((m+1)) $LOG" | grep -q '🧪 тема:' && break; done
+  sh "tail -n +$((m+1)) $LOG" | grep -q '🧪 тема:' || { say "у сборки нет стенда --es uitheme — тему не сменить"; exit 1; }
+  sleep 3; say "  тема: $THEME (стенд --es uitheme)"
+fi
 
 # Границы: название в шапке (id hint), прокрутка крупного текста, разделитель «ранее» над прежними репликами.
 b=$(sh "uiautomator dump /sdcard/falar-ui.xml >/dev/null; cat /sdcard/falar-ui.xml; rm -f /sdcard/falar-ui.xml" | python3 -c "

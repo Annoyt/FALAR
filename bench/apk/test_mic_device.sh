@@ -111,9 +111,12 @@ hold() {
   wl "$m" 'стенд: вместо микрофона будет' 10 >/dev/null || return 1
   sleep 1; front || return 1
   $ADB shell "sh /data/local/tmp/falar_px.sh $(( $2 / 1000 + 2 )) $dx $dy $cx $body" > $D/$3.raw &
-  sleep 0.3; $ADB shell "input swipe $cx $cy $cx $cy $2"; wait
-  local t0; t0=$(sh "tail -n 400 $F/at.tsv | grep micfile_begin | tail -1" | cut -f1)
+  sleep 0.3; $ADB shell "date +%s%3N > /data/local/tmp/falar_sw; input swipe $cx $cy $cx $cy $2"; wait
+  local t0 sw; t0=$(sh "tail -n 400 $F/at.tsv | grep micfile_begin | tail -1" | cut -f1); sw=$(sh "cat /data/local/tmp/falar_sw; rm -f /data/local/tmp/falar_sw")
   LC_ALL=C awk -v t0="$t0" 'NF == 7 { printf "%.2f %s %s %s %s %s %s\n", ($1 - t0) / 1000, $2, $3, $4, $5, $6, $7 }' $D/$3.raw > $D/$3.px
+  # Конец удержания в тех же секундах от первого кадра: касание начинается раньше, чем запись взяла
+  # первый кадр (на 0,3–0,6 с), и снимки после отпускания в окно удержания попадать не должны.
+  LC_ALL=C awk -v t0="$t0" -v sw="$sw" -v ms="$2" 'BEGIN { printf "%.2f\n", (sw + ms - t0) / 1000 }' > $D/$3.end
 }
 # Круг: сливовый (цвета нет), иначе оттенок: зелёный 70–170°, жёлтый 45–70°, красный < 20° или > 345°.
 cls() { python3 -c "
@@ -132,7 +135,7 @@ early=0; earlyok=0; late=0; lateok=0
 while read x r g b mr mg mb; do
   c=$(cls $r $g $b); say "  $x с: круг $c ($r $g $b), микрофон $mr $mg $mb"
   if python3 -c "import sys; sys.exit(0 if 0.1 <= $x <= 1.2 else 1)"; then early=$((early+1)); [ "$c" = нет_цвета ] && mint "$mr $mg $mb" && earlyok=$((earlyok+1)); fi
-  if python3 -c "import sys; sys.exit(0 if 2.0 <= $x <= 3.7 else 1)"; then late=$((late+1)); [ "$c" = красный ] && white "$mr $mg $mb" && lateok=$((lateok+1)); fi
+  if python3 -c "import sys; sys.exit(0 if 2.0 <= $x <= min(3.7, $(cat $D/m3.end) - 0.2) else 1)"; then late=$((late+1)); [ "$c" = красный ] && white "$mr $mg $mb" && lateok=$((lateok+1)); fi
 done < $D/m3.px
 [ $early -ge 1 ] && [ $earlyok = $early ] && res 0 "M3 первую секунду цвета нет: круг сливовый, микрофон мятный ($earlyok из $early)" || res 1 "M3 в первую секунду уже цвет или нет снимков: так $earlyok из $early"
 [ $late -ge 1 ] && [ $lateok = $late ] && res 0 "M3 молчат дольше 1,5 с — круг красный, микрофон белый ($lateok из $late)" || res 1 "M3 после 1,5 с тишины не красный: так $lateok из $late"
