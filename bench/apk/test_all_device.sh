@@ -13,7 +13,9 @@
 # - BUILD=1: build.sh, test.sh (провал на столе — на телефон не идём), установка — только когда
 #   телефон свободен; Falar, бывший впереди, после установки снова впереди;
 # - страховочный снимок до прогона (выученное, словари, свои слова, пины, ключи облака, разговоры,
-#   настройки, модули) в ~/.cache/falar-stand/. После прогона — сверка и возврат того, что отличается.
+#   настройки, модули, состояние «Что нового») в ~/.cache/falar-stand/. После прогона — сверка и возврат
+#   того, что отличается. Окно «Что нового», которое ждёт показа (поставили новую версию), на время
+#   прогона прячется — иначе оно легло бы поверх экрана под касаниями проверок — и после возвращается;
 #   Прогон оборвался, даже kill -9 — снимок остаётся «невозвращённым», и следующий запуск сначала
 #   возвращает его (или --restore). Разговоры, появившиеся за прогон, удаляются, только если они
 #   тестовые («ТЕСТ …») или пустые: настоящий разговор владельца не трогается;
@@ -27,7 +29,7 @@ ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
 STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"
-SUITES="ui better scroll-day scroll-night busy memo hearing mic modules"
+SUITES="ui better scroll-day scroll-night busy memo hearing mic modules whatsnew"
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json models/openrouter.json"
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
@@ -68,6 +70,9 @@ snap() {
   wait_idle
   m=$(mark); launch --es settings show; wl "$m" '🧪 настройки:' 20 > "$d/settings" || { say "у сборки нет стенда --es settings — прогон не начинаю"; rm -rf "$d"; return 1; }
   m=$(mark); launch --es modules show; wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]' > "$d/modules"
+  # «Что нового»: снимок состояния, и окно, ждущее показа, — спрятать до возврата (у сборок без стенда пусто).
+  m=$(mark); launch --es whatsnew state; wl "$m" '🧪 что нового:' 15 | sed -n 's/.*снимок //p' > "$d/whatsnew"
+  if [ -s "$d/whatsnew" ]; then local w; w=$(cat "$d/whatsnew"); launch "--es whatsnew 'put:${w%|*|*}|0|${w##*|}'"; fi
   echo "$d" > "$STATE/pending"
   say "  снимок: $(basename "$d") · $(cut -c10- "$d/settings") · модули [$(cat "$d/modules")]"
 }
@@ -102,6 +107,7 @@ restore() {
     m=$(mark); launch --es settings show; now=$(wl "$m" '🧪 настройки:' 20 | cut -c10-)
     [ "$now" = "$(cut -c10- "$d/settings")" ] && say "  настройки и модули — как были: $now" || say "  ВНИМАНИЕ: настройки после возврата «$now», а было «$(cut -c10- "$d/settings")»"
   fi
+  if [ -s "$d/whatsnew" ]; then m=$(mark); launch "--es whatsnew 'put:$(cat "$d/whatsnew")'"; wl "$m" '🧪 что нового:' 15 >/dev/null && say "  «Что нового» — как было: $(cat "$d/whatsnew")"; fi
   $ADB shell "am force-stop $PKG"; sleep 1
   asleep || launch
   rm -f "$STATE/pending"

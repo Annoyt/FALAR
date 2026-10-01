@@ -20,5 +20,7 @@ public class SuitesTest {
   @Test void modules() { assertEquals(0, ModulesTest.run()); }
   @Test void textRules() { assertEquals(0, TextRulesTest.run()); }
   @Test void screen() { assertEquals(0, ScreenTest.run()); }
+  @Test void whatsNew() throws Exception { assertEquals(0, WhatsNewTest.run(System.getProperty("falar.whatsnew", "../../bench/apk/whatsnew.txt"),
+      System.getProperty("falar.manifest", "../../bench/apk/AndroidManifest.xml"))); }
   @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
 }

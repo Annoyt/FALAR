@@ -76,7 +76,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   boolean holdingRead = false, cribVisible = false;
 
   final ServiceConnection conn = new ServiceConnection() {
-    public void onServiceConnected(ComponentName n, IBinder b) { svc = ((TranslatorService.LocalBinder) b).get(); svc.setListener(MainActivity.this); }
+    public void onServiceConnected(ComponentName n, IBinder b) { svc = ((TranslatorService.LocalBinder) b).get(); svc.setListener(MainActivity.this); logNews(); }
     public void onServiceDisconnected(ComponentName n) { svc = null; }
   };
 
@@ -131,6 +131,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
       else startSvc();
     }
+    checkNews();
 
     // «Говорить» принимает любой язык: направление определяется по сказанному.
     // Позицию кнопки ставит удержание, а не нажатость вида: палец, съехавший с кнопки, запись не
@@ -1623,6 +1624,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     updTitle = new TextView(this); updTitle.setTextSize(15.5f); updTitle.setTextColor(look.fg); updTitle.setTypeface(null, Typeface.BOLD); updTitle.setText("Falar");
     updLbl = new TextView(this); updLbl.setTextSize(12.5f); updLbl.setTextColor(look.dim);
     ut.addView(updTitle); ut.addView(updLbl);
+    // «Что нового» снова: окно после обновления закрывают одним касанием, а перечитать хочется потом.
+    // С номером установленной: рядом может висеть «Вышла Falar …», и без номера было бы не понять, о какой версии речь.
+    TextView news = new TextView(this); news.setTextSize(12.5f); news.setTextColor(look.accent); news.setPadding(0, dp(4), 0, 0);
+    String myVer; try { myVer = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { myVer = ""; }
+    news.setText("Что нового в " + myVer + " ›"); ut.addView(news);
+    ut.setOnClickListener(x -> newsDialog(true));
     updCard.addView(ut, new LinearLayout.LayoutParams(0, -2, 1f));
     bUpdate = r.button("Проверить", false); bUpdateGo = r.button("Обновить", true); bUpdateGo.setVisibility(View.GONE);
     updCard.addView(bUpdate, new LinearLayout.LayoutParams(-2, dp(40))); updCard.addView(bUpdateGo, new LinearLayout.LayoutParams(-2, dp(40)));
@@ -2274,6 +2281,133 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  day|night|system). Ночной режим телефона — настройка системы, и у владельца он включён: без этого
    *  дневную тему на стенде было не увидеть (0.26.0 вышла с непроверенным днём). Держится до конца
    *  процесса; экран при смене пересоздаётся. Только для уже открытого экрана: из onNewIntent. */
+  // ---- «Что нового» после обновления ----------------------------------------------------------
+  /** Пункты whatsnew.txt из APK, разобранные один раз. Не разобрался — пусто, и окна нет: показывать
+   *  половину нельзя, а сам файл проверяет настольный тест (WhatsNewTest). */
+  java.util.List<WhatsNew.Entry> newsAll;
+  /** Открытое окно «Что нового»; null — закрыто. */
+  android.app.AlertDialog newsBox;
+  java.util.List<WhatsNew.Entry> newsAll() {
+    if (newsAll != null) return newsAll;
+    try (java.io.InputStream in = getAssets().open("whatsnew.txt")) {
+      java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(); byte[] b = new byte[1 << 14]; int n;
+      while ((n = in.read(b)) > 0) bo.write(b, 0, n);
+      newsAll = WhatsNew.parse(new String(bo.toByteArray(), "UTF-8"));
+    } catch (Exception e) {
+      newsAll = new java.util.ArrayList<>();
+      String line = "🆕 whatsnew.txt не прочёлся: " + e.getMessage();
+      if (svc != null) svc.log(line); else onLog(line);
+    }
+    return newsAll;
+  }
+  android.content.pm.PackageInfo pkg() {
+    try { return getPackageManager().getPackageInfo(getPackageName(), 0); } catch (Exception e) { return null; }
+  }
+  /** Первый запуск после обновления: запомнить, с какой версии пришли, и показать, что изменилось с
+   *  неё — по всем пропущенным версиям. Номер прошлого запуска — «ran_code»; прежние версии его не
+   *  писали (WhatsNew.previous). Окно держится до «Понятно»: пересозданный экран покажет его снова. */
+  void checkNews() {
+    android.content.pm.PackageInfo p = pkg(); if (p == null) return;
+    int stored = prefs.getInt("ran_code", 0);
+    if (stored != p.versionCode) {
+      int from = WhatsNew.previous(stored, p.firstInstallTime == p.lastUpdateTime, p.versionCode);
+      boolean any = !WhatsNew.notes(newsAll(), from, p.versionCode, p.versionName).isEmpty();
+      prefs.edit().putInt("ran_code", p.versionCode).putString("ran_name", p.versionName)
+          .putInt("news_from", from).putString("news_from_name", stored > 0 ? prefs.getString("ran_name", "") : "")
+          .putBoolean("news_show", any).putBoolean("news_logged", !any).apply();
+    }
+    if (prefs.getBoolean("news_show", false)) newsDialog(false);
+  }
+  /** Окно: сначала «Новое», потом «Исправлено»; у пунктов версия, если версий несколько. Из «Настроек»
+   *  (manual) без обновления — пункты установленной версии. */
+  void newsDialog(boolean manual) {
+    android.content.pm.PackageInfo p = pkg(); if (p == null || newsBox != null) return;
+    int from = prefs.getInt("news_from", 0);
+    boolean upd = from > 0 && from < p.versionCode;
+    WhatsNew.Notes n = upd ? WhatsNew.notes(newsAll(), from, p.versionCode, p.versionName) : new WhatsNew.Notes();
+    String since = upd ? WhatsNew.since(prefs.getString("news_from_name", "")) : "";
+    if (n.isEmpty() && manual) { n = WhatsNew.own(newsAll(), p.versionCode, p.versionName); since = ""; }
+    if (n.isEmpty()) {
+      prefs.edit().putBoolean("news_show", false).apply();
+      if (manual) onLog("🆕 для " + p.versionName + " записей нет");
+      return;
+    }
+    android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
+    if (!since.isEmpty()) {
+      sb.append(since).append("\n");
+      sb.setSpan(new android.text.style.ForegroundColorSpan(look.soft), 0, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+    newsSection(sb, "Новое", n.added, n.multi);
+    newsSection(sb, "Исправлено", n.fixed, n.multi);
+    TextView tv = new TextView(this); tv.setText(sb); tv.setTextSize(15); tv.setTextColor(look.fg); tv.setLineSpacing(0, 1.12f);
+    tv.setPadding(dp(24), dp(4), dp(24), dp(4)); tv.setTextIsSelectable(true);
+    ScrollView sv = new ScrollView(this); sv.addView(tv);
+    final android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
+        .setTitle("Что нового в Falar " + p.versionName).setView(sv)
+        .setPositiveButton("Понятно", null).create();
+    // Закрыли — «Понятно», «назад» или касанием мимо — значит, видели: само больше не показывается.
+    d.setOnDismissListener(x -> { if (newsBox == d) { newsBox = null; prefs.edit().putBoolean("news_show", false).apply(); } });
+    newsBox = d; d.show();
+  }
+  void newsSection(android.text.SpannableStringBuilder sb, String head, java.util.List<WhatsNew.Item> items, boolean multi) {
+    if (items.isEmpty()) return;
+    if (sb.length() > 0) sb.append("\n");
+    int a = sb.length(); sb.append(head).append("\n");
+    sb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), a, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    sb.setSpan(new android.text.style.ForegroundColorSpan(look.accent), a, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    for (WhatsNew.Item i : items) {
+      int s0 = sb.length(); sb.append(i.text);
+      if (multi) {
+        int v = sb.length(); sb.append("  ").append(i.ver);
+        sb.setSpan(new android.text.style.ForegroundColorSpan(look.soft), v, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.setSpan(new android.text.style.RelativeSizeSpan(0.8f), v, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      }
+      sb.append("\n");
+      // Точка с отступом: перенесённая строка пункта встаёт под текст, а не под точку.
+      sb.setSpan(new android.text.style.BulletSpan(dp(10), look.accent), s0, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+  }
+  /** Та же сводка — в журнал, один раз на обновление: окно закрывают одним касанием, а журнал хранит
+   *  её и в at.log. */
+  void logNews() {
+    if (svc == null || prefs.getBoolean("news_logged", true)) return;
+    android.content.pm.PackageInfo p = pkg(); if (p == null) return;
+    WhatsNew.Notes n = WhatsNew.notes(newsAll(), prefs.getInt("news_from", 0), p.versionCode, p.versionName);
+    if (!n.isEmpty()) svc.log(WhatsNew.plain(n, prefs.getString("news_from_name", ""), p.versionName));
+    prefs.edit().putBoolean("news_logged", true).apply();
+  }
+  /** Стенд «Что нового» (test_whatsnew_device.sh, test_all_device.sh). ran:<код> — будто прошлый запуск
+   *  был той версией: экран пересоздаётся и проходит настоящую проверку при запуске. forget — записи
+   *  нет, как после версии без окна. show — открыть, как из «Настроек». put:<снимок> — вернуть
+   *  состояние из строки «снимок …» (с «ждёт 0» и закрыть окно — так прогон проверок прячет его до
+   *  возврата). Итог — строкой в журнал. */
+  void newsStand(String a) {
+    String s = a == null ? "" : a.trim();
+    android.content.pm.PackageInfo p = pkg(); if (p == null) return;
+    try {
+      if (s.startsWith("ran:")) {
+        int code = Integer.parseInt(s.substring(4).trim()); String name = String.valueOf(code);
+        for (WhatsNew.Entry e : newsAll()) if (e.code == code) name = e.name;
+        prefs.edit().putInt("ran_code", code).putString("ran_name", name).commit();
+        recreate(); return;
+      }
+      if (s.equals("forget")) { prefs.edit().remove("ran_code").remove("ran_name").commit(); recreate(); return; }
+      if (s.startsWith("put:")) {
+        String[] f = s.substring(4).split("\\|", -1);
+        prefs.edit().putInt("ran_code", Integer.parseInt(f[0])).putString("ran_name", f[1]).putInt("news_from", Integer.parseInt(f[2]))
+            .putString("news_from_name", f[3]).putBoolean("news_show", "1".equals(f[4])).putBoolean("news_logged", "1".equals(f[5])).commit();
+        if (!"1".equals(f[4]) && newsBox != null) { android.app.AlertDialog d = newsBox; newsBox = null; d.dismiss(); }
+      }
+      if (s.equals("show")) newsDialog(true);
+    } catch (RuntimeException e) { onLog("🧪 что нового: не понял «" + s + "» — " + e); return; }
+    String line = "🧪 что нового: прошлый запуск " + prefs.getInt("ran_code", 0) + " · с " + prefs.getInt("news_from", 0)
+        + " · окно " + (newsBox != null ? 1 : 0) + " · ждёт " + (prefs.getBoolean("news_show", false) ? 1 : 0)
+        + " · в журнале " + (prefs.getBoolean("news_logged", true) ? 1 : 0)
+        + " · снимок " + prefs.getInt("ran_code", 0) + "|" + prefs.getString("ran_name", "") + "|" + prefs.getInt("news_from", 0)
+        + "|" + prefs.getString("news_from_name", "") + "|" + (prefs.getBoolean("news_show", false) ? 1 : 0) + "|" + (prefs.getBoolean("news_logged", true) ? 1 : 0);
+    if (svc != null) svc.log(line); else onLog(line);
+  }
+
   static int themeTest = 0;      // 0 — как система, 1 — день, 2 — ночь
   @Override protected void attachBaseContext(Context base) {
     super.attachBaseContext(base);
@@ -2297,6 +2431,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (i.hasExtra("redraw")) { getWindow().getDecorView().invalidate(); return; }
     if (i.hasExtra("uishot")) { uiShot(i.getStringExtra("uishot"), i.getStringExtra("uiscreen")); return; }
     if (i.hasExtra("uitexts")) { uiTexts(); return; }
+    if (i.hasExtra("whatsnew")) { newsStand(i.getStringExtra("whatsnew")); return; }
     if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
@@ -2659,5 +2794,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (models) { convBusy = what; abProg.set(1, 0, total > 0 ? done / (float) total : 0f); } else convBusy = null;
     refreshHint();
   }
-  @Override protected void onDestroy() { unbindSvc(); super.onDestroy(); }
+  @Override protected void onDestroy() {
+    // Окно «Что нового» уходит вместе с экраном, но не считается прочитанным: пересозданный экран
+    // (поворот, тема, камера) покажет его снова. Иначе оно терялось бы при первом же повороте.
+    if (newsBox != null) { android.app.AlertDialog d = newsBox; newsBox = null; d.dismiss(); }
+    unbindSvc(); super.onDestroy();
+  }
 }
