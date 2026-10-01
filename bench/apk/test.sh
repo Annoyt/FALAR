@@ -16,7 +16,10 @@
 #   OcrCore    — офлайн-чтение снимка без моделей: рамки, вырез, строки и абзацы, цвета наложения;
 #                со сверкой с эталоном tools/ocr_ref.py, если он собран (tools/ocr_golden.py);
 #   OcrWords   — правка слов снимка по словарю: пропущенная буква, ударения, слипшиеся слова, но
-#                не имена и не английский; со сверкой с tools/ocr_words.py (… golden).
+#                не имена и не английский; со сверкой с tools/ocr_words.py (… golden);
+#   Screen     — что показывают экраны 0.26.0: ход перевода и загрузки в реплике, строка под названием,
+#                гаснет ли «Улучшить», «Память разговора», метки модулей, «Облако», подсказка «Слов».
+# Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
 #   bash bench/apk/test.sh
 # org.json на столе берётся с Maven (на телефоне он в системе); tools/json.jar не в git.
@@ -39,7 +42,8 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Hearing.java $A/test/HearingTest.java \
   $A/src/dev/agenttranslator/OcrCore.java $A/test/OcrCoreTest.java \
   $A/src/dev/agenttranslator/OcrWords.java $A/test/OcrWordsTest.java \
-  $A/src/dev/agenttranslator/Modules.java $A/test/ModulesTest.java $A/test/TextRulesTest.java
+  $A/src/dev/agenttranslator/Modules.java $A/test/ModulesTest.java $A/test/TextRulesTest.java \
+  $A/src/dev/agenttranslator/Screen.java $A/test/ScreenTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -56,4 +60,5 @@ java -cp "$OUT:$J" dev.agenttranslator.OcrCoreTest "$R/bench/ocr/runs/golden" ||
 java -cp "$OUT:$J" dev.agenttranslator.OcrWordsTest "$R/data/ocr_words_pt.txt.gz" "$R/bench/ocr/runs/golden" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ModulesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.TextRulesTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.ScreenTest || fail=1
 exit $fail
