@@ -17,13 +17,13 @@ import android.widget.*;
  *  (results/2026-09-13-headphones.md), поэтому собеседник её читает. «Слова» и «Настройки» — из
  *  панели ☰ (решение владельца 01.10). Макеты — design/mockups/index.html. */
 public class MainActivity extends Activity implements TranslatorService.Listener {
-  TextView status, logView, smallRu, hint, keyState, voiceState, voiceMsg;
+  TextView status, logView, smallRu, hint, keyState;
   /** Крупный текст словами: под каждым словом транскрипция для чтения вслух. */
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
   /** Настройки: строки и сегменты (Rows), переключатели. */
   Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segReadGuard, segMicSrc; Switch tTranslitOther;
   ListView histList;
-  Button bPin, bVoice, bVoice2, bWord, bBetter, bClear, bKey, bVoiceBack, bForget; View bModels, bVoices;
+  Button bPin, bWord, bBetter, bClear, bKey; View bModels;
   TextView logLast;
   MicButton bMic;
   /** «Слушать» в доке: половинки PT и RU, кольцо «как слышно». Состояние держат tListenPt/tListenRu. */
@@ -34,10 +34,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   EditText keyIn; SeekBar sMic, sHold; TextView micLbl, holdLbl, micVal; Switch cMicAuto;
   View reviewBox; TextView revWord, revRu, revEx, revStat; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart;
   String revCur; boolean revOpen;
-  Switch tCtx; ToggleButton tAuto, tLang, tListenPt, tListenRu;
-  View talkView, sysView, learnView, voiceView, modsView, cloudView, journalView; ScrollView logScroll;
-  /** Какой раздел открыт: 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск ·
-   *  5 модули и файлы · 6 облако · 7 журнал (5–7 открываются из настроек). */
+  Switch tCtx; ToggleButton tListenPt, tListenRu;
+  View talkView, sysView, learnView, modsView, cloudView, journalView; ScrollView logScroll;
+  /** Какой раздел открыт: 0 разговор · 1 слова · 2 настройки · 4 первый запуск ·
+   *  5 модули и файлы · 6 облако · 7 журнал (5–7 открываются из настроек). 3 свободен: до 0.27 там
+   *  был экран голосов — теперь голос запоминается в разговоре кнопкой FALAR (Voices). */
   int screen = 0;
   ListView wordList; TextView learnHint, minVal;
   /** «Слова»: учу или знаю, порог «встречалось не меньше», строка порога, карточка повторения. */
@@ -63,7 +64,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   final java.util.Map<String, Switch> modChecks = new java.util.HashMap<>();
   final java.util.Map<String, CheckBox> setupChecks = new java.util.HashMap<>();
   LinearLayout ttsBox, cloudBox, llmBox, modBox, keysBox, addBox; View grpTr, bKeyHelp; Button bUnused; boolean setupSynced = false;
-  Rows.Row rowVoices, rowCloud, rowMods, rowLog, rowRoute; TextView modsSum;
+  Rows.Row rowCloud, rowMods, rowLog, rowRoute; TextView modsSum;
   final java.util.Map<String, ModRow> modRows = new java.util.HashMap<>();
   ModelStore.State mst; boolean micForever, svcStarted; ScrollView bigScroll;
   TextView updLbl, updTitle; Button bUpdate, bUpdateGo; LinearLayout updCard;
@@ -107,7 +108,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     box.addView(talkView = buildTalk());
     box.addView(learnView = buildLearn());
     box.addView(sysView = buildSys());
-    box.addView(voiceView = buildVoice());
     box.addView(modsView = buildMods());
     box.addView(cloudView = buildCloud());
     box.addView(journalView = buildLog());
@@ -118,8 +118,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     top.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
     sidePanel = buildSide(); sidePanel.setVisibility(View.GONE);
     top.addView(sidePanel, new FrameLayout.LayoutParams(dp(318), -1, Gravity.START));
-    for (Button btn : new Button[]{bVoice, bVoice2, bVoiceBack, bForget}) style(btn);
-    for (ToggleButton tg : new ToggleButton[]{tAuto, tLang}) style(tg);
     setContentView(top); rootView = top;
     show(0); applySizes();
 
@@ -152,14 +150,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bPin.setOnClickListener(v -> { if (svc != null && !svc.pinLast()) onLog("нечего запоминать"); });
     bBetter.setOnClickListener(v -> improve());
     tCtx.setOnCheckedChangeListener((v, on) -> { if (svc != null && !uiSync) svc.setContext(on); });
-    bVoice.setOnTouchListener((v, e) -> { pressed(v, e); return enroll(e, "я", tLang.isChecked() ? "pt" : "ru"); });
-    bVoice2.setOnTouchListener((v, e) -> { pressed(v, e); return enroll(e, "собеседник", tLang.isChecked() ? "ru" : "pt"); });
-    tAuto.setOnCheckedChangeListener((v, on) -> {
-      if (svc == null) return;
-      svc.setAutoDir(on);
-      if (on && !svc.autoDir) { v.setChecked(false); voiceMsg.setText("Сначала запишите свой голос — без профиля направление выводить не из чего."); }
-      else voiceMsg.setText(on ? "Направление берётся из языка опознанного голоса." : "Направление задают кнопки «Слушать» на экране разговора.");
-    });
     bModels.setOnClickListener(v -> showModels());
     // «Снимок, текст»: одно касание — камера, галерея или набрать фразу. Долгое нажатие — снимок
     // сразу в облако, минуя офлайн-распознавание: нужно, когда оно не справилось.
@@ -167,14 +157,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bInput.setOnLongClickListener(v -> { if (svc == null || !svc.mod(Modules.CLOUD)) return false; cloudPhoto = true; pickPhotoMenu(); return true; });
     // Половинки «Слушать» переключают те же PT и RU, что прежние две кнопки: одну, другую или обе.
     bListen.onHalf = pt -> { if (pt) tListenPt.toggle(); else tListenRu.toggle(); };
-    bVoices.setOnClickListener(v -> { show(3); refreshVoice(); });
-    bVoiceBack.setOnClickListener(v -> show(2));
-    bForget.setOnClickListener(v -> new android.app.AlertDialog.Builder(this)
-        .setTitle("Забыть голоса?")
-        .setMessage("Оба профиля удалятся. Записать заново — это две секунды речи, но пока их нет, "
-                  + "авто-направление по голосу работать не будет.")
-        .setPositiveButton("забыть", (d, w) -> { if (svc != null) { svc.clearVoices(); tAuto.setChecked(false); refreshVoice(); voiceMsg.setText("Профили удалены."); } })
-        .setNegativeButton("отмена", null).show());
     // Ключ проверяется у OpenRouter, а не просто сохраняется: ответ приходит через секунды,
     // и всё это время надо показывать, что происходит — иначе кнопку жмут второй раз.
     bKey.setOnClickListener(v -> {
@@ -312,7 +294,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     abAct.setImageDrawable(icon(talk ? app.falar.R.drawable.ic_plus : app.falar.R.drawable.ic_more, 0xFFFFFFFF));
     abAct.setContentDescription(talk ? "Новый разговор" : "Ещё");
     if (talk) { refreshHint(); return; }
-    abTitle.setText(screen == 1 ? "Слова" : screen == 2 ? "Настройки" : screen == 3 ? "Голоса" : screen == 5 ? "Модули и файлы" : screen == 6 ? "Облако" : screen == 7 ? "Журнал" : "Falar");
+    abTitle.setText(screen == 1 ? "Слова" : screen == 2 ? "Настройки" : screen == 5 ? "Модули и файлы" : screen == 6 ? "Облако" : screen == 7 ? "Журнал" : "Falar");
     hint.setText(screen == 1 ? "из ваших разговоров" : ""); hint.setVisibility(screen == 1 ? View.VISIBLE : View.GONE);
     abProg.setVisibility(View.GONE);
   }
@@ -342,23 +324,58 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
   }
 
-  /** «Назад»: закрыть панель; из «Голосов» — в настройки; из «Слов» и «Настроек» — к разговору. */
+  /** «Назад»: закрыть панель; из разделов настроек — в настройки; из «Слов» и «Настроек» — к разговору. */
   @Override public void onBackPressed() {
     if (sidePanel != null && sidePanel.getVisibility() == View.VISIBLE) { drawer(false); return; }
-    if (screen == 3 || screen >= 5) { show(2); return; }
+    if (screen >= 5) { show(2); return; }
     if (screen == 1 || screen == 2) { show(0); return; }
     super.onBackPressed();
   }
 
-  /** Кто сказал текущую реплику — точкой цвета: слива — вы, золото — собеседник. */
+  /** Кто сказал текущую (последнюю) реплику — точкой цвета и подписью. Голос разговора — «Собеседник 2»
+   *  или его имя, у каждого свой цвет (Look.voice); касание подписи — назвать по имени. Снимок и
+   *  набранная фраза — владелец телефона. Без голосов — по направлению: слива — вы, золото — собеседник. */
   void setWho(String dir) {
     if (whoLbl == null) return;
+    whoLbl.setOnClickListener(null); whoLbl.setClickable(false);
     if (dir == null || bigText.length() < 2) { whoLbl.setText(""); whoLbl.setCompoundDrawables(null, null, null, null); return; }
+    String[] last = svc == null || svc.chats == null ? null : svc.chats.turn(svc.chats.size() - 1);
+    String who = last == null || last.length < 8 ? "" : last[7];
+    final Voices.Voice v = svc == null || svc.chats == null ? null : svc.chats.voices.get(who);
     boolean me = dir.startsWith("ru");
-    android.graphics.drawable.GradientDrawable dot = round(me ? Look.PLUM : Look.GOLD, 4, 0);
+    int color; String text;
+    if (Voices.OWNER.equals(who)) { color = Look.PLUM; text = "владелец телефона" + (last != null && Chats.PHOTO.equals(last[8]) ? " · снимок" : ""); }
+    else if (who.matches("\\d{1,4}")) { int n = Integer.parseInt(who); color = look.voice(n); text = cap(svc.chats.voices.label(who)); }
+    else { color = me ? Look.PLUM : Look.GOLD; text = me ? "вы · по-португальски" : "собеседник"; }
+    android.graphics.drawable.GradientDrawable dot = round(color, 4, 0);
     dot.setBounds(0, 0, dp(8), dp(8));
     whoLbl.setCompoundDrawables(dot, null, null, null);
-    whoLbl.setText(me ? "вы · по-португальски" : "собеседник");
+    whoLbl.setText(text);
+    if (v != null) whoLbl.setOnClickListener(x -> nameVoiceDialog(v));
+  }
+  /** Подпись последней реплики словами: голос разговора, владелец телефона или пусто — голоса нет. */
+  String lastWhoLabel() {
+    if (svc == null || svc.chats == null) return "";
+    String[] last = svc.chats.turn(svc.chats.size() - 1);
+    String who = last == null || last.length < 8 ? "" : last[7];
+    return Voices.OWNER.equals(who) || who.matches("\\d{1,4}") ? svc.chats.voices.label(who) : "";
+  }
+  static String cap(String s) { return s == null || s.isEmpty() ? "" : Character.toUpperCase(s.charAt(0)) + s.substring(1); }
+  /** Как зовут собеседника N: имя вместо номера — в репликах, в «Памяти разговора» и для облака.
+   *  Вписанное здесь автоматика не меняет; пустое поле возвращает номер. */
+  void nameVoiceDialog(final Voices.Voice v) {
+    if (svc == null || v == null) return;
+    LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(40, 8, 40, 0);
+    final EditText in = new EditText(this); in.setSingleLine(true); in.setTextSize(16);
+    in.setText(v.name); in.setHint("например, Ана"); box.addView(in);
+    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(look.soft);
+    note.setText("Собеседник " + v.n + " — " + ("ru".equals(v.lang) ? "говорит по-русски" : "говорит по-португальски")
+               + ". Пустое поле — снова «собеседник " + v.n + "».");
+    box.addView(note);
+    new android.app.AlertDialog.Builder(this)
+        .setTitle("Как зовут собеседника " + v.n + "?").setView(box)
+        .setPositiveButton("сохранить", (d, w) -> { svc.nameVoice(v.n, in.getText().toString()); showLastTurn(); refreshHist(); })
+        .setNegativeButton("отмена", null).show();
   }
 
   /** Кнопка-«чип» под репликой: скруглённая рамка, значок слева. */
@@ -500,13 +517,21 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** «Память разговора» — по касанию названия разговора в шапке: что Falar знает о разговоре сверх
    *  последних реплик. Только то, что понятно без знания устройства приложения (владелец 01.10:
    *  «зачем простому пользователю информация, что от облака»): кто говорит, имена, ключевые детали.
-   *  Откуда детали, глоссарий, тема и как их читает уточнитель — не здесь. Действия — «ещё…». */
+   *  Откуда детали, глоссарий, тема и как их читает уточнитель — не здесь. Действия — «ещё…».
+   *  С голосами разговора — сколько людей говорит и строка на каждого: имя или «собеседник N», язык,
+   *  о чём говорит (Memo.speakers; владелец 01.10: «если имён нет — какие мысли доносит собеседник»). */
   void memoDialog() {
     if (svc == null || svc.chats == null) return;
     final Chats c = svc.chats;
     StringBuilder b = new StringBuilder();
-    String who = svc.whoLine();
-    b.append(who.isEmpty() ? "Кто говорит — пока не ясно." : who);
+    final java.util.List<Voices.Voice> voices = c.voices.all();
+    String spk = Memo.speakers(c.dialog(), c.voices);
+    if (!spk.isEmpty()) b.append(spk);
+    else {
+      String who = svc.whoLine();
+      b.append(who.isEmpty() ? "Кто говорит — пока не ясно." : who);
+      if (svc.mod(Modules.SPEAKER)) b.append("\nГолосов в разговоре нет: пусть каждый скажет фразу кнопкой FALAR — тогда слушание переводит только их.");
+    }
     // Имена из разговора — рядом с тем, кто говорит; добавить их в свои слова — «ещё…».
     final java.util.List<String[]> names = new java.util.ArrayList<>(svc.pendingNames);
     if (!names.isEmpty()) {
@@ -521,6 +546,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     ScrollView sv = new ScrollView(this); sv.addView(tv);
     final java.util.List<String[]> ts = c.terms();
     final java.util.List<String> more = new java.util.ArrayList<>();
+    final String NAME_V = "назвать собеседника…", FORGET_V = "забыть голоса разговора (" + voices.size() + ")";
+    if (!voices.isEmpty()) { more.add(NAME_V); more.add(FORGET_V); }
     if (Chats.BY_USER.equals(c.memoBy)) more.add("вернуть память автоматике");
     if (!names.isEmpty()) more.add("добавить имена в свои слова (" + names.size() + ")");
     if (!ts.isEmpty()) more.add("забыть подсказки разговора (" + ts.size() + ")");
@@ -531,11 +558,30 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (!more.isEmpty()) d.setNeutralButton("ещё…", (dd, w) -> new android.app.AlertDialog.Builder(this)
         .setItems(more.toArray(new String[0]), (d2, k) -> {
           String it = more.get(k);
-          if (it.startsWith("вернуть")) { svc.setMemoByUser(""); refreshHint(); }
+          if (it.equals(NAME_V)) pickVoice(voices);
+          else if (it.equals(FORGET_V)) forgetVoicesDialog(voices.size());
+          else if (it.startsWith("вернуть")) { svc.setMemoByUser(""); refreshHint(); }
           else if (it.startsWith("забыть")) { int n = c.clearTerms(); onLog("🗑 подсказки разговора убраны: " + n); refreshHint(); }
           else namesDialog(names);
         }).setNegativeButton("отмена", null).show());
     d.show();
+  }
+  /** Кого назвать: собеседники разговора с их языком; один — сразу его имя. */
+  void pickVoice(final java.util.List<Voices.Voice> vs) {
+    if (vs.size() == 1) { nameVoiceDialog(vs.get(0)); return; }
+    String[] items = new String[vs.size()];
+    for (int i = 0; i < items.length; i++) items[i] = cap(Voices.label(vs.get(i))) + ("ru".equals(vs.get(i).lang) ? " · по-русски" : " · по-португальски");
+    new android.app.AlertDialog.Builder(this).setTitle("Кого назвать?")
+        .setItems(items, (d, w) -> nameVoiceDialog(vs.get(w))).setNegativeButton("отмена", null).show();
+  }
+  /** Забыть голоса разговора: слепок — биометрия человека, стереть его можно всегда. Реплики остаются
+   *  с прежними подписями; слушание снова ждёт фразу кнопкой FALAR. */
+  void forgetVoicesDialog(int n) {
+    new android.app.AlertDialog.Builder(this).setTitle("Забыть голоса разговора?")
+        .setMessage("Слепки голосов (" + n + ") удалятся с телефона. Реплики останутся с подписями. "
+                  + "Пока каждый снова не скажет фразу кнопкой FALAR, слушание ничего переводить не будет.")
+        .setPositiveButton("забыть", (d, w) -> { if (svc != null) { svc.forgetVoices(); showLastTurn(); refreshHist(); } })
+        .setNegativeButton("отмена", null).show();
   }
   /** Вписать или поправить ключевые детали. Вписанное человеком автоматика больше не меняет;
    *  пустое поле возвращает память облаку. */
@@ -602,9 +648,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     histList.setAdapter(new ArrayAdapter<String[]>(this, 0, histRows) {
       @Override public View getView(int pos, View cv, ViewGroup parent) {
         String[] t = getItem(pos);
-        boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]), me = !srcPt && !photo;
+        // Справа — владелец телефона: его русская речь, снимки и набранное; слева — португальская речь.
+        boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]), owner = Voices.OWNER.equals(t[7]) || photo, me = !srcPt || owner;
         LinearLayout bub = new LinearLayout(MainActivity.this);
         bub.setOrientation(LinearLayout.VERTICAL); bub.setPadding(dp(12), dp(8), dp(12), dp(9));
+        // Кто сказал — подписью цвета его голоса: в разговоре бывает и трое, и по-португальски двое.
+        String lbl = svc == null || svc.chats == null ? "" : svc.chats.voices.label(owner && t[7].isEmpty() ? Voices.OWNER : t[7]);
+        if (!lbl.isEmpty()) {
+          TextView wl = new TextView(MainActivity.this); wl.setText(cap(lbl)); wl.setTextSize(11);
+          wl.setTextColor(t[7].matches("\\d{1,4}") ? look.voice(Integer.parseInt(t[7])) : look.soft);
+          wl.setPadding(0, 0, 0, dp(2)); bub.addView(wl);
+        }
         android.graphics.drawable.GradientDrawable bg = round(me ? look.tint : look.card, 16, me ? 0 : look.line);
         float r = dp(16), s = dp(6);
         bg.setCornerRadii(me ? new float[]{r, r, s, s, r, r, r, r} : new float[]{s, s, r, r, r, r, r, r});
@@ -800,16 +854,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
   }
 
-  /** 0 разговор · 1 слова · 2 настройки · 3 голоса · 4 первый запуск · 5 модули и файлы · 6 облако · 7 журнал. «Слова» и «Настройки»
-   *  открываются из панели ☰, голоса — из настроек: их настраивают один раз. У первого запуска
-   *  шапки нет — у него свой заголовок. */
+  /** 0 разговор · 1 слова · 2 настройки · 4 первый запуск · 5 модули и файлы · 6 облако · 7 журнал. «Слова» и «Настройки»
+   *  открываются из панели ☰, 5–7 — из настроек. У первого запуска шапки нет — у него свой заголовок. */
   void show(int tab) {
     screen = tab;
     talkView.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
     learnView.setVisibility(tab == 1 ? View.VISIBLE : View.GONE);
     sysView.setVisibility(tab == 2 ? View.VISIBLE : View.GONE);
     if (tab == 2) micLabel();
-    voiceView.setVisibility(tab == 3 ? View.VISIBLE : View.GONE);
     if (modsView != null) { modsView.setVisibility(tab == 5 ? View.VISIBLE : View.GONE); cloudView.setVisibility(tab == 6 ? View.VISIBLE : View.GONE); journalView.setVisibility(tab == 7 ? View.VISIBLE : View.GONE); }
     if (tab == 6) refreshKey(null);
     if (tab == 7 && logScroll != null) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
@@ -1737,8 +1789,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         startService(new Intent(MainActivity.this, TranslatorService.class).putExtra("hold", String.valueOf(sb.getProgress() * 250)));
       }
     });
-    rowVoices = r.nav(c2, app.falar.R.drawable.ic_users, "Голоса и авто-направление", "", null);
-    bVoices = rowVoices.v;
 
     // ---- перевод
     LinearLayout c3 = r.group(v, "Перевод"); grpTr = (View) c3.getTag();
@@ -1943,53 +1993,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
   int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
   int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
-
-  /** Режим настройки голосов. Отдельный экран потому, что это разовая настройка со своим смыслом:
-   *  приложение запоминает, как звучите вы и собеседник, и дальше выводит направление перевода
-   *  из языка узнанного голоса. Состояние профилей показано прямо здесь — раньше оно было только
-   *  в журнале, и снаружи запись голоса выглядела как кнопка, которая ничего не делает. */
-  View buildVoice() {
-    LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setPadding(24, 12, 24, 12);
-    bVoiceBack = new Button(this); bVoiceBack.setText("← настройки"); bVoiceBack.setTextSize(13); bVoiceBack.setVisibility(View.GONE);   // назад — стрелкой шапки
-    TextView t = new TextView(this); t.setTextSize(13); t.setTextColor(look.soft);
-    t.setText("Приложение запоминает голос и язык, на котором этот голос говорит. Дальше направление "
-            + "перевода берётся из того, чей голос услышан, а не из кнопок. Держите кнопку и говорите "
-            + "две-три секунды обычным голосом.");
-    v.addView(t);
-    voiceState = new TextView(this); voiceState.setTextSize(15); voiceState.setTextColor(look.fg);
-    voiceState.setPadding(0, 14, 0, 4); v.addView(voiceState);
-    voiceMsg = new TextView(this); voiceMsg.setTextSize(13); voiceMsg.setTextColor(look.accent); v.addView(voiceMsg);
-    tLang = new ToggleButton(this); tLang.setTextOn("я говорю: PT"); tLang.setTextOff("я говорю: RU"); tLang.setChecked(false);
-    v.addView(tLang);
-    LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
-    bVoice = new Button(this); bVoice.setText("🎤 мой голос\n(удерживать)"); bVoice.setEnabled(false);
-    row.addView(bVoice, new LinearLayout.LayoutParams(0, -2, 1f));
-    bVoice2 = new Button(this); bVoice2.setText("🎤 собеседник\n(удерживать)"); bVoice2.setEnabled(false);
-    row.addView(bVoice2, new LinearLayout.LayoutParams(0, -2, 1f));
-    v.addView(row);
-    tAuto = new ToggleButton(this); tAuto.setTextOn("↔ авто-направление по голосу: ВКЛ"); tAuto.setTextOff("↔ авто-направление по голосу: выкл");
-    tAuto.setChecked(false); tAuto.setEnabled(false); v.addView(tAuto);
-    bForget = new Button(this); bForget.setText("забыть голоса"); bForget.setTextSize(13); bForget.setEnabled(false); v.addView(bForget);
-    return v;
-  }
-
-  void refreshVoice() {
-    if (voiceState == null) return;
-    if (svc == null || svc.spk == null) { voiceState.setText("движок ещё грузится"); return; }
-    if (!svc.spk.ready) {
-      voiceState.setText("Модели отпечатка голоса нет — режим выключен");
-      voiceMsg.setText("Нужен файл в models/speaker/*.onnx");
-      bVoice.setEnabled(false); bVoice2.setEnabled(false); tAuto.setEnabled(false); bForget.setEnabled(false);
-      return;
-    }
-    boolean me = svc.spk.has(Speaker.ME), other = svc.spk.has(Speaker.OTHER);
-    if (rowVoices != null) { rowVoices.sub.setText((me ? "мой голос записан" : "мой голос не записан") + " · собеседник — " + (other ? "записан" : "нет")); rowVoices.sub.setVisibility(View.VISIBLE); }
-    voiceState.setText("мой голос: " + (me ? "записан" : "не записан")
-                     + "\nсобеседник: " + (other ? "записан" : "не записан")
-                     + (me || other ? "\nпрофили: " + svc.spk.describe() : ""));
-    tAuto.setEnabled(me); bForget.setEnabled(me || other);
-    tAuto.setChecked(svc.autoDir);
-  }
 
   /** Ключи: у каждого — состояние и своя корзина. Опознаётся по началу и хвосту, целиком на экране
    *  не нужен. Первый — рабочий, остальные — запасные; ключ, который OpenRouter не принял, — с
@@ -2259,12 +2262,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       ui.postDelayed(this, 100);
     }});
   }
-  boolean enroll(MotionEvent e, String who, String lang) {
-    if (svc == null) return false;
-    if (e.getAction() == MotionEvent.ACTION_DOWN) { buzz(); svc.enrollStart(who, lang); return true; }
-    if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) { svc.pttStop(); return true; }
-    return false;
-  }
   boolean ptt(MotionEvent e, String dir) {
     if (svc == null) return false;
     // Кнопкам удержания отклик ставим здесь: общий обработчик касания у них затирается своим.
@@ -2288,7 +2285,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       new Handler(Looper.getMainLooper()).post(() -> handlePhoto(u, c));
     }
     bPin.setEnabled(true); bBetter.setEnabled(true);
-    tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bVoice.setEnabled(true); bVoice2.setEnabled(true); bWord.setEnabled(true);
+    tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bWord.setEnabled(true);
     bMic.setEnabled(true); bInput.setEnabled(true); bListen.setEnabled(true);
     uiSync = true;
     tCtx.setChecked(svc != null && svc.contextMode);
@@ -2301,7 +2298,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (bigText.length() < 2)
       setHint(svc != null && (svc.listenPt || svc.listenRu) ? "Pode falar · здесь появится перевод"
                                                             : "Микрофон выключен — включите «Слушать» или удержание");
-    refreshChats(); refreshKey(null); refreshVoice(); markListen(); refreshBetter(); refreshIntervals(); refreshReadGuard(); applyModules();
+    refreshChats(); refreshKey(null); markListen(); refreshBetter(); refreshIntervals(); refreshReadGuard(); applyModules();
     onUpdate(svc == null ? "" : svc.updateState);
   }
   @Override public void onStatus(String s) { status.setText(s); }
@@ -2312,7 +2309,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     logView.append(s + "\n\n");
     if (logLast != null) logLast.setText(s.replace('\n', ' '));   // свёрнутый журнал всё равно показывает последний ответ
     if (logScroll != null && screen == 7) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
-    if (s.startsWith("🎤") && voiceMsg != null) { voiceMsg.setText(s); refreshVoice(); }
     if (s.startsWith("🧠") && tCtx != null && svc != null && tCtx.isChecked() != svc.contextMode) { uiSync = true; tCtx.setChecked(svc.contextMode); uiSync = false; }
     if (s.startsWith("☁") && keyState != null && svc != null && svc.cloud != null) refreshKey(null);
     if (s.startsWith("☁") || s.startsWith("🧠")) refreshBetter();
@@ -2360,7 +2356,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     vis(ttsBox, tts); vis(revCard, tts);
     if (!tts && revOpen && bRevStart != null) bRevStart.performClick();          // повторение на слух без голоса бессмысленно
     vis(cloudBox, cloud); vis(llmBox, llm); vis(grpTr, cloud || llm);
-    vis(bVoices, on.contains(Modules.SPEAKER));
     // Без чтения снимков и облака снимать нечем — кнопка дока только набирает фразу.
     boolean photo = Modules.photo(on);
     if (inputIcon != null) {
@@ -2586,8 +2581,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     String pt = srcIsPt ? src : dst, ru = srcIsPt ? dst : src;
     refreshHist();                      // список строится из самого разговора, а не копится в строке
     showBig(pt, dir, refined);
-    setHint((srcIsPt ? "собеседник" : "вы") + (refined ? " · уточнено" : ""));
     smallRu.setText(ru); setWho(dir);
+    String wl = lastWhoLabel();
+    setHint((wl.isEmpty() ? srcIsPt ? "собеседник" : "вы" : wl) + (refined ? " · уточнено" : ""));
     refreshBetter();
   }
 

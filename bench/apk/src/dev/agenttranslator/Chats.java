@@ -25,8 +25,12 @@ import org.json.*;
  *  человеком автоматика не перезаписывает (см. Memo). Поле тоже необязательное.
  *
  *  Реплика: `dir`, `src`, `dst`, `at`, необязательно `fixed` (улучшенный перевод), `by` (кто
- *  улучшил: user/cloud/llm) и `who` (кто говорил, если голос опознан). Правка человека (`by=user`)
- *  для автоматики неприкосновенна.
+ *  улучшил: user/cloud/llm) и `who` (номер голоса разговора, если голос опознан: «2» —
+ *  собеседник 2). Правка человека (`by=user`) для автоматики неприкосновенна.
+ *
+ *  **Голоса** (`voices`, с 0.27) — слепки тех, кто говорил в этом разговоре кнопкой FALAR (Voices):
+ *  по ним слушание отличает участников от чужих голосов вокруг. Живут только в файле разговора и
+ *  удаляются вместе с ним. Поле необязательное.
  *
  *  Реплика со снимка (с 0.24) несёт ещё `photo`: имя файла в files/photos, размер снимка и
  *  абзацы с их прямоугольниками — по ним перевод рисуется поверх фото (PhotoView). Это не
@@ -46,6 +50,8 @@ public class Chats {
   public volatile String memo = "", memoBy = "";
   JSONArray turns = new JSONArray();          // в Android у JSONArray нет clear(), пересоздаём
   JSONArray terms = new JSONArray();
+  /** Голоса разговора (см. Voices); свой замок у самого списка. */
+  public volatile Voices voices = new Voices();
 
   public Chats(File filesDir) {
     dir = new File(filesDir, "chats");
@@ -74,11 +80,11 @@ public class Chats {
     // сказанное дальше исчезало без единого слова. Теперь разговор продолжается в новом,
     // с тем же именем и пометкой, — данные не теряются, а файл не растёт без предела.
     if (turns.length() >= KEEP) {
-      String was = name, m = memo, mb = memoBy, tp = topic; JSONArray tm = terms;
+      String was = name, m = memo, mb = memoBy, tp = topic; JSONArray tm = terms; Voices vs = voices;
       newChat(was.isEmpty() ? "" : was + " · продолжение");
       // Продолжение — тот же разговор: память, тема и глоссарий переходят в него. Иначе на 500-й
       // реплике уточнитель посреди разговора начинал бы с чистого листа.
-      memo = m; memoBy = mb; topic = tp; terms = tm;
+      memo = m; memoBy = mb; topic = tp; terms = tm; voices = vs;   // и те же люди
       rolled = true;
     }
     turns.put(x);
@@ -110,6 +116,28 @@ public class Chats {
       write(file(id), o.toString());
       return true;
     } catch (Exception e) { return false; }
+  }
+
+  /** Фраза кнопкой FALAR в текущем разговоре: чей это голос (Voices.enroll). Новый голос получает
+   *  номер после всех, что уже встречались в репликах: номера забытых голосов не переиспользуются,
+   *  иначе «собеседник 1» в старых репликах и новый «собеседник 1» были бы разными людьми. */
+  public synchronized Voices.Voice enroll(float[] e, String lang, long at) {
+    int next = voices.maxN();
+    for (int k = 0; k < turns.length(); k++) {
+      JSONObject x = turns.optJSONObject(k); String w = x == null ? "" : x.optString("who", "");
+      if (w.matches("\\d{1,4}")) next = Math.max(next, Integer.parseInt(w));
+    }
+    Voices.Voice v = voices.enroll(e, lang, at, next + 1);
+    save(); return v;
+  }
+  /** Забыть голоса текущего разговора; номера в репликах остаются подписями. Сколько было. */
+  public synchronized int clearVoices() { int n = voices.clear(); save(); return n; }
+  /** Имя голоса: by = user — вписал человек (автоматика его не трогает), auto — нашлось в разговоре. */
+  public synchronized boolean nameVoice(int n, String nm, String by) { boolean ok = voices.name(n, nm, by); if (ok) save(); return ok; }
+  /** О чём говорит каждый голос — от пересмотра разговора: номер → строка. */
+  public synchronized int voiceSays(Map<Integer, String> m) {
+    int n = 0; for (Map.Entry<Integer, String> x : m.entrySet()) if (voices.says(x.getKey(), x.getValue())) n++;
+    if (n > 0) save(); return n;
   }
 
   /** Каталог снимков при репликах «📷»: рядом с разговорами, внутри файлов приложения. */
@@ -144,7 +172,7 @@ public class Chats {
     if (left == 0) dropIfEmpty(); else save();
     current = System.currentTimeMillis();
     name = who == null ? "" : who;
-    turns = new JSONArray(); terms = new JSONArray(); topic = ""; memo = ""; memoBy = "";
+    turns = new JSONArray(); terms = new JSONArray(); topic = ""; memo = ""; memoBy = ""; voices = new Voices();
     save();
     return left;
   }
@@ -163,6 +191,7 @@ public class Chats {
     memoBy = memo.isEmpty() ? "" : o.optString("memoBy", "");
     terms = o == null ? null : o.optJSONArray("terms");
     if (terms == null) terms = new JSONArray();
+    voices = Voices.fromJson(o == null ? null : o.optJSONArray("voices"));
     return left;
   }
 
@@ -286,6 +315,8 @@ public class Chats {
     try {
       JSONObject o = load(to);
       if (o == null) { o = new JSONObject().put("id", to).put("name", ""); }
+      x = new JSONObject(x.toString());
+      if (x.optString("who", "").matches("\\d{1,4}")) x.remove("who");   // номер голоса — этого разговора, там он чужой
       JSONArray t = o.optJSONArray("turns");
       if (t == null) t = new JSONArray();
       t.put(x);
@@ -397,6 +428,7 @@ public class Chats {
       if (topic.isEmpty()) o.remove("topic"); else o.put("topic", topic);
       if (memo.isEmpty()) { o.remove("memo"); o.remove("memoBy"); } else o.put("memo", memo).put("memoBy", memoBy);
       if (terms.length() == 0) o.remove("terms"); else o.put("terms", terms);
+      if (voices.isEmpty()) o.remove("voices"); else o.put("voices", voices.toJson());
       write(file(current), o.toString());
     } catch (Exception ignore) {}
   }

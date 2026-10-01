@@ -6,6 +6,8 @@
 #   Brief      — бюджет контекста уточнителя, чтобы запрос не перерастал окно модели;
 #   Chats      — правка человека неприкосновенна для автоматики («два перевода подряд» после правки);
 #   Memo       — память разговора: кто говорит (по грамматике исходников), ключевые детали, потолок;
+#                собеседники по голосам: сколько, имя из представления, о чём говорит каждый;
+#   Voices     — голоса разговора: фраза кнопкой FALAR — знакомый голос или новый, номера, имена, файл;
 #   WordList   — свои слова: искажённое имя находится, обычное слово («sábado») именем не подменяется;
 #   Pressure   — когда выгружать уточнитель по сигналу памяти: пик от подъёма пережидаем;
 #   Gain       — чувствительность микрофона: ограничитель держит потолок и форму волны, срез — нет;
@@ -33,6 +35,7 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Chats.java $A/src/dev/agenttranslator/Phrasebook.java \
   $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java $A/test/ChatsTest.java \
   $A/src/dev/agenttranslator/Memo.java $A/src/dev/agenttranslator/Cloud.java $A/test/MemoTest.java \
+  $A/src/dev/agenttranslator/Voices.java $A/test/VoicesTest.java \
   $A/src/dev/agenttranslator/WordList.java $A/test/WordListTest.java \
   $A/src/dev/agenttranslator/Pressure.java $A/test/PressureTest.java \
   $A/src/dev/agenttranslator/Gain.java $A/test/GainTest.java $A/test/CloudTest.java \
@@ -47,6 +50,7 @@ java -cp "$OUT:$J" dev.agenttranslator.UpdatesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.BriefTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ChatsTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.MemoTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.VoicesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WordListTest "$R/data/common_words.txt" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.PressureTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.GainTest || fail=1
