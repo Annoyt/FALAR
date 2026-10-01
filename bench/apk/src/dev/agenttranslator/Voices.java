@@ -26,12 +26,18 @@ public class Voices {
    *  слит с участником в 4 %; из трёх фраз — 93 % и 12 %. Слить двоих хуже, чем завести лишний
    *  номер: оба всё равно участники, но «Говорят двое» станет неправдой. */
   public static final float SAME = 0.40f;
+  /** Тот же порог по числу фраз в слепке (E2, рабочие точки «чужих ≤ 5 %»): у среднего нескольких
+   *  фраз косинус выше ко всем голосам сразу, и порог растёт — 0,40 / 0,43 / 0,44 для 1 / 2 / 3+. */
+  public static float same(int k) { return k <= 1 ? SAME : k == 2 ? 0.43f : 0.44f; }
   /** Слушание: сегмент — голос разговора, если косинус к его слепку не ниже. Тот же замер, E2 near →
    *  far (слепок с фраз кнопкой вблизи, сегмент издалека): при 0,40 чужих принято 3–9 %, своих —
    *  55–85 % (слепок из 1–3 фраз); на кусках речи от 1,5 с — до 86–97 %. Владельцу важнее не писать
    *  чужие обрывки, поэтому порог — у «чужих ≤ 5 %». При 0,60 (порог до замера) своих издалека
    *  принималось 5–21 %. */
   public static final float HEAR = 0.40f;
+  /** Порог слушания по числу фраз в слепке: 0,38 / 0,40 / 0,42 для 1 / 2 / 3+ (E2 near → far, чужих
+   *  принято 3–6 %, своих — 60–62 / 73–77 / 77–80 %). */
+  public static float hear(int k) { return k <= 1 ? 0.38f : k == 2 ? HEAR : 0.42f; }
   /** Сколько фраз весит слепок: дальше новая фраза входит с весом 1/(K+1) — голос подстраивается,
    *  но одна неудачная фраза его не уводит. */
   static final int K = 8;
@@ -75,11 +81,14 @@ public class Voices {
   }
   public synchronized int maxN() { int m = 0; for (Voice v : list) m = Math.max(m, v.n); return m; }
 
-  /** Ближайший голос и второй за ним: по разнице видно, уверенно ли опознание. */
+  /** Ближайший голос и второй за ним: по разнице видно, уверенно ли опознание. thr — порог,
+   *  который к нему применяется (по числу фраз в его слепке); NaN — без порога (best(e)). */
   public static class Match {
-    public final Voice v, next; public final float score, nextScore;
-    Match(Voice v, float score, Voice next, float nextScore) { this.v = v; this.score = score; this.next = next; this.nextScore = nextScore; }
+    public final Voice v, next; public final float score, nextScore, thr;
+    Match(Voice v, float score, Voice next, float nextScore, float thr) { this.v = v; this.score = score; this.next = next; this.nextScore = nextScore; this.thr = thr; }
     public boolean hit(float t) { return v != null && score >= t; }
+    /** Прошёл свой порог. */
+    public boolean hit() { return v != null && !Float.isNaN(thr) && score >= thr; }
   }
   public synchronized Match best(float[] e) {
     Voice b = null, s = null; float bs = -2, ss = -2;
@@ -87,15 +96,25 @@ public class Voices {
       float c = cos(e, v.e);
       if (c > bs) { s = b; ss = bs; b = v; bs = c; } else if (c > ss) { s = v; ss = c; }
     }
-    return new Match(b, b == null ? 0 : bs, s, s == null ? 0 : ss);
+    return new Match(b, b == null ? 0 : bs, s, s == null ? 0 : ss, Float.NaN);
+  }
+  /** Ближайший с учётом порогов: у каждого голоса свой порог (по числу фраз в слепке), выигрывает
+   *  тот, у кого запас над своим порогом больше. listen — слушание (hear), иначе фраза кнопкой (same). */
+  public synchronized Match best(float[] e, boolean listen) {
+    Voice b = null, s = null; float bm = -9, sm = -9, bs = 0, ss = 0, bt = Float.NaN;
+    if (e != null) for (Voice v : list) {
+      float c = cos(e, v.e), t = listen ? hear(v.k) : same(v.k), mg = c - t;
+      if (mg > bm) { s = b; sm = bm; ss = bs; b = v; bm = mg; bs = c; bt = t; } else if (mg > sm) { s = v; sm = mg; ss = c; }
+    }
+    return new Match(b, bs, s, ss, bt);
   }
 
   /** Фраза кнопкой FALAR: чей это голос. Совпал с известным — он, и его слепок подстраивается под
    *  фразу; не совпал ни с кем — новый голос с номером next. e — отпечаток единичной длины. */
   public synchronized Voice enroll(float[] e, String lang, long at, int next) {
     if (e == null) return null;
-    Match m = best(e);
-    if (m.hit(SAME)) { fold(m.v, e); m.v.count(lang); return m.v; }
+    Match m = best(e, false);
+    if (m.hit()) { fold(m.v, e); m.v.count(lang); return m.v; }
     Voice v = new Voice(Math.max(next, maxN() + 1), lang, e.clone(), at);
     list.add(v);
     return v;

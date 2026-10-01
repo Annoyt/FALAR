@@ -43,6 +43,19 @@ public class VoicesTest {
     ok(Math.abs(m.score - Voices.cos(ab, v2.print())) < 1e-6, "V6 косинус ближайшего — к его слепку");
     ok(m.hit(0.7f) && !m.hit(0.9f), "V6 hit — по порогу");
 
+    // Порог — по числу фраз в слепке; ближайший — по запасу над своим порогом.
+    ok(Voices.same(1) == 0.40f && Voices.same(2) == 0.43f && Voices.same(5) == 0.44f, "V6 порог фразы кнопкой 0,40 / 0,43 / 0,44");
+    ok(Voices.hear(1) == 0.38f && Voices.hear(2) == 0.40f && Voices.hear(3) == 0.42f, "V6 порог слушания 0,38 / 0,40 / 0,42");
+    Voices tv = new Voices();
+    float[] pv = v(0.41, Math.sqrt(1 - 0.41 * 0.41), 0, 0), pw = v(0.39, 0, Math.sqrt(1 - 0.39 * 0.39), 0), probe = v(1, 0, 0, 0);
+    Voices.Voice tvv = tv.enroll(pv, "pt", 0, 1); tv.enroll(pv, "pt", 0, 1); tv.enroll(pv, "pt", 0, 1);
+    Voices.Voice tvw = tv.enroll(pw, "pt", 0, 2);
+    ok(tvv.k == 3 && tvw.k == 1 && tv.size() == 2, "V6 слепки из 3 и из 1 фразы");
+    Voices.Match tm = tv.best(probe, true);
+    ok(tm.v == tvw && tm.hit() && Math.abs(tm.thr - 0.38f) < 1e-6, "V6 0,39 при пороге 0,38 выигрывает у 0,41 при пороге 0,42");
+    ok(tv.best(probe).v == tvv, "V6 без порогов ближе — по косинусу");
+    ok(!tv.best(v(0, 0, 0, 1), true).hit(), "V6 никто не прошёл порог — чужой");
+
     // Язык — большинство фраз кнопкой; поровну — прежний.
     Voices lv = new Voices(); Voices.Voice l = lv.enroll(a, "pt", 0, 1);
     lv.enroll(a, "ru", 0, 2); eq(l.lang + " " + l.ru + "/" + l.pt, "pt 1/1", "V7 поровну — язык прежний");

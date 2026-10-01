@@ -304,7 +304,7 @@ public class TranslatorService extends Service {
       worker.submit(() -> { try { WaveReader wr = new WaveReader(wav); long t = System.nanoTime();
         float[] e = spk == null ? null : spk.embed(wr.getSamples(), wr.getSampleRate());
         if (e == null || chats == null) { log("🎤 стенд: голос не записан — " + (spk == null || !spk.ready ? "модели отпечатка нет" : "запись короче " + Speaker.MIN_SECONDS + " с")); return; }
-        Voices.Match m = chats.voices.best(e); int before = chats.voices.size();
+        Voices.Match m = chats.voices.best(e, false); int before = chats.voices.size();
         Voices.Voice v = chats.enroll(e, lang, System.currentTimeMillis());
         log("🎤 стенд: " + new File(wav).getName() + " → " + voiceNote(v, m, chats.voices.size() > before) + " (" + (System.nanoTime() - t) / 1000000 + " мс)");
         Listener l = listener; if (l != null) main.post(l::onHistory); } catch (Throwable t) { log("🎤 стенд: ошибка записи голоса — " + t); } }); }
@@ -332,9 +332,9 @@ public class TranslatorService extends Service {
         if (e == null || chats == null) { log("🎤 стенд: " + new File(wav).getName() + " — отпечатка нет"); return; }
         StringBuilder b = new StringBuilder();
         for (Voices.Voice v : chats.voices.all()) b.append(String.format(Locale.ROOT, " %d=%.3f", v.n, Voices.cos(e, v.print())));
-        Voices.Match m = chats.voices.best(e);
+        Voices.Match m = chats.voices.best(e, true);
         log("🎤 стенд: " + new File(wav).getName() + " →" + (b.length() == 0 ? " голосов нет" : b.toString()) + " · "
-            + (m.hit(Voices.HEAR) ? "голос " + m.v.n : "чужой") + " (" + ms + " мс)"); } catch (Throwable t) { log("🎤 стенд: ошибка опознания — " + t); } }); }
+            + (m.hit() ? "голос " + m.v.n : "чужой") + " (" + ms + " мс)"); } catch (Throwable t) { log("🎤 стенд: ошибка опознания — " + t); } }); }
     // Стендовая подача текста ровно тем же путём, что у снимка: перевод строки пишется как «\n».
     // Нужна потому, что облако на одном и том же снимке отвечало и за 10 с, и за 49 с — проверять
     // на нём разбор строк и маски нельзя, воспроизводимости нет.
@@ -2452,7 +2452,7 @@ public class TranslatorService extends Service {
       if (e == null) { log("🎤 голос не записан: фраза короче " + Speaker.MIN_SECONDS + " с или отпечаток не посчитался"); return; }
       Chats c = chats;
       if (c == null || c.current != chatId) { log("🎤 разговор сменился — голос фразы не записан"); return; }
-      Voices.Match m = c.voices.best(e); int before = c.voices.size();
+      Voices.Match m = c.voices.best(e, false); int before = c.voices.size();
       Voices.Voice v = c.enroll(e, lang, at);
       boolean placed = c.setWho(at, String.valueOf(v.n));
       String nm = v.name.isEmpty() ? Memo.intro(asr, lang) : null;
@@ -2859,11 +2859,11 @@ public class TranslatorService extends Service {
         try { e = whoIn.print.get(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignore) {}
         long waited = (System.nanoTime() - tw) / 1000000, total = (tw - whoIn.t0) / 1000000 + waited;
         Voices vs = chats == null ? new Voices() : chats.voices;
-        Voices.Match m = vs.best(e);
-        if (e == null || !m.hit(Voices.HEAR)) {
+        Voices.Match m = vs.best(e, true);
+        if (e == null || !m.hit()) {
           skipVoice("skip_voice", e == null ? "🎤 отпечаток не посчитался — фраза не переведена"
               : String.format(Locale.ROOT, "🎤 чужой голос: ближе всех «%s» — %.2f, нужно %.2f · не перевожу (отпечаток %d мс, ждал %d мс)",
-                  Voices.label(m.v), m.score, Voices.HEAR, total, waited), durMs, m.score, false);
+                  Voices.label(m.v), m.score, m.thr, total, waited), durMs, m.score, false);
           return;
         }
         who = String.valueOf(m.v.n);
