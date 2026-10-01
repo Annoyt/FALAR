@@ -21,7 +21,7 @@ public class TranslatorService extends Service {
     /** Реплика разобранной, а не строкой журнала: экрану нужно показать стороны по отдельности —
      *  португальскую крупно (её читает собеседник), русскую мелко. */
     void onTurn(String dir, String src, String dst, boolean refined);
-    /** Строка-подсказка на экране разговора: причина отказа, итог пересмотра. null — только обновить кнопку «получше». */
+    /** Строка-подсказка на экране разговора: причина отказа, итог пересмотра. null — только обновить кнопку «Улучшить». */
     void onHint(String s);
     /** Список реплик изменился не через новую реплику: правка, пересмотр, удаление. */
     void onHistory();
@@ -239,8 +239,8 @@ public class TranslatorService extends Service {
       synchronized (history) { if (!history.isEmpty()) { lastLocalAt = history.get(history.size() - 1).at; log("↩ продолжаем разговор: восстановлено реплик " + history.size()); } }
       log("📝 " + words.stats());
       if (pb.pinsWithDigits > 0) log("📌 пинов с числом без маски: " + pb.pinsWithDigits + " — они не срабатывают, перезакрепите их кнопкой «запомнить»");
-      if (mod(Modules.CLOUD)) log(cloud.ready ? "☁ «получше» доступно: " + cloud.models.length + " бесплатных моделей"
-                                               : "☁ облако включено, но ключа нет (models/openrouter.json) — «получше» только уточнителем");
+      if (mod(Modules.CLOUD)) log(cloud.ready ? "☁ «Улучшить» облаком доступно: " + cloud.models.length + " бесплатных моделей"
+                                               : "☁ облако включено, но ключа нет (models/openrouter.json) — «Улучшить» только уточнителем");
       if (mod(Modules.SPEAKER)) log(spk.ready ? "🎤 отпечаток голоса готов за " + spk.loadMs + " мс, профили: " + spk.describe()
                                               : "🎤 модели отпечатка голоса ещё нет — докачается, до тех пор разделение говорящих выключено");
       status("Готово. ASR " + eng.loadAsrMs + " · MT " + eng.loadMtMs + " · TTS " + eng.loadTtsMs + " мс · " + pb.stats());
@@ -1580,7 +1580,7 @@ public class TranslatorService extends Service {
     return t;
   }
 
-  /** Что сделает кнопка «получше»: "cloud", "local" или причина, почему ничего. Одна кнопка значит
+  /** Что сделает кнопка «Улучшить»: "cloud", "local" или причина, почему ничего. Одна кнопка значит
    *  «улучшить сейчас»: есть ключ и сеть — облако; иначе локальный проход при включённом контексте. */
   public String improveMode() {
     if (eng == null) return "движок ещё загружается";        // интент со стенда приходит раньше, чем поднялись модели
@@ -1610,8 +1610,8 @@ public class TranslatorService extends Service {
   public void improveNow() {
     String m = improveMode();
     if (m.equals("cloud")) { sinceCloud = 0; cloudBackoff = 1; cloudReview(true); }
-    else if (m.equals("local")) { sinceLocal = 0; hint("🧠 разбираю контекст…"); kickLocal(); }
-    else { log("получше недоступно: " + m); hint("получше недоступно: " + m); }
+    else if (m.equals("local")) { sinceLocal = 0; kickLocal(); }
+    else { log("улучшить нельзя: " + m); hint("улучшить нельзя: " + m); }
   }
   /** Сеть проверяется здесь, а не неудачным запросом: иначе каждое нажатие в самолёте ждёт таймаут. */
   public boolean online() {
@@ -1742,7 +1742,7 @@ public class TranslatorService extends Service {
       status("Готово. " + pb.stats());
     } catch (Throwable t) { log("подключение скачанного: " + t); }
   }
-  /** Сеть пришла или ушла — кнопка «получше» и причина в подсказке обновляются сразу, а не со следующей
+  /** Сеть пришла или ушла — кнопка «Улучшить» и причина в подсказке обновляются сразу, а не со следующей
    *  реплики: на устройстве после выхода из режима полёта кнопка оставалась серой до нового события. */
   void watchNetwork() {
     try {
@@ -1911,7 +1911,7 @@ public class TranslatorService extends Service {
     if (chats == null || chats.size() == 0) { log("☁ нечего уточнять"); hint("нечего уточнять"); return; }
     if (!cloudConsent()) { log("☁ нет согласия на отправку разговора"); hint("нужно согласие на отправку разговора в облако"); return; }
     if (cloudBusy) { log("☁ запрос уже в работе"); return; }
-    cloudBusy = true; hint("☁ пересматриваю разговор…"); busy("cloud", "пересматриваю разговор в облаке…", 0, 0);
+    cloudBusy = true; busy("cloud", "пересматриваю разговор в облаке…", 0, 0);   // ход — на экране в реплике, подсказка в шапке его повторяла бы
     final long chatId = chats.current;
     cloudWorker.submit(() -> {
       try {
@@ -2043,7 +2043,7 @@ public class TranslatorService extends Service {
     final String tgt = t[0].substring(3), text = t[2];
     worker.submit(() -> { try { speakOut(tgt, text); } catch (Throwable e) { log("🔊 " + e); } });
   }
-  /** Произнести готовый текст (для «получше»: перевод уже есть, нужен только звук). */
+  /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). */
   void speakOut(String tgt, String text) throws Exception {
     if (!voice()) { hint("🔇 озвучка выключена — «Система» → «Модули»"); return; }
     synchronized (tts) {
@@ -2765,7 +2765,7 @@ public class TranslatorService extends Service {
   }
   /** Произнести готовый перевод. Вынесено из конвейера, потому что озвучка может ждать паузы
    *  в речи, а перевод ждать не должен. */
-  /** Один голос за раз. Очередь озвучки, набранная фраза, снимок и «получше» синтезируют
+  /** Один голос за раз. Очередь озвучки, набранная фраза, снимок и «Улучшить» синтезируют
    *  в разных потоках, а AudioTrack один: без этого замка две озвучки писали в него вперемешку,
    *  и первая же закончившаяся снимала заглушку с микрофона под второй. */
   final Object tts = new Object();

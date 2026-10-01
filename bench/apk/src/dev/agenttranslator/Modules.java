@@ -87,6 +87,6 @@ public final class Modules {
 
   /** Кнопка 📷 есть, если снимок есть чем прочитать: на телефоне или в облаке. */
   public static boolean photo(Set<String> on) { return on.contains(OCR) || on.contains(CLOUD); }
-  /** Кнопка «получше» есть, если есть чем уточнять: уточнителем или облаком. */
+  /** Кнопка «Улучшить» есть, если есть чем уточнять: уточнителем или облаком. */
   public static boolean better(Set<String> on) { return on.contains(LLM) || on.contains(CLOUD); }
 }

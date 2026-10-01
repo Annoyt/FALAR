@@ -70,7 +70,7 @@ push_dir  "$M/denoiser" "denoiser" opt   # шумоподавитель; в ко
 push_dir  "$M/llm"      "llm"      opt   # контекстный уточнитель; в slim-сборке всё равно не запустится
 push_file "$R/data/tatoeba/phrasebook_tatoeba.tsv" "phrasebook_tatoeba.tsv" opt
 push_file "$R/data/common_words.txt" "common_words.txt" opt
-push_file "$M/openrouter.json" "openrouter.json" opt   # ключ и список :free-моделей для кнопки «получше»
+push_file "$M/openrouter.json" "openrouter.json" opt   # ключ и список :free-моделей для кнопки «Улучшить»
 
 say ""
 $ADB shell "du -sh $DST; find $DST -maxdepth 2 -type f | wc -l"

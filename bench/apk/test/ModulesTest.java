@@ -3,7 +3,7 @@ package dev.agenttranslator;
 import java.util.*;
 
 /** Модули: выбор по умолчанию под телефон, «как было» у обновившегося, запись выбора,
- *  когда есть кнопки 📷 и «получше». Запуск: bash bench/apk/test.sh. */
+ *  когда есть кнопки 📷 и «Улучшить». Запуск: bash bench/apk/test.sh. */
 public class ModulesTest {
   static int fails = 0, checks = 0;
   static void ok(boolean c, String what) { checks++; if (!c) { fails++; System.out.println("  ПРОВАЛ: " + what); } }
@@ -39,7 +39,7 @@ public class ModulesTest {
 
     // K: какие кнопки есть
     ok(Modules.photo(set(Modules.OCR)) && Modules.photo(set(Modules.CLOUD)) && !Modules.photo(set(Modules.TTS, Modules.LLM)), "K1 📷 — если снимок есть чем прочитать");
-    ok(Modules.better(set(Modules.LLM)) && Modules.better(set(Modules.CLOUD)) && !Modules.better(set(Modules.TTS, Modules.OCR)), "K2 «получше» — если есть чем уточнять");
+    ok(Modules.better(set(Modules.LLM)) && Modules.better(set(Modules.CLOUD)) && !Modules.better(set(Modules.TTS, Modules.OCR)), "K2 «Улучшить» — если есть чем уточнять");
     boolean named = true;
     for (String m : Modules.CHOICE) named &= !Modules.title(m).equals(m) && !Modules.what(m).isEmpty();
     ok(named && !Modules.what(Modules.BASE).isEmpty(), "K3 у каждого модуля название и строка «что даёт»");

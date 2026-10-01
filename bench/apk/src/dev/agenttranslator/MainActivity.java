@@ -440,10 +440,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     String h = hintBase;
     if (holdingRead) h = "читаете вслух · микрофон не слушает";
     else if (cribDefault() && !cribShown && bigText.length() > 1) h += (h.isEmpty() ? "" : " · ") + "транскрипция скрыта · касание вернёт";
-    // Причина, по которой «получше» серая, — здесь же: в журнал её никто не пойдёт читать посреди разговора.
+    // Причина, по которой «Улучшить» серая, — здесь же: в журнал её никто не пойдёт читать посреди разговора.
     if (svc != null && svc.eng != null && !svc.cloudBusy) {
       String m = svc.improveMode();
-      if (!m.equals("cloud") && !m.equals("local")) h += (h.isEmpty() ? "" : " · ") + "получше недоступно: " + m;
+      if (!m.equals("cloud") && !m.equals("local")) h += (h.isEmpty() ? "" : " · ") + "улучшить нельзя: " + m;
     }
     String topic = svc != null && svc.chats != null ? svc.chats.topic : "";
     if (!topic.isEmpty() && !h.contains(topic) && !title.equals(topic)) h += (h.isEmpty() ? "" : " · ") + topic;
@@ -452,7 +452,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     abProg.setVisibility(convBusy != null ? View.VISIBLE : View.GONE);
   }
 
-  /** Кнопка «получше» значит «улучшить сейчас»: облако, если есть ключ и сеть, иначе локальный
+  /** Кнопка «Улучшить» (прежде «получше», переименовал владелец 01.10) значит «улучшить сейчас»: облако, если есть ключ и сеть, иначе локальный
    *  проход при включённом контексте. Перед первой отправкой разговора — согласие, один раз. */
   void improve() {
     if (svc == null) return;
@@ -507,7 +507,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     String who = svc.whoLine(), kw = c.topic.isEmpty() ? svc.topicLine() : "";
     b.append(who.isEmpty() ? "Кто говорит — пока не ясно: нет реплик, где человек говорит о себе («obrigada», «я поняла»)."
                            : who + " Посчитано по тому, как люди говорят о себе: «obrigada», «estou cansada», «я понял».").append("\n\n");
-    if (c.memo.isEmpty()) b.append("Ключевые детали — пока нет. Их пишет облачный пересмотр («получше» или по интервалу) и дополняет каждый раз; можно вписать самому.");
+    if (c.memo.isEmpty()) b.append("Ключевые детали — пока нет. Их пишет облачный пересмотр («Улучшить» или по интервалу) и дополняет каждый раз; можно вписать самому.");
     else b.append("Ключевые детали ").append(Chats.BY_USER.equals(c.memoBy) ? "(ваши — автоматика их не меняет)" : Chats.BY_CLOUD.equals(c.memoBy) ? "(от облака)" : "(от модели)")
           .append(":\n").append(c.memo);
     b.append("\n\nТема: ").append(!c.topic.isEmpty() ? c.topic : kw.isEmpty() ? "нет" : "нет, вместо неё частые слова: " + kw);
@@ -995,7 +995,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
 
   /** Экран разговора. Сверху — текущая реплика: кто сказал, португальский крупно, русский мелко;
-   *  под ней её действия («Получше», «Запомнить», «⋯») или, пока она распознаётся, переводится и
+   *  под ней её действия («Улучшить», «Запомнить», «⋯») или, пока она распознаётся, переводится и
    *  уточняется, — ход этого на том же месте (решение владельца 01.10: ход — в реплике). Ниже —
    *  прежние реплики карточками. Внизу док: «Снимок, текст», кнопка удержания, «Слушать» PT | RU.
    *  Режимов (ввод · удержание · слушать) и сворачивания больше нет: док занимает 76 dp, а три
@@ -1053,7 +1053,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // и крупный текст не подпрыгивает, когда он начинается и кончается.
     FrameLayout act = new FrameLayout(this);
     LinearLayout chips = new LinearLayout(this); chips.setOrientation(LinearLayout.HORIZONTAL); chips.setGravity(Gravity.CENTER_VERTICAL);
-    bBetter = chip("Получше", app.falar.R.drawable.ic_spark); bBetter.setEnabled(false);
+    bBetter = chip("Улучшить", app.falar.R.drawable.ic_spark); bBetter.setEnabled(false);
     bPin = chip("Запомнить", app.falar.R.drawable.ic_pin); bPin.setEnabled(false);
     Button more = chip("", app.falar.R.drawable.ic_more); more.setPadding(dp(8), 0, 0, 0); more.setContentDescription("Меню реплики");
     LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, dp(32)); cp.setMarginEnd(dp(8));
@@ -1915,7 +1915,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     LinearLayout c2 = r.group(v, "Куда пойдёт запрос");
     rowRoute = r.nav(c2, app.falar.R.drawable.ic_cloud, "Модели и маршрут", "", null);
     bModels = rowRoute.v;
-    // Как часто разбирать разговор в облаке. 0 — только по кнопке «Получше».
+    // Как часто разбирать разговор в облаке. 0 — только по кнопке «Улучшить».
     LinearLayout c3 = r.group(v, "Пересмотр разговора");
     LinearLayout s3 = r.sub(c3, false); s3.setPadding(dp(14), dp(14), dp(14), dp(14));
     final int[] cloudVals = {0, 5, 10, 20};
@@ -2020,7 +2020,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       del.setImageDrawable(icon(app.falar.R.drawable.ic_trash, rows.ink())); del.setBackground(rows.press(0)); del.setClickable(true);
       del.setOnClickListener(x -> new android.app.AlertDialog.Builder(this).setTitle("Убрать ключ " + Cloud.idOf(k) + "?")
           .setMessage(ks.size() > 1 ? "Запросы пойдут со следующего ключа. Ключ на сайте OpenRouter останется — его можно вставить снова."
-                                    : "Облако перестанет работать: «Получше» облаком, пересмотр разговора и названия разговоров. "
+                                    : "Облако перестанет работать: «Улучшить» облаком, пересмотр разговора и названия разговоров. "
                                     + "Ключ на сайте OpenRouter останется — его можно вставить снова.")
           .setPositiveButton("убрать", (d, w) -> new Thread(() -> { final String r = svc.removeCloudKey(k);
               runOnUiThread(() -> refreshKey(r)); }).start())
@@ -2029,7 +2029,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       keysBox.addView(row);
     }
     if (ks.isEmpty()) {
-      TextView none = new TextView(this); none.setText("Ключа нет — названия разговоров и «Получше» облаком выключены");
+      TextView none = new TextView(this); none.setText("Ключа нет — названия разговоров и «Улучшить» облаком выключены");
       none.setTextSize(13); none.setTextColor(look.dim); none.setPadding(dp(14), dp(12), dp(14), dp(12));
       keysBox.addView(none);
       if (addBox != null) addBox.setVisibility(View.VISIBLE);
@@ -2622,13 +2622,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     return n == 4 ? d : new long[]{d[0], d[1], d[3]};            // без озвучки третьего этапа нет
   }
   final Runnable cloudTick = new Runnable() { public void run() {
-    if (convBusy == null || cloudFrom == 0) return;
-    long ms = android.os.SystemClock.uptimeMillis() - cloudFrom;
-    convBusy = "пересматриваю разговор в облаке · " + ms / 1000 + " с";
-    // Точного хода у облака нет — это один запрос. Полоса идёт по времени: прошло / сколько обычно
+    if (cloudFrom == 0) return;
+    long ms = android.os.SystemClock.uptimeMillis() - cloudFrom, left = cloudTypical - ms;
+    // Точного хода у облака нет — это один запрос. Отрезок идёт по времени: прошло / сколько обычно
     // отвечает эта модель, и не доходит до конца, пока ответа нет.
-    abProg.set(1, 0, Math.min(0.95f, ms / (float) cloudTypical));
-    refreshHint();
+    stageBar.set(1, 0, Math.min(0.95f, ms / (float) cloudTypical));
+    busyLbl.setText("Улучшаю в облаке · " + (left >= 1000 ? "ещё ≈ " + Math.round(left / 1000.0) + " с" : "дольше обычного · " + ms / 1000 + " с"));
     ui.postDelayed(this, 1000);
   }};
   @Override public void onBusy(String kind, String what, int done, int total) {
@@ -2644,29 +2643,30 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       return;
     }
     if (loadK >= 0) { loadK = -1; ui.removeCallbacks(loadTick); }
-    boolean reply = what != null && ("live".equals(kind) || "refine".equals(kind));
+    // Улучшение облаком — там же и так же, как загрузка и перевод (владелец 01.10: «переделать
+    // индикатор аналогично»): отрезок по времени ответа модели и подпись «Улучшаю в облаке · ещё ≈ N с».
+    boolean cloud = what != null && "cloud".equals(kind), models = what != null && "models".equals(kind);
+    boolean reply = what != null && ("live".equals(kind) || "refine".equals(kind) || cloud);
     busyRow.setVisibility(reply ? View.VISIBLE : View.INVISIBLE);
     chipsRow.setVisibility(reply ? View.INVISIBLE : View.VISIBLE);
-    if (reply) {
+    if (reply && !cloud) {
       // Этап — по тому, что идёт: распознавание (и чтение снимка), перевод, уточнение.
       int stage = "refine".equals(kind) ? 2 : what.startsWith("перевожу") ? 1 : 0;
       stageBar.set(3, stage, total > 0 ? Math.min(1f, done / (float) total) : 0f);
       // «уточняю перевод · 1 из 2»: номер той, что в работе, а не уже сделанных. У процентов свой текст.
       busyLbl.setText(total > 0 && !what.contains("%") ? what + " · " + Math.min(done + 1, total) + " из " + total : what);
     }
-    boolean cloud = what != null && "cloud".equals(kind), models = what != null && "models".equals(kind);
     if (cloud) {
       if (cloudFrom == 0) {
         cloudFrom = android.os.SystemClock.uptimeMillis();
         long typ = 0;
         try { Cloud c = svc == null ? null : svc.cloud; if (c != null) typ = c.metaOf(c.next()).ms; } catch (Throwable t) { typ = 0; }
         cloudTypical = typ > 0 ? typ : 20000;
-        convBusy = "пересматриваю разговор в облаке · 0 с"; abProg.set(1, 0, 0);
         ui.post(cloudTick);
       }
     } else { cloudFrom = 0; ui.removeCallbacks(cloudTick); }
-    if (models) { convBusy = what; abProg.set(1, 0, total > 0 ? done / (float) total : 0f); }
-    if (!cloud && !models) convBusy = null;
+    // Загрузки моделей — в шапке: они идут минутами и закрыли бы кнопки реплики на всё это время.
+    if (models) { convBusy = what; abProg.set(1, 0, total > 0 ? done / (float) total : 0f); } else convBusy = null;
     refreshHint();
   }
   @Override protected void onDestroy() { unbindSvc(); super.onDestroy(); }
