@@ -131,6 +131,7 @@ final class Rows {
         o[k].setTextColor(on ? 0xFFFFFFFF : look.dim);
         o[k].setTypeface(null, on ? Typeface.BOLD : Typeface.NORMAL);
         o[k].setBackground(on ? r.round(Look.PLUM, 9, 0) : null);
+        o[k].setSelected(on);         // выбор слышит TalkBack и видит стенд (uiautomator: selected="true")
       }
     }
   }

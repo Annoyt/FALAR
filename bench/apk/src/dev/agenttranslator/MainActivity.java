@@ -454,17 +454,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (hint == null || screen != 0) return;
     String title = chatTitle();
     abTitle.setText(title);
-    String h = hintBase;
-    if (holdingRead) h = "читаете вслух · микрофон не слушает";
-    else if (cribDefault() && !cribShown && bigText.length() > 1) h += (h.isEmpty() ? "" : " · ") + "транскрипция скрыта · касание вернёт";
     // Причина, по которой «Улучшить» серая, — здесь же: в журнал её никто не пойдёт читать посреди разговора.
-    if (svc != null && svc.eng != null && !svc.cloudBusy) {
-      String m = svc.improveMode();
-      if (!m.equals("cloud") && !m.equals("local")) h += (h.isEmpty() ? "" : " · ") + "улучшить нельзя: " + m;
-    }
+    String mode = svc != null && svc.eng != null && !svc.cloudBusy ? svc.improveMode() : null;
     String topic = svc != null && svc.chats != null ? svc.chats.topic : "";
-    if (!topic.isEmpty() && !h.contains(topic) && !title.equals(topic)) h += (h.isEmpty() ? "" : " · ") + topic;
-    if (convBusy != null) h = convBusy;
+    String h = Screen.hint(hintBase, holdingRead, cribDefault() && !cribShown && bigText.length() > 1, mode, topic, title, convBusy);
     hint.setText(h); hint.setVisibility(h.isEmpty() ? View.GONE : View.VISIBLE);
     abProg.setVisibility(convBusy != null ? View.VISIBLE : View.GONE);
   }
@@ -509,9 +502,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Строка «Облако» в настройках: сколько ключей и как часто пересмотр. */
   void refreshCloudRow() {
     if (rowCloud == null || svc == null || svc.cloud == null) return;
-    int n = svc.cloud.keys().size();
-    rowCloud.sub.setText((n == 0 ? "ключа нет" : n == 1 ? "1 ключ" : n + (n < 5 ? " ключа" : " ключей"))
-        + " · пересмотр " + (svc.cloudEvery == 0 ? "по кнопке" : "каждые " + svc.cloudEvery + " реплик"));
+    rowCloud.sub.setText(Screen.cloudRow(svc.cloud.keys().size(), svc.cloudEvery));
     rowCloud.sub.setVisibility(View.VISIBLE);
   }
   /** «Память разговора» — по касанию названия разговора в шапке: что Falar знает о разговоре сверх
@@ -523,34 +514,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   void memoDialog() {
     if (svc == null || svc.chats == null) return;
     final Chats c = svc.chats;
-    StringBuilder b = new StringBuilder();
     final java.util.List<Voices.Voice> voices = c.voices.all();
-    String spk = Memo.speakers(c.dialog(), c.voices);
-    if (!spk.isEmpty()) b.append(spk);
-    else {
-      String who = svc.whoLine();
-      b.append(who.isEmpty() ? "Кто говорит — пока не ясно." : who);
-      if (svc.mod(Modules.SPEAKER)) b.append("\nГолосов в разговоре нет: пусть каждый скажет фразу кнопкой FALAR — тогда слушание переводит только их.");
-    }
     // Имена из разговора — рядом с тем, кто говорит; добавить их в свои слова — «ещё…».
     final java.util.List<String[]> names = new java.util.ArrayList<>(svc.pendingNames);
-    if (!names.isEmpty()) {
-      b.append("\nИмена: ");
-      for (int k = 0; k < names.size(); k++) {
-        String[] n = names.get(k); b.append(k > 0 ? ", " : "").append(n[0]);
-        if (n.length > 1 && !n[1].isEmpty() && !n[1].equalsIgnoreCase(n[0])) b.append(" (").append(n[1]).append(')');
-      }
-    }
-    b.append("\n\nКлючевые детали").append(c.memo.isEmpty() ? " — пока нет." : ":\n" + c.memo);
-    TextView tv = new TextView(this); tv.setText(b.toString()); tv.setTextSize(15); tv.setPadding(48, 24, 48, 8); tv.setTextIsSelectable(true);
+    TextView tv = new TextView(this);
+    tv.setText(Screen.memoText(svc.whoLine(), Memo.speakers(c.dialog(), c.voices), svc.mod(Modules.SPEAKER), names, c.memo));
+    tv.setTextSize(15); tv.setPadding(48, 24, 48, 8); tv.setTextIsSelectable(true);
     ScrollView sv = new ScrollView(this); sv.addView(tv);
-    final java.util.List<String[]> ts = c.terms();
-    final java.util.List<String> more = new java.util.ArrayList<>();
-    final String NAME_V = "назвать собеседника…", FORGET_V = "забыть голоса разговора (" + voices.size() + ")";
-    if (!voices.isEmpty()) { more.add(NAME_V); more.add(FORGET_V); }
-    if (Chats.BY_USER.equals(c.memoBy)) more.add("вернуть память автоматике");
-    if (!names.isEmpty()) more.add("добавить имена в свои слова (" + names.size() + ")");
-    if (!ts.isEmpty()) more.add("забыть подсказки разговора (" + ts.size() + ")");
+    final java.util.List<String> more = Screen.memoMore(voices.size(), Chats.BY_USER.equals(c.memoBy), names.size(), c.terms().size());
     android.app.AlertDialog.Builder d = new android.app.AlertDialog.Builder(this)
         .setTitle("Память разговора").setView(sv)
         .setPositiveButton("изменить", (dd, w) -> editMemo())
@@ -558,8 +529,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (!more.isEmpty()) d.setNeutralButton("ещё…", (dd, w) -> new android.app.AlertDialog.Builder(this)
         .setItems(more.toArray(new String[0]), (d2, k) -> {
           String it = more.get(k);
-          if (it.equals(NAME_V)) pickVoice(voices);
-          else if (it.equals(FORGET_V)) forgetVoicesDialog(voices.size());
+          if (it.equals(Screen.NAME_VOICE)) pickVoice(voices);
+          else if (it.startsWith(Screen.FORGET_VOICES)) forgetVoicesDialog(voices.size());
           else if (it.startsWith("вернуть")) { svc.setMemoByUser(""); refreshHint(); }
           else if (it.startsWith("забыть")) { int n = c.clearTerms(); onLog("🗑 подсказки разговора убраны: " + n); refreshHint(); }
           else namesDialog(names);
@@ -863,6 +834,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     sysView.setVisibility(tab == 2 ? View.VISIBLE : View.GONE);
     if (tab == 2) micLabel();
     if (modsView != null) { modsView.setVisibility(tab == 5 ? View.VISIBLE : View.GONE); cloudView.setVisibility(tab == 6 ? View.VISIBLE : View.GONE); journalView.setVisibility(tab == 7 ? View.VISIBLE : View.GONE); }
+    // Сегменты — заново у службы при каждом открытии: настройку меняют не только с этого экрана
+    // (стенд, другой экран), а сегмент показывал бы прежнее до следующего запуска (test_ui_device.sh U4).
+    if (tab == 2 || tab == 6) { refreshIntervals(); refreshReadGuard(); }
     if (tab == 6) refreshKey(null);
     if (tab == 7 && logScroll != null) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     if (setupView != null) setupView.setVisibility(tab == 4 ? View.VISIBLE : View.GONE);
@@ -1463,8 +1437,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     TextView b = new TextView(this); b.setText("раз"); b.setTextSize(13.5f); b.setTextColor(look.dim); st.addView(b);
     top.addView(st); stepperRow = st;
     // Порог — от 1 до 10 повторов, как у прежнего ползунка.
-    minus.setOnClickListener(x -> { if (wordsMin > 1) { wordsMin--; minVal.setText(String.valueOf(wordsMin)); refreshWords(); } });
-    plus.setOnClickListener(x -> { if (wordsMin < 10) { wordsMin++; minVal.setText(String.valueOf(wordsMin)); refreshWords(); } });
+    minus.setOnClickListener(x -> stepWords(-1));
+    plus.setOnClickListener(x -> stepWords(+1));
     learnHint = new TextView(this); learnHint.setTextSize(12); learnHint.setTextColor(look.soft); learnHint.setPadding(dp(4), dp(8), dp(4), 0);
     learnHint.setText("Слова из ваших разговоров, от частых к редким"); top.addView(learnHint);
     v.addView(top);
@@ -1494,6 +1468,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // «Очистить выученное» — из «⋯» шапки; сама кнопка на экране больше не стоит.
     bClear = new Button(this); bClear.setEnabled(false);
     return v;
+  }
+  void stepWords(int d) {
+    int n = Screen.stepMin(wordsMin, d);
+    if (n == wordsMin) return;
+    wordsMin = n; minVal.setText(String.valueOf(n)); refreshWords();
   }
   TextView stepBtn(String t) {
     TextView x = new TextView(this); x.setText(t); x.setTextSize(19); x.setTypeface(null, Typeface.BOLD); x.setGravity(Gravity.CENTER);
@@ -1654,12 +1633,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (svc == null || svc.learn == null) return;
     shownWords.clear();
     for (Learn.Word w : l) shownWords.add(w.w);
-    String say = svc.mod(Modules.TTS) ? "нажатие произносит, " : "";
-    if (knownMode) learnHint.setText(l.isEmpty() ? "Известных слов пока нет — отмечайте их долгим нажатием в «Учу»"
-                                                 : "Знаю: " + l.size() + " слов · " + say + "долгое возвращает в изучение");
-    else learnHint.setText(l.isEmpty()
-          ? "Пока нечего показать: нужно, чтобы слово встретилось не меньше " + min + " раз"
-          : "Слов от " + min + " повторов: " + l.size() + " · " + say + "долгое — «знаю»");
+    learnHint.setText(Screen.wordsHint(knownMode, l.size(), min, svc.mod(Modules.TTS)));
     wordList.setAdapter(new WordRow(l, knownMode));
     wordList.setOnItemClickListener((p, vv, pos, id) -> {
       if (pos < shownWords.size() && svc != null && svc.mod(Modules.TTS)) svc.sayWord(shownWords.get(pos), "pt");
@@ -2232,6 +2206,25 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       if (tmp && !started) unbindSvc();
     }, tmp ? 2500 : 700);
   }
+  /** Стенд: что видно на экране сейчас — подписи видимых видов одной строкой в журнал
+   *  («🧪 на экране: …», --es uitexts 1); у выключенного вида — «[выкл]» («Улучшить [выкл]»).
+   *  uiautomator снимает дерево, только когда экран затих, а во время загрузки он обновляется дважды
+   *  в секунду: снимок приходил уже после конца хода (test_modules D4). Журнал («Журнал») не
+   *  перечисляется — он и так в at.log. */
+  void uiTexts() {
+    StringBuilder b = new StringBuilder();
+    texts(rootView, b);
+    String line = "🧪 на экране: " + b;
+    if (svc != null) svc.log(line); else onLog(line);
+  }
+  void texts(View v, StringBuilder b) {
+    if (v == null || !v.isShown() || v == logView) return;
+    if (v instanceof TextView) {
+      CharSequence t = ((TextView) v).getText();
+      if (t != null && t.length() > 0) b.append(b.length() == 0 ? "" : " | ").append(t.toString().replace('\n', ' ')).append(v.isEnabled() ? "" : " [выкл]");
+    }
+    if (v instanceof ViewGroup) { ViewGroup g = (ViewGroup) v; for (int k = 0; k < g.getChildCount(); k++) texts(g.getChildAt(k), b); }
+  }
   /** Стенд: кольцо «как слышно» вокруг «Слушать» с уровнем, похожим на речь, — тем же опросом
    *  5 раз в секунду, но без микрофона. Цена кольца на экране (measure_mic_anim.sh, вид meter). */
   void meterDemo(long ms) {
@@ -2269,13 +2262,33 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) { svc.pttStop(); return true; }
     return false;
   }
+  /** Стенд: тема на время проверки — день или ночь, как бы ни стояла система (--es uitheme
+   *  day|night|system). Ночной режим телефона — настройка системы, и у владельца он включён: без этого
+   *  дневную тему на стенде было не увидеть (0.26.0 вышла с непроверенным днём). Держится до конца
+   *  процесса; экран при смене пересоздаётся. Только для уже открытого экрана: из onNewIntent. */
+  static int themeTest = 0;      // 0 — как система, 1 — день, 2 — ночь
+  @Override protected void attachBaseContext(Context base) {
+    super.attachBaseContext(base);
+    if (themeTest == 0) return;
+    android.content.res.Configuration c = new android.content.res.Configuration();
+    c.uiMode = themeTest == 1 ? android.content.res.Configuration.UI_MODE_NIGHT_NO : android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    applyOverrideConfiguration(c);
+  }
   @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
+    if (i.hasExtra("uitheme")) {
+      String t = i.getStringExtra("uitheme");
+      themeTest = "day".equals(t) ? 1 : "night".equals(t) ? 2 : 0;
+      String line = "🧪 тема: " + (themeTest == 1 ? "день" : themeTest == 2 ? "ночь" : "как в системе");
+      if (svc != null) svc.log(line); else onLog(line);       // в журнал сервиса — его ждёт стенд
+      recreate(); return;
+    }
     if (i.hasExtra("micanim")) { micDemo(i.getStringExtra("micanim"), i.getStringExtra("micsec")); return; }
     // Стенд: перерисовать окно целиком. Перерисовка обычно частичная — только то, что сдвинулось, —
     // и вылезшее за свои границы видно не всегда: проверка прокрутки (test_scroll_device.sh) один
     // раз прошла на сборке с ошибкой. Целиком — вылезшее видно всегда.
     if (i.hasExtra("redraw")) { getWindow().getDecorView().invalidate(); return; }
     if (i.hasExtra("uishot")) { uiShot(i.getStringExtra("uishot"), i.getStringExtra("uiscreen")); return; }
+    if (i.hasExtra("uitexts")) { uiTexts(); return; }
     if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
@@ -2379,22 +2392,18 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       boolean on = Modules.BASE.equals(m) || svc.mod(m);
       if (!Modules.BASE.equals(m)) r.sw.setChecked(on);
       long b = svc.store.bytes(m);
-      r.size.setText(b == 0 ? "" : b >= 1_000_000_000L ? String.format(java.util.Locale.ROOT, "%.1f ГБ", b / 1e9).replace('.', ',') : Math.round(b / 1e6) + " МБ");
+      r.size.setText(Screen.modSize(b));
       r.size.setVisibility(b == 0 ? View.GONE : View.VISIBLE);
       boolean onPhone = b > 0 && svc.store.onPhone(m), loading = cur != null && m.equals(cur.module) && busy;
-      if (b == 0) rows.pill(r.pill, keys == 0 ? "нужен ключ" : keys == 1 ? "ключ есть" : "ключей: " + keys, keys == 0 ? "no" : "ok");
-      else if (!on) rows.pill(r.pill, onPhone ? "выключен · файлы на месте" : "выключен", "no");
-      else if (onPhone) rows.pill(r.pill, "установлено", "ok");
-      else if (loading && !wait) rows.pill(r.pill, "качается", "go");
-      else if (wait) rows.pill(r.pill, "ждёт Wi-Fi", "wait");
-      else rows.pill(r.pill, busy ? "в очереди" : "не скачано", "no");
+      String[] pill = Screen.modPill(on, b, onPhone, loading, wait, busy, keys);
+      rows.pill(r.pill, pill[0], pill[1]);
       // Полоса — у включённого модуля, файлов которого ещё нет: сколько уже на телефоне.
-      boolean bar = on && b > 0 && !onPhone;
+      boolean bar = Screen.modBar(on, b, onPhone);
       r.barBox.setVisibility(bar ? View.VISIBLE : View.GONE);
       if (bar) {
         long d = Math.min(b, svc.store.doneBytes(m));
         r.bar.set(1, 0, d / (float) b);
-        r.barLbl.setText(Math.round(d / 1e6) + " из " + Math.round(b / 1e6) + " МБ · " + (int) (d * 100 / b) + " %");
+        r.barLbl.setText(Screen.modBarLabel(d, b));
       }
     }
     uiSync = false;
@@ -2543,16 +2552,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       bModelsVerify.setEnabled(false); bModelsStop.setVisibility(View.GONE); modelsLbl.setVisibility(View.GONE); return;
     }
     boolean busy = s.busy(), check = ModelStore.CHECK.equals(s.phase);
-    if (check) { modsSum.setText("Проверяю файлы…"); modsSum.setCompoundDrawables(dl, null, null, null); }
-    else if (busy) {
-      modsSum.setText(ModelStore.WAIT.equals(s.phase) ? "Жду Wi-Fi · осталось " + ModelStore.mb(Math.max(0, s.total - s.done)) + " МБ"
-          : "Качаю · " + ModelStore.mb(s.done) + " из " + ModelStore.mb(s.total) + " МБ");
-      modsSum.setCompoundDrawables(dl, null, null, null);
-    } else if (s.coreMissing == 0 && s.autoMissing == 0) {
-      modsSum.setText("Все модели установлены · " + core + " из " + core); modsSum.setCompoundDrawables(ok, null, null, null);
-    } else if (s.coreMissing > 0) {
-      modsSum.setText("Обязательных нет: " + s.coreMissing + " из " + core + " · " + ModelStore.mb(s.coreBytes) + " МБ"); modsSum.setCompoundDrawables(dl, null, null, null);
-    } else { modsSum.setText("Модулям не хватает " + ModelStore.mb(s.autoBytes) + " МБ — докачается само"); modsSum.setCompoundDrawables(dl, null, null, null); }
+    String[] sum = Screen.modelsSum(true, check, busy, ModelStore.WAIT.equals(s.phase), s.done, s.total, s.coreMissing, s.autoMissing, core, s.coreBytes, s.autoBytes);
+    modsSum.setText(sum[0]); modsSum.setCompoundDrawables("ok".equals(sum[1]) ? ok : dl, null, null, null);
     // Ошибки и остановка — строкой под ней: причина видна там, где смотрят.
     String extra = !s.errors.isEmpty() && !busy ? String.join("\n", s.errors) : ModelStore.PAUSED.equals(s.phase) ? s.message : "";
     modelsLbl.setText(extra); modelsLbl.setVisibility(extra.isEmpty() ? View.GONE : View.VISIBLE);
@@ -2599,28 +2600,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   final Runnable loadTick = new Runnable() { public void run() {
     if (loadK < 0) return;
     long[] ms = loadMs; int n = loadN, k = Math.min(loadK, n - 1);
-    long el = android.os.SystemClock.uptimeMillis() - loadFrom, cur = ms[Math.min(k, ms.length - 1)], before = 0, after = 0, all = 0;
-    for (int i = 0; i < n; i++) { long x = ms[Math.min(i, ms.length - 1)]; all += x; if (i < k) before += x; else if (i > k) after += x; }
-    long left = Math.max(cur - el, 500) + after;
-    stageBar.set(n, k, Math.min(0.95f, el / (float) Math.max(1, cur)));
-    busyLbl.setText("Загружаю модели · " + loadWhat + " · ещё ≈ " + Math.max(1, Math.round(left / 1000.0)) + " с");
+    long el = android.os.SystemClock.uptimeMillis() - loadFrom;
+    stageBar.set(n, k, Screen.loadFrac(ms, n, k, el));
+    busyLbl.setText(Screen.loadCaption(loadWhat, Screen.loadLeft(ms, n, k, el)));
     ui.postDelayed(this, 500);
   }};
-  /** Сколько шли этапы загрузки в прошлый раз: распознавание, перевод, [озвучка,] словарь и разговоры.
-   *  Нет замера — Redmi Note 10 Pro, 30.09: 3,7 · 3,7 · 3,0 · 1,5 с. */
-  long[] loadExpect(int n) {
-    long[] d = {3700, 3700, 3000, 1500};
-    try { String[] x = prefs.getString("load_ms", "").split(","); if (x.length == 4) for (int i = 0; i < 4; i++) { long v = Long.parseLong(x[i].trim()); if (v > 0) d[i] = v; } }
-    catch (Exception ignore) {}
-    return n == 4 ? d : new long[]{d[0], d[1], d[3]};            // без озвучки третьего этапа нет
-  }
   final Runnable cloudTick = new Runnable() { public void run() {
     if (cloudFrom == 0) return;
-    long ms = android.os.SystemClock.uptimeMillis() - cloudFrom, left = cloudTypical - ms;
-    // Точного хода у облака нет — это один запрос. Отрезок идёт по времени: прошло / сколько обычно
-    // отвечает эта модель, и не доходит до конца, пока ответа нет.
-    stageBar.set(1, 0, Math.min(0.95f, ms / (float) cloudTypical));
-    busyLbl.setText("Улучшаю в облаке · " + (left >= 1000 ? "ещё ≈ " + Math.round(left / 1000.0) + " с" : "дольше обычного · " + ms / 1000 + " с"));
+    long ms = android.os.SystemClock.uptimeMillis() - cloudFrom;
+    // Точного хода у облака нет — это один запрос (Screen.cloudFrac, cloudCaption).
+    stageBar.set(1, 0, Screen.cloudFrac(ms, cloudTypical));
+    busyLbl.setText(Screen.cloudCaption(ms, cloudTypical));
     ui.postDelayed(this, 1000);
   }};
   @Override public void onBusy(String kind, String what, int done, int total) {
@@ -2630,7 +2620,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // подпись с тем, сколько осталось.
     if (what != null && "load".equals(kind)) {
       busyRow.setVisibility(View.VISIBLE); chipsRow.setVisibility(View.INVISIBLE);
-      if (loadK < 0) { loadMs = loadExpect(total); ui.post(loadTick); }
+      if (loadK < 0) { loadMs = Screen.loadExpect(prefs.getString("load_ms", ""), total); ui.post(loadTick); }
       if (done != loadK) { loadK = done; loadFrom = android.os.SystemClock.uptimeMillis(); }
       loadN = Math.max(1, total); loadWhat = what;
       return;
@@ -2638,23 +2628,21 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (loadK >= 0) { loadK = -1; ui.removeCallbacks(loadTick); }
     // Улучшение облаком — там же и так же, как загрузка и перевод (владелец 01.10: «переделать
     // индикатор аналогично»): отрезок по времени ответа модели и подпись «Улучшаю в облаке · ещё ≈ N с».
-    boolean cloud = what != null && "cloud".equals(kind), models = what != null && "models".equals(kind);
-    boolean reply = what != null && ("live".equals(kind) || "refine".equals(kind) || cloud);
+    int at = Screen.where(kind, what);
+    boolean reply = at == Screen.REPLY, cloud = reply && "cloud".equals(kind), models = at == Screen.BAR;
     busyRow.setVisibility(reply ? View.VISIBLE : View.INVISIBLE);
     chipsRow.setVisibility(reply ? View.INVISIBLE : View.VISIBLE);
     if (reply && !cloud) {
       // Этап — по тому, что идёт: распознавание (и чтение снимка), перевод, уточнение.
-      int stage = "refine".equals(kind) ? 2 : what.startsWith("перевожу") ? 1 : 0;
-      stageBar.set(3, stage, total > 0 ? Math.min(1f, done / (float) total) : 0f);
-      // «уточняю перевод · 1 из 2»: номер той, что в работе, а не уже сделанных. У процентов свой текст.
-      busyLbl.setText(total > 0 && !what.contains("%") ? what + " · " + Math.min(done + 1, total) + " из " + total : what);
+      stageBar.set(3, Screen.stage(kind, what), Screen.stageFrac(done, total));
+      busyLbl.setText(Screen.stageCaption(what, done, total));
     }
     if (cloud) {
       if (cloudFrom == 0) {
         cloudFrom = android.os.SystemClock.uptimeMillis();
         long typ = 0;
         try { Cloud c = svc == null ? null : svc.cloud; if (c != null) typ = c.metaOf(c.next()).ms; } catch (Throwable t) { typ = 0; }
-        cloudTypical = typ > 0 ? typ : 20000;
+        cloudTypical = Screen.cloudTypical(typ);
         ui.post(cloudTick);
       }
     } else { cloudFrom = 0; ui.removeCallbacks(cloudTick); }

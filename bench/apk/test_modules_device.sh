@@ -8,13 +8,22 @@
 # D2 «Озвучка» выключена: голоса отданы, реплика переводится «· озвучка выключена»; включена — голоса снова.
 # D3 «Чтение снимков» и «Облако» выключены: снимок не читается (--es photofile), файлы моделей остались.
 # D4 «удалить неиспользуемые»: файлы выключенного модуля снимков удалены; включили — докачались
-#    сами с локального источника (tools/models_serve.py через adb reverse).
+#    сами с локального источника (tools/models_serve.py через adb reverse). Если экран включён и
+#    впереди Falar, докачка идёт медленно (--slow, около 1 МБ/с) при открытом экране «Модули и файлы»
+#    (0.26.0): строка над модулями — ход докачки, у «Чтения снимков» — метка «качается» и своя полоса
+#    «N из M МБ · P %», после — «установлено» и полосы нет.
 # В конце набор модулей возвращается к тому, что был. Удаление (D4) идёт, только если у других
 # выключенных модулей нет файлов на телефоне: чужие скачанные модели тест не удаляет.
 # Разговоры владельца не трогаются: реплика — в отдельном тестовом разговоре, выученное и словари
 # возвращаются из снимка. Телефон — рабочий телефон человека: запуск только когда впереди Falar,
 # рабочий стол или экран погашен.
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 SER=${1:-}; ADB="$R/tools/platform-tools/adb${SER:+ -s $SER}"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
@@ -24,7 +33,7 @@ pass=0; fail=0; skip=0; ORIG=""
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 sk() { skip=$((skip+1)); say "ПРОПУСК $1"; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 free_phone() {
   local n=0
   while :; do
@@ -40,9 +49,20 @@ wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LO
 since() { sh "tail -n +$(($1+1)) $LOG"; }
 mods() { local m; m=$(mark); start_app --es modules show; wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]'; }
 setmods() { local m; m=$(mark); start_app --es modules "'$1'"; sleep 4; }
-serve() { stop_serve; python3 $R/tools/models_serve.py > $D/serve.log 2>&1 & SRV=$!; sleep 0.7; grep -q "источник моделей" $D/serve.log || { say "  сервер не поднялся"; exit 2; }; }
+serve() { stop_serve; python3 $R/tools/models_serve.py "$@" > $D/serve.log 2>&1 & SRV=$!; sleep 0.7; grep -q "источник моделей" $D/serve.log || { say "  сервер не поднялся"; exit 2; }; }
 stop_serve() { [ -n "$SRV" ] && kill $SRV 2>/dev/null; SRV=""; for p in $(ss -ltnp 2>/dev/null | grep ':8765 ' | grep -o 'pid=[0-9]*' | cut -d= -f2); do kill $p 2>/dev/null; done; sleep 0.3; }
 size() { sh "stat -c %s $F/models/$1 2>/dev/null || echo 0" | awk '{print $1+0}'; }
+# Экран «Модули и файлы» касаниями (bench/apk/ui.py): ☰ → «Настройки» → листать до пункта → он.
+front() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys window" | grep -m1 mCurrentFocus | grep -q "$PKG/"; }
+dump() { sh "uiautomator dump /sdcard/falar-ui.xml >/dev/null; cat /sdcard/falar-ui.xml; rm -f /sdcard/falar-ui.xml" > $D/ui.xml; }
+ui() { local c=$1; shift; python3 $R/bench/apk/ui.py "$c" $D/ui.xml "$@"; }
+tapon() { local p; dump; p=$(ui find "$@" | head -1 | awk '{print $5, $6}'); [ -n "$p" ] && front && $ADB shell "input tap $p" && sleep 1.5; }
+mods_screen() {
+  local i
+  tapon --desc "Разговоры, слова, настройки" && tapon --text Настройки || return 1
+  for i in 1 2 3 4 5; do dump; ui find --text "Модули и файлы" >/dev/null && break; front && $ADB shell "input swipe 540 1600 540 700 350"; sleep 1.2; done
+  tapon --text "Модули и файлы" && dump && [ "$(ui sub --rid hint | sed -n 1p)" = "Модули и файлы" ]
+}
 
 restore() {
   say "== возврат"
@@ -56,8 +76,12 @@ restore() {
   $ADB shell "rm -f $F/chats/$TID.json $F/modtest.jpg"
   say "  тестовый разговор удалён · текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
   start_app; rm -rf "$D"
+  c=$(crashed); [ -z "$c" ] && res 0 "D5 за проверку Falar не падал" || res 1 "D5 Falar упал: $c"
   say; say "итог: PASS $pass, FAIL $fail, пропущено $skip"
 }
+# Падения Falar за проверку — по logcat с начала прогона (падения самого uiautomator не в счёт).
+T0=$($ADB shell "date '+%m-%d %H:%M:%S.000'" 2>/dev/null | tr -d '\r')
+crashed() { $ADB shell "logcat -d -v time -t '$T0'" 2>/dev/null | tr -d '\r' | grep -A3 'FATAL EXCEPTION' | grep -A1 'Process: app.falar' | grep -vE 'Process:|^--' | head -1 | cut -c1-160; }
 trap restore EXIT
 
 $ADB wait-for-device; free_phone
@@ -106,10 +130,37 @@ else
   m=$(mark); start_app --es modules unused-delete
   l=$(wl "$m" 'удалены модели выключенных' 30); say "  $l"
   [ "$(size ocr/det.onnx)" = 0 ] && [ "$(size ocr/rec.onnx)" = 0 ] && res 0 "D4 файлы выключенного модуля удалены" || res 1 "D4 файлы на месте"
-  $ADB reverse tcp:8765 tcp:8765 >/dev/null; serve
-  m=$(mark); start_app --es modelsbase $BASE; sleep 2; setmods "$(without cloud),ocr"
+  $ADB reverse tcp:8765 tcp:8765 >/dev/null
+  ui4=""; front && ui4=1
+  if [ -n "$ui4" ]; then serve --slow 60; else serve; fi
+  m=$(mark); start_app --es modelsbase $BASE; sleep 2
+  [ -n "$ui4" ] && { mods_screen || { ui4=""; say "  (экран «Модули и файлы» не открылся — ход на экране не проверить)"; }; }
+  m2=$(mark); setmods "$(without cloud),ocr"
+  if [ -n "$ui4" ]; then
+    # Ход на экране — стендом --es uitexts (подписи видимого экрана строкой в журнал): uiautomator
+    # снимает дерево, только когда экран затих, а во время докачки он обновляется, и снимок приходил
+    # уже после конца хода. Ловим от «📦 докачиваю» до «модули докачаны» после него: строка «докачаны»
+    # бывает и раньше — после удаления файлов служба сверяет включённые модули.
+    : > $D/dl
+    for i in $(seq 90); do
+      mm=$(mark); start_app --es uitexts 1; wl "$mm" '🧪 на экране:' 5 >> $D/dl
+      since "$m2" | grep -q 'докачиваю' && since "$m2" | grep -q 'модули докачаны' && break
+      sleep 0.5
+    done
+    say "  снимков экрана за докачку: $(grep -c 'на экране' $D/dl)"
+    grep -oE 'Качаю · [0-9.]+ из [0-9.]+ МБ|Чтение снимков \| [^|]+ \| [^|]+ \| [^|]+( \| [0-9]+ из [0-9]+ МБ · [0-9]+ %)?' $D/dl | sed 's/Чтение снимков | [^|]* | /Чтение снимков | … | /' | sort -u | head -6 | sed 's/^/    /'
+    grep -qE 'Качаю · [0-9.]+ из [0-9.]+ МБ' $D/dl && res 0 "D4 над модулями — ход докачки «Качаю · … из … МБ»" || res 1 "D4 хода докачки над модулями не видно"
+    grep -qE 'Чтение снимков \| [^|]+ \| [0-9,]+ [МГ]Б \| (качается|в очереди) \| [0-9]+ из [0-9]+ МБ · [0-9]+ %' $D/dl \
+      && res 0 "D4 у «Чтения снимков» — «качается» и своя полоса «N из M МБ · P %»" || res 1 "D4 у модуля не видно метки и полосы загрузки"
+  fi
   l=$(wl "$m" 'модули докачаны|докачиваю' 120); say "  $l"
   d=$(wl "$m" 'модули докачаны' 240); say "  $d"
   [ "$(size ocr/det.onnx)" = "$(stat -c %s $R/models/ocr/det.onnx)" ] && res 0 "D4 включили — модели снимков докачались сами" || res 1 "D4 не докачались"
+  if [ -n "$ui4" ]; then
+    sleep 2; dump; r=$(ui up --text 'Чтение снимков' --levels 1 | paste -sd'|' -)
+    printf '%s' "$r" | grep -q '|установлено' && ! printf '%s' "$r" | grep -qE '[0-9]+ из [0-9]+ МБ · ' \
+      && res 0 "D4 после докачки — «установлено», полосы нет" || res 1 "D4 после докачки у модуля: $r"
+    front && { $ADB shell "input keyevent 4"; sleep 1; $ADB shell "input keyevent 4"; sleep 1; }
+  fi
   stop_serve
 fi

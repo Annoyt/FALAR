@@ -10,27 +10,55 @@
 # Разговоры владельца не трогаются: тестовый разговор кладётся файлом с самым свежим временем (без
 # «нового разговора», который запускает разбор покидаемого) и в конце удаляется. Выученное, словарь,
 # известные слова и пины возвращаются из снимка, снятого прямо перед проверкой. Настройки разбора
-# возвращаются в REFINE_EVERY и CLOUD_EVERY (по умолчанию 1 и 10 — как у владельца на 28.09).
+# возвращаются к тем, что были (REFINE_EVERY и CLOUD_EVERY задают их явно).
 # Облачная часть идёт, только если в приложении есть ключ OpenRouter и согласие на отправку: в облако
 # уходит только синтетический тестовый разговор ниже.
 #
 # Экран: касания — только когда он включён и впереди Falar; экран блокировки не трогаем никогда.
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 SER=${1:-f6lnlrorgi59xwge}; ADB="$R/tools/platform-tools/adb -s $SER"
 ACT=app.falar/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/app.falar/files; LOG=$F/at.log
-REFINE_EVERY=${REFINE_EVERY:-1}; CLOUD_EVERY=${CLOUD_EVERY:-10}
+REF=; CLOUD=
 D=$(mktemp -d /tmp/falar-memo.XXXX); SNAP=$D/snap; mkdir -p $SNAP
 TID=$(date +%s%3N)
 pass=0; fail=0; skip=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 sk() { skip=$((skip+1)); say "ПРОПУСК $1"; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
 # ждать строку журнала после отметки; шаблон — расширенный (grep -E): у toybox «\|» в простом не работает
 wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
 since() { sh "tail -n +$(($1+1)) $LOG"; }
+# Настройки, к которым вернуться: частота разбора и облака — из окружения (REFINE_EVERY, CLOUD_EVERY),
+# иначе у самого приложения (стенд --es settings show читает сохранённые настройки), у прежних
+# сборок — из журнала; без них — как в приложении по умолчанию. Зовётся после free_phone: запускает Falar.
+every() { sh "grep -E '$1: (каждые|только)' $LOG | tail -1" | sed -n 's/.*каждые \([0-9]*\).*/\1/p;s/.*только по кнопке.*/0/p'; }
+orig_settings() {
+  REF=${REFINE_EVERY:-}; CLOUD=${CLOUD_EVERY:-}
+  [ -n "$REF" ] && [ -n "$CLOUD" ] && return
+  local m st; m=$(mark); $ADB shell "am start -n $ACT --es settings show" >/dev/null 2>&1
+  st=$(wl "$m" '🧪 настройки:' 15)
+  [ -z "$REF" ] && REF=$(printf '%s' "$st" | sed -n 's/.*разбор \([0-9][0-9]*\).*/\1/p')
+  [ -z "$CLOUD" ] && CLOUD=$(printf '%s' "$st" | sed -n 's/.*облако \([0-9][0-9]*\).*/\1/p')
+  [ -z "$REF" ] && REF=$(every 'разбор контекста'); [ -z "$CLOUD" ] && CLOUD=$(every 'пересмотр разговора в облаке')
+  REF=${REF:-3}; CLOUD=${CLOUD:-0}
+}
+free_phone() {
+  local n=0
+  while :; do
+    local f; f=$(sh "dumpsys window | grep -m1 mCurrentFocus")
+    case "$f" in *app.falar*|*com.miui.home*|*launcher*|*mCurrentFocus=null*) return 0;; esac
+    n=$((n+1)); [ $n -eq 1 ] && say "  телефон занят ($f), жду…"; sleep 10
+  done
+}
 front() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys window" | grep -m1 mCurrentFocus | grep -q "app.falar/"; }
 chat() { $ADB pull "$F/chats/$TID.json" "$D/chat.json" >/dev/null 2>&1 && python3 -c "import json,sys; o=json.load(open('$D/chat.json',encoding='utf-8')); print(o.get(sys.argv[1],''))" "$1"; }
 dump() { sh "uiautomator dump /sdcard/falar-ui.xml >/dev/null; cat /sdcard/falar-ui.xml; rm -f /sdcard/falar-ui.xml"; }
@@ -48,7 +76,8 @@ print('\n'.join(html.unescape(t) for t in re.findall(r'text=\"([^\"]*)\"', sys.s
 
 restore() {
   say "== возврат"
-  $ADB shell "am start -n $ACT --es listen off --es refineevery $REFINE_EVERY --es cloudevery $CLOUD_EVERY" >/dev/null 2>&1; sleep 3
+  $ADB shell "am start -n $ACT --es listen off ${REF:+--es refineevery $REF} ${CLOUD:+--es cloudevery $CLOUD}" >/dev/null 2>&1; sleep 3
+  say "  разбор: $REF, облако: $CLOUD"
   $ADB shell "am force-stop app.falar"; sleep 2
   for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do
     [ -f "$SNAP/$(basename $f)" ] && $ADB push "$SNAP/$(basename $f)" "$F/$f" >/dev/null 2>&1 && say "  вернул $f"
@@ -61,7 +90,7 @@ restore() {
 }
 trap restore EXIT
 
-$ADB wait-for-device
+$ADB wait-for-device; free_phone; orig_settings
 say "== снимок перед проверкой"
 for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do $ADB pull "$F/$f" "$SNAP/" >/dev/null 2>&1; done
 say "  $(ls $SNAP | tr '\n' ' ')"
@@ -98,6 +127,8 @@ if front; then
     printf '%s\n' "$txt" | grep -q "Кто говорит: по-португальски — женщина, по-русски — мужчина." \
       && res 0 "M1 «кто говорит» посчитан по репликам и виден" || { res 1 "M1 нет строки «кто говорит»"; printf '%s\n' "$txt" | head -12; }
     printf '%s\n' "$txt" | grep -q "Ключевые детали — пока нет" && res 0 "M1 деталей пока нет — так и сказано" || res 1 "M1 нет строки о деталях"
+    lab=$(printf '%s\n' "$txt" | grep -oE 'от облака|от модели|облачный пересмотр|уточнител|глоссари|obrigada' | sort -u | tr '\n' ' ')
+    [ -z "$lab" ] && res 0 "M1 без пояснений для разработчика (владелец 01.10)" || res 1 "M1 в окне служебное: $lab"
     $ADB exec-out screencap -p > /tmp/falar-memo-dialog.png 2>/dev/null
     front && $ADB shell "input keyevent 4"; sleep 1
   else sk "M1 строка с названием не найдена на экране"; fi
@@ -160,15 +191,32 @@ if [ -n "$(sh "ls $F/models/openrouter.json 2>/dev/null")" ]; then
     [ "$(chat memo)" = "$MINE" ] && [ "$(chat memoBy)" = "user" ] && res 0 "M4 после пересмотра память та же, пометка «человек»" || res 1 "M4 память изменилась: $(chat memoBy) · $(chat memo)"
     printf '%s' "$l" | grep -q "память ваша, не тронута" && say "  журнал: облако прислало память, ваша не тронута" || say "  (облако на этот раз памяти не прислало)"
   else sk "M4 облако не ответило: $l"; fi
+  # Окно памяти — без пометок, откуда она (владелец 01.10: «зачем простому пользователю информация,
+  # что от облака»): вписанное вами видно своим текстом, а вернуть его автоматике — в «ещё…».
+  ui6=""
   if front; then
     xy=$(dump | node "app.falar:id/hint")
     if [ -n "$xy" ] && front; then
       $ADB shell "input tap $xy"; sleep 2
-      dump | alltext | grep -q "Ключевые детали (ваши" && res 0 "M5 экран показывает, что память ваша" || res 1 "M5 на экране не видно, что память ваша"
+      dump > $D/m5.xml; txt=$(alltext < $D/m5.xml)
+      printf '%s\n' "$txt" | grep -qF "$MINE" && res 0 "M5 в окне — память, вписанная вами" || { res 1 "M5 в окне нет вписанной памяти"; printf '%s\n' "$txt" | head -12; }
+      lab=$(printf '%s\n' "$txt" | grep -oE '\(ваши|от облака|от модели|автоматика их не меняет|уточнител|глоссари' | sort -u | tr '\n' ' ')
+      [ -z "$lab" ] && res 0 "M5 без пометок, откуда память" || res 1 "M5 в окне пометки: $lab"
       $ADB exec-out screencap -p > /tmp/falar-memo-dialog-user.png 2>/dev/null
-      front && $ADB shell "input keyevent 4"; sleep 1
+      xy=$(python3 $R/bench/apk/ui.py find $D/m5.xml --text "ещё…" | cut -d' ' -f5,6)
+      if [ -n "$xy" ] && front; then
+        $ADB shell "input tap $xy"; sleep 1.5
+        xy=$(dump > $D/m6.xml; python3 $R/bench/apk/ui.py find $D/m6.xml --text "вернуть память автоматике" | cut -d' ' -f5,6)
+        if [ -n "$xy" ] && front; then
+          m=$(mark); $ADB shell "input tap $xy"; ui6=1
+          wl "$m" 'возвращена автоматике' 20 >/dev/null && [ -z "$(chat memo)" ] && res 0 "M6 «ещё…» → «вернуть память автоматике» стирает память человека" || res 1 "M6 память не стёрта из меню"
+        else res 1 "M6 в «ещё…» нет «вернуть память автоматике»"; front && $ADB shell "input keyevent 4"; fi
+      else res 1 "M5 у окна вашей памяти нет кнопки «ещё…»"; front && $ADB shell "input keyevent 4"; fi
+      sleep 1
     else sk "M5 строка с названием не найдена"; fi
   else sk "M5 экран выключен или впереди не Falar"; fi
-  m=$(mark); $ADB shell "am start -n $ACT --es memo off" >/dev/null 2>&1
-  wl "$m" 'возвращена автоматике' 20 >/dev/null && [ -z "$(chat memo)" ] && res 0 "M6 «вернуть облаку» стирает память человека" || res 1 "M6 память не стёрта"
+  if [ -z "$ui6" ]; then
+    m=$(mark); $ADB shell "am start -n $ACT --es memo off" >/dev/null 2>&1
+    wl "$m" 'возвращена автоматике' 20 >/dev/null && [ -z "$(chat memo)" ] && res 0 "M6 «вернуть облаку» стирает память человека" || res 1 "M6 память не стёрта"
+  fi
 else sk "M3–M6 нет ключа OpenRouter в приложении"; fi

@@ -15,6 +15,12 @@
 # Телефон — рабочий аппарат владельца: Falar впереди ещё не значит «свободен». Ждём, пока журнал
 # приложения молчит три минуты (29.09 владелец разговаривал через Falar, а экран был включён).
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
+# девять минут касались телефона одновременно).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
@@ -22,7 +28,7 @@ D=$(mktemp -d /tmp/falar-mic.XXXX); SNAP=$D/snap; mkdir -p $SNAP; TID=$(date +%s
 pass=0; fail=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
-sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
+sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 # Сколько секунд журнал приложения молчит.
 quiet_s() { sh "echo \$(( \$(date +%s) - \$(stat -c %Y $LOG 2>/dev/null || echo 0) ))"; }
 free_phone() {
@@ -111,9 +117,12 @@ hold() {
   wl "$m" 'стенд: вместо микрофона будет' 10 >/dev/null || return 1
   sleep 1; front || return 1
   $ADB shell "sh /data/local/tmp/falar_px.sh $(( $2 / 1000 + 2 )) $dx $dy $cx $body" > $D/$3.raw &
-  sleep 0.3; $ADB shell "input swipe $cx $cy $cx $cy $2"; wait
-  local t0; t0=$(sh "tail -n 400 $F/at.tsv | grep micfile_begin | tail -1" | cut -f1)
+  sleep 0.3; $ADB shell "date +%s%3N > /data/local/tmp/falar_sw; input swipe $cx $cy $cx $cy $2"; wait
+  local t0 sw; t0=$(sh "tail -n 400 $F/at.tsv | grep micfile_begin | tail -1" | cut -f1); sw=$(sh "cat /data/local/tmp/falar_sw; rm -f /data/local/tmp/falar_sw")
   LC_ALL=C awk -v t0="$t0" 'NF == 7 { printf "%.2f %s %s %s %s %s %s\n", ($1 - t0) / 1000, $2, $3, $4, $5, $6, $7 }' $D/$3.raw > $D/$3.px
+  # Конец удержания в тех же секундах от первого кадра: касание начинается раньше, чем запись взяла
+  # первый кадр (на 0,3–0,6 с), и снимки после отпускания в окно удержания попадать не должны.
+  LC_ALL=C awk -v t0="$t0" -v sw="$sw" -v ms="$2" 'BEGIN { printf "%.2f\n", (sw + ms - t0) / 1000 }' > $D/$3.end
 }
 # Круг: сливовый (цвета нет), иначе оттенок: зелёный 70–170°, жёлтый 45–70°, красный < 20° или > 345°.
 cls() { python3 -c "
@@ -132,7 +141,7 @@ early=0; earlyok=0; late=0; lateok=0
 while read x r g b mr mg mb; do
   c=$(cls $r $g $b); say "  $x с: круг $c ($r $g $b), микрофон $mr $mg $mb"
   if python3 -c "import sys; sys.exit(0 if 0.1 <= $x <= 1.2 else 1)"; then early=$((early+1)); [ "$c" = нет_цвета ] && mint "$mr $mg $mb" && earlyok=$((earlyok+1)); fi
-  if python3 -c "import sys; sys.exit(0 if 2.0 <= $x <= 3.7 else 1)"; then late=$((late+1)); [ "$c" = красный ] && white "$mr $mg $mb" && lateok=$((lateok+1)); fi
+  if python3 -c "import sys; sys.exit(0 if 2.0 <= $x <= min(3.7, $(cat $D/m3.end) - 0.2) else 1)"; then late=$((late+1)); [ "$c" = красный ] && white "$mr $mg $mb" && lateok=$((lateok+1)); fi
 done < $D/m3.px
 [ $early -ge 1 ] && [ $earlyok = $early ] && res 0 "M3 первую секунду цвета нет: круг сливовый, микрофон мятный ($earlyok из $early)" || res 1 "M3 в первую секунду уже цвет или нет снимков: так $earlyok из $early"
 [ $late -ge 1 ] && [ $lateok = $late ] && res 0 "M3 молчат дольше 1,5 с — круг красный, микрофон белый ($lateok из $late)" || res 1 "M3 после 1,5 с тишины не красный: так $lateok из $late"

@@ -774,6 +774,11 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("better")) improveNow();
     // Стенд: можно ли сейчас «Улучшить» (как решает экран, без кнопки на экране) — test_better_device.sh.
     if (i != null && i.hasExtra("betterstate")) log("🧪 «Улучшить»: " + (eng == null ? "движок не готов" : (cloudBusy ? "занята — облако работает" : lastImproved() ? "погашена" : "можно") + " · способ: " + improveMode()));
+    // Стенд: сохранённые настройки, к которым скрипт вернёт приложение после проверки (test_*_device.sh).
+    // Из настроек, а не из полей: до загрузки движков поля ещё не прочитаны.
+    if (i != null && i.hasExtra("settings")) { android.content.SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
+      log("🧪 настройки: разбор " + p.getInt("refine_every", 3) + " · облако " + p.getInt("cloud_every", 0) + " · чтение вслух " + p.getInt("read_guard", 1)
+          + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0)); }
     if (i != null && i.hasExtra("refineevery")) setRefineEvery(Integer.parseInt(i.getStringExtra("refineevery")));
     if (i != null && i.hasExtra("cloudevery")) setCloudEvery(Integer.parseInt(i.getStringExtra("cloudevery")));
     if (i != null && i.hasExtra("consent")) { getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("cloud_consent", "1".equals(i.getStringExtra("consent"))).apply(); log("☁ согласие на отправку разговора: " + cloudConsent()); }
@@ -889,6 +894,7 @@ public class TranslatorService extends Service {
     // Экран мог подключиться после проверки моделей при старте — отдаём ему итог сразу.
     if (l != null && store != null) { ModelStore.State st = store.state(); main.post(() -> l.onModels(st)); }
     if (l != null) { String u = updateState; main.post(() -> l.onUpdate(u)); }
+    if (l != null && lastStatus != null) { String st = lastStatus; main.post(() -> l.onStatus(st)); }
     pushBusy();
   }
 
@@ -1679,19 +1685,15 @@ public class TranslatorService extends Service {
   /** Последняя реплика уже обработана тем, чем «Улучшить» обработала бы её сейчас, — тогда кнопка
    *  гаснет (владелец 01.10: «надо тушить кнопку улучшить, если данная фраза уже была обработана»).
    *  Облако: оно уже пересматривало разговор до этой реплики или правило её. Уточнитель: он её уже
-   *  разбирал или она уже улучшена. По способу, а не «чем угодно»: уточнитель разбирает каждую
-   *  реплику сам, и иначе облачное «Улучшить» не было бы доступно почти никогда. Правленное
-   *  человеком автоматика не меняет, текст снимка «Улучшить» не трогает — тоже гаснет. */
+   *  разбирал или она уже улучшена. Само правило — Screen.improved (настольный тест ScreenTest);
+   *  здесь — откуда что взять. Способ спрашивается последним: в нём проверка сети. */
   public boolean lastImproved() {
     Chats c = chats; if (c == null || c.size() == 0) return true;
-    String[] t = c.turn(c.size() - 1); if (t == null) return true;
-    if (Chats.PHOTO.equals(t[8])) return true;
+    String[] t = c.turn(c.size() - 1);
+    if (t == null || Chats.PHOTO.equals(t[8])) return true;
     long at; try { at = Long.parseLong(t[6]); } catch (Exception e) { return false; }
-    if (c.humanAt(at)) return true;
-    String m = improveMode();
-    if (m.equals("cloud")) return Chats.BY_CLOUD.equals(t[5]) || (lastCloudChat == c.current && lastCloudAt >= at);
-    if (m.equals("local")) return !t[4].isEmpty() || lastLocalAt >= at;
-    return false;
+    boolean human = c.humanAt(at);
+    return Screen.improved(t, human, human ? "" : improveMode(), lastCloudChat == c.current, lastCloudAt, lastLocalAt);
   }
   public boolean cloudConsent() { return getSharedPreferences("at", MODE_PRIVATE).getBoolean("cloud_consent", false); }
   public void setRefineEvery(int n) {
@@ -3240,7 +3242,10 @@ public class TranslatorService extends Service {
       return (frameZeroAt - headWriteNanos) / 1000000;
     } catch (Throwable e) { return -1; }
   }
-  void status(String s) { Listener l = listener; if (l != null) main.post(() -> l.onStatus(s)); }
+  /** Последняя строка состояния — для экрана, подключившегося позже: пересозданный экран (тема системы,
+   *  возврат после камеры) иначе показывал «Запуск сервиса…» при работающей службе (test_ui_device.sh U9). */
+  volatile String lastStatus;
+  void status(String s) { lastStatus = s; Listener l = listener; if (l != null) main.post(() -> l.onStatus(s)); }
   final java.util.concurrent.ExecutorService fileLog = java.util.concurrent.Executors.newSingleThreadExecutor();
   final java.text.SimpleDateFormat stamp = new java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT);
   void log(String s) {

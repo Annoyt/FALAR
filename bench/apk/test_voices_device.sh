@@ -97,10 +97,14 @@ restore
 # строка Success/Failure — целиком; Falar был впереди — снова впереди.
 if [ "${INSTALL:-0}" = 1 ]; then
   APK=$R/bench/apk/Falar.apk; [ -f "$APK" ] || { say "нет $APK — сначала build.sh"; exit 1; }
+  # Свободен — это и экран не трогали 3 минуты, и Falar 3 минуты ничего не пишет в журнал, и владелец
+  # не слушает: телефон на столе со «Слушать» экрана не касается, а установка убила бы разговор.
   n=0; while :; do
     a=$(sh "dumpsys power" | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
-    if asleep || { case "$(focus)" in *$PKG*|*com.miui.home*|*launcher*) true;; *) false;; esac && [ "${a:-0}" -ge 180000 ]; }; then break; fi
-    n=$((n+1)); [ $n -eq 1 ] && say "  жду, пока телефон свободен для установки ($(focus))"; sleep 20
+    quiet=$(( $(sh "date +%s") - $(sh "stat -c %Y $LOG 2>/dev/null || echo 0") ))
+    listening=$(sh "grep -E '▶ слушаю|⏹ не слушаю' $LOG | tail -1" | grep -c '▶ слушаю')
+    if [ "$listening" = 0 ] && [ "$quiet" -ge 180 ] && { asleep || { case "$(focus)" in *$PKG*|*com.miui.home*|*launcher*) true;; *) false;; esac && [ "${a:-0}" -ge 180000 ]; }; }; then break; fi
+    n=$((n+1)); [ $n -eq 1 ] && say "  жду, пока телефон свободен для установки ($(focus | sed 's/.*{//; s/}.*//'), журнал молчит $quiet с, слушание: $listening)"; sleep 20
   done
   front=0; case "$(focus)" in *$PKG*) asleep || front=1;; esac
   free=$(sh "df /data" | awk 'NR==2{print $4}'); say "  свободно на /data: $free КБ"
