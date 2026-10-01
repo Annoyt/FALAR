@@ -55,7 +55,7 @@ class PBFDAF:
         self.W = np.zeros((p, n + 1), np.complex128)
         self.X = np.zeros((p, n + 1), np.complex128)
         self.xold = np.zeros(n)
-        self.pw = np.zeros(n + 1)
+        self.pw = np.zeros(n + 1); self.plt = 0.0
 
     def block(self, x, d):
         n = self.n
@@ -64,10 +64,16 @@ class PBFDAF:
         y = np.fft.irfft(np.sum(self.W * self.X, axis=0))[n:]
         e = d - y
         E = np.fft.rfft(np.concatenate([np.zeros(n), e]))
-        px = np.sum(np.abs(self.X) ** 2, axis=0) / self.p
-        self.pw = 0.9 * self.pw + 0.1 * px
-        if np.mean(px) > 1e-7:                   # опора молчит — не учимся на одном шуме
-            delta = 1e-2 * np.mean(self.pw) + 1e-9
+        px = np.sum(np.abs(self.X) ** 2, axis=0)      # сумма по всем блокам фильтра: общий шаг — mu, а не mu·P
+        # Мощность опоры по полосам — не ниже текущей: на начале фразы сглаженная отстаёт, и шаг,
+        # нормированный по ней, выходил в разы больше нужного (фильтр разносило на первых словах).
+        self.pw = np.maximum(0.9 * self.pw + 0.1 * px, px)
+        m = float(np.mean(px)); self.plt = m if self.plt == 0 else 0.995 * self.plt + 0.005 * m
+        # Речь — с паузами и цветным спектром: где опора тихая (пауза, верхние полосы), нормированный шаг
+        # взлетает и фильтр разносит. Поэтому регуляризация — от долгой средней мощности опоры, а в
+        # тихих блоках опоры фильтр не учится вовсе.
+        if m > 0.01 * self.plt and m > 1e-9:
+            delta = 0.05 * float(np.mean(self.pw)) + 1e-9   # от текущей мощности: долгая растёт медленно, и слабые полосы разносило
             G = self.mu * np.conj(self.X) * E / (self.pw + delta)
             g = np.fft.irfft(G, axis=1); g[:, n:] = 0
             self.W += np.fft.rfft(g, axis=1)
@@ -78,6 +84,36 @@ class PBFDAF:
         for i in range(0, len(mic) - self.n + 1, self.n):
             out[i:i + self.n] = self.block(ref[i:i + self.n], mic[i:i + self.n])
         return out
+
+
+def nlms(ref, mic, L=2048, mu=0.5, dtd=True):
+    """Свой подавитель: нормированный LMS во времени (L отводов), опора выровнена по задержке эха заранее.
+    dtd — не учиться, пока говорит человек: ошибка заметно громче оценки эха (на сходившемся фильтре).
+    Возвращает (ошибка — микрофон без эха, оценка эха)."""
+    w = np.zeros(L); xb = np.zeros(L); e = np.zeros_like(mic); yh = np.zeros_like(mic)
+    pe = py = 1e-9
+    for i in range(len(mic)):
+        xb[1:] = xb[:-1]; xb[0] = ref[i]
+        y = w @ xb; yh[i] = y; e[i] = mic[i] - y
+        pe = 0.995 * pe + 0.005 * e[i] * e[i]; py = 0.995 * py + 0.005 * y * y
+        if dtd and i > 32000 and pe > 4 * py:      # ошибка вчетверо громче эха — это человек, фильтр не трогаем
+            continue
+        nrm = xb @ xb
+        if nrm > 1e-6:
+            w += mu * e[i] * xb / (nrm + 1e-3)
+    return e, yh
+
+
+def res(e, yh, beta=2.0, floor=0.05):
+    """Подавление остатка эха: где в полосе оценка эха сравнима с выходом — полоса глушится (Винер)."""
+    n, h = 512, 256
+    win = np.hanning(n)
+    out = np.zeros(len(e) + n); norm = np.zeros(len(e) + n)
+    for i in range(0, len(e) - n, h):
+        E = np.fft.rfft(e[i:i + n] * win); Y = np.fft.rfft(yh[i:i + n] * win)
+        g = np.maximum(floor, 1 - beta * np.abs(Y) ** 2 / (np.abs(E) ** 2 + 1e-12))
+        out[i:i + n] += np.fft.irfft(E * g) * win; norm[i:i + n] += win ** 2
+    return (out[:len(e)] / np.maximum(norm[:len(e)], 1e-6)).astype(np.float64)
 
 
 _asr = None
@@ -134,19 +170,20 @@ def main():
     refal[max(0, s0):max(0, s0) + len(ref16)] = ref16[:len(refal) - max(0, s0)]
     seg = slice(at + k, at + k + len(ref16))
     print('\n## 2. Свой подавитель на записи vr (только эхо и фон)\n')
-    print('| блок, отсчётов | длина фильтра, мс | шаг | эхо до, dBFS | после, dBFS | ERLE, дБ | последние 2 с: ERLE, дБ |')
+    print('| фильтр, мс | шаг | эхо, dBFS | после фильтра | ERLE, дБ | + подавление остатка: dBFS · ERLE, дБ | последние 2 с: ERLE фильтра · с подавлением, дБ |')
     print('|---|---|---|---|---|---|---|')
     best = None
-    for n, p_, mu in ((256, 4, 0.5), (256, 8, 0.5), (256, 16, 0.5), (256, 8, 0.2), (256, 8, 0.8), (128, 16, 0.5)):
-        e = PBFDAF(n, p_, mu).run(refal, mic)
-        before, after = db(mic[seg]), db(e[seg])
-        tail = slice(seg.stop - 32000, seg.stop)
-        erle_tail = db(mic[tail]) - db(e[tail])
-        print(f'| {n} | {n * p_ / 16:.0f} | {mu} | {before:.1f} | {after:.1f} | {before - after:.1f} | {erle_tail:.1f} |')
-        if best is None or erle_tail > best[0]:
-            best = (erle_tail, n, p_, mu)
-    _, n, p_, mu = best
-    print(f'\nЛучший по последним 2 с: блок {n}, фильтр {n * p_ / 16:.0f} мс, шаг {mu}.')
+    tail = slice(seg.stop - 32000, seg.stop)
+    for L, mu in ((1024, 0.5), (2048, 0.5), (2048, 0.2), (4096, 0.5)):
+        e, yh = nlms(refal, mic.astype(np.float64), L, mu)
+        r = res(e, yh)
+        before = db(mic[seg])
+        print(f'| {L / 16:.0f} | {mu} | {before:.1f} | {db(e[seg]):.1f} | {before - db(e[seg]):.1f} | {db(r[seg]):.1f} · {before - db(r[seg]):.1f} | '
+              f'{db(mic[tail]) - db(e[tail]):.1f} · {db(mic[tail]) - db(r[tail]):.1f} |')
+        if best is None or db(mic[tail]) - db(r[tail]) > best[0]:
+            best = (db(mic[tail]) - db(r[tail]), L, mu)
+    _, L, mu = best
+    print(f'\nЛучший: фильтр {L / 16:.0f} мс, шаг {mu}.')
 
     # 3. Человек поверх озвучки
     sys.path.insert(0, os.path.join(R, 'tools'))
@@ -177,7 +214,7 @@ def main():
             h = h * (echo_rms * 10 ** (r / 20) / (10 ** (db(h) / 20)))
             x = mic.copy(); s1 = seg.start + 16000
             L = min(len(h), len(x) - s1); x[s1:s1 + L] += h[:L]
-            e = PBFDAF(n, p_, mu).run(refal, x)
+            e0, yh = nlms(refal, x.astype(np.float64), L, mu); e = res(e0, yh)
             win = slice(seg.start, max(seg.stop, s1 + L) + 3200)
             txt = open(c + '.txt', encoding='utf-8').read()
             ha, hb = asr(x[win]), asr(e[win])
