@@ -2314,7 +2314,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (s.startsWith("☁") || s.startsWith("🧠")) refreshBetter();
   }
   @Override public void onHint(String s) { if (s != null) setHint(s); refreshBetter(); }
-  @Override public void onHistory() { refreshHist(); refreshHint(); refreshChats(); refreshBetter(); }
+  @Override public void onHistory() { refreshHist(); refreshHint(); refreshChats(); refreshBetter(); if (bigText.length() >= 2) setWho(bigDir); }
   @Override public void onNames(java.util.List<String[]> names, boolean manual) {
     if (isFinishing() || isDestroyed()) return;
     if (manual) namesDialog(names);

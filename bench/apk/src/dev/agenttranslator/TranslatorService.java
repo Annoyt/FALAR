@@ -834,7 +834,7 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("testwav")) { final String wav = i.getStringExtra("testwav"), dir = i.getStringExtra("dir") == null ? "pt2ru" : i.getStringExtra("dir");
       final boolean asPtt = "1".equals(i.getStringExtra("ptt"));
       worker.submit(() -> { try { WaveReader wr = new WaveReader(wav); final float[] smp = wr.getSamples(); final int sr = wr.getSampleRate();
-        if (asPtt) process(dir, smp, sr, true, voicesOn() ? new Who(spkExec.submit(() -> spk.embed(smp, sr))) : null);
+        if (asPtt) process(dir, smp, sr, true, voicesOn() ? new Who(spkExec.submit(() -> spk.embed(smp, sr)), false) : null);
         else process(dir, smp, sr); } catch (Throwable t) { log("Ошибка теста: " + t); } }); }
     return START_STICKY;
   }
@@ -948,7 +948,7 @@ public class TranslatorService extends Service {
     // Фраза кнопкой — голос того, кто её сказал (Voices): отпечаток считается рядом с распознаванием,
     // а в голоса разговора ложится, когда реплика принята. Тот же звук после усиления, что слышит и
     // слушание: слепок и сегменты сравниваются в одном тракте.
-    final Who who = voicesOn() ? new Who(spkExec.submit(() -> spk.embed(all, 16000))) : null;
+    final Who who = voicesOn() ? new Who(spkExec.submit(() -> spk.embed(all, 16000)), false) : null;
     // Удержание всегда определяет язык по сказанному. Раньше здесь вызывался вариант, берущий
     // режим из полей: при выключенных кнопках слушания autoLang=false, направление оставалось
     // ru2pt, и сказанное по-португальски отбивал языковой фильтр — «не похоже на русский».
@@ -978,15 +978,20 @@ public class TranslatorService extends Service {
         sf[0], sf[1], gainDb, segLimPct > 0 ? String.format(Locale.ROOT, ", ограничитель %.2f %%", segLimPct) : "")));
   }
   volatile String pttFixed = null; volatile boolean pttAuto = true;
-  /** Отпечатки голоса — своим потоком: у фразы кнопкой он считается рядом с распознаванием. */
-  final ExecutorService spkExec = Executors.newSingleThreadExecutor();
-  /** Чей голос у фразы: номер голоса разговора с косинусом (слушание: голос опознан до
-   *  распознавания) или отпечаток, который ещё считается (кнопка FALAR: голос ложится в разговор,
-   *  когда реплика принята, — шум, отбитый проверкой языка, голосом не становится). */
+  /** Отпечатки голоса — своим потоком с низким приоритетом и одним ядром (Speaker): перевод главнее.
+   *  Владелец 01.10: «флоу скорости не должен нас покидать» — отпечаток не должен задерживать ни
+   *  распознавание, ни перевод, ни озвучку. Поток один, задачи — по очереди: голос фразы кнопкой
+   *  (enrollLater) ждёт свой отпечаток, поставленный в очередь раньше, и дождётся его. */
+  final ExecutorService spkExec = Executors.newSingleThreadExecutor(r -> new Thread(() -> {
+    try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); } catch (Throwable ignore) {}
+    r.run(); }, "voiceprint"));
+  /** Отпечаток фразы, который считается рядом с распознаванием. listen — сегмент слушания: решение
+   *  «голос разговора или чужой» принимается после распознавания и до перевода (processText);
+   *  иначе — фраза кнопкой FALAR: её голос ложится в разговор уже после того, как перевод на экране и
+   *  звучит (enrollLater), — шум, отбитый проверкой языка, голосом не становится. */
   static final class Who {
-    final String n; final float score; final long ms; final java.util.concurrent.Future<float[]> print;
-    Who(String n, float score, long ms) { this.n = n; this.score = score; this.ms = ms; print = null; }
-    Who(java.util.concurrent.Future<float[]> print) { n = null; score = 0; ms = 0; this.print = print; }
+    final java.util.concurrent.Future<float[]> print; final boolean listen; final long t0 = System.nanoTime();
+    Who(java.util.concurrent.Future<float[]> print, boolean listen) { this.print = print; this.listen = listen; }
   }
   /** Голоса разговора работают: модуль включён, модель поднята, разговоры открыты. */
   boolean voicesOn() { Speaker s = spk; return s != null && s.ready && chats != null; }
@@ -2410,32 +2415,46 @@ public class TranslatorService extends Service {
     String dir = fixedDir != null ? fixedDir : "pt2ru";
     Who w = null;
     if (voicesOn()) {
-      Voices vs = chats.voices;
-      if (vs.isEmpty()) { skipVoice("skip_novoice", "🎤 в разговоре ещё нет голосов — пусть каждый скажет фразу кнопкой FALAR", seg, Float.NaN, true); return; }
-      long t = System.nanoTime(); float[] e;
-      try { e = spk.embed(seg, 16000); } catch (Throwable x) { skipVoice("skip_voice", "🎤 отпечаток не посчитался (" + x + ") — фраза не переведена", seg, Float.NaN, false); return; }
-      long ms = (System.nanoTime() - t) / 1000000;
-      if (e == null) { skipVoice("skip_short", "🎤 обрывок короче " + Speaker.MIN_SECONDS + " с — по голосу не узнать, не перевожу", seg, Float.NaN, false); return; }
-      Voices.Match m = vs.best(e);
-      if (!m.hit(Voices.HEAR)) {
-        skipVoice("skip_voice", String.format(Locale.ROOT, "🎤 чужой голос: ближе всех «%s» — %.2f, нужно %.2f · не перевожу (%d мс)",
-            Voices.label(m.v), m.score, Voices.HEAR, ms), seg, m.score, false);
-        return;
-      }
-      w = new Who(String.valueOf(m.v.n), m.score, ms);
-      if (fixedDir == null) dir = "ru".equals(m.v.lang) ? "ru2pt" : "pt2ru";
+      double ms = seg.length / 16.0;
+      if (chats.voices.isEmpty()) { skipVoice("skip_novoice", "🎤 в разговоре ещё нет голосов — пусть каждый скажет фразу кнопкой FALAR", ms, Float.NaN, true); return; }
+      if (seg.length < Speaker.MIN_SECONDS * 16000) { skipVoice("skip_short", "🎤 обрывок короче " + Speaker.MIN_SECONDS + " с — по голосу не узнать, не перевожу", ms, Float.NaN, false); return; }
+      // Отпечаток — рядом с распознаванием, своим потоком; решение — до перевода (processText).
+      final Speaker sp = spk;
+      w = new Who(spkExec.submit(() -> sp.embed(seg, 16000)), true);
     }
     process(dir, seg, 16000, autoLang && fixedDir == null, w);
   }
   /** Сегмент не переведён из-за голоса: в журнал и в at.tsv; на экран — только «голосов нет»
    *  (иначе слушание в новом разговоре выглядит сломанным), а не каждый чужой обрывок. */
   volatile long noVoiceHintAt = 0;
-  void skipVoice(String kind, String m, float[] seg, float score, boolean show) {
-    log(m); tsvSeg(kind, "", "", "", Float.isNaN(score) ? "" : String.format(Locale.ROOT, "%.2f", score), seg.length / 16.0, 0, 0);
+  void skipVoice(String kind, String m, double durMs, float score, boolean show) {
+    log(m); tsvSeg(kind, "", "", "", Float.isNaN(score) ? "" : String.format(Locale.ROOT, "%.2f", score), durMs, 0, 0);
     long now = System.currentTimeMillis();
     if (show && now - noVoiceHintAt > 20_000) { noVoiceHintAt = now; hint("скажите фразу кнопкой FALAR — голос запомнится"); }
   }
 
+  /** Голос фразы кнопкой FALAR — в голоса разговора, когда реплика уже на экране и звучит: перевод
+   *  отпечатка не ждёт. Новый человек получает номер, знакомый подстраивает слепок; номер ложится в
+   *  реплику по её метке, подпись на экране дорисовывается. Только в разговоре, где фраза сказана.
+   *  Задача идёт в том же потоке, что и отпечаток (spkExec), и стоит в очереди после него. */
+  void enrollLater(Who w, String lang, String asr, long chatId, long at) {
+    spkExec.submit(() -> {
+      float[] e = null;
+      try { e = w.print.get(10, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignore) {}
+      long total = (System.nanoTime() - w.t0) / 1000000;
+      if (e == null) { log("🎤 голос не записан: фраза короче " + Speaker.MIN_SECONDS + " с или отпечаток не посчитался"); return; }
+      Chats c = chats;
+      if (c == null || c.current != chatId) { log("🎤 разговор сменился — голос фразы не записан"); return; }
+      Voices.Match m = c.voices.best(e); int before = c.voices.size();
+      Voices.Voice v = c.enroll(e, lang, at);
+      boolean placed = c.setWho(at, String.valueOf(v.n));
+      String nm = v.name.isEmpty() ? Memo.intro(asr, lang) : null;
+      boolean named = nm != null && c.nameVoice(v.n, nm, "auto");
+      log("🎤 " + voiceNote(v, m, c.voices.size() > before) + String.format(Locale.ROOT, " · отпечаток готов через %d мс после фразы", total)
+          + (named ? " · представился: " + nm : "") + (placed ? "" : " · реплики с этой меткой уже нет"));
+      Listener l = listener; if (l != null) main.post(l::onHistory);
+    });
+  }
   /** Португальская речь, которая на самом деле не речь собеседника: владелец читает вслух
    *  фразу с экрана по транскрипции. Два признака, оба без настройки и без сети.
    *  Первый: сказанное почти целиком состоит из слов фразы, которая сейчас на экране — значит
@@ -2825,28 +2844,30 @@ public class TranslatorService extends Service {
     busy("live", "перевожу…", 0, 0);
     try {
       long t1 = System.nanoTime();
-      String who = whoIn == null ? null : whoIn.n, spkTag = null;
-      if (who != null) spkTag = String.format(Locale.ROOT, " · 🎤 голос %s %.2f (%d мс)", who, whoIn.score, whoIn.ms);
+      String who = null, spkTag = null;
+      // Слушание: голос разговора или чужой — после распознавания и до перевода. Отпечаток считался
+      // рядом с распознаванием; обычно он готов, и ждать не приходится (ждал — в журнале).
+      if (whoIn != null && whoIn.listen) {
+        float[] e = null; long tw = System.nanoTime();
+        try { e = whoIn.print.get(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignore) {}
+        long waited = (System.nanoTime() - tw) / 1000000, total = (tw - whoIn.t0) / 1000000 + waited;
+        Voices vs = chats == null ? new Voices() : chats.voices;
+        Voices.Match m = vs.best(e);
+        if (e == null || !m.hit(Voices.HEAR)) {
+          skipVoice("skip_voice", e == null ? "🎤 отпечаток не посчитался — фраза не переведена"
+              : String.format(Locale.ROOT, "🎤 чужой голос: ближе всех «%s» — %.2f, нужно %.2f · не перевожу (отпечаток %d мс, ждал %d мс)",
+                  Voices.label(m.v), m.score, Voices.HEAR, total, waited), durMs, m.score, false);
+          return;
+        }
+        who = String.valueOf(m.v.n);
+        spkTag = String.format(Locale.ROOT, " · 🎤 голос %s %.2f (отпечаток %d мс, ждал %d мс)", who, m.score, total, waited);
+        if (auto) dirIn = "ru".equals(m.v.lang) ? "ru2pt" : "pt2ru";   // язык голоса — по умолчанию; ясный текст поправит
+      }
       Once r = translateOnce(dirIn, asrIn, auto, gate);
       busy("live", null, 0, 0);                    // перевод готов; озвучка слышна сама
       if (r.skip != null) { log(r.skip); tsvSeg(r.skipKind, r.dir, r.asr, "", r.lkTag, durMs, srcMs, 0); return; }
       String guard = readSkip(r.dir, r.asr, who, kind);
       if (guard != null) { log(guard); hint(guard); status(guard); tsvSeg("skip_read", r.dir, r.asr, "", "", durMs, srcMs, 0); return; }
-      // Фраза кнопкой FALAR принята — её голос ложится в голоса разговора: новый человек получает
-      // номер, знакомый подстраивает слепок. Только в разговоре, где сказано: если его успели
-      // сменить, номер голоса из другого разговора тут был бы чужим.
-      if (whoIn != null && whoIn.print != null) {
-        float[] e = null; long tw = System.nanoTime();
-        try { e = whoIn.print.get(3, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignore) {}
-        long waited = (System.nanoTime() - tw) / 1000000;
-        if (e == null) log("🎤 голос не записан: фраза короче " + Speaker.MIN_SECONDS + " с или отпечаток не посчитался");
-        else if (chats != null && chats.current == chatId) {
-          Voices.Match m = chats.voices.best(e); int before = chats.voices.size();
-          Voices.Voice v = chats.enroll(e, r.src, System.currentTimeMillis());
-          who = String.valueOf(v.n);
-          spkTag = " · 🎤 " + voiceNote(v, m, chats.voices.size() > before) + (waited > 5 ? " (ждал отпечаток " + waited + " мс)" : "");
-        }
-      }
       // Снимок и набранная фраза — реплики владельца телефона: их вводит тот, кто держит телефон.
       if (who == null && (kind.equals("фото") || kind.equals("набрано"))) who = Voices.OWNER;
       // Человек назвался — «меня зовут Анна», «meu nome é Ana»: имя у его голоса (вписанное
@@ -2895,6 +2916,7 @@ public class TranslatorService extends Service {
       final String fSrc = asr, fDst = mt, fDir = dir;
       Listener lt = listener; if (lt != null) main.post(() -> lt.onTurn(fDir, fSrc, fDst, false));
       notify(asr + " → " + mt); scheduleRefine();
+      if (whoIn != null && !whoIn.listen) enrollLater(whoIn, r.src, r.asr, chatId, at);
     } catch (Throwable t) { Log.e(TAG, "process", t); log("Ошибка: " + t); tsv("error", dirIn, String.valueOf(t)); }
     finally { busy("live", null, 0, 0); }
   }

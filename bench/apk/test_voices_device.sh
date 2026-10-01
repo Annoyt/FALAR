@@ -215,9 +215,13 @@ printf '%s' "$l" | grep -q "удалены: ${OLDN:-?} " && res 0 "V0 удалё
 [ -z "$(sh "ls $M/speaker_profiles.json 2>/dev/null")" ] && res 0 "V0 файла больше нет" || res 1 "V0 файл остался"
 
 say "== V1–V3: фразы кнопкой FALAR"
-ptt() { local m l; m=$(mark); launch --es testwav "$F/$1" --es ptt 1; l=$(wl "$m" '🎤 (новый голос|голос узнан)|голос не записан|пропуска|пропущено' 60); printf '%s' "$l"; }
+ptt() { local m l; m=$(mark); launch --es testwav "$F/$1" --es ptt 1; l=$(wl "$m" '🎤 (новый голос|голос узнан)|голос не записан|пропуска|пропущено' 60); printf '%s' "$l"
+  # перевод не ждёт отпечатка: строка реплики (#N …) — раньше строки о голосе
+  local tl vl; tl=$(since "$m" | grep -n -m1 -E '^[0-9:.]+ #[0-9]+ ' | cut -d: -f1); vl=$(since "$m" | grep -n -m1 -E '🎤 (новый голос|голос узнан)' | cut -d: -f1)
+  [ -n "$tl" ] && [ -n "$vl" ] && [ "$tl" -lt "$vl" ] && echo " [реплика раньше голоса]" || echo " [голос раньше реплики или строк нет]"; }
 l=$(ptt vt_A1.wav); say "  $l"
 printf '%s' "$l" | grep -q "новый голос: собеседник 1 (pt)" && res 0 "V1 первый голос — собеседник 1, португальский" || res 1 "V1 ${l:-нет строки}"
+printf '%s' "$l" | grep -q "реплика раньше голоса" && res 0 "V1 перевод не ждал отпечатка: реплика в журнале раньше голоса" || res 1 "V1 порядок строк: голос не после реплики"
 sleep 2
 eq=$(cj "$TID" "len(o['turns']), o['turns'][-1].get('who'), [(v['n'], v['lang'], v['k'], len(v['e'])) for v in o.get('voices', [])]")
 [ "$eq" = "1 1 [(1, 'pt', 1, 512)]" ] && res 0 "V1 номер у реплики, слепок в файле разговора (512 чисел)" || res 1 "V1 в файле: $eq"
@@ -236,6 +240,7 @@ m=$(mark); launch --es listen both; sleep 2; launch --es feedwav "$F/vt_feed.wav
 wl "$m" 'подача закончена' 120 >/dev/null; sleep 8
 L=$(since "$m")
 skips=$(printf '%s\n' "$L" | grep -c '🎤 чужой голос')
+say "  ждал отпечаток перед переводом, мс: $(printf '%s\n' "$L" | sed -n 's/.*ждал \([0-9]*\) мс.*/\1/p' | tr '\n' ' ')· сам отпечаток, мс: $(printf '%s\n' "$L" | sed -n 's/.*отпечаток \([0-9]*\) мс.*/\1/p' | tr '\n' ' ')"
 say "  чужой голос: $skips · $(printf '%s\n' "$L" | grep -E '🎤 чужой голос' | sed 's/.*ближе всех/ближе всех/' | tr '\n' ';')"
 cj "$TID" "'\n'.join((t.get('who','-') + '\t' + t['src']) for t in o['turns'][$n0:])" > "$D/got.tsv"
 sed 's/^/  реплика: /' "$D/got.tsv"

@@ -156,6 +156,13 @@ public class ChatsTest {
     JSONArray mt = g.load(other).getJSONArray("turns");
     ok(!mt.getJSONObject(0).has("who"), "C29 номер голоса в чужой разговор не переносится");
     eq(mt.getJSONObject(1).optString("who"), Voices.OWNER, "C29 владелец телефона — везде владелец");
+    // голос фразы кнопкой ложится в реплику по метке уже после неё — перевод отпечатка не ждёт
+    Chats sw = new Chats(tmp());
+    sw.add("pt2ru", "Bom dia", "Доброе утро", null, 7_000);
+    ok(sw.setWho(7_000, "1") && "1".equals(sw.all().get(0)[7]), "C31 номер голоса лёг в реплику по метке");
+    ok(!sw.setWho(8_000, "1"), "C31 реплики с такой меткой нет — false");
+    Chats sw2 = new Chats(sw.dir.getParentFile()); sw2.open(sw.current);
+    eq(sw2.all().get(0)[7], "1", "C31 и в файле");
     // старый файл без поля voices читается как раньше
     Chats o = new Chats(tmp());
     JSONObject old = new JSONObject().put("id", 42).put("name", "Старый").put("turns", new JSONArray().put(Chats.turn("pt2ru", "Oi", "Привет", "собеседник", 1)));

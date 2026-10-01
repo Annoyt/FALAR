@@ -130,6 +130,17 @@ public class Chats {
     Voices.Voice v = voices.enroll(e, lang, at, next + 1);
     save(); return v;
   }
+  /** Номер голоса у реплики текущего разговора по её метке: голос фразы кнопкой узнаётся уже после
+   *  того, как реплика легла, — перевод отпечатка не ждёт. false — такой реплики уже нет. */
+  public synchronized boolean setWho(long at, String who) {
+    for (int k = turns.length() - 1; k >= 0; k--) {
+      JSONObject x = turns.optJSONObject(k);
+      if (x == null || x.optLong("at", -1) != at) continue;
+      try { x.put("who", who); } catch (JSONException e) { return false; }
+      save(); return true;
+    }
+    return false;
+  }
   /** Забыть голоса текущего разговора; номера в репликах остаются подписями. Сколько было. */
   public synchronized int clearVoices() { int n = voices.clear(); save(); return n; }
   /** Имя голоса: by = user — вписал человек (автоматика его не трогает), auto — нашлось в разговоре. */

@@ -40,7 +40,9 @@ public class Speaker {
       long t = System.currentTimeMillis();
       env = OrtEnvironment.getEnvironment();
       try (OrtSession.SessionOptions so = new OrtSession.SessionOptions()) {
-        so.setIntraOpNumThreads(2); so.setInterOpNumThreads(1);
+        // Одно ядро и поток вызова: отпечаток идёт потоком с низким приоритетом (spkExec), а пул ORT
+        // свой приоритет не наследует и мешал бы распознаванию и переводу.
+        so.setIntraOpNumThreads(1); so.setInterOpNumThreads(1);
         sess = env.createSession(f[0].getAbsolutePath(), so);
       }
       loadMs = System.currentTimeMillis() - t; ready = true;
