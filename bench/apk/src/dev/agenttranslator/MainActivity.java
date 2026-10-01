@@ -476,7 +476,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     String m = svc.improveMode();
     // Чем улучшит — значком: облако или уточнитель на телефоне; слово на чипе одно.
     chipIcon(bBetter, m.equals("cloud") ? app.falar.R.drawable.ic_cloud : m.equals("local") ? app.falar.R.drawable.ic_wand : app.falar.R.drawable.ic_spark);
-    bBetter.setEnabled(!svc.cloudBusy && (m.equals("cloud") || m.equals("local")));
+    // Гаснет и тогда, когда последняя фраза уже обработана тем же способом: нажатие ничего бы не дало.
+    bBetter.setEnabled(!svc.cloudBusy && (m.equals("cloud") || m.equals("local")) && !svc.lastImproved());
     refreshHint();
   }
   void refreshIntervals() {
@@ -2321,7 +2322,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (s.startsWith("☁") || s.startsWith("🧠")) refreshBetter();
   }
   @Override public void onHint(String s) { if (s != null) setHint(s); refreshBetter(); }
-  @Override public void onHistory() { refreshHist(); refreshHint(); refreshChats(); }
+  @Override public void onHistory() { refreshHist(); refreshHint(); refreshChats(); refreshBetter(); }
   @Override public void onNames(java.util.List<String[]> names, boolean manual) {
     if (isFinishing() || isDestroyed()) return;
     if (manual) namesDialog(names);

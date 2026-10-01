@@ -147,6 +147,9 @@ public class TranslatorService extends Service {
   volatile String lastMaskedSrc, lastMaskedDst; volatile List<String[]> lastSlots = new ArrayList<>(); volatile long lastAt = 0;
   /** Метка последней реплики, разобранной локальным проходом: следующий берёт всё, что позже. */
   volatile long lastLocalAt = 0;
+  /** До какой реплики (её at) и в каком разговоре облако уже пересмотрело разговор — для «Улучшить».
+   *  Отметка нужна отдельно от правок: облако могло прочесть фразу и ничего в ней не менять. */
+  volatile long lastCloudAt = 0, lastCloudChat = 0;
   /** Имена из облачных ответов, ещё не разобранные человеком. */
   public final List<String[]> pendingNames = Collections.synchronizedList(new ArrayList<>());
   /** Модели по манифесту, вшитому в APK: проверка при старте, загрузка с Hugging Face, необязательное по кнопке. */
@@ -728,6 +731,8 @@ public class TranslatorService extends Service {
     // Прогон изнутри приложения: снаружи его не запустить, потому что «am start» будит экран
     // и выводит активность вперёд, разрушая само проверяемое условие.
     if (i != null && i.hasExtra("better")) improveNow();
+    // Стенд: можно ли сейчас «Улучшить» (как решает экран, без кнопки на экране) — test_better_device.sh.
+    if (i != null && i.hasExtra("betterstate")) log("🧪 «Улучшить»: " + (eng == null ? "движок не готов" : (cloudBusy ? "занята — облако работает" : lastImproved() ? "погашена" : "можно") + " · способ: " + improveMode()));
     if (i != null && i.hasExtra("refineevery")) setRefineEvery(Integer.parseInt(i.getStringExtra("refineevery")));
     if (i != null && i.hasExtra("cloudevery")) setCloudEvery(Integer.parseInt(i.getStringExtra("cloudevery")));
     if (i != null && i.hasExtra("consent")) { getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("cloud_consent", "1".equals(i.getStringExtra("consent"))).apply(); log("☁ согласие на отправку разговора: " + cloudConsent()); }
@@ -982,7 +987,7 @@ public class TranslatorService extends Service {
     }
   }
   /** Смена разговора: счётчики интервалов и отметка локального разбора относятся к разговору. */
-  void resetPassCounters() { sinceLocal = 0; sinceCloud = 0; cloudBackoff = 1; cloudSkipLogged = false; lastLocalAt = 0; lastAt = 0; }
+  void resetPassCounters() { sinceLocal = 0; sinceCloud = 0; cloudBackoff = 1; cloudSkipLogged = false; lastLocalAt = 0; lastAt = 0; lastCloudAt = 0; }
 
   public int clearVoices() {
     int n = spk == null ? 0 : spk.forget();
@@ -1590,6 +1595,23 @@ public class TranslatorService extends Service {
     if (!cloudReady()) return mod(Modules.CLOUD) ? "нет ключа OpenRouter, а контекст 🧠 выключен" : "контекст 🧠 выключен, а облако — выключенный модуль";
     return "нет сети, а контекст 🧠 выключен";
   }
+  /** Последняя реплика уже обработана тем, чем «Улучшить» обработала бы её сейчас, — тогда кнопка
+   *  гаснет (владелец 01.10: «надо тушить кнопку улучшить, если данная фраза уже была обработана»).
+   *  Облако: оно уже пересматривало разговор до этой реплики или правило её. Уточнитель: он её уже
+   *  разбирал или она уже улучшена. По способу, а не «чем угодно»: уточнитель разбирает каждую
+   *  реплику сам, и иначе облачное «Улучшить» не было бы доступно почти никогда. Правленное
+   *  человеком автоматика не меняет, текст снимка «Улучшить» не трогает — тоже гаснет. */
+  public boolean lastImproved() {
+    Chats c = chats; if (c == null || c.size() == 0) return true;
+    String[] t = c.turn(c.size() - 1); if (t == null) return true;
+    if (Chats.PHOTO.equals(t[8])) return true;
+    long at; try { at = Long.parseLong(t[6]); } catch (Exception e) { return false; }
+    if (c.humanAt(at)) return true;
+    String m = improveMode();
+    if (m.equals("cloud")) return Chats.BY_CLOUD.equals(t[5]) || (lastCloudChat == c.current && lastCloudAt >= at);
+    if (m.equals("local")) return !t[4].isEmpty() || lastLocalAt >= at;
+    return false;
+  }
   public boolean cloudConsent() { return getSharedPreferences("at", MODE_PRIVATE).getBoolean("cloud_consent", false); }
   public void setRefineEvery(int n) {
     refineEvery = Math.max(0, n); getSharedPreferences("at", MODE_PRIVATE).edit().putInt("refine_every", refineEvery).apply();
@@ -1939,6 +1961,7 @@ public class TranslatorService extends Service {
           return;
         }
         if (chats.current != chatId) { log("☁ разговор сменился, пока шёл пересмотр — ответ отброшен"); return; }
+        if (!rows.isEmpty()) { lastCloudAt = Long.parseLong(rows.get(rows.size() - 1)[6]); lastCloudChat = chatId; }
         final Cloud.Review r = Cloud.Review.parse(out);
         int fixed = 0, learned = 0, masked = 0; String lastFix = null; final long chatLast = chats.lastAt(); StringBuilder wrongLang = new StringBuilder();
         Turn[] h; synchronized (history) { h = history.toArray(new Turn[0]); }
