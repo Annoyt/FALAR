@@ -2601,19 +2601,16 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  бегущая полоса перерисовывала весь экран на каждом кадре. */
   String convBusy; long cloudFrom; long cloudTypical;
   /** Загрузка движков: этап, их число, что грузится, когда этап начался; сколько этапы шли в прошлый
-   *  раз (load_ms, пишет сервис): по ним полоса идёт и внутри этапа, а в шапке — «ещё ≈ N с». */
+   *  раз (load_ms, пишет сервис): по ним отрезок идёт и внутри этапа, а в подписи — «ещё ≈ N с». */
   int loadK = -1, loadN; String loadWhat; long loadFrom; long[] loadMs;
   final Runnable loadTick = new Runnable() { public void run() {
     if (loadK < 0) return;
     long[] ms = loadMs; int n = loadN, k = Math.min(loadK, n - 1);
     long el = android.os.SystemClock.uptimeMillis() - loadFrom, cur = ms[Math.min(k, ms.length - 1)], before = 0, after = 0, all = 0;
     for (int i = 0; i < n; i++) { long x = ms[Math.min(i, ms.length - 1)]; all += x; if (i < k) before += x; else if (i > k) after += x; }
-    float f = (before + Math.min(0.95f * cur, el)) / (float) Math.max(1, all);
     long left = Math.max(cur - el, 500) + after;
-    convBusy = "Загружаю модели · " + loadWhat + " · ещё ≈ " + Math.max(1, Math.round(left / 1000.0)) + " с";
-    abProg.set(1, 0, f);
-    if (bMic != null) bMic.setLoad(f);
-    refreshHint();
+    stageBar.set(n, k, Math.min(0.95f, el / (float) Math.max(1, cur)));
+    busyLbl.setText("Загружаю модели · " + loadWhat + " · ещё ≈ " + Math.max(1, Math.round(left / 1000.0)) + " с");
     ui.postDelayed(this, 500);
   }};
   /** Сколько шли этапы загрузки в прошлый раз: распознавание, перевод, [озвучка,] словарь и разговоры.
@@ -2636,14 +2633,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }};
   @Override public void onBusy(String kind, String what, int done, int total) {
     if (busyRow == null) return;
-    // Загрузка движков — в шапке и кольцом на кнопке удержания, пока она тусклая.
+    // Загрузка движков — тем же видом, что ход перевода и снимка (владелец 01.10: «надо сохранить
+    // стиль»): отрезки этапов «распознавание · перевод · озвучка · словарь» на месте кнопок реплики и
+    // подпись с тем, сколько осталось.
     if (what != null && "load".equals(kind)) {
+      busyRow.setVisibility(View.VISIBLE); chipsRow.setVisibility(View.INVISIBLE);
       if (loadK < 0) { loadMs = loadExpect(total); ui.post(loadTick); }
       if (done != loadK) { loadK = done; loadFrom = android.os.SystemClock.uptimeMillis(); }
       loadN = Math.max(1, total); loadWhat = what;
       return;
     }
-    if (loadK >= 0) { loadK = -1; ui.removeCallbacks(loadTick); convBusy = null; if (bMic != null) bMic.setLoad(-1); }
+    if (loadK >= 0) { loadK = -1; ui.removeCallbacks(loadTick); }
     boolean reply = what != null && ("live".equals(kind) || "refine".equals(kind));
     busyRow.setVisibility(reply ? View.VISIBLE : View.INVISIBLE);
     chipsRow.setVisibility(reply ? View.INVISIBLE : View.VISIBLE);
