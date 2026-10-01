@@ -24,6 +24,8 @@
 # оборвался, даже kill -9, — следующий запуск сначала возвращает телефон (или --restore).
 # Замок общий с test_all_device.sh. Falar запускается только поверх себя, рабочего стола или
 # погашенного экрана, и только когда экрана не касались минуту.
+#
+#   INSTALL=1 bash bench/apk/test_voices_device.sh   # сначала поставить bench/apk/Falar.apk
 R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=f6lnlrorgi59xwge; ONLY_RESTORE=0
 for a in "$@"; do case "$a" in --restore) ONLY_RESTORE=1;; *) SER=$a;; esac; done
@@ -87,6 +89,28 @@ restore() {
 $ADB wait-for-device
 restore
 [ "$ONLY_RESTORE" = 1 ] && exit 0
+
+# ---- INSTALL=1: поставить собранную сборку (bench/apk/Falar.apk) ------------------------------------
+# Только на свободный телефон: экран погашен или впереди Falar/рабочий стол и экрана не касались
+# 3 минуты; место — прямо перед установкой; без incremental (тот оставляет ~0,4 ГБ до перезагрузки);
+# строка Success/Failure — целиком; Falar был впереди — снова впереди.
+if [ "${INSTALL:-0}" = 1 ]; then
+  APK=$R/bench/apk/Falar.apk; [ -f "$APK" ] || { say "нет $APK — сначала build.sh"; exit 1; }
+  n=0; while :; do
+    a=$(sh "dumpsys power" | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
+    if asleep || { case "$(focus)" in *$PKG*|*com.miui.home*|*launcher*) true;; *) false;; esac && [ "${a:-0}" -ge 180000 ]; }; then break; fi
+    n=$((n+1)); [ $n -eq 1 ] && say "  жду, пока телефон свободен для установки ($(focus))"; sleep 20
+  done
+  front=0; case "$(focus)" in *$PKG*) asleep || front=1;; esac
+  free=$(sh "df /data" | awk 'NR==2{print $4}'); say "  свободно на /data: $free КБ"
+  [ "${free:-0}" -ge 1500000 ] || { say "мало места для установки — попросите владельца перезагрузить телефон"; exit 1; }
+  before=$(sh "dumpsys package $PKG" | grep -m1 lastUpdateTime)
+  out=$($ADB install --no-incremental -r "$APK" 2>&1 | tr -d '\r' | grep -E '^(Success|Failure)'); say "  установка: ${out:-нет ответа}"
+  after=$(sh "dumpsys package $PKG" | grep -m1 lastUpdateTime)
+  case "$out" in Success*) [ "$before" != "$after" ] || { say "сборка не сменилась"; exit 1; };; *) exit 1;; esac
+  say "  $(sh "dumpsys package $PKG" | grep -m1 versionName | tr -d ' ') · $after"
+  [ $front = 1 ] && $ADB shell "am start -n $ACT" >/dev/null 2>&1
+fi
 D=$(mktemp -d "$STATE/voices-run.XXXX")
 trap 'restore; rm -rf "$D"; say; say "итог: PASS $pass, FAIL $fail"' EXIT
 
