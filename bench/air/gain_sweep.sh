@@ -52,7 +52,9 @@ restore() {
   $ADB shell "am force-stop $PKG"; sleep 2      # подача могла не кончиться — после сброса она подстроила бы авто снова
   $ADB shell "am start -n $ACT --es vad 0 --es silent 0 --es refineevery $REF --es cloudevery $CLOUD --es micautodb $AUTO0 $([ -n "${NOSPK:-}" ] && echo "--es modules '$MODS0'")" >/dev/null 2>&1; sleep 3
   if [ -n "${NOSPK:-}" ]; then local mm; mm=$(count $LOG); $ADB shell "am start -n $ACT --es modules show" >/dev/null 2>&1; sleep 3
-    say "  модули: $(sh "tail -n +$((mm+1)) $LOG | grep -m1 '🧩 модули сейчас'" | sed 's/.*модули сейчас: //') (было до замера: [$MODS0])"; fi
+    local now; now=$(sh "tail -n +$((mm+1)) $LOG | grep -m1 '🧩 модули сейчас'" | sed -n 's/.*модули сейчас: \[\([a-z,]*\)\].*/\1/p')
+    [ "$now" = "$MODS0" ] && say "  модуль «отпечаток голоса» включён обратно: модули [$now], как до замера" \
+      || say "  ВНИМАНИЕ: модули после возврата [$now], а до замера были [$MODS0] — вернуть: am start -n $ACT --es modules '$MODS0'"; fi
   $ADB shell "am force-stop $PKG"; sleep 2
   for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do
     [ -f "$SNAP/$(basename $f)" ] && $ADB push "$SNAP/$(basename $f)" "$F/$f" >/dev/null 2>&1; done
