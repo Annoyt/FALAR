@@ -42,7 +42,7 @@ putvol() {
   if [ "$now" = "$v" ]; then rm -f "$PENDV"; say "  громкость возвращена: $v"; else say "  ГРОМКОСТЬ НЕ ВОЗВРАЩЕНА (нужно $v, сейчас ${now:-нет связи}) — вернёт следующий запуск или --restore"; fi
 }
 if [ -z "$FALAR_STAND_LOCK" ]; then
-  exec 9>"$STATE/lock"; flock -n 9 || { say "на телефоне уже идёт проверка (замок) — не начинаю"; exit 1; }
+  exec 9>"$STATE/lock"; flock -n 9 || { say "  замок занят — жду, пока освободится"; flock -w ${LOCK_WAIT:-3600} 9 || { say "замок так и не освободился — не начинаю"; exit 1; }; }
 fi
 $ADB wait-for-device
 putvol
