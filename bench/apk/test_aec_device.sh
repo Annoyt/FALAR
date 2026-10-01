@@ -47,6 +47,10 @@ if [ "${INSTALL:-0}" = 1 ]; then
   case "$out" in Success*) ;; *) exit 1;; esac
 fi
 mkdir -p "$OUT"
+# Громкость — как при разговоре через стол (VOL из 15, по умолчанию 10); прежняя возвращается в конце.
+VOL0=$(sh "cmd media_session volume --stream 3 --get" | sed -n 's/.*volume is \([0-9]*\).*/\1/p')
+trap '[ -n "$VOL0" ] && sh "cmd media_session volume --stream 3 --set $VOL0" >/dev/null && say "  громкость возвращена: $VOL0"' EXIT
+sh "cmd media_session volume --stream 3 --set ${VOL:-10}" >/dev/null; say "  громкость: ${VOL:-10} из 15 (была ${VOL0:-?})"
 m=$(mark); $ADB shell "am start -n $ACT" >/dev/null 2>&1
 wl "$m" '🧩 модули:' 150 >/dev/null; sleep 3
 m=$(mark); $ADB shell "am start -n $ACT --es aectest $CFGS" >/dev/null 2>&1
