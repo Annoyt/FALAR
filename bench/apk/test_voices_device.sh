@@ -150,8 +150,12 @@ for who, p in feed: x += [rd(p), sil(2.5)]
 wr('vt_feed.wav', np.concatenate(x))
 wr('vt_none.wav', np.concatenate([sil(1.0), rd(A[5]), sil(2.5)]))
 wr('vt_off.wav', np.concatenate([sil(1.0), rd(C[2]), sil(2.5)]))
-# двое подряд без паузы (0,1 с): весь кусок похож на обоих (эталон: 0,59 и 0,60) — режется по голосам
-wr('vt_two.wav', np.concatenate([sil(1.0), rd(A[7]), sil(0.1), rd(B[12]), sil(2.5)]))
+# двое подряд вплотную, без своей тишины записей по краям (с ней пауза ~0,6 с, и куски режет уже нарезка):
+# весь кусок похож на обоих (эталон: 0,55 и 0,58), окна — [1 1 1 1 2 2] — режется по голосам
+def speech(x, f=320):
+    n = len(x) // f; e = 20 * np.log10(np.array([np.sqrt(np.mean(x[i*f:(i+1)*f] ** 2)) for i in range(n)]) + 1e-9)
+    k = np.where(e > e.max() - 35)[0]; return x[max(0, k[0] - 2) * f:min(n, k[-1] + 3) * f]
+wr('vt_two.wav', np.concatenate([sil(1.0), speech(rd(A[7])), speech(rd(B[12])), sil(2.5)]))
 with open(f'{D}/feed.tsv', 'w', encoding='utf-8') as f:
     for who, p in feed: f.write(who + '\t' + open(p + '.txt', encoding='utf-8').read().strip() + '\n')
     f.write('none\t' + open(A[5] + '.txt', encoding='utf-8').read().strip() + '\n')
