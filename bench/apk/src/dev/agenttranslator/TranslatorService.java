@@ -2192,7 +2192,8 @@ public class TranslatorService extends Service {
     org.json.JSONObject meta = new org.json.JSONObject().put("ref_rate", rate).put("text", text);
     for (String cfg : cfgs.split(",")) {
       cfg = cfg.trim(); if (cfg.isEmpty()) continue;
-      boolean vc = cfg.startsWith("vc"), aec = cfg.endsWith("_aec");
+      // _q — без озвучки: только запись (голос человека из колонок стенда — чем режим записи портит его сам по себе)
+      boolean vc = cfg.startsWith("vc"), aec = cfg.contains("_aec"), quiet = cfg.contains("_q");
       if (vc && bt) continue;
       int min = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT);
       AudioRecord rec = new AudioRecord.Builder().setAudioSource(vc ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.VOICE_RECOGNITION)
@@ -2211,11 +2212,14 @@ public class TranslatorService extends Service {
       rt.start();
       Thread.sleep(700);
       long playAt; double playOff;
+      // Метка для стенда на ПК: по ней колонки начинают фразу человека — поверх озвучки или в тишине.
+      log("🔁 эхо-стенд: " + (quiet ? "тишина " : "играю ") + cfg);
       synchronized (tts) {
         ensureTrack(rate);
         playAt = System.nanoTime(); playOff = got[0];
-        for (float[] c : parts) writeOut(c, c.length, lang);
+        if (!quiet) for (float[] c : parts) writeOut(c, c.length, lang);
       }
+      if (quiet) Thread.sleep((long) (ref.length * 1000.0 / rate));
       rt.join(15000);
       rec.stop(); rec.release(); if (ec != null) try { ec.release(); } catch (Throwable ignore) {}
       new DenoisedAudio(Arrays.copyOf(buf, got[0]), 16000).save(new File(dir, "aec_" + cfg + ".wav").getAbsolutePath());

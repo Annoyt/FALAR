@@ -68,8 +68,43 @@ trap 'putvol' EXIT
 sh "cmd media_session volume --stream 3 --set ${VOL:-10}" >/dev/null; say "  громкость: ${VOL:-10} из 15 (была $VOL0)"
 m=$(mark); $ADB shell "am start -n $ACT" >/dev/null 2>&1
 wl "$m" '🧩 модули:' 150 >/dev/null; sleep 3
-m=$(mark); $ADB shell "am start -n $ACT --es aectest $CFGS" >/dev/null 2>&1
-wl "$m" '🔁 эхо-стенд: (готово|ошибка|движок)' 180 >/dev/null
+m=$(mark)
+# NEAR=1 — «человек» из колонок ПК: на каждую метку стенда («играю …» или «тишина …») через 1 с колонки
+# говорят следующую живую фразу из корпуса; микрофон ПК пишет всё (по нему видно, не тише ли сама
+# озвучка телефона в другом режиме записи). Какие фразы и когда — в near.tsv.
+if [ "${NEAR:-0}" = 1 ]; then
+  PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3
+  "$PY" - "$R" "$OUT" <<'EOF'
+import os, sys, random
+R, OUT = sys.argv[1], sys.argv[2]
+random.seed(20261002)
+c = []
+for lang in ('pt', 'ru'):
+    d = f'{R}/bench/air/corpus/{lang}'
+    for f in sorted(os.listdir(d)):
+        if f.endswith('.wav'):
+            c.append(f'{d}/{f[:-4]}')
+random.shuffle(c)
+open(f'{OUT}/near-list.txt', 'w').write('\n'.join(c[:40]) + '\n')
+EOF
+  pw-record --rate 16000 --channels 1 "$OUT/pc_mic.wav" & PCREC=$!
+  (
+    k=0; seen=$m
+    while :; do
+      l=$(sh "tail -n +$((seen+1)) $LOG | grep -n -E -m1 '🔁 эхо-стенд: (играю|тишина|готово)'")
+      [ -z "$l" ] && { sleep 0.3; continue; }
+      seen=$((seen + ${l%%:*})); case "$l" in *готово*) break;; esac
+      cfg=$(printf '%s' "$l" | sed -n 's/.*: \(играю\|тишина\) \([a-z_0-9]*\).*/\2/p')
+      clip=$(sed -n "$((k % 40 + 1))p" "$OUT/near-list.txt"); k=$((k+1))
+      sleep 1.0
+      printf '%s\t%s\t%s\n' "$cfg" "$clip" "$(date +%s%3N)" >> "$OUT/near.tsv"
+      pw-play "$clip.wav" 2>/dev/null
+    done
+  ) & PLAYER=$!
+fi
+$ADB shell "am start -n $ACT --es aectest $CFGS" >/dev/null 2>&1
+wl "$m" '🔁 эхо-стенд: (готово|ошибка|движок)' 300 >/dev/null
+if [ -n "$PLAYER" ]; then sleep 1; kill $PLAYER 2>/dev/null; kill -INT $PCREC 2>/dev/null; wait $PCREC 2>/dev/null; fi
 sh "tail -n +$((m+1)) $LOG" | grep '🔁' | tee "$OUT/log.txt" | sed 's/^/  /'
 for f in aec.json aec_ref.wav $(printf '%s\n' "$CFGS" | tr ',' '\n' | sed 's/^/aec_/; s/$/.wav/'); do
   $ADB pull "$F/$f" "$OUT/" >/dev/null 2>&1 && $ADB shell "rm -f $F/$f"
