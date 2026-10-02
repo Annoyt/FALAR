@@ -3,6 +3,8 @@
 #
 #   bash bench/apk/test_barge_device.sh            # INSTALL=1 — сначала поставить bench/apk/Falar.apk
 #   bash bench/apk/test_barge_device.sh --restore  # только вернуть телефон после оборванного прогона
+#   VOL=10 …   # громкость озвучки на время прогона (прежняя возвращается); без VOL — нужна не ниже 5 из 15
+#   DUMP=3 …   # только записать совмещение микрофона и сыгранного на концах трёх фраз (barge-dump)
 #
 # Проверяет (в отдельном тестовом разговоре, «человек» — колонки ПК, живые фразы из bench/air/corpus):
 #  B0 короткая фраза (2,8 с) начинает звучать сразу, а не когда придёт следующая (порог старта дорожки);
@@ -79,7 +81,17 @@ restore() {
   rm -f "$PEND"; [ -n "$snap" ] && rm -rf "$snap"
   launch; say "  модули: [${mods}] · ${set} · слушание выключено"
 }
+PENDV=$STATE/barge-volume-pending
+# Вернуть громкость из $PENDV и сверить; файл убирается, только если громкость на телефоне та самая.
+putvol() {
+  [ -f "$PENDV" ] || return 0
+  local v now; v=$(cat "$PENDV")
+  sh "cmd media_session volume --stream 3 --set $v" >/dev/null
+  now=$(sh "cmd media_session volume --stream 3 --get" | sed -n 's/.*volume is \([0-9]*\).*/\1/p')
+  if [ "$now" = "$v" ]; then rm -f "$PENDV"; say "  громкость возвращена: $v"; else say "  ГРОМКОСТЬ НЕ ВОЗВРАЩЕНА (нужно $v, сейчас ${now:-нет связи}) — вернёт следующий запуск или --restore"; fi
+}
 $ADB wait-for-device
+putvol
 restore
 [ "$ONLY_RESTORE" = 1 ] && exit 0
 n=0; until free3; do n=$((n+1)); [ $n -eq 1 ] && say "  жду, пока телефон свободен ($(focus | sed 's/.*{//; s/}.*//'))"; sleep 20; done
@@ -96,11 +108,24 @@ if [ "${INSTALL:-0}" = 1 ]; then
   after=$(sh "dumpsys package $PKG" | grep -m1 lastUpdateTime)
   case "$out" in Success*) [ "$before" != "$after" ] || { say "сборка не сменилась"; exit 1; };; *) exit 1;; esac
 fi
+# Телефон общий: между прогонами другая сессия могла поставить свою сборку. Сверяем установленный APK с этим;
+# другая — не начинаем (INSTALL=1 поставит эту, ANYBUILD=1 — всё равно).
+inst=$(sh "sha256sum \$(pm path $PKG | head -1 | cut -d: -f2)" | cut -d' ' -f1); mine=$(sha256sum "$R/bench/apk/Falar.apk" 2>/dev/null | cut -d' ' -f1)
+[ "${ANYBUILD:-0}" = 1 ] || [ "$inst" = "$mine" ] || { say "на телефоне другая сборка (${inst:0:12}…, эта ${mine:0:12}…) — не начинаю; INSTALL=1 поставит эту"; exit 1; }
 D=$(mktemp -d "$STATE/barge-run.XXXX")
-trap 'restore; rm -rf "$D"; say; say "итог: PASS $pass, FAIL $fail"' EXIT
+trap 'restore; putvol; rm -rf "$D"; say; say "итог: PASS $pass, FAIL $fail"' EXIT
+# Громкость: перебиванию нужна слышимая озвучка. VOL — поставить на время прогона (прежняя возвращается и
+# сверяется, и после обрыва — следующим запуском); без VOL — какая есть, но не ниже 5 из 15.
+VOL0=$(sh "cmd media_session volume --stream 3 --get" | sed -n 's/.*volume is \([0-9]*\).*/\1/p')
+if [ -n "$VOL" ]; then
+  [ -n "$VOL0" ] || { say "громкость не прочлась — не начинаю"; exit 1; }
+  echo "$VOL0" > "$PENDV"; sh "cmd media_session volume --stream 3 --set $VOL" >/dev/null; say "  громкость: $VOL из 15 (была $VOL0)"
+elif [ "${VOL0:-0}" -lt 5 ]; then say "громкость озвучки ${VOL0:-?} из 15 — её не слышно, перебиванию нечего ловить; задайте VOL=10"; exit 1
+else say "  громкость: $VOL0 из 15"; fi
 
 # ---- B0: короткая фраза звучит сразу -----------------------------------------------------------------
 say "== B0: короткая фраза (2,8 с) начинает звучать сразу"
+m=$(mark); launch; wl "$m" '🧩 модули:' 150 >/dev/null; sleep 3          # стенд эха ждёт поднятого движка
 m=$(mark); launch --es aectest vr_e3,vr_e6
 wl "$m" '🔁 эхо-стенд: (готово|ошибка|движок)' 120 >/dev/null
 $ADB pull "$F/aec.json" "$D/aec.json" >/dev/null 2>&1; for f in $(sh "ls $F" | grep -E '^aec_.*\.(wav|json)$'); do $ADB shell "rm -f $F/$f" < /dev/null; done
@@ -205,10 +230,21 @@ speak() {
 # дождаться тишины: ни озвучки, ни нарезки (журнал молчит 3 с)
 calm() { local i a b; for i in $(seq 40); do a=$(sh "stat -c %Y $LOG"); sleep 3; b=$(sh "stat -c %Y $LOG"); [ "$a" = "$b" ] && return 0; done; }
 
+# DUMP=N — только записать совмещение на концах N фраз (--es bargedump) и забрать на ПК, без B1–B4.
+if [ -n "$DUMP" ]; then
+  say "== совмещение: $DUMP фраз(ы) в $STATE/barge-dump"
+  rm -rf "$STATE/barge-dump"; mkdir -p "$STATE/barge-dump"
+  m=$(mark); launch --es bargedump "$DUMP"; sleep 1
+  for i in $(seq "$DUMP"); do speak >/dev/null || say "  фраза $i не зазвучала"; calm; done
+  since "$m" | grep -E '🗣' | sed 's/^/  /'
+  for f in $(sh "ls $F" | grep -E '^barge_[0-9]+'); do $ADB pull "$F/$f" "$STATE/barge-dump/" >/dev/null 2>&1 && $ADB shell "rm -f $F/$f" < /dev/null; done
+  ls "$STATE/barge-dump" | tr '\n' ' '; say; exit 0
+fi
 say "== B1: перебивание сверяет время динамика и учит эхо"
 m1=$(mark)
 for i in 1 2 3 4 5 6; do speak >/dev/null || say "  фраза $i не зазвучала"; calm;
   since "$m1" | grep -q '🗣 перебивание готово' && break; done
+since "$m1" | grep -E '🗣 (перебивание учится|сверка времени)' | sed 's/^/  /'
 l=$(since "$m1" | grep -m1 'время динамика сверено'); say "  ${l:-нет строки о сверке}"
 off=$(printf '%s' "$l" | sed -n 's/.*поправка \([0-9-]*\) мс.*/\1/p')
 [ -n "$off" ] && [ "$off" -ge 40 ] && [ "$off" -le 140 ] && res 0 "B1 поправка времени найдена по эху: $off мс" || res 1 "B1 поправка: ${off:-нет}"
@@ -238,6 +274,11 @@ trial() {   # $1 — метка серии, дальше клипы
   cp "$D/played.tsv" "$D/played_$tag.tsv"
   since "$mm" > "$D/log_$tag.txt"
 }
+# Перебивание не выучилось — B3 и B4 ничего бы не показали: дальше не идём, строки «учится» — в журнале прогона.
+if ! since "$m1" | grep -q '🗣 перебивание готово'; then
+  since "$m1" | grep -E '🗣' | sed 's/^/  /' | tail -12
+  say "B3/B4 пропущены: перебивание не готово"; exit 1
+fi
 say "== B3: человек поверх озвучки — с перебиванием"
 trial on "${HUM[@]:0:8}"
 say "== B4: то же без перебивания — как было"

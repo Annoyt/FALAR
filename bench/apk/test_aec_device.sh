@@ -59,6 +59,10 @@ if [ "${INSTALL:-0}" = 1 ]; then
   out=$($ADB install --no-incremental -r "$APK" 2>&1 | tr -d '\r' | grep -E '^(Success|Failure)'); say "  установка: ${out:-нет ответа}"
   case "$out" in Success*) ;; *) exit 1;; esac
 fi
+# Телефон общий: между прогонами другая сессия могла поставить свою сборку — без новых режимов стенда. Сверяем
+# установленный APK с этим (bench/apk/Falar.apk); другая — не начинаем (INSTALL=1 поставит эту, ANYBUILD=1 — всё равно).
+inst=$(sh "sha256sum \$(pm path $PKG | head -1 | cut -d: -f2)" | cut -d' ' -f1); mine=$(sha256sum "$R/bench/apk/Falar.apk" 2>/dev/null | cut -d' ' -f1)
+[ "${ANYBUILD:-0}" = 1 ] || [ "$inst" = "$mine" ] || { say "на телефоне другая сборка (${inst:0:12}…, эта ${mine:0:12}…) — не начинаю; INSTALL=1 поставит эту"; exit 1; }
 mkdir -p "$OUT"
 # Громкость — как при разговоре через стол (VOL из 15, по умолчанию 10); прежняя возвращается в конце и
 # сверяется. Телефон отключили посреди прогона — прежняя громкость остаётся в $PENDV, и её вернёт

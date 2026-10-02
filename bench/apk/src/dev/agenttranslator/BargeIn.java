@@ -25,6 +25,9 @@ final class BargeIn {
   static final double THETA1 = 10, SHARE1 = 0.10; static final int K1 = 2, M1 = 2;
   static final double THETA2 = 8, SHARE2 = 0.25; static final int K2 = 3, M2 = 4;
   static final double DECAY = 4, NOISE_DB = 6, SPREAD_DB = -25, DUCK_DB = -20;
+  /** Насколько тише эхо в комнате при приглушении на DUCK_DB — сначала считаем, что мало: на громкости 15 у Redmi
+   *  −20 дБ в цифре дают −10…−11 дБ у микрофона (усилитель на пределе сжимает). Дальше учится по отбоям. */
+  static final double ATT0 = -10;
   static final int TAIL = 10, JIT = 1, GRACE = 10;
   /** После решения звук ещё идёт: буферы вывода после метки времени, ~80 мс на Redmi. */
   static final int STOP_MS = 100;
@@ -63,6 +66,8 @@ final class BargeIn {
   }
 
   double[] g = new double[NB];          // усиление тракта по полосам, дБ — хранится между фразами
+  double[] att = new double[NB];        // ослабление эха приглушением по полосам, дБ — тоже хранится
+  final double[] obs = new double[NB], nobs = new double[NB];
   double[] noise;                       // фон по полосам
   final double[][] hist = new double[TAIL + 3][];
   int nh = 0;
@@ -73,8 +78,9 @@ final class BargeIn {
   String state = "listen";
   double score, lev = -200;
 
-  BargeIn() { java.util.Arrays.fill(smax, 1e-12); }
+  BargeIn() { java.util.Arrays.fill(smax, 1e-12); java.util.Arrays.fill(att, ATT0); }
   BargeIn(double[] gDb, double[] noise) { this(); if (gDb != null) g = gDb.clone(); if (noise != null) this.noise = noise.clone(); }
+  BargeIn(double[] gDb, double[] noise, double[] attDb) { this(gDb, noise); if (attDb != null) att = attDb.clone(); }
 
   /** Новая фраза озвучки: всё, кроме усиления тракта и фона. */
   void reset() { nh = 0; nHits = 0; nHits2 = 0; since = -1; state = "listen"; fireT = -1; }
@@ -99,6 +105,7 @@ final class BargeIn {
     for (int b = 0; b < NB; b++) c[b] = 10 * Math.log10(m[b] / (e[b] + spread + noise[b])) > theta && m[b] > noise[b] * floor;
     return c;
   }
+  static double[] add(double[] a, double[] b) { double[] r = new double[a.length]; for (int i = 0; i < a.length; i++) r[i] = a[i] + b[i]; return r; }
   static double share(boolean[] c) { int k = 0; for (boolean x : c) if (x) k++; return k / (double) c.length; }
 
   /** Шаг: m — мощности кадра микрофона, rNext — сыгранного на шаг вперёд (оно известно заранее). */
@@ -112,8 +119,15 @@ final class BargeIn {
     double[] e = new double[NB];
     if (state.equals("ducked")) {
       if (now < fireT + EFF) return NONE;
-      if (now >= fireT + EFF + WIN2) { state = "listen"; nHits = 0; return UNDUCK; }
-      boolean[] c = cells(m, s, g, DUCK_DB, THETA2, e);
+      if (now >= fireT + EFF + WIN2) {
+        state = "listen"; nHits = 0;
+        // отбой — человека не было: как на самом деле приглушение ослабило эхо, учим по полосам
+        for (int b = 0; b < NB; b++) if (nobs[b] >= 5) att[b] = Math.max(DUCK_DB, Math.min(0, att[b] + 0.3 * (obs[b] / nobs[b] - att[b])));
+        return UNDUCK;
+      }
+      double seenAt = Math.pow(10, 15 / 10.0);
+      for (int b = 0; b < NB; b++) { double e0 = s[b] * Math.pow(10, g[b] / 10); if (e0 > noise[b] * seenAt) { obs[b] += 10 * Math.log10(m[b] / (e0 + 1e-12)); nobs[b]++; } }
+      boolean[] c = cells(m, s, add(g, att), 0, THETA2, e);
       score = share(c);
       push(hits2, score >= SHARE2, true);
       if (count(hits2, nHits2) >= K2) {
@@ -138,7 +152,7 @@ final class BargeIn {
     for (int b = 0; b < NB; b++) smax[b] = Math.max(smax[b] * dec, s[b]);
     if (learn && count(hits, nHits) == 0)
       for (int b = 0; b < NB; b++) if (teach(b, s, e)) g[b] += 10 * Math.log10(m[b] / (s[b] + 1e-12)) > g[b] ? 0.375 : -0.125;
-    if (count(hits, nHits) >= K1) { state = "ducked"; fireT = now; nHits2 = 0; return DUCK; }
+    if (count(hits, nHits) >= K1) { state = "ducked"; fireT = now; nHits2 = 0; java.util.Arrays.fill(obs, 0); java.util.Arrays.fill(nobs, 0); return DUCK; }
     return NONE;
   }
   int frame(double[] m, double[] rNext) { return frame(m, rNext, true); }

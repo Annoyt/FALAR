@@ -45,7 +45,11 @@ DECAY, TAIL, JIT = 4.0, 10, 1               # затухание отражен�
 NOISE_DB = 6.0                              # полоса считается, только если громче фона на столько
 SPREAD_DB = -25.0                           # искажения динамика: доля всего эха, что ложится в любую полосу
 GRACE = 10                                  # шагов после начала звука не решаем: щелчок усилителя и начало эха
-DUCK_DB = -20.0                             # приглушение на подозрении
+DUCK_DB = -20.0                             # приглушение на подозрении (цифровое, setVolume)
+ATT0 = -10.0                                # насколько тише при этом эхо в комнате — сначала считаем, что мало:
+                                            # на громкости 15 у Redmi −20 дБ в цифре дают −10…−11 дБ у микрофона
+                                            # (усилитель на пределе сжимает); дальше учится по отбоям
+SIM_ATT = {}                                # для смесей: громкость → настоящее ослабление эха при приглушении, дБ
 STOP_MS = 100                               # после решения звук ещё идёт: буферы вывода за меткой времени (~80 мс)
 EFF = -(-(N + STOP_MS * 16) // HOP)         # через столько шагов после решения приглушение уже слышно
 WIN2 = 25                                   # шагов на проверку, потом — отбой
@@ -84,8 +88,10 @@ class Barge:
     """Потоковый датчик: frame(m, r_next) на каждом шаге — мощности кадра микрофона и сыгранного на шаг
     вперёд (сыгранное известно заранее). Возвращает действие: NONE, DUCK, STOP, UNDUCK."""
 
-    def __init__(self, g_db=None, noise=None):
+    def __init__(self, g_db=None, noise=None, att=None):
         self.g = np.zeros(NB) if g_db is None else np.array(g_db, float)     # усиление тракта, дБ
+        self.att = np.full(NB, ATT0) if att is None else np.array(att, float)  # ослабление эха приглушением, дБ
+        self.obs, self.nobs = np.zeros(NB), np.zeros(NB)
         self.noise = None if noise is None else np.array(noise, float)
         self.hist = []
         self.smax = np.full(NB, 1e-12)
@@ -130,8 +136,14 @@ class Barge:
             if t >= self.fire_t + EFF + WIN2:
                 self.state = 'listen'
                 self.hits = []
+                # отбой — человека не было: как на самом деле приглушение ослабило эхо, учим по полосам
+                ok = self.nobs >= 5
+                self.att = np.where(ok, np.clip(self.att + 0.3 * (self.obs / np.maximum(self.nobs, 1) - self.att), DUCK_DB, 0), self.att)
                 return UNDUCK
-            c, _ = self.cells(m, s, self.g + DUCK_DB, THETA2)
+            e0 = s * 10 ** (self.g / 10)
+            seen = e0 > self.noise * 10 ** (15 / 10)
+            self.obs += np.where(seen, 10 * np.log10(m / (e0 + 1e-12)), 0); self.nobs += seen
+            c, _ = self.cells(m, s, self.g + self.att, THETA2)
             self.score = c.mean()
             self.hits2 = (self.hits2 + [self.score >= SHARE2])[-M2:]
             if sum(self.hits2) >= K2:
@@ -162,6 +174,7 @@ class Barge:
             self.state = 'ducked'
             self.fire_t = t
             self.hits2 = []
+            self.obs, self.nobs = np.zeros(NB), np.zeros(NB)
             return DUCK
         return NONE
 
@@ -194,14 +207,15 @@ class Barge:
         self.since, self.state, self.fire_t = -1, 'listen', None
 
 
-def closed_loop(echo, human, ref, bg, start, g0, noise0):
+def closed_loop(echo, human, ref, bg, start, g0, noise0, sim_db=None, att0=None):
     """Датчик на смеси с обратной связью: приглушение и остановка меняют эхо, которое слышит микрофон дальше
     (действие на шаге t слышно с отсчёта t·HOP + N + STOP_MS). Возвращает (действия [(шаг, действие)],
     звук как его слышал микрофон, детектор)."""
     n = len(echo)
     scale = np.ones(n)
     Rb = bands(ref)
-    b = Barge(g0, noise0)
+    b = Barge(g0, noise0, att0)
+    duck = 10 ** ((DUCK_DB if sim_db is None else sim_db) / 20)       # настоящее ослабление эха в комнате
     acts = []
     for t in range(max(0, start - 2), min(len(Rb) - 1, (n - N) // HOP)):
         seg = slice(t * HOP, t * HOP + N)
@@ -213,12 +227,12 @@ def closed_loop(echo, human, ref, bg, start, g0, noise0):
         acts.append((t, a))
         at = t * HOP + N + STOP_MS * 16
         if a == DUCK:
-            scale[at:] = np.minimum(scale[at:], 10 ** (DUCK_DB / 20))
+            scale[at:] = np.minimum(scale[at:], duck)
         elif a == UNDUCK:
             scale[at:] = 1.0
         elif a == STOP:
             tt = np.arange(n - at)
-            scale[at:] = np.minimum(scale[at:], 10 ** (DUCK_DB / 20) * 10 ** (-0.25 * tt / 16 / 20))   # −0,25 дБ/мс
+            scale[at:] = np.minimum(scale[at:], duck * 10 ** (-0.25 * tt / 16 / 20))   # −0,25 дБ/мс
     heard = echo * scale + bg * (1 - scale) + human
     return acts, heard, b
 
@@ -452,7 +466,7 @@ def section1(recs):
         g0 = np.mean([learned[id(q)] for q in ech if q['vol'] == r['vol'] and q is not r], axis=0)
         s0 = (r['at'] + r['al']) // HOP
         bg = np.tile(r['mic'][max(0, r['at'] - 8000):r['at']], 60)[:len(r['mic'])]
-        acts, _, _ = closed_loop(r['mic'], np.zeros(len(r['mic'])), aligned(r, r['al']), bg, s0, g0, noise_of(r['mic'], s0))
+        acts, _, _ = closed_loop(r['mic'], np.zeros(len(r['mic'])), aligned(r, r['al']), bg, s0, g0, noise_of(r['mic'], s0), SIM_ATT.get(r['vol']))
         d = sum(a == DUCK for _, a in acts); s = sum(a == STOP for _, a in acts)
         sus += d; stops += s; sec += len(r['ref']) / SR
         e = r['mic'][r['at'] + r['al']:r['at'] + r['al'] + len(r['ref'])]
@@ -524,7 +538,7 @@ def section3(recs, prior, with_asr=True):
                 ref = aligned(e, e['al'], n)
                 for level in (0, -12):
                     human = np.zeros(n); human[h_at - 1600:h_at - 1600 + len(hseg)] = hseg * 10 ** (level / 20)
-                    acts, heard, b = closed_loop(echo, human, ref, bg, s_e // HOP, prior[e['vol']], noise_of(echo, s_e // HOP))
+                    acts, heard, b = closed_loop(echo, human, ref, bg, s_e // HOP, prior[e['vol']], noise_of(echo, s_e // HOP), SIM_ATT.get(e['vol']))
                     st = rows.setdefault((e['vol'], level), dict(n=0, stop=0, early=0, dips=0, lat_duck=[], lat_stop=[], levs=[],
                                                                  rec_now=[], rec=[], top=[], leak=[]))
                     st['n'] += 1
@@ -624,7 +638,8 @@ def golden():
             act.append([t, a_])
     json.dump({'clips': [f'pt/{lst[3]}', f'pt/{lst[11]}', f'ru/{hl[5]}'], 'hops': len(Mb) - 1, 'g0': [float(x) for x in g0],
                'click_hop': click // HOP, 'human_hop': h_at // HOP, 'closed_loop': [[int(t), int(a_)] for t, a_ in acts], 'score': sc, 'actions': act,
-               'gain_db': [round(float(x), 6) for x in b2.g], 'band_power_head': [[float(v) for v in Mb[t]] for t in range(40, 44)],
+               'gain_db': [round(float(x), 6) for x in b2.g], 'att_db': [round(float(x), 6) for x in b2.att],
+               'band_power_head': [[float(v) for v in Mb[t]] for t in range(40, 44)],
                'gate': gate_ref(mic16, ref16, g0, act)},
               open(f'{out}/barge_golden.json', 'w'), ensure_ascii=False)
     print('действия:', act, '(в замкнутом контуре:', acts, ') · щелчок на шаге', click // HOP, '· человек с шага', h_at // HOP, '· шагов', len(Mb) - 1)

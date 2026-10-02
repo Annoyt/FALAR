@@ -82,6 +82,9 @@ public class BargeInTest {
       ok(undo && stop, "G5 в эталоне есть и отбой (стук), и остановка (человек)");
       JSONArray ge = g.getJSONArray("gain_db"); double gw = 0; for (int b = 0; b < BargeIn.NB; b++) gw = Math.max(gw, Math.abs(d.g[b] - ge.getDouble(b)));
       ok(gw < 1e-6, "G6 усиление тракта в конце совпало (" + gw + " дБ)");
+      if (g.has("att_db")) { JSONArray ga = g.getJSONArray("att_db"); double aw = 0, moved = 0;
+        for (int b = 0; b < BargeIn.NB; b++) { aw = Math.max(aw, Math.abs(d.att[b] - ga.getDouble(b))); moved = Math.max(moved, Math.abs(d.att[b] - BargeIn.ATT0)); }
+        ok(aw < 1e-6 && moved > 1, "G6 ослабление эха приглушением выучено на отбое и совпало (" + aw + " дБ, сдвинулось на " + moved + " дБ)"); }
       if (g.has("gate")) {
         JSONObject gt = g.getJSONObject("gate"); int a0 = gt.getInt("from"), a1 = gt.getInt("to"), upto = gt.getInt("upto");
         float[] y = BargeIn.gate(Arrays.copyOfRange(m, a0, a1), Arrays.copyOfRange(r, a0, a1), gd, upto);

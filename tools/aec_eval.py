@@ -262,9 +262,9 @@ def main():
             h, hr = read(c + '.wav'); h = h if hr == 16000 else resample_poly(h, 16000, hr).astype(np.float32)
             h = h * (echo_rms * 10 ** (r / 20) / (10 ** (db(h) / 20)))
             x = mic.copy(); s1 = seg.start + 16000
-            L = min(len(h), len(x) - s1); x[s1:s1 + L] += h[:L]
+            nh = min(len(h), len(x) - s1); x[s1:s1 + nh] += h[:nh]       # nh, а не L: L — длина фильтра (было затёрто)
             e0, yh = nlms(refal, x.astype(np.float64), L, mu); e = res(e0, yh)
-            win = slice(seg.start, max(seg.stop, s1 + L) + 3200)
+            win = slice(seg.start, max(seg.stop, s1 + nh) + 3200)
             txt = open(c + '.txt', encoding='utf-8').read()
             ha, hb = asr(x[win]), asr(e[win])
             a_rec.append(recall(txt, ha)); a_leak.append(recall(tts_words, ha))
