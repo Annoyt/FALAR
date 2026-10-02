@@ -34,6 +34,16 @@ export async function findRelay(chat, msg) {
   return db.get('SELECT * FROM relays WHERE chat = :chat AND msg = :msg ORDER BY id DESC LIMIT 1', { ':chat': chat, ':msg': msg });
 }
 
+/** Все копии одного сообщения человека (подпись и копия — две строки). */
+export async function relaysOf(person, personMsg) {
+  return db.all('SELECT * FROM relays WHERE person = :p AND person_msg = :pm ORDER BY id', { ':p': person, ':pm': personMsg });
+}
+
+/** Копия переехала: новое место той же связи. */
+export async function moveRelay(id, chat, msg) {
+  await db.run('UPDATE relays SET chat = :c, msg = :m WHERE id = :id', { ':c': chat, ':m': msg, ':id': id });
+}
+
 export async function setting(key) {
   const r = await db.get('SELECT value FROM settings WHERE key = :k', { ':k': key });
   return r ? r.value : null;

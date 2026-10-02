@@ -74,7 +74,7 @@ deploy)
   fi
   setv BOT_URL "$url"
   node cf/secrets.mjs | $W secret bulk > /dev/null && echo "Секреты Worker обновлены"
-  node cf/tg.mjs setWebhook "{\"url\":\"$url/telegram\",\"allowed_updates\":[\"message\"],\"max_connections\":1}" > /dev/null \
+  node cf/tg.mjs setWebhook "{\"url\":\"$url/telegram\",\"allowed_updates\":[\"message\",\"callback_query\"],\"max_connections\":1}" > /dev/null \
     && echo "Webhook: $url/telegram"
   echo "Бот: @$(username)"
   [ -n "$(get FALAR_BOT_OWNER)" ] || echo "Дальше: напишите боту /id и выполните bash bot/cf.sh owner <число>"

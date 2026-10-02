@@ -210,6 +210,73 @@ const bobRow = sdk.rows('SELECT name FROM people WHERE id = :id', { ':id': BORIS
 eq(bobRow.name, 'Борис', 'X2 в базе — имя, текста сообщений нет');
 ok(!sdk.rows('PRAGMA table_info(relays)').some((x) => /text|body/.test(x.name)), 'X2 в связях нет текста');
 
+// ---- кнопки темы: человек выбирает сам, разработчик раскладывает одним касанием
+const button = (await import('handlers/callback_query')).default;
+let qid = 1;
+const cb = (from, data, message) => ({ id: String(qid++), from, data, message });
+const VERA = { id: 2003, is_bot: false, first_name: 'Вера' };
+const GLEB = { id: 2004, is_bot: false, first_name: 'Глеб' };
+await handle(grp('/setup'));            // топики на месте (после E2 «Ошибки» пересоздан)
+calls();
+for (const k of Object.keys(F.TOPICS)) topic[k] = Number(sdk.rows("SELECT value FROM settings WHERE key = :k", { ':k': 'topic:' + GROUP + ':' + k })[0].value);
+NOW += 7 * 3600;
+await handle(dm(VERA, '/start'));
+cs = calls();
+eq(cs[0].params.reply_markup && cs[0].params.reply_markup.keyboard.flat().map((b) => b.text), ['🐞 Ошибка', '💡 Предложение', '🌐 Перевод'], 'KB1 /start — кнопки темы под полем ввода');
+await handle(dm(VERA, '🐞 Ошибка'));
+cs = calls();
+eq(cs.map((c) => [c.method, c.params.chat_id, c.params.text]), [['sendMessage', VERA.id, F.PROMPTS.bug]], 'KB2 кнопка «Ошибка» — просьба описать, никуда не пересылается');
+await handle(dm(VERA, 'Не открывается камера'));
+s = sent(calls(), 'sendMessage');
+eq([s[0].params.chat_id, s[0].params.message_thread_id, !!s[0].params.reply_markup], [GROUP, topic.bug, false], 'KB3 следующее сообщение — в «Ошибки», без кнопок');
+const g1 = dm(GLEB, 'Хорошее приложение, но хочу тёмную тему');
+await handle(g1);
+cs = calls();
+s = sent(cs, 'sendMessage');
+const gen = s.find((x) => x.params.chat_id === GROUP);
+eq([gen.params.message_thread_id, gen.params.reply_markup.inline_keyboard[0].map((b) => b.callback_data)], [undefined, ['o:bug', 'o:idea', 'o:translation']], 'KB4 без темы — в общий топик, на копии кнопки разработчику');
+const askMsg = s.find((x) => x.params.chat_id === GLEB.id);
+eq([askMsg.params.text, askMsg.params.reply_markup.inline_keyboard[0].map((b) => b.callback_data)],
+   [F.ASK, ['c:bug:' + g1.message_id, 'c:idea:' + g1.message_id, 'c:translation:' + g1.message_id]], 'KB4 человеку — «о чём это?» с кнопками');
+const genCopy = sdk.rows('SELECT msg FROM relays WHERE person = :p', { ':p': GLEB.id })[0].msg;
+await button(cb(GLEB, 'c:idea:' + g1.message_id, { message_id: 777, chat: { id: GLEB.id, type: 'private' } }));
+cs = calls();
+let cp = sent(cs, 'copyMessage');
+eq(cp.map((x) => [x.params.chat_id, x.params.message_thread_id, x.params.from_chat_id, x.params.message_id, x.params.reply_markup]), [[GROUP, topic.idea, GROUP, genCopy, undefined]], 'KB5 нажатие человека — копия в «Идеи», без кнопок');
+eq(sent(cs, 'deleteMessage').map((x) => [x.params.chat_id, x.params.message_id]), [[GROUP, genCopy]], 'KB5 копия из общего топика удалена');
+eq(sent(cs, 'answerCallbackQuery').map((x) => x.params.text), ['Перенесено в «Идеи»'], 'KB5 ответ на нажатие');
+eq(sent(cs, 'editMessageText').map((x) => [x.params.message_id, x.params.text, x.params.reply_markup.inline_keyboard.length]), [[777, F.sortedText('idea'), 0]], 'KB5 под ответом человеку кнопок больше нет');
+const moved = sdk.rows('SELECT msg FROM relays WHERE person = :p', { ':p': GLEB.id })[0].msg;
+ok(moved !== genCopy, 'KB5 связь — уже с новой копией');
+await handle(dm(GLEB, 'И ещё шрифт крупнее'));
+s = sent(calls(), 'sendMessage');
+eq([s[0].params.chat_id, s[0].params.message_thread_id], [GROUP, topic.idea], 'KB6 продолжение — туда, куда отнесли');
+await handle(grp('Сделаю', { is_topic_message: true, message_thread_id: topic.idea, reply_to_message: { message_id: moved, from: BOT } }));
+eq(sent(calls(), 'copyMessage').map((x) => [x.params.chat_id, x.params.reply_parameters.message_id]), [[GLEB.id, g1.message_id]], 'KB7 ответ на перенесённую копию доходит человеку');
+NOW += F.FOLLOW_UP + 1;
+const g2 = dm(GLEB, 'а ещё вопрос про обновления');
+await handle(g2);
+calls();
+const gen2 = sdk.rows('SELECT msg FROM relays WHERE person = :p AND person_msg = :m', { ':p': GLEB.id, ':m': g2.message_id })[0].msg;
+await button(cb(BORIS, 'o:bug', { message_id: gen2, chat: { id: GROUP, type: 'supergroup' } }));
+cs = calls();
+eq([cs.length, cs[0].method, cs[0].params.text], [1, 'answerCallbackQuery', 'Раскладывает только разработчик'], 'KB8 чужой не раскладывает');
+sdk.api.fail('deleteMessage', 'Bad Request: message can\'t be deleted');
+await button(cb(ME, 'o:bug', { message_id: gen2, chat: { id: GROUP, type: 'supergroup' } }));
+cs = calls();
+eq(sent(cs, 'copyMessage').map((x) => x.params.message_thread_id), [topic.bug], 'KB9 разработчик — одним касанием в «Ошибки»');
+eq(sent(cs, 'editMessageReplyMarkup').map((x) => [x.params.message_id, x.params.reply_markup.inline_keyboard.length]), [[gen2, 0]], 'KB9 старше 48 ч не удалить — с неё снимаются кнопки');
+eq(sent(cs, 'editMessageText').length, 0, 'KB9 у человека ничего не правится');
+eq(sdk.rows('SELECT topic FROM people WHERE id = :p', { ':p': GLEB.id })[0].topic, 'bug', 'KB9 продолжение человека — туда, куда отнёс разработчик');
+await button(cb(GLEB, 'zzz', { message_id: 1, chat: { id: GLEB.id, type: 'private' } }));
+await button(cb(GLEB, 'c:bug:' + g2.message_id, { message_id: 1, chat: { id: 1, type: 'private' } }));
+await button(cb(GLEB, 'c:bug', { message_id: 1, chat: { id: GLEB.id, type: 'private' } }));
+await button(cb(ME, 'o:bug:' + gen2, { message_id: gen2, chat: { id: GROUP, type: 'supergroup' } }));
+cs = calls();
+eq(cs.map((c) => c.method), ['answerCallbackQuery', 'answerCallbackQuery', 'answerCallbackQuery', 'answerCallbackQuery'], 'KB10 мусор, чужой чат, «c:» без номера, «o:» с номером — только ответ на нажатие');
+await handle(dm(GLEB, '🌐 Перевод'));
+eq(calls().map((c) => c.params.text), [F.PROMPTS.translation], 'KB11 кнопка под полем ввода в любой момент меняет тему');
+
 // ---- прослойка Cloudflare (cf/sdk.js): именованные параметры для D1 и Bot API через fetch
 const cf = await import(pathToFileURL(path.join(ROOT, 'cf/sdk.js')).href);
 eq(cf.positional('SELECT * FROM t WHERE a = :a AND b = :b OR a = :a', { ':a': 1, ':b': 'x' }),

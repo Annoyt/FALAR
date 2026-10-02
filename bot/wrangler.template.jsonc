@@ -11,7 +11,8 @@
     "lib/owner": "./lib/owner.js",
     "lib/feedback": "./lib/feedback.js",
     "lib/store": "./lib/store.js",
-    "handlers/message": "./handlers/message.js"
+    "handlers/message": "./handlers/message.js",
+    "handlers/callback_query": "./handlers/callback_query.js"
   },
   "d1_databases": [
     { "binding": "DB", "database_name": "falar-feedback", "database_id": "__D1_ID__" }

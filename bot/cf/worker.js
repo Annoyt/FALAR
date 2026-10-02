@@ -3,6 +3,7 @@
 // только Telegram и этот Worker.
 
 import handle from 'handlers/message';
+import handleButton from 'handlers/callback_query';
 import { bind } from 'sdk';
 import { setOwner } from 'lib/owner';
 
@@ -19,9 +20,10 @@ export default {
     bind(env); setOwner(env.OWNER);
     // Ошибка обработки — в журнал (wrangler tail), а Telegram всё равно получает 200: иначе он
     // повторял бы то же обновление снова и снова.
-    if (u && u.message) {
-      try { await handle(u.message, { update: u }); } catch (e) { console.error('handler', (e && e.stack) || e); }
-    }
+    try {
+      if (u && u.message) await handle(u.message, { update: u });
+      else if (u && u.callback_query) await handleButton(u.callback_query, { update: u });
+    } catch (e) { console.error('handler', (e && e.stack) || e); }
     return new Response('ok\n');
   },
 };

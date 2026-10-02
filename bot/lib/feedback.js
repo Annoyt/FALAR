@@ -67,9 +67,54 @@ export function command(text) {
   return m ? m[1].toLowerCase() : null;
 }
 
+// Кнопки темы: под полем ввода (после /start) человек выбирает заранее; под ответом «о чём это?» —
+// после сообщения без метки; на копии в общем топике группы — для разработчика. Нажатие переносит
+// копию в топик, и следующие полчаса сообщения человека идут туда же (route — продолжение).
+export const CHOICES = [
+  { key: 'bug', label: '🐞 Ошибка' },
+  { key: 'idea', label: '💡 Предложение' },
+  { key: 'translation', label: '🌐 Перевод' },
+];
+
+/** Текст кнопки под полем ввода → тема; любой другой текст → null. */
+export function choiceOf(text) {
+  const t = (text || '').trim(), c = CHOICES.find((x) => x.label === t);
+  return c ? c.key : null;
+}
+
+export const KEYBOARD = {
+  keyboard: [[{ text: CHOICES[0].label }, { text: CHOICES[1].label }], [{ text: CHOICES[2].label }]],
+  resize_keyboard: true, is_persistent: true, input_field_placeholder: 'Опишите, что случилось или что предложить',
+};
+
+/** «О чём это?» под ответом человеку: c:<тема>:<номер его сообщения> (не длиннее 64 байт). */
+export function askMarkup(personMsg) {
+  return { inline_keyboard: [CHOICES.map((c) => ({ text: c.label, callback_data: 'c:' + c.key + ':' + personMsg }))] };
+}
+
+/** На копии в общем топике группы — разработчику: o:<тема>. */
+export function ownerMarkup() {
+  return { inline_keyboard: [CHOICES.map((c) => ({ text: '→ ' + TOPICS[c.key].name, callback_data: 'o:' + c.key }))] };
+}
+
+/** Данные кнопки: {who: 'c' | 'o', key, pm}; чужое — null. */
+export function parseData(s) {
+  const m = /^(c|o):(bug|idea|translation)(?::(\d{1,12}))?$/.exec(s || '');
+  if (!m || (m[1] === 'c') !== (m[3] !== undefined)) return null;
+  return { who: m[1], key: m[2], pm: m[3] ? Number(m[3]) : null };
+}
+
+export const PROMPTS = {
+  bug: 'Опишите, что случилось и что вы перед этим делали. Можно приложить снимок экрана.',
+  idea: 'Напишите, чего не хватает или что сделать удобнее.',
+  translation: 'Пришлите фразу, перевод приложения и как правильно. Удобнее прямо из приложения: меню реплики → «Сообщить о переводе».',
+};
+export const ASK = 'Спасибо, передал разработчику. О чём это сообщение?';
+export function sortedText(key) { return 'Спасибо, передал разработчику — в «' + TOPICS[key].name + '».'; }
+
 export const GREETING =
   'Здравствуйте! Это бот обратной связи Falar — переводчика между русским и португальским.\n\n' +
-  'Напишите, что не так или чего не хватает; можно приложить снимок экрана. ' +
+  'Выберите кнопкой внизу, о чём сообщение, — или просто напишите; можно приложить снимок экрана. ' +
   'Сообщение увидит только разработчик, ответ придёт сюда же.\n\n' +
   'Пришли из приложения, а поле ввода пустое? Текст уже скопирован: вставьте его ' +
   '(долгое нажатие → «Вставить») или нажмите в приложении «Telegram» ещё раз.';

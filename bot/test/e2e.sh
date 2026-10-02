@@ -39,9 +39,10 @@ failnext() { curl -s -X POST --data "$3" "http://127.0.0.1:$TG/fail/$1/$2" > /de
 js() { curl -s "http://127.0.0.1:$TG/calls" | node -e "const c = JSON.parse(require('fs').readFileSync(0, 'utf8')); const r = ($1); console.log(typeof r === 'string' ? r : JSON.stringify(r));"; }
 sql() { $W d1 execute falar-feedback --local --persist-to "$TMP/state" --config "$CFG" --command "$1" --json 2>/dev/null \
   | node -e "const j = JSON.parse(require('fs').readFileSync(0, 'utf8')); console.log(JSON.stringify(j[0].results));"; }
-N=1
+echo 1 > "$TMP/n"
+# Номер сообщения — в файле: msg зовётся внутри $(…), и счётчик в переменной там бы не рос.
 msg() {   # msg <from_id> <имя> <chat_id> <chat_type> <текст> [доп. поля JSON без скобок]
-  N=$((N + 1))
+  local N; N=$(( $(cat "$TMP/n") + 1 )); echo $N > "$TMP/n"
   printf '{"update_id":%d,"message":{"message_id":%d,"date":0,"from":{"id":%s,"is_bot":false,"first_name":"%s"},"chat":{"id":%s,"type":"%s"%s},"text":%s%s}}' \
     $N $N "$1" "$2" "$3" "$4" "$([ "$4" = supergroup ] && echo ',"is_forum":true')" "$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$5")" "${6:+,$6}"
 }
@@ -81,4 +82,18 @@ post "$(msg 2002 Борис 2002 private "#идея ещё")" > /dev/null
 chk '[ "$(js "c.filter(x => x.params.chat_id === -100500).map(x => x.params.message_thread_id ?? null)")" = "[$t,null]" ]' "W10 ошибка Telegram (400, топик удалён) — в общий топик"
 left=$(sql "SELECT count(*) AS n FROM settings WHERE key = 'topic:-100500:idea'")
 chk '[ "$left" = "[{\"n\":0}]" ]' "W10 удалённый топик забыт"
+echo "== кнопки темы"
+reset
+post "$(msg 2004 Глеб 2004 private "Хочу тёмную тему")" > /dev/null
+pm=$(cat "$TMP/n")
+chk '[ "$(js "c.find(x => x.params.chat_id === 2004).params.reply_markup.inline_keyboard[0].map(b => b.callback_data).join()")" = "c:bug:$pm,c:idea:$pm,c:translation:$pm" ]' "W12 без темы — человеку «о чём это?» с кнопками"
+gen=$(sql "SELECT msg FROM relays WHERE person = 2004" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].msg)")
+bug=$(sql "SELECT value FROM settings WHERE key = 'topic:-100500:bug'" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].value)")
+reset
+N=$(( $(cat "$TMP/n") + 1 )); echo $N > "$TMP/n"
+r=$(post "{\"update_id\":$N,\"callback_query\":{\"id\":\"q1\",\"chat_instance\":\"x\",\"data\":\"c:bug:$pm\",\"from\":{\"id\":2004,\"is_bot\":false,\"first_name\":\"Глеб\"},\"message\":{\"message_id\":900,\"date\":0,\"chat\":{\"id\":2004,\"type\":\"private\"}}}}")
+chk '[ "$r" = 200 ] && [ "$(js "c.map(x => x.method).join()")" = "copyMessage,deleteMessage,answerCallbackQuery,editMessageText" ]' "W13 нажатие — копия в топик, старая удалена, ответ, кнопки сняты"
+chk '[ "$(js "[c[0].params.message_thread_id, c[0].params.message_id, c[1].params.message_id]")" = "[$bug,$gen,$gen]" ]' "W13 из общего топика ($gen) — в «Ошибки» ($bug)"
+now=$(sql "SELECT msg FROM relays WHERE person = 2004" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].msg)")
+chk '[ "$now" != "$gen" ]' "W13 связь в D1 переехала на новую копию ($now)"
 chk '! grep -qE "Uncaught|TypeError|ReferenceError" "$TMP/dev.log"' "W11 в журнале Worker нет необработанных ошибок"
