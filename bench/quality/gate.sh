@@ -43,6 +43,12 @@ DBASE=$STATE/quality-baseline
 # основного дерева репозитория. Манифест — всегда этого дерева: сверяется то, что уедет из него.
 MAIN=$(cd "$(git -C "$R" rev-parse --git-common-dir)/.." && pwd)
 pick() { [ -e "$R/$1" ] && echo "$R/$1" || echo "$MAIN/$1"; }
+# Снимки набора, записи комнаты и модели чтения не в git, а tools/ocr_*.py, test_ocr_device.sh и
+# gain_sweep.sh берут их по путям своего дерева, мимо pick(): чего нет в рабочем дереве — ссылка из
+# основного (в .gitignore, git её не видит).
+for d in bench/ocr/photos bench/ocr/runs/cyl-down bench/air/rec models/ocr models/ocr-cand; do
+  [ -e "$R/$d" ] || [ ! -e "$MAIN/$d" ] || { mkdir -p "$(dirname "$R/$d")"; ln -s "$MAIN/$d" "$R/$d"; }
+done
 PY=$(pick .venv)/bin/python; CPY=$(pick .venv-comet)/bin/python; ADB=${ADB:-$(pick tools/platform-tools)/adb}
 MODELS=$R/models; for m in mt asr_multi ocr; do [ -d "$MODELS/$m" ] || MODELS=$MAIN/models; done; export FALAR_MODELS=$MODELS
 COMET_CKPT=$(pick models/comet/wmt22-comet-da/checkpoints/model.ckpt)
