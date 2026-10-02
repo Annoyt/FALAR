@@ -112,6 +112,21 @@ public class DenoiseGateTest {
     // первая версия музыки не знает
     g = v1(); eq(scenario(g, new double[][]{{-30, tone, 100}}), "62:+", "G9 первая версия включается и в музыке");
 
+    // G11: границы — те же числа, что у близнеца (Gate в tools/vad_denoise_eval.py)
+    eq(scenario(new DenoiseGate(), new double[][]{{-45, noise, 100}}), "23:+", "G11 фон ровно порог + 3 дБ — быстро");
+    eq(scenario(new DenoiseGate(), new double[][]{{-45.01, noise, 100}}), "62:+", "G11 чуть тише порога + 3 — только через 2 с");
+    eq(scenario(new DenoiseGate(), new double[][]{{-40, NaN, 3}, {-40, noise, 100}}), "26:+", "G11 быстрое — когда наблюдений спектра 8");
+    eq(scenario(new DenoiseGate(), new double[][]{{-48, noise, 100}}), "62:+", "G11 фон ровно на пороге −48 — включает");
+    eq(scenario(new DenoiseGate(), new double[][]{{-48.01, noise, 1000}}), "", "G11 чуть тише порога — никогда");
+    g = new DenoiseGate();
+    for (int k = 0; k < 7; k++) g.observe(tone);
+    ok(!g.music(), "G11 семь тональных кадров — о музыке судить рано");
+    g.observe(tone); ok(g.music(), "G11 восьмой — музыка");
+    g = new DenoiseGate(); for (int k = 0; k < 20; k++) g.observe(DenoiseGate.LOG_MUSIC);
+    ok(!g.music(), "G11 ровно на границе — не музыка (строго ниже)");
+    g = new DenoiseGate(); for (int k = 0; k < 20; k++) g.observe(DenoiseGate.LOG_MUSIC - 1e-9);
+    ok(g.music(), "G11 чуть ниже границы — музыка");
+
     // G10: плоскостность кадра — тот же счёт, что в Python (log_flatness), до 1e-9
     float[][] frames = new float[4][512];
     for (int n = 0; n < 512; n++) {
@@ -128,6 +143,8 @@ public class DenoiseGateTest {
     double wf = Math.exp(DenoiseGate.logFlatness(white));
     ok(wf > 0.3 && wf < 0.8, "G10 белый шум — ровный спектр (" + String.format(Locale.ROOT, "%.2f", wf) + ")");
     g = new DenoiseGate(); g.observeFrame(frames[3]); near(g.flat, py[3], 1e-9, "G10 observeFrame считает то же");
+    float[] half = Arrays.copyOf(frames[3], 256), padded = Arrays.copyOf(half, 512);
+    near(DenoiseGate.logFlatness(half), DenoiseGate.logFlatness(padded), 1e-12, "G10 короткий кадр дополняется нулями");
 
     System.out.println(fails == 0 ? "DenoiseGate: " + checks + " проверок, все прошли" : "DenoiseGate: провалов " + fails + " из " + checks);
     return fails;

@@ -236,7 +236,7 @@ class Gate:
                 return 0
             self.on_cnt = self.on_cnt + 1 if room >= self.t else 0
             self.fast_cnt = self.fast_cnt + 1 if self.music_on and self.obs >= self.MIN_OBS and room >= self.t + self.FAST_DB else 0
-            if self.on_cnt < self.ON_FRAMES and (not self.music_on or self.fast_cnt < self.FAST_FRAMES):
+            if self.on_cnt < self.ON_FRAMES and self.fast_cnt < self.FAST_FRAMES:
                 return 0
             self.on, self.off_cnt, self.music_cnt = True, 0, 0
             return 1

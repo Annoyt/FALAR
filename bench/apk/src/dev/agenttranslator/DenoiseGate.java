@@ -77,7 +77,7 @@ public final class DenoiseGate {
       if (m) { onCnt = 0; fastCnt = 0; return 0; }
       onCnt = room >= t ? onCnt + 1 : 0;
       fastCnt = v2 && obs >= MIN_OBS && room >= t + FAST_DB ? fastCnt + 1 : 0;
-      if (onCnt < ON_FRAMES && (!v2 || fastCnt < FAST_FRAMES)) return 0;
+      if (onCnt < ON_FRAMES && fastCnt < FAST_FRAMES) return 0;
       on = true; offCnt = 0; musicCnt = 0;
       return 1;
     }
