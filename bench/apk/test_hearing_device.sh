@@ -3,7 +3,8 @@
 #
 #   bash bench/apk/test_hearing_device.sh [запись=near-pt]
 #
-# Включается «Слушать PT», вместо микрофона подаётся запись комнаты (feedwav). Итог по каждой
+# Включается «Слушать PT», вместо микрофона подаётся запись комнаты (feedwav); стенд --es feedonly 1
+# держит микрофон глухим и вне подачи — живая комната не добавляет своих фраз к записанным. Итог по каждой
 # фразе — словами в журнале («🎚 слышно хорошо: …»), а на экране слов нет (владелец 29.09): как
 # слышно — только цветом кольца вокруг «Слушать» в доке (0.26.0). Кольцо и половинки кнопки
 # проверяются по снимкам экрана без сжатия на самом телефоне (px_phone.sh): включённая половинка PT
@@ -84,7 +85,7 @@ restore() {
   say "== возврат"
   # Сначала остановить: подача записи ещё идёт и после сброса снова подстроила бы авто.
   $ADB shell "am force-stop $PKG"; sleep 2
-  $ADB shell "am start -n $ACT --es listen off --es silent 0 ${REF:+--es refineevery $REF} ${CLOUD:+--es cloudevery $CLOUD} --es micautodb $AUTO0" >/dev/null 2>&1; sleep 3
+  $ADB shell "am start -n $ACT --es listen off --es silent 0 --es feedonly 0 ${REF:+--es refineevery $REF} ${CLOUD:+--es cloudevery $CLOUD} --es micautodb $AUTO0" >/dev/null 2>&1; sleep 3
   $ADB shell "am force-stop $PKG"; sleep 2
   for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do
     [ -f "$SNAP/$(basename $f)" ] && $ADB push "$SNAP/$(basename $f)" "$F/$f" >/dev/null 2>&1; done
@@ -105,7 +106,7 @@ $ADB shell "am force-stop $PKG"; sleep 1; $ADB push $D/t.json "$F/chats/$TID.jso
 $ADB push "$REC/room.wav" "$F/replay.wav" >/dev/null 2>&1
 $ADB push $A/px_phone.sh /data/local/tmp/falar_px.sh >/dev/null 2>&1
 m0=$(count $LOG)
-$ADB shell "am start -n $ACT --es listen pt --es silent 1 --es refineevery 0 --es cloudevery 0" >/dev/null 2>&1
+$ADB shell "am start -n $ACT --es listen pt --es silent 1 --es feedonly 1 --es refineevery 0 --es cloudevery 0" >/dev/null 2>&1
 for _ in $(seq 60); do sleep 2; [ "$(seen $m0 '🧩 модули:')" != 0 ] && [ "$(seen $m0 'микрофон:|слушаю')" != 0 ] && break; done
 sleep 3; front || { say "впереди не Falar или экран погашен — экран не проверить"; exit 1; }
 

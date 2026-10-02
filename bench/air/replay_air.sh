@@ -6,8 +6,16 @@
 #
 # Комната зафиксирована в записи, поэтому два прогона отличаются ровно настройками — в отличие
 # от прогонов через живой воздух, где разница между комнатами больше разницы между настройками.
+# Стенд --es feedonly 1 держит микрофон глухим и вне подачи: до неё и после «подача закончена» в нарезку
+# шли живые фразы комнаты и попадали в listener.tsv (02.10 так 16 минут не кончался gain_sweep). На выходе
+# — feedonly 0, иначе приложение осталось бы глухим, пока его не откроют с рабочего стола.
 set -e
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и вызванный из других (как у test_*_device.sh).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 ADB=$R/tools/platform-tools/adb
 PKG=app.falar
 LIS=""; REC=""; SEG=""; LABEL=""; SPEED=4
@@ -45,7 +53,8 @@ $L push "$REC/room.wav" "$EXT/replay.wav" >/dev/null
 N0_L=$(lines); N0_LOG=$($L shell "test -f $EXT/at.log && wc -l < $EXT/at.log || echo 0" | tr -d '\r ')
 
 $L shell am force-stop $PKG >/dev/null 2>&1 || true; sleep 2
-$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 $SEGARGS >/dev/null
+trap '$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es feedonly 0 >/dev/null 2>&1 || true' EXIT
+$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es vad 1 --es silent 1 --es feedonly 1 --es fixdir $DIR --es denoise 0 $SEGARGS >/dev/null
 READY=0
 for _ in $(seq 40); do sleep 2; [ "$(tailgrep "$N0_LOG" 'микрофон:')" != 0 ] && { READY=1; break; }; done
 [ "$READY" = 1 ] || { echo "слушающий не поднялся"; exit 1; }
