@@ -6,7 +6,7 @@
 мерила бы не то, что получит пользователь. sha256 больших файлов запоминается по (путь, размер, время
 изменения) в ~/.cache/falar-stand/sha256.json, чтобы не считать 1,4 ГБ при каждом запуске.
 
-    python3 bench/quality/models_check.py <каталог models> mt/ asr_multi/
+    python3 bench/quality/models_check.py <манифест> <каталог моделей> mt/ asr_multi/
 """
 import hashlib
 import json
@@ -15,8 +15,8 @@ import sys
 
 
 def main():
-    models, prefixes = sys.argv[1], tuple(sys.argv[2:])
-    man = json.load(open(os.path.join(models, "manifest.json"), encoding="utf-8"))
+    manifest, models, prefixes = sys.argv[1], sys.argv[2], tuple(sys.argv[3:])
+    man = json.load(open(manifest, encoding="utf-8"))
     cache_path = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "falar-stand", "sha256.json")
     try:
         cache = json.load(open(cache_path))

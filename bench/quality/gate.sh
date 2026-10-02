@@ -20,11 +20,20 @@
 #     как по умолчанию), WER по фразам; под замком стенда, телефон рабочий.
 # Вердикт — bench/quality/verdict.py: без изменений / не хуже / лучше / хуже (значимо и не меньше
 # порога). Код выхода 1 — хуже эталона. Журналы и результаты — ~/.cache/falar-stand/quality/<время>/.
+# Всё тело — в фигурных скобках: bash прочтёт его целиком до запуска, и правка файла посреди прогона
+# (02.10 так сбился прогон) не подсунет ему середину строки.
+{
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); Q=$R/bench/quality; A=$R/bench/apk; BASE=$Q/baseline
 STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand
 RUN=$STATE/quality/$(date +%Y%m%d-%H%M%S); mkdir -p "$RUN"
-PY=$R/.venv/bin/python; CPY=$R/.venv-comet/bin/python; ADB=${ADB:-$R/tools/platform-tools/adb}
+# Рабочие деревья (falar-wt/*) держат модели и окружения не целиком: чего нет здесь, берётся из
+# основного дерева репозитория. Манифест — всегда этого дерева: сверяется то, что уедет из него.
+MAIN=$(cd "$(git -C "$R" rev-parse --git-common-dir)/.." && pwd)
+pick() { [ -e "$R/$1" ] && echo "$R/$1" || echo "$MAIN/$1"; }
+PY=$(pick .venv)/bin/python; CPY=$(pick .venv-comet)/bin/python; ADB=${ADB:-$(pick tools/platform-tools)/adb}
+MODELS=$R/models; for m in mt asr_multi; do [ -d "$MODELS/$m" ] || MODELS=$MAIN/models; done; export FALAR_MODELS=$MODELS
+COMET_CKPT=$(pick models/comet/wmt22-comet-da/checkpoints/model.ckpt)
 RECS=${RECS:-near-pt near-ru far-pt noisy-pt}
 DEVICE=0; ACCEPT=0; RELEASE=
 while [ $# -gt 0 ]; do
@@ -55,10 +64,10 @@ if [ ! -f "$ORT" ]; then   # та же версия, что в приложен�
   curl -sSL -o "$ORT.part" "$U" && [ "$(sha1sum < "$ORT.part" | cut -d' ' -f1)" = "$(curl -sSL "$U.sha1")" ] \
     && mv "$ORT.part" "$ORT" || { rm -f "$ORT.part"; fail "onnxruntime-$ORTV.jar не скачался или не сошёлся sha1"; }
 fi
-J=$R/tools/json.jar; AJ=$R/tools/android.jar
-[ -f "$J" ] || curl -sSL -o "$J" https://repo1.maven.org/maven2/org/json/json/20240303/json-20240303.jar
+J=$(pick tools/json.jar); AJ=$(pick tools/android.jar)
+[ -f "$J" ] || { J=$R/tools/json.jar; curl -sSL -o "$J" https://repo1.maven.org/maven2/org/json/json/20240303/json-20240303.jar; }
 [ -f "$AJ" ] || fail "нет tools/android.jar — откуда взять, в bench/apk/README.md"
-$PY "$Q/models_check.py" "$R/models" mt/ asr_multi/ | tee -a "$RUN/gate.log"
+$PY "$Q/models_check.py" "$R/models/manifest.json" "$MODELS" mt/ asr_multi/ | tee -a "$RUN/gate.log"
 [ "${PIPESTATUS[0]}" = 0 ] || fail "модели в models/ не те, что в манифесте: проверка мерила бы не то, что уедет на телефон (tools/models_fetch.py)"
 
 # ---- перевод: код приложения на столе
@@ -67,11 +76,11 @@ javac --release 11 -nowarn -encoding UTF-8 -cp "$ORT:$J:$AJ" -sourcepath "$A/src
   "$A/src/dev/agenttranslator/Engine.java" "$A"/sherpa-java-api/*.java "$Q/MtRun.java" > "$RUN/javac.log" 2>&1 \
   || fail "код перевода не собрался на столе: $RUN/javac.log"
 for d in pt2ru ru2pt; do
-  java -cp "$C:$ORT:$J:$AJ" dev.agenttranslator.MtRun "$R/models" $d "$RUN/mt_$d.json" \
+  java -cp "$C:$ORT:$J:$AJ" dev.agenttranslator.MtRun "$MODELS" $d "$RUN/mt_$d.json" \
     "$R/data/mt_test/tatoeba.json=tatoeba" "$R/data/test_set.json=situations" 2>> "$RUN/mt.log" \
     || fail "перевод $d упал: $RUN/mt.log"
 done
-if [ -x "$CPY" ] && [ -f "$R/models/comet/wmt22-comet-da/checkpoints/model.ckpt" ]; then
+if [ -x "$CPY" ] && [ -f "$COMET_CKPT" ]; then
   "$CPY" "$R/tools/mt_metrics.py" --threads 4 "$RUN/mt_pt2ru.json" "$RUN/mt_ru2pt.json" 2>> "$RUN/mt.log" | tee -a "$RUN/gate.log"
   [ "${PIPESTATUS[0]}" = 0 ] || fail "COMET упал: $RUN/mt.log (ПК с андервольтом под нагрузкой — повторите)"
 else
@@ -124,3 +133,4 @@ if [ $ACCEPT = 1 ]; then
 fi
 [ $V = 1 ] && say "ХУЖЕ эталона. Исправить — или, если ухудшение осознанное, принять: bash bench/quality/gate.sh --accept и закоммитить эталон."
 exit $V
+}

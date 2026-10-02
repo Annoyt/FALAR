@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(R, "bench", "asr2"))
 from wer2 import wer  # noqa: E402  — одна норма и один WER на все стенды распознавания
 
 CORPUS = os.path.join(R, "bench", "air", "corpus")
-MODEL = os.path.join(R, "models", "asr_multi")
+MODEL = os.path.join(os.environ.get("FALAR_MODELS") or os.path.join(R, "models"), "asr_multi")
 
 
 def samples(path):
