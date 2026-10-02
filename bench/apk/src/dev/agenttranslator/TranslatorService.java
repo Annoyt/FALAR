@@ -3651,6 +3651,11 @@ public class TranslatorService extends Service {
       if (micEnd - h > micRing.length - 2048) continue;                 // отстали — не бывает, но кольцо конечно
       double[] m = BargeIn.power(micSlice(h, BargeIn.N), 0);
       boolean on = playing && !Double.isNaN(tsD);
+      // Фраза доиграла по-настоящему — последний отданный отсчёт прозвучал и отзвучал (250 мс): дальше датчику ждать
+      // нечего. Конец по расчёту (playEndMs) приходит раньше настоящего, и в зазоре тишина после фразы сходила за
+      // человека (прогон 02.10, громкость 10).
+      if (on && !writingSpeech) { long last; synchronized (refRing) { last = refNext; }
+        if (Math.round(h - micBase + tsD - (Double.isNaN(bargeOffMs) ? 0 : bargeOffMs) * 16) > last + 4000) on = false; }
       if (playing) { phHops++; if (on) phOn++; }
       if (!on && !"ducked".equals(barge.state)) {
         if (!playing) barge.learn(m, QUIET);                            // между фразами — только фон

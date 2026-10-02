@@ -24,6 +24,9 @@ final class BargeIn {
   static final double F_LO = 150, F_HI = 6000;
   static final double THETA1 = 10, SHARE1 = 0.10; static final int K1 = 2, M1 = 2;
   static final double THETA2 = 8, SHARE2 = 0.25; static final int K2 = 3, M2 = 4;
+  /** И полосы «за человеком» вместе громче фона в них на столько: колебания фона после конца фразы проходили порог
+   *  полосы, и озвучку «перебивала» тишина (прогон 02.10, громкость 10). */
+  static final double SNR2 = 10;
   static final double DECAY = 4, NOISE_DB = 6, SPREAD_DB = -25;
   /** На подозрении озвучка на паузе, а не тише: на громкости 15 у Redmi приглушение на 20/30/40 дБ в цифре гасило
    *  эхо у микрофона лишь на 5–11 дБ (обработка звука подтягивает тихое). На паузе эха нет — остаётся хвост в
@@ -87,9 +90,18 @@ final class BargeIn {
   /** Новая фраза озвучки: всё, кроме усиления тракта и фона. */
   void reset() { nh = 0; nHits = 0; nHits2 = 0; since = -1; state = "listen"; fireT = -1; }
 
-  /** Фон: вниз быстро, вверх еле-еле и не больше чем вдвое за шаг — как у нарезки. Вверх по 0,01 за шаг он за пару
-   *  секунд речи между фразами дорастал до самой речи, и на паузе человек был «не громче фона» (прогон 02.10). */
-  static double trackNoise(double m, double n) { return m < n ? n + 0.3 * (m - n) : n + 0.002 * (Math.min(m, 2 * n) - n); }
+  /** Фон: вниз быстро, вверх не быстрее 0,03 дБ за шаг (2 дБ/с). Вверх по 0,01 линейно он за пару секунд речи между
+   *  фразами дорастал до самой речи, и на паузе человек был «не громче фона»; а «не больше чем вдвое за шаг по 0,002»
+   *  не поднимался с цифрового нуля начала записи — и тишина сходила за человека (прогоны 02.10). Цифровой ноль
+   *  фоном не считается. */
+  static double trackNoise(double m, double n) {
+    if (m < 1e-9) return n;
+    if (n < 1e-9) return m;
+    double d = 10 * Math.log10(m / n);
+    // вниз — 0,3 разницы, но не больше 1 дБ за шаг: несколько почти тихих кадров на стыке фраз (телефон глушит вход,
+    // включая динамик) роняли фон на 10 дБ, и тишина после фразы сходила за человека
+    return n * Math.pow(10, (d > 0 ? Math.min(0.03, d) : Math.max(-1.0, 0.3 * d)) / 10);
+  }
 
   double[] smear() {
     double[] s = new double[NB];
@@ -136,7 +148,9 @@ final class BargeIn {
       for (int b = 0; b < NB; b++) { double e0 = s[b] * Math.pow(10, g[b] / 10); if (e0 > noise[b] * seenAt) { obs[b] += 10 * Math.log10(m[b] / (e0 + 1e-12)); nobs[b]++; } }
       boolean[] c = cells(m, s, add(g, att), 0, THETA2, e);
       score = share(c);
-      push(hits2, score >= SHARE2, true);
+      double cm = 0, cn = 0; for (int b = 0; b < NB; b++) if (c[b]) { cm += m[b]; cn += noise[b]; }
+      double snr = 10 * Math.log10(cm / (cn + 1e-12) + 1e-12);
+      push(hits2, score >= SHARE2 && snr >= SNR2, true);
       if (count(hits2, nHits2) >= K2) {
         state = "stopped";
         double v = 0; for (int b = 0; b < NB; b++) if (c[b]) v += m[b];
