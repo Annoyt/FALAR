@@ -101,15 +101,53 @@ def summarize(results):
     return out
 
 
-class Comet:
-    """Модель грузится один раз (~20 с) на все файлы."""
+class CometCache:
+    """Оценки COMET по тройке (исходник, перевод, эталон): у неизменившегося перевода оценка та же, и
+    проверка после правки досчитывает только изменившиеся фразы. Оценка от состава пачки не зависит —
+    сверено: выборка из 48 пар отдельно дала те же числа до четвёртого знака. Файл — вне репозитория."""
 
-    def __init__(self, threads=0):
+    def __init__(self, path=None):
+        self.path = Path(path or os.environ.get("FALAR_COMET_CACHE")
+                         or Path.home() / ".cache" / "falar-stand" / "comet-cache.tsv")
+        self.d = {}
+        if self.path.exists():
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                k, _, v = line.partition("\t")
+                if v:
+                    self.d[k] = float(v)
+
+    @staticmethod
+    def key(r):
+        import hashlib
+        return hashlib.sha1(f"{r['src']}\0{r['hyp']}\0{r['ref']}".encode("utf-8")).hexdigest()
+
+    def get(self, r):
+        return self.d.get(self.key(r))
+
+    def add(self, rows):
+        new = [(self.key(r), r["comet"]) for r in rows if self.key(r) not in self.d]
+        if not new:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "a", encoding="utf-8") as f:
+            for k, v in new:
+                self.d[k] = v
+                f.write(f"{k}\t{v}\n")
+
+
+class Comet:
+    """Модель грузится один раз (~20 с) на все файлы — и только если в кэше нашлось не всё."""
+
+    def __init__(self, threads=0, cache=True):
+        self.threads, self.model = threads, None
+        self.cache = CometCache() if cache else None
+
+    def _load(self):
         import logging
         import warnings
         import torch
         warnings.filterwarnings("ignore")
-        torch.set_num_threads(threads or max(1, min(8, (os.cpu_count() or 2) - 2)))
+        torch.set_num_threads(self.threads or max(1, min(8, (os.cpu_count() or 2) - 2)))
         from comet import load_from_checkpoint
         # lightning настраивает свои журналы при импорте — глушить после него
         for name in ("pytorch_lightning", "lightning", "lightning.pytorch", "lightning_fabric", "comet"):
@@ -119,10 +157,24 @@ class Comet:
         self.model = load_from_checkpoint(str(COMET_CKPT))
 
     def score(self, results, batch=32):
-        data = [{"src": r["src"], "mt": r["hyp"], "ref": r["ref"]} for r in results]
-        out = self.model.predict(data, batch_size=batch, gpus=0, progress_bar=False)
-        for r, s in zip(results, out.scores):
-            r["comet"] = round(float(s), 4)
+        """Проставить r["comet"]; вернуть, сколько посчитано заново (остальное — из кэша)."""
+        todo = []
+        for r in results:
+            v = self.cache.get(r) if self.cache else None
+            if v is None:
+                todo.append(r)
+            else:
+                r["comet"] = v
+        if todo:
+            if self.model is None:
+                self._load()
+            data = [{"src": r["src"], "mt": r["hyp"], "ref": r["ref"]} for r in todo]
+            out = self.model.predict(data, batch_size=batch, gpus=0, progress_bar=False)
+            for r, v in zip(todo, out.scores):
+                r["comet"] = round(float(v), 4)
+            if self.cache:
+                self.cache.add(todo)
+        return len(todo)
 
 
 def headline(summary):
@@ -150,6 +202,8 @@ def rescore(path, comet=None, force=False):
         todo = res if force else [r for r in res if "comet" not in r]
         if todo:
             comet.score(todo)
+        elif comet.cache:
+            comet.cache.add([r for r in res if "comet" in r])   # готовые оценки — в кэш
     s = d.setdefault("summary", {})
     s["sets"] = summarize(res)
     headline(s)
@@ -254,7 +308,7 @@ def main():
     ap.add_argument("files", nargs="*")
     ap.add_argument("--selftest", action="store_true", help="сверить свою сборку chrF с sacrebleu")
     ap.add_argument("--no-comet", action="store_true", help="только chrF и chrF++")
-    ap.add_argument("--force", action="store_true", help="COMET заново и там, где уже посчитан")
+    ap.add_argument("--force", action="store_true", help="COMET заново и там, где уже посчитан (кэш тоже не берётся)")
     ap.add_argument("--compare", action="store_true", help="два файла: B против A")
     ap.add_argument("--table", action="store_true", help="только напечатать таблицу оценок по файлам")
     ap.add_argument("--since", default="", help="--table/--compare: только пары Tatoeba не старше даты ГГГГ-ММ-ДД")
@@ -279,7 +333,7 @@ def main():
                     print(f"  {metric:7s} A {m['A']:{f}}  B {m['B']:{f}}  Δ {m['delta']:+{f}}  "
                           f"95% [{m['ci95'][0]:+{f}}; {m['ci95'][1]:+{f}}]  p={m['p']:.3f}")
         return
-    comet = None if a.no_comet else Comet(a.threads)
+    comet = None if a.no_comet else Comet(a.threads, cache=not a.force)
     for f in a.files:
         print(line(Path(f).name, rescore(f, comet, a.force)), flush=True)
 

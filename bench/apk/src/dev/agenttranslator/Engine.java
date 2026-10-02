@@ -89,7 +89,17 @@ public class Engine {
     }
     loadAsrMs = (System.nanoTime() - t) / 1000000; log.log("ASR+VAD загружены за " + loadAsrMs + " мс (" + asrName + (denoiser != null ? ", шумоподавитель есть" : "") + ") · +" + (rssMb() - r0) + " МБ резидентно");
     stage("mt");
-    t = System.nanoTime(); long rss0 = rssMb();
+    loadMt();
+    if (withTts) { stage("tts"); loadTts(); } else log.log("TTS не загружается: модуль «Озвучка» выключен");
+  }
+
+  /** Только перевод — без распознавания, VAD и голосов: замер качества перевода на столе
+   *  (bench/quality/MtRun.java) тем же кодом, что работает на телефоне. */
+  static Engine mtOnly(File modelsDir, Log log) throws Exception { return new Engine(modelsDir, log, true); }
+  private Engine(File modelsDir, Log log, boolean mtOnly) throws Exception { this.m = modelsDir; this.log = log; loadMt(); }
+
+  void loadMt() throws Exception {
+    long t = System.nanoTime(), rss0 = rssMb();
     env = OrtEnvironment.getEnvironment();
     boolean legacy = "legacy".equals(mtVariant); int kvDirs = 0;
     for (String d : new String[]{"pt2ru", "ru2pt"}) {
@@ -103,7 +113,6 @@ public class Engine {
     log.log("MT загружен за " + loadMtMs + " мс · +" + (rss1 - rss0) + " МБ резидентно, всего " + rss1 + " МБ · "
         + (kvDirs == 2 ? "две сессии на направление" : kvDirs == 0 ? "три сессии на направление" : "две сессии в одном направлении, три в другом")
         + (legacy ? " (стенд: прежний путь)" : ""));
-    if (withTts) { stage("tts"); loadTts(); } else log.log("TTS не загружается: модуль «Озвучка» выключен");
   }
 
   /** Поднимать ли голоса при создании движка: модуль «Озвучка» (Modules.TTS). Статическое поле,
