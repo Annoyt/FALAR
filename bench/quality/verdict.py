@@ -98,11 +98,12 @@ def wer_compare(pairs):
     return {"A": va, "B": vb, "delta": vb - va, "ci95": [ds[N_BOOT // 40], ds[N_BOOT - N_BOOT // 40 - 1]], "p": p}
 
 
-def asr(base_dir, run_dir, out, kind="pc"):
+def asr(base_dir, run_dir, out, kind="pc", device_base=""):
     """kind="pc" — модель на корпусе Tatoeba (asr_pc.json), "device" — полный путь на телефоне на записях
     комнаты (asr_device.json); фразы сводятся по записи и файлу, решает сумма по языку."""
     name, label = ("asr_pc.json", "ПК") if kind == "pc" else ("asr_device.json", "телефон")
-    bp, cp = os.path.join(base_dir, name), os.path.join(run_dir, name)
+    bp = os.path.join(device_base if kind == "device" and device_base else base_dir, name)
+    cp = os.path.join(run_dir, name)
     if not (os.path.exists(bp) and os.path.exists(cp)):
         out.append(f"- распознавание ({label}): нет {'эталона' if not os.path.exists(bp) else 'прогона'} — пропущено")
         return False
@@ -138,6 +139,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
     ap.add_argument("--run", required=True)
+    ap.add_argument("--device-base", default="", help="эталон телефона — вне git (записи комнаты личные)")
     ap.add_argument("--stages", default="mt asr", help="mt asr device — какие этапы сравнивать")
     ap.add_argument("--report", default="")
     a = ap.parse_args()
@@ -147,7 +149,7 @@ def main():
     if "asr" in a.stages:
         worst |= asr(a.base, a.run, out, "pc")
     if "device" in a.stages:
-        worst |= asr(a.base, a.run, out, "device")
+        worst |= asr(a.base, a.run, out, "device", a.device_base)
     if not out:
         print("нечего сравнивать")
         return 2

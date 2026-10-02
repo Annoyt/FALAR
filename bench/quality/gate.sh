@@ -19,7 +19,9 @@
 #     (bench/air/gain_sweep.sh: чувствительность авто с ограничителем, шумодав нарезки «только при шуме» —
 #     как по умолчанию), WER по фразам; под замком стенда, телефон рабочий.
 # Вердикт — bench/quality/verdict.py: без изменений / не хуже / лучше / хуже (значимо и не меньше
-# порога). Код выхода 1 — хуже эталона. Журналы и результаты — ~/.cache/falar-stand/quality/<время>/.
+# порога). Код выхода 1 — хуже эталона. Эталон ПК — bench/quality/baseline (в git), эталон телефона —
+# ~/.cache/falar-stand/quality-baseline (записи комнаты личные). Журналы и результаты —
+# ~/.cache/falar-stand/quality/<время>/.
 # Всё тело — в фигурных скобках: bash прочтёт его целиком до запуска, и правка файла посреди прогона
 # (02.10 так сбился прогон) не подсунет ему середину строки.
 {
@@ -27,6 +29,9 @@ set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); Q=$R/bench/quality; A=$R/bench/apk; BASE=$Q/baseline
 STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand
 RUN=$STATE/quality/$(date +%Y%m%d-%H%M%S); mkdir -p "$RUN"
+# Эталон телефона — вне git, рядом с записями комнаты: записи личные (bench/air/rec не в репозитории),
+# и услышанное в них тоже не выкладываем. Нет эталона — первый прогон на телефоне его и создаёт.
+DBASE=$STATE/quality-baseline
 # Рабочие деревья (falar-wt/*) держат модели и окружения не целиком: чего нет здесь, берётся из
 # основного дерева репозитория. Манифест — всегда этого дерева: сверяется то, что уедет из него.
 MAIN=$(cd "$(git -C "$R" rev-parse --git-common-dir)/.." && pwd)
@@ -116,18 +121,23 @@ if [ $DEVICE = 1 ]; then
     [ -n "$D" ] && $PY "$Q/asr_device.py" "$D" "$RUN/asr_device.json" | tee -a "$RUN/gate.log"
     [ -f "$RUN/asr_device.json" ] || fail "прогон на телефоне не дал результата: $RUN/device.log"
     STAGES="$STAGES device"
+    if [ ! -f "$DBASE/asr_device.json" ]; then
+      mkdir -p "$DBASE"; cp "$RUN/asr_device.json" "$DBASE/"
+      say "  эталона на телефоне не было — создан из этого прогона ($DBASE)"
+    fi
     say "  распознавание на телефоне: $(since $t)"
   fi
 fi
 
 # ---- вердикт
 say ""
-$PY "$Q/verdict.py" --base "$BASE" --run "$RUN" --stages "$STAGES" --report "$RUN/report.md" | tee -a "$RUN/gate.log"
+$PY "$Q/verdict.py" --base "$BASE" --device-base "$DBASE" --run "$RUN" --stages "$STAGES" --report "$RUN/report.md" | tee -a "$RUN/gate.log"
 V=${PIPESTATUS[0]}
 say "всего: $(since $t0) · журнал: $RUN/gate.log"
 if [ $ACCEPT = 1 ]; then
-  mkdir -p "$BASE"
-  for f in mt_pt2ru.json mt_ru2pt.json asr_pc.json asr_device.json; do [ -f "$RUN/$f" ] && cp "$RUN/$f" "$BASE/$f"; done
+  mkdir -p "$BASE" "$DBASE"
+  for f in mt_pt2ru.json mt_ru2pt.json asr_pc.json; do [ -f "$RUN/$f" ] && cp "$RUN/$f" "$BASE/$f"; done
+  [ -f "$RUN/asr_device.json" ] && cp "$RUN/asr_device.json" "$DBASE/"
   say "эталон обновлён из этого прогона — закоммитьте bench/quality/baseline вместе с правкой"
   exit 0
 fi
