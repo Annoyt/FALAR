@@ -127,6 +127,8 @@ public class TranslatorService extends Service {
    *  vaddenoise). Счёт ведёт поток нарезки, итог пишет поток подачи, когда очередь кадров разобрана:
    *  после подачи кадров может не быть вовсе, и ждать следующего кадра, чтобы написать итог, нельзя. */
   volatile boolean dnReset = false; volatile long dnCostNs, dnCostCpu, dnCostFrames, dnCostAll; volatile String dnCostMode = "raw";
+  /** Цена фильтра Винера (ступень 3): процессорное время потока и кадров, с той же подачи записи. */
+  volatile long qCostCpu, qCostFrames;
   /** Модель шумодава нарезки — из APK (assets/gtcrn_simple.onnx, 0,5 МБ, GTCRN, MIT): он включён у всех по
    *  умолчанию, качать его отдельно незачем. Движку нужен путь к файлу, поэтому модель один раз за жизнь
    *  процесса сверяется с копией во внутренней папке приложения и, если та другой длины (новая версия,
@@ -154,8 +156,10 @@ public class TranslatorService extends Service {
   void logDn(String mode, long ns, long cpu, long frames, long all) {
     if (all == 0) return;
     double sec = frames * FRAME_MS / 1000.0, core = frames == 0 ? 0 : cpu / 1e9 / sec, wall = frames == 0 ? 0 : ns / 1e9 / sec;
-    log(String.format(Locale.ROOT, "🔇 шумодав нарезки (%s): работал %.0f %% времени (%.0f с из %.0f), пока работает — %.1f %% ядра по процессору потока (по часам %.1f %%)",
-        mode, 100.0 * frames / all, sec, all * FRAME_MS / 1000.0, 100 * core, 100 * wall));
+    long qf = qCostFrames, qc = qCostCpu;
+    String q = qf == 0 ? "" : String.format(Locale.ROOT, "; фильтр Винера для детектора — %.1f %% ядра потока", 100 * (qc / 1e9) / (qf * FRAME_MS / 1000.0));
+    log(String.format(Locale.ROOT, "🔇 шумодав нарезки (%s): работал %.0f %% времени (%.0f с из %.0f), пока работает — %.1f %% ядра по процессору потока (по часам %.1f %%)%s",
+        mode, 100.0 * frames / all, sec, all * FRAME_MS / 1000.0, 100 * core, 100 * wall, q));
     tsv("vaddn_cost", mode, "" + frames, "" + all, "" + (cpu / 1000000), "" + (ns / 1000000));
   }
   /** Фон комнаты по слушанию, dBFS до усиления, и когда он мерился (uptime). Удержанию он нужен,
@@ -1086,7 +1090,7 @@ public class TranslatorService extends Service {
    *  и его фон по очищенному; dn_sil — детектор по очищенному, порог по исходному; auto[:T] — ступень по
    *  умолчанию со своим порогом; auto1|auto2|auto3[:T] — ступень явно, для сравнения. Стенд не сохраняется:
    *  перезапуск — снова auto. Замеры — results/2026-10-02-vad-denoise.md, results/2026-10-03-noise-detect.md. */
-  static final int VADDN_LEVEL = 2;
+  static final int VADDN_LEVEL = 3;
   volatile String vadDn = "auto"; volatile double vadDnGate = DenoiseGate.DEFAULT_T; volatile int vadDnLevel = VADDN_LEVEL;
   String vadDnLine() {
     String m = vadDn;
@@ -2388,7 +2392,7 @@ public class TranslatorService extends Service {
       // Шумодав нарезки: свой выход копится и отдаётся кадрами по 512; включает его DenoiseGate.
       OnlineSpeechDenoiser dn = null; String dnMode = "raw"; float[] dnBuf = new float[4096]; int dnLen = 0;
       double dnNoise = 0; long dnNs = 0, dnCpu = 0, dnFrames = 0, dnAll = 0; DenoiseGate gate = new DenoiseGate(); boolean musicNoted = false;
-      Wiener qdn = new Wiener();                         // ступень 3: в тишине детектор слышит фильтр Винера
+      Wiener qdn = new Wiener(); long qCpu = 0, qFrames = 0;   // ступень 3: в тишине детектор слышит фильтр Винера
       log(vadDnLine());
       while (running) {
         if (probing) { try { Thread.sleep(20); } catch (InterruptedException e) { return; } continue; }
@@ -2417,10 +2421,11 @@ public class TranslatorService extends Service {
           if (!dnMode.equals("raw")) logDn(dnMode, dnNs, dnCpu, dnFrames, dnAll);
           if (dn != null) { dn.release(); dn = null; }
           dnMode = mode; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0; gate.reset(); musicNoted = false; qdn.reset();
+          qCpu = 0; qFrames = 0; qCostCpu = 0; qCostFrames = 0;
           if ((mode.equals("dn") || mode.equals("dn_sil")) && (dn = eng.onlineDenoiser(dnModel())) == null) { log("🔇 нет модели шумодава — нарезка по исходному"); vadDn = dnMode = "raw"; }
         }
         if (dnReset) {
-          dnReset = false; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0;
+          dnReset = false; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0; qCpu = 0; qFrames = 0; qCostCpu = 0; qCostFrames = 0;
           if (dnMode.equals("auto")) { gate.reset(); musicNoted = false; qdn.reset(); if (dn != null) { dn.release(); dn = null; } } else if (dn != null) dn.reset();
         }
         // «Только при шуме»: решает фон комнаты до этого кадра — та же оценка, что у «как слышно».
@@ -2459,7 +2464,9 @@ public class TranslatorService extends Service {
         if (vadReset) { vadReset = false; eng.vad.reset(); if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; } }
         float[] vin = eff.equals("raw") ? win : dwin;
         if (dnMode.equals("auto") && vadDnLevel == 3) {   // фильтр идёт всегда — его оценка шума не должна отставать
+          long c0 = android.os.Debug.threadCpuTimeNanos();
           float[] q = qdn.run(win);
+          qCpu += android.os.Debug.threadCpuTimeNanos() - c0; qFrames++; qCostCpu = qCpu; qCostFrames = qFrames;
           if (!gate.on() && !gate.music()) vin = q;
         }
         eng.vad.acceptWaveform(vin);
