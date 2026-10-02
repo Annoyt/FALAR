@@ -28,12 +28,26 @@ login)
   $W login ;;
 token)
   echo "Токен бота: @BotFather → /mybots → бот → API Token (вида 123456789:AA…)."
-  read -rsp "Вставьте токен (ввод не виден): " T; echo
-  [[ "$T" =~ ^[0-9]{5,15}:[A-Za-z0-9_-]{30,}$ ]] || { echo "Это не токен бота: ожидается <число>:<35 знаков>" >&2; exit 1; }
+  read -rsp "Вставьте токен (ввод не виден): " RAW; echo
+  # Токен ищется внутри вставленного: вместе с ним мог скопироваться текст сообщения BotFather или
+  # служебные символы вставки. Не нашёлся — сказать, что не так, не показывая самого ввода.
+  T=$(printf '%s' "$RAW" | grep -oE '[0-9]{5,15}:[A-Za-z0-9_-]{30,}' | head -1)
+  if [ -z "$T" ]; then
+    n=${#RAW}; why=""
+    [ "$n" -eq 0 ] && why="вставка не дошла — попробуйте Ctrl+Shift+V или правую кнопку мыши → «Вставить»"
+    [ -z "$why" ] && [[ "$RAW" != *:* ]] && why="нет двоеточия — нужна строка целиком, вида 123456789:AA…"
+    [ -z "$why" ] && [[ "$RAW" =~ [^[:print:]] ]] && why="в тексте служебные символы — скопируйте токен заново"
+    [ -z "$why" ] && why="после двоеточия должно быть 35 букв, цифр, «-» или «_»"
+    echo "Токен не найден во вставленном (знаков: $n): $why." >&2; unset RAW; exit 1
+  fi
+  unset RAW
   setv BOT_TOKEN "$T"; unset T
   [ -n "$(get WEBHOOK_SECRET)" ] || setv WEBHOOK_SECRET "$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)"
   u=$(username)
-  [ -n "$u" ] || { echo "Telegram не принял токен (getMe) — проверьте и повторите." >&2; exit 1; }
+  if [ -z "$u" ]; then   # неверный токен не оставляем в файле
+    t=$(mktemp "$ENV.XXXX"); grep -v '^BOT_TOKEN=' "$ENV" > "$t" || true; chmod 600 "$t"; mv "$t" "$ENV"
+    echo "Telegram не принял токен (getMe) — проверьте и повторите." >&2; exit 1
+  fi
   echo "Сохранён в $ENV. Бот: @$u"
   [ "$u" = falar_feedback_bot ] || echo "Имя бота не falar_feedback_bot — скажите Claude: ссылки в приложении и на сайте надо поменять."
   ;;
