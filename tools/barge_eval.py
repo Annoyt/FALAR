@@ -106,6 +106,13 @@ class Barge:
         self.score = 0.0
         self.lev = -200.0
 
+    def track_noise(self, m):
+        """Фон: вниз быстро, вверх еле-еле и не больше чем вдвое за шаг — как у нарезки. Вверх по 0,01 за шаг
+        он за пару секунд речи между фразами дорастал до самой речи, и на паузе человек был «не громче фона»
+        (прогон 02.10: проверка не подтверждала живого человека)."""
+        up = self.noise + 0.002 * (np.minimum(m, 2 * self.noise) - self.noise)
+        return np.where(m < self.noise, self.noise + 0.3 * (m - self.noise), up)
+
     def smear(self):
         h = self.hist                    # h[-1] — шаг t+1, h[-2] — шаг t
         s = np.zeros(NB)
@@ -156,8 +163,7 @@ class Barge:
             return NONE
         # фон — где сыгранного нет вовсе: вниз быстро, вверх медленно
         quiet = s < 1e-9
-        dn = np.where(m < self.noise, 0.3, 0.01)
-        self.noise = np.where(quiet, self.noise + dn * (m - self.noise), self.noise)
+        self.noise = np.where(quiet, self.track_noise(m), self.noise)
         c, e = self.cells(m, s, self.g, THETA1)
         self.score = c.mean()
         if self.since < 0 and e.sum() > self.noise.sum():
@@ -191,8 +197,7 @@ class Barge:
         if self.noise is None:
             self.noise = np.array(m, float)
         quiet = s < 1e-9
-        dn = np.where(m < self.noise, 0.3, 0.01)
-        self.noise = np.where(quiet, self.noise + dn * (m - self.noise), self.noise)
+        self.noise = np.where(quiet, self.track_noise(m), self.noise)
         self.smax = np.maximum(self.smax * 10 ** (-0.05), s)
         ok = self.teach(s, s * 10 ** (self.g / 10))
         rat = 10 * np.log10(m / (s + 1e-12))

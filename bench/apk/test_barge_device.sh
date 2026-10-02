@@ -172,7 +172,13 @@ O síndico avisou que a água vai ser cortada amanhã entre as nove e o meio-dia
 A professora pediu que as crianças tragam um desenho da família na segunda-feira.
 Esse mercado tem frutas mais frescas, mas fica um pouco longe da nossa casa.
 Ontem fomos ao cinema e o filme era tão longo que quase dormi no final.
-O técnico vem consertar a geladeira hoje à tarde, entre as duas e as cinco horas.""".split('\n')
+O técnico vem consertar a geladeira hoje à tarde, entre as duas e as cinco horas.
+A biblioteca municipal ganhou uma sala nova só para leitura em silêncio.
+Meu vizinho toca violão todas as noites, mas ninguém do prédio reclama.
+A gente pode dividir a conta do jantar em partes iguais, se todos concordarem.
+O porteiro guardou o pacote que chegou para você na segunda-feira.
+Amanhã começa a feira de livros na praça, e a entrada é gratuita.
+O trem para o litoral sai às sete, então precisamos acordar bem cedo.""".split('\n')
 open(f'{D}/say.txt', 'w', encoding='utf-8').write('\n'.join(say) + '\n')
 # «человек» — живые фразы корпуса, 2–4 с, разные дикторы
 import wave
@@ -219,12 +225,14 @@ wl "$m" '🧩 модули:' 150 >/dev/null; sleep 3
 cur=$(sh "ls -t $F/chats/ | head -1"); [ "$cur" = "$TID.json" ] || { res 1 "B· текущий разговор не тестовый: $cur"; exit 1; }
 launch --es listen both; sleep 2
 
-# одна фраза телефона: подать текст, дождаться начала звука (строка say_begin в at.tsv); вернуть отметку времени
+# одна фраза телефона: подать текст, дождаться начала звука (строка say_begin в at.tsv); отметка — в SPOKE_AT.
+# Не через $(speak): в подоболочке счётчик k не растёт, и каждой следующей шла та же фраза — её отбивала
+# проверка «прочли вслух с экрана» (прогоны 02.10, B3/B4 вышли пустыми).
 k=0
 speak() {
-  local t0 i l; t0=$(tmark)
+  local t0 i l; t0=$(tmark); SPOKE_AT=""
   launch "--es feedasr '${SAY[$k]}'"; k=$((k+1))
-  for i in $(seq 60); do l=$(sh "tail -n +$((t0+1)) $TSV | grep -m1 -F say_begin"); [ -n "$l" ] && { printf '%s' "$l" | cut -f1; return 0; }; sleep 0.25; done
+  for i in $(seq 60); do l=$(sh "tail -n +$((t0+1)) $TSV | grep -m1 -F say_begin"); [ -n "$l" ] && { SPOKE_AT=$(printf '%s' "$l" | cut -f1); return 0; }; sleep 0.25; done
   return 1
 }
 # дождаться тишины: ни озвучки, ни нарезки (журнал молчит 3 с)
@@ -260,7 +268,7 @@ dips=$(since "$m2" | grep -c '🗣 похоже, перебивают'); stops=$
 # фраза человека поверх озвучки: колонки ПК через 0,6–1,6 с после начала звука
 human() {
   local clip=$1 at dly
-  at=$(speak) || return 1
+  speak || return 1; at=$SPOKE_AT
   dly=$(LC_ALL=C awk -v s="$RANDOM" 'BEGIN { srand(s); printf "%.1f", 0.6 + rand() }')
   sleep "$dly"; printf '%s\t%s\t%s\n' "$clip" "$at" "$(date +%s%3N)" >> "$D/played.tsv"
   pw-play "$clip.wav" 2>/dev/null; calm

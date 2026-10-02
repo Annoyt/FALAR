@@ -87,6 +87,10 @@ final class BargeIn {
   /** Новая фраза озвучки: всё, кроме усиления тракта и фона. */
   void reset() { nh = 0; nHits = 0; nHits2 = 0; since = -1; state = "listen"; fireT = -1; }
 
+  /** Фон: вниз быстро, вверх еле-еле и не больше чем вдвое за шаг — как у нарезки. Вверх по 0,01 за шаг он за пару
+   *  секунд речи между фразами дорастал до самой речи, и на паузе человек был «не громче фона» (прогон 02.10). */
+  static double trackNoise(double m, double n) { return m < n ? n + 0.3 * (m - n) : n + 0.002 * (Math.min(m, 2 * n) - n); }
+
   double[] smear() {
     double[] s = new double[NB];
     for (int j = -JIT; j <= TAIL; j++) {
@@ -142,7 +146,7 @@ final class BargeIn {
       return NONE;
     }
     // фон — где сыгранного нет вовсе: вниз быстро, вверх медленно
-    for (int b = 0; b < NB; b++) if (s[b] < 1e-9) noise[b] += (m[b] < noise[b] ? 0.3 : 0.01) * (m[b] - noise[b]);
+    for (int b = 0; b < NB; b++) if (s[b] < 1e-9) noise[b] = trackNoise(m[b], noise[b]);
     boolean[] c = cells(m, s, g, 0, THETA1, e);
     score = share(c);
     double es = 0, ns = 0; for (int b = 0; b < NB; b++) { es += e[b]; ns += noise[b]; }
@@ -168,7 +172,7 @@ final class BargeIn {
     hist[nh++] = rNext.clone();
     double[] s = smear();
     if (noise == null) noise = m.clone();
-    for (int b = 0; b < NB; b++) if (s[b] < 1e-9) noise[b] += (m[b] < noise[b] ? 0.3 : 0.01) * (m[b] - noise[b]);
+    for (int b = 0; b < NB; b++) if (s[b] < 1e-9) noise[b] = trackNoise(m[b], noise[b]);
     double dec = Math.pow(10, -0.05); boolean any = false;
     for (int b = 0; b < NB; b++) smax[b] = Math.max(smax[b] * dec, s[b]);
     double[] e = new double[NB]; for (int b = 0; b < NB; b++) e[b] = s[b] * Math.pow(10, g[b] / 10);

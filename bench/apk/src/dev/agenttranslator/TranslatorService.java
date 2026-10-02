@@ -3531,7 +3531,7 @@ public class TranslatorService extends Service {
   long micEnd = 0, micBase = 0, bargeHop = 0, duckStart = -1, tsAt = 0, duckAtMs = 0, gainSavedAt = 0;
   volatile long phraseAtMs = 0;
   /** Номер отсчёта сыгранного (16 кГц) минус номер кадра записи — по меткам времени, без поправки телефона. */
-  double tsD = Double.NaN;
+  double tsD = Double.NaN, tsHold = Double.NaN;
   int bargeVol = -1, warmHops = 0, envN = 0, phHops = 0, phOn = 0;
   boolean wasPlaying = false;
   final double[] envMic = new double[512], envRef = new double[512];
@@ -3553,6 +3553,10 @@ public class TranslatorService extends Service {
   void phraseBegin(int rate) {
     if (bargeStop) hush();
     ensureTrack(rate);
+    // Дорожка могла остаться на паузе перебивания: подозрение пришлось на конец прежней фразы, а новая началась
+    // раньше отбоя — датчик сбрасывается на новой фразе, и «продолжить» уже некому. Тогда все следующие фразы
+    // писались в стоящую дорожку и не звучали (прогон 02.10). Недоигранный хвост прежней — выбросить.
+    try { if (track.getPlayState() != AudioTrack.PLAYSTATE_PLAYING) { track.pause(); track.flush(); track.play(); } } catch (Throwable e) {}
     try { track.setVolume(1f); } catch (Throwable e) {}
     synchronized (refRing) { phraseFrame0 = trackWritten; }
     try { ttsVol = getSystemService(AudioManager.class).getStreamVolume(AudioManager.STREAM_MUSIC); } catch (Throwable e) {}
@@ -3614,7 +3618,7 @@ public class TranslatorService extends Service {
     long nowMs = System.currentTimeMillis();
     if (bargeForget) { bargeForget = false; Arrays.fill(barge.g, 0); Arrays.fill(barge.att, BargeIn.ATT0); warmHops = 0; offEst.clear(); envN = 0; }
     if (bargeNew) {
-      bargeNew = false; barge.reset(); duckStart = -1; envN = 0; tsD = Double.NaN; tsAt = 0;
+      bargeNew = false; barge.reset(); duckStart = -1; envN = 0; tsD = Double.NaN; tsHold = Double.NaN; tsAt = 0;
       if (ttsVol != bargeVol) loadGain(ttsVol); else if (nowMs - gainSavedAt > 30000) saveGain();
     }
     AudioTrack tr = track;
@@ -3671,8 +3675,13 @@ public class TranslatorService extends Service {
         // Недоигранное ждёт в дорожке и продолжится с того же места — не подтвердится, слушатель ничего не потеряет.
         duckStart = h; duckAtMs = nowMs;
         try { tr.pause(); } catch (Throwable e) {}
-        log(String.format(Locale.ROOT, "🗣 похоже, перебивают (%d полос из %d, %.1f с от начала фразы) — озвучка на паузе",
-            Math.round(barge.score * BargeIn.NB), BargeIn.NB, (nowMs - phraseAtMs) / 1000.0));
+        // На паузе метки дорожки стоят, а после неё Android ещё какое-то время отдаёт прежние: совмещение с ними
+        // уезжает на длину паузы, и датчик тут же снова «видел человека» (прогон 02.10: 29 пауз на 6 фраз).
+        // Сбрасываем и ждём метку, где дорожка уже ушла дальше этого кадра.
+        tsHold = tsD; tsD = Double.NaN; phraseFrame0 = Math.max(phraseFrame0, lastFt);
+        log(String.format(Locale.ROOT, "🗣 похоже, перебивают (%d полос из %d, %.1f с от начала фразы%s) — озвучка на паузе",
+            Math.round(barge.score * BargeIn.NB), BargeIn.NB, (nowMs - phraseAtMs) / 1000.0,
+            writingSpeech ? ", синтез ещё идёт" : playEndMs > nowMs ? String.format(Locale.ROOT, ", до конца звучания %.1f с", (playEndMs - nowMs) / 1000.0) : ", фраза уже доиграла"));
         tsv("barge", "hold", "" + (nowMs - phraseAtMs), f3(barge.score));
       } else if (a == BargeIn.RESUME) {
         try { if (tr != null) tr.play(); } catch (Throwable e) {}
@@ -3689,7 +3698,9 @@ public class TranslatorService extends Service {
         // подпор: от PRE_MS до подозрения; пока приглушение ещё не слышно (+ OPEN_MS на затухание) — с погашенным эхом
         long from = Math.max(micEnd - micRing.length + 2048, duckStart + BargeIn.N - PRE_MS * 16L);
         int len = (int) (micEnd - from), upto = (int) (duckStart + BargeIn.N + (BargeIn.STOP_MS + OPEN_MS) * 16L - from);
-        float[] y = BargeIn.gate(micSlice(from, len), refSlice(Math.round(from - micBase + (Double.isNaN(tsD) ? 0 : tsD) - off * 16), len), barge.g, upto);
+        // сыгранное для гашения — по совмещению до паузы (на паузе оно сброшено); нет его — подпор без гашения
+        double tsG = Double.isNaN(tsD) ? tsHold : tsD;
+        float[] x = micSlice(from, len), y = Double.isNaN(tsG) ? x : BargeIn.gate(x, refSlice(Math.round(from - micBase + tsG - off * 16), len), barge.g, upto);
         for (int o = 0; o < len; o += 512) if (!capQ.offer(Arrays.copyOfRange(y, o, Math.min(len, o + 512)))) framesDropped++;
         taken = true;
         muteUntil = nowMs; playEndMs = nowMs; spokenPtEnd = Math.min(spokenPtEnd, nowMs);
