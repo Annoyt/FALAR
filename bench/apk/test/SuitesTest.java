@@ -20,6 +20,7 @@ public class SuitesTest {
   @Test void modules() { assertEquals(0, ModulesTest.run()); }
   @Test void textRules() { assertEquals(0, TextRulesTest.run()); }
   @Test void screen() { assertEquals(0, ScreenTest.run()); }
+  @Test void voiceOut() { assertEquals(0, VoiceOutTest.run()); }
   @Test void feedback() throws Exception { assertEquals(0, FeedbackTest.run(System.getProperty("falar.root", "../.."))); }
   @Test void whatsNew() throws Exception { assertEquals(0, WhatsNewTest.run(System.getProperty("falar.whatsnew", "../../bench/apk/whatsnew.txt"),
       System.getProperty("falar.manifest", "../../bench/apk/AndroidManifest.xml"))); }
