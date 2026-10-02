@@ -19,7 +19,13 @@ LINE = re.compile(r"^(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s{2}(.*)$")
 
 
 def main():
-    src, out = sys.argv[1], sys.argv[2]
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("src")
+    ap.add_argument("out")
+    ap.add_argument("--expect", default="", help="записи, которые обязаны дать результат: нет хоть одной — код 4")
+    a = ap.parse_args()
+    src, out = a.src, a.out
     results, summary, invalid = [], {}, []
     for run_dir in sorted(d for d in glob.glob(os.path.join(src, "*")) if os.path.isdir(d) and "-a" in os.path.basename(d)):
         run = os.path.basename(run_dir)
@@ -56,6 +62,10 @@ def main():
     if invalid:
         print("asr_device: НЕДЕЙСТВИТЕЛЬНЫ — " + "; ".join(invalid))
         sys.exit(3)
+    missing = [r for r in a.expect.split() if r not in summary]
+    if missing:                                       # прогон прерван или запись пропущена — вердикта нет
+        print("asr_device: НЕТ РЕЗУЛЬТАТА — " + ", ".join(missing))
+        sys.exit(4)
 
 
 if __name__ == "__main__":

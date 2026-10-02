@@ -68,6 +68,11 @@ public class TranslatorService extends Service {
   public volatile String updateBase;
   /** Стендовое (bench/air): «молчать» — переводить, но не озвучивать, иначе собственный голос
    *  лезет в воздух между фразами и портит замер; уровень фона для SNR каждого сегмента. */
+  /** Стенд (--es feedonly 1): микрофон в нарезку не идёт и вне подачи записи — слышна только подача.
+   *  Без этого после «▷ подача закончена» нарезка снова слушала комнату, а gain_sweep ждал, пока журнал
+   *  перестанет расти, — 02.10 16 минут живых сегментов с домашними разговорами. Снимается сбросом fromUi
+   *  и перезапуском сервиса (не сохраняется). */
+  volatile boolean feedOnly = false;
   volatile boolean silent = false; volatile double noiseRms = 0; volatile double segNoiseDb = Double.NaN, segDb = Double.NaN; volatile long segAt = 0; volatile long segPos = 0; volatile String fixedDir = null; volatile String dumpSegs = null; volatile int rawSec = 0; volatile boolean feeding = false; volatile long vadSamples = 0; volatile boolean duplex = true; volatile boolean autoLang = true; volatile String micSource = "builtin";
   /** Что слушаем. Микрофон открыт только пока включена хотя бы одна кнопка или идёт удержание:
    *  фоновое прослушивание без спроса — это и лишний расход, и запись чужих разговоров. */
@@ -544,6 +549,8 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("micfile")) { String f = i.getStringExtra("micfile");
       try { micFile = f == null || f.isEmpty() ? null : new WaveReader(f).getSamples(); log("🎙 стенд: " + (micFile == null ? "снова микрофон" : "вместо микрофона будет " + new File(f).getName())); }
       catch (Throwable t) { micFile = null; log("🎙 стенд: запись не прочиталась — " + t); } }
+    if (i != null && i.hasExtra("feedonly")) { feedOnly = "1".equals(i.getStringExtra("feedonly"));
+      log(feedOnly ? "🎙 стенд: микрофон глухой — нарезка слышит только подачу записи" : "🎙 стенд: микрофон снова слышен"); }
     // Подача записанного потока комнаты вместо микрофона. Нужна потому, что комната между
     // прогонами меняется сильнее, чем настройки нарезки (SNR гулял 14–21 дБ), и сравнивать
     // параметры последовательными прогонами бессмысленно. Здесь же путь ровно тот, что у живого
@@ -764,6 +771,8 @@ public class TranslatorService extends Service {
     if (i != null && i.getBooleanExtra("fromUi", false) && !i.hasExtra("silent") && !i.hasExtra("fixdir")) {
       if (silent) log("↺ стендовый молчаливый режим сброшен: озвучка включена");
       silent = false;
+      if (feedOnly) log("↺ стенд: микрофон снова слышен");
+      feedOnly = false;
       // Направление не обнуляем, а пересчитываем из кнопок слушания. Раньше здесь стояло
       // fixedDir = null: приложение, открытое нажатием на собственное уведомление, молча
       // превращало «Слушать RU» в «слушаю оба языка» — кнопка при этом продолжала гореть одна.
@@ -2317,7 +2326,7 @@ public class TranslatorService extends Service {
         // Во время подачи записи микрофон в очередь не пускаем: иначе в замер подмешивается
         // живая комната и повтор перестаёт быть повтором.
         // Чувствительность — в потоке нарезки (startVad), здесь звук идёт как есть.
-        if (vadMode && !feeding && eng != null && !readingAloud && System.currentTimeMillis() > muteUntil)
+        if (vadMode && !feeding && !feedOnly && eng != null && !readingAloud && System.currentTimeMillis() > muteUntil)
           if (!capQ.offer(n == win.length ? win.clone() : Arrays.copyOf(win, n))) framesDropped++;
       }
       rec.stop(); rec.release(); capRouted = null;

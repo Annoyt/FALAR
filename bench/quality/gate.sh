@@ -59,6 +59,14 @@ while [ $# -gt 0 ]; do
     *) echo "не знаю ключ: $1"; exit 2;; esac
 done
 say() { printf '%s\n' "$*" | tee -a "$RUN/gate.log"; }
+# Телефон свободен: экран погашен — или впереди Falar либо рабочий стол, и экрана не касались минуту
+# (как idle() в bench/apk/test_all_device.sh): телефон рабочий, его могут держать в руках.
+phone_idle() {
+  $ADB shell dumpsys power 2>/dev/null | grep -qE 'mWakefulness=(Asleep|Dozing)' && return 0
+  case "$($ADB shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus)" in *app.falar*|*com.miui.home*|*launcher*) ;; *) return 1;; esac
+  local a; a=$($ADB shell dumpsys power 2>/dev/null | tr -d '\r' | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
+  [ "${a:-0}" -ge 60000 ]
+}
 fail() { say "ОШИБКА: $*"; exit 2; }
 t0=$(date +%s); since() { echo "$(( $(date +%s) - $1 )) с"; }
 say "== проверка качества · $(git -C "$R" rev-parse --short HEAD) · $RUN"
@@ -151,17 +159,32 @@ if [ $DEVICE = 1 ]; then
   else
     for r in $RECS; do [ -f "$R/bench/air/rec/$r/room.wav" ] || fail "нет записи комнаты bench/air/rec/$r (они личные и в git не лежат)"; done
     t=$(date +%s)
-    say "  телефон: $(grep -o 'versionName="[^"]*"' "$A/AndroidManifest.xml" | cut -d'"' -f2) в репозитории, на телефоне — $($ADB shell dumpsys package app.falar 2>/dev/null | sed -n 's/.*versionName=\([^ ]*\).*/\1/p' | head -1 | tr -d '\r'); записи: $RECS"
     exec 8>"$STATE/lock"
     flock -n 8 || { say "  жду замок стенда (на телефоне идёт другая проверка)…"; flock -w 3600 8 || fail "замок стенда занят больше часа"; }
+    # Мерить надо код этого дерева, а не то, что стоит на телефоне: 02.10 там стояла сборка другой
+    # ветки, а сверялась одна versionName. Отладочная сборка HEAD ставится поверх (install -r, данные
+    # приложения целы). Не встала — например, стоит релизная с GitHub с другой подписью — проверка
+    # останавливается: удалять приложение ради неё нельзя.
+    bash "$A/build.sh" > "$RUN/build.log" 2>&1 || fail "сборка для телефона не собралась: $RUN/build.log"
+    n=0; until phone_idle; do n=$((n+1)); [ $n = 1 ] && say "  жду, пока телефон свободен: экран погашен или впереди Falar/рабочий стол и минуту не трогали"; sleep 15; done
+    was=$($ADB shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus)
+    res=$($ADB install --no-incremental -r "$A/Falar.apk" 2>&1 | grep -E '^(Success|Failure)')
+    [ "$res" = Success ] || fail "сборка этого дерева не встала на телефон: ${res:-нет ответа} (другая подпись? поставьте отладочную сборку вручную)"
+    case "$was" in *app.falar*) $ADB shell "am start -n app.falar/dev.agenttranslator.MainActivity" > /dev/null 2>&1;; esac
+    say "  телефон: поставлена сборка этого дерева ($(git -C "$R" rev-parse --short HEAD)$(git -C "$R" diff --quiet || echo ', с незакоммиченными правками')); записи: $RECS"
     FALAR_STAND_LOCK=1 bash "$R/bench/air/gain_sweep.sh" --rec "$RECS" --gains auto --modes limit --vaddn auto > "$RUN/device.log" 2>&1
+    GS=$?
     exec 8>&-
+    # Прерванный или неполный прогон вердикта не даёт: 02.10 после kill gain_sweep сравнились три записи из
+    # четырёх, и вышло «не хуже» с p = 0,050.
+    [ $GS = 0 ] || fail "прогон на телефоне прерван (gain_sweep, код $GS): $RUN/device.log"
     D=$(sed -n 's/^прогоны: //p' "$RUN/device.log" | tail -1)
     [ -n "$D" ] || fail "прогон на телефоне не дал результата: $RUN/device.log"
-    $PY "$Q/asr_device.py" "$D" "$RUN/asr_device.json" | tee -a "$RUN/gate.log"
+    $PY "$Q/asr_device.py" "$D" "$RUN/asr_device.json" --expect "$RECS" | tee -a "$RUN/gate.log"
     case "${PIPESTATUS[0]}" in
       0) ;;
-      3) fail "прогон на телефоне недействителен — приложение сбросило стендовые режимы посреди прогона (сборка без правки 02.10?): $RUN/device.log";;
+      3) fail "прогон на телефоне недействителен — приложение сбросило стендовые режимы посреди прогона: $RUN/device.log";;
+      4) fail "прогон на телефоне неполный — не все записи дали результат: $RUN/device.log";;
       *) fail "прогон на телефоне не разобрался: $RUN/device.log";;
     esac
     STAGES="$STAGES device"

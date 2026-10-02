@@ -55,7 +55,7 @@ AUTO0=$(sh "grep -E '🎚 (чувствительность: авто, сейч�
 restore() {
   say "== возврат: разбор каждые $REF, облако каждые $CLOUD, авто-чувствительность $AUTO0 дБ"
   $ADB shell "am force-stop $PKG"; sleep 2      # подача могла не кончиться — после сброса она подстроила бы авто снова
-  $ADB shell "am start -n $ACT --es vad 0 --es silent 0 --es refineevery $REF --es cloudevery $CLOUD --es micautodb $AUTO0 $([ -n "${NOSPK:-}" ] && echo "--es modules '$MODS0'")" >/dev/null 2>&1; sleep 3
+  $ADB shell "am start -n $ACT --es vad 0 --es feedonly 0 --es silent 0 --es refineevery $REF --es cloudevery $CLOUD --es micautodb $AUTO0 $([ -n "${NOSPK:-}" ] && echo "--es modules '$MODS0'")" >/dev/null 2>&1; sleep 3
   if [ -n "${NOSPK:-}" ]; then local mm; mm=$(count $LOG); $ADB shell "am start -n $ACT --es modules show" >/dev/null 2>&1; sleep 3
     local now; now=$(sh "tail -n +$((mm+1)) $LOG | grep -m1 '🧩 модули сейчас'" | sed -n 's/.*модули сейчас: \[\([a-z,]*\)\].*/\1/p')
     [ "$now" = "$MODS0" ] && say "  модуль «отпечаток голоса» включён обратно: модули [$now], как до замера" \
@@ -109,7 +109,9 @@ PY
     free_phone
     $ADB shell "am force-stop $PKG"; sleep 2
     m0=$(count $LOG)
-    $ADB shell "am start -n $ACT --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 --es vaddenoise $v --es refineevery 0 --es cloudevery 0 $GX --es limiter $L" >/dev/null 2>&1
+    # feedonly: микрофон в нарезку не идёт и вне подачи — до неё и после «подача закончена» нарезка
+    # слушала бы комнату (сборки до 02.10 ключ не знают и слушают — ждать в тишине).
+    $ADB shell "am start -n $ACT --es vad 1 --es feedonly 1 --es silent 1 --es fixdir $DIR --es denoise 0 --es vaddenoise $v --es refineevery 0 --es cloudevery 0 $GX --es limiter $L" >/dev/null 2>&1
     # Готов, когда движки подняты («🧩 модули:» пишется сразу после них) и захват идёт: подача
     # раньше движков теряла бы начало записи — поток нарезки выбрасывает кадры, пока движка нет.
     ok=0; for _ in $(seq 60); do sleep 2; [ "$(seen $m0 'микрофон:')" != 0 ] && [ "$(seen $m0 '🧩 модули:')" != 0 ] && { ok=1; break; }; done
