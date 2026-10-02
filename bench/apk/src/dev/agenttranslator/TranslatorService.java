@@ -121,14 +121,16 @@ public class TranslatorService extends Service {
   /** Подача записи началась — шумодав нарезки с чистого листа, счёт его времени тоже (стенд --es
    *  vaddenoise). Счёт ведёт поток нарезки, итог пишет поток подачи, когда очередь кадров разобрана:
    *  после подачи кадров может не быть вовсе, и ждать следующего кадра, чтобы написать итог, нельзя. */
-  volatile boolean dnReset = false; volatile long dnCostNs, dnCostFrames, dnCostAll; volatile String dnCostMode = "raw";
-  /** Во что обошёлся шумодав нарезки: доля времени, когда он работал, и его RTF — доля ядра, пока работает. */
-  void logDn(String mode, long ns, long frames, long all) {
+  volatile boolean dnReset = false; volatile long dnCostNs, dnCostCpu, dnCostFrames, dnCostAll; volatile String dnCostMode = "raw";
+  /** Во что обошёлся шумодав нарезки: доля времени, когда он работал, и сколько ядра он ест, пока работает, —
+   *  по процессорному времени потока нарезки. Время по часам — справочно: при подаче записи ×4 рядом
+   *  распознаёт parakeet, потоки делят ядра, и часы завышают цену (на первом прогоне — 18 %). */
+  void logDn(String mode, long ns, long cpu, long frames, long all) {
     if (all == 0) return;
-    double sec = frames * FRAME_MS / 1000.0, rtf = frames == 0 ? 0 : ns / 1e9 / sec;
-    log(String.format(Locale.ROOT, "🔇 шумодав нарезки (%s): работал %.0f %% времени (%.0f с из %.0f), RTF %.3f — это %.1f %% ядра, пока работает",
-        mode, 100.0 * frames / all, sec, all * FRAME_MS / 1000.0, rtf, 100 * rtf));
-    tsv("vaddn_cost", mode, "" + frames, "" + all, "" + (ns / 1000000));
+    double sec = frames * FRAME_MS / 1000.0, core = frames == 0 ? 0 : cpu / 1e9 / sec, wall = frames == 0 ? 0 : ns / 1e9 / sec;
+    log(String.format(Locale.ROOT, "🔇 шумодав нарезки (%s): работал %.0f %% времени (%.0f с из %.0f), пока работает — %.1f %% ядра по процессору потока (по часам %.1f %%)",
+        mode, 100.0 * frames / all, sec, all * FRAME_MS / 1000.0, 100 * core, 100 * wall));
+    tsv("vaddn_cost", mode, "" + frames, "" + all, "" + (cpu / 1000000), "" + (ns / 1000000));
   }
   /** Фон комнаты по слушанию, dBFS до усиления, и когда он мерился (uptime). Удержанию он нужен,
    *  когда в самой записи тишины нет — заговорили сразу, отпустили сразу. Годен ROOM_MS: комната
@@ -530,7 +532,7 @@ public class TranslatorService extends Service {
         Thread.sleep(1500);
         feeding = false;
         log("▷ подача закончена"); tsv("feed_end", new File(wav).getName());
-        if (!"raw".equals(dnCostMode)) logDn(dnCostMode, dnCostNs, dnCostFrames, dnCostAll);
+        if (!"raw".equals(dnCostMode)) logDn(dnCostMode, dnCostNs, dnCostCpu, dnCostFrames, dnCostAll);
       } catch (Throwable t) { feeding = false; log("▷ ошибка подачи: " + t); } }, "feed").start();
     }
     // Проверка наушников: куда уходит вывод, какова задержка, и слышит ли микрофон озвучку.
@@ -2301,7 +2303,7 @@ public class TranslatorService extends Service {
       boolean inSpeech = false; int silent = 0, voiced = 0;
       // Шумодав нарезки (стенд --es vaddenoise): свой выход копится и отдаётся кадрами по 512.
       OnlineSpeechDenoiser dn = null; String dnMode = "raw"; float[] dnBuf = new float[4096]; int dnLen = 0;
-      double dnNoise = 0; long dnNs = 0, dnFrames = 0, dnAll = 0; boolean gateOn = false; int onCnt = 0, offCnt = 0;
+      double dnNoise = 0; long dnNs = 0, dnCpu = 0, dnFrames = 0, dnAll = 0; boolean gateOn = false; int onCnt = 0, offCnt = 0;
       while (running) {
         if (probing) { try { Thread.sleep(20); } catch (InterruptedException e) { return; } continue; }
         float[] win;
@@ -2325,13 +2327,13 @@ public class TranslatorService extends Service {
         liveQ = (float) listenLive.q(listenLive.speechDb()); liveSpeech = listenLive.voiced();
         String mode = vadDn;
         if (!mode.equals(dnMode)) {
-          if (!dnMode.equals("raw")) logDn(dnMode, dnNs, dnFrames, dnAll);
+          if (!dnMode.equals("raw")) logDn(dnMode, dnNs, dnCpu, dnFrames, dnAll);
           if (dn != null) { dn.release(); dn = null; }
-          dnMode = mode; dnLen = 0; dnNoise = 0; dnNs = 0; dnFrames = 0; dnAll = 0; gateOn = false; onCnt = 0; offCnt = 0;
+          dnMode = mode; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0; gateOn = false; onCnt = 0; offCnt = 0;
           if ((mode.equals("dn") || mode.equals("dn_sil")) && (dn = eng.onlineDenoiser()) == null) { log("🔇 нет models/denoiser/gtcrn_simple.onnx — нарезка по исходному"); vadDn = dnMode = "raw"; }
         }
         if (dnReset) {
-          dnReset = false; dnLen = 0; dnNoise = 0; dnNs = 0; dnFrames = 0; dnAll = 0; onCnt = 0; offCnt = 0;
+          dnReset = false; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0; onCnt = 0; offCnt = 0;
           if (dnMode.equals("auto") && dn != null) { dn.release(); dn = null; gateOn = false; } else if (dn != null) dn.reset();
         }
         // «Только при шуме»: решает фон комнаты до этого кадра — та же оценка, что у «как слышно».
@@ -2355,15 +2357,15 @@ public class TranslatorService extends Service {
         if (!dnMode.equals("raw")) dnAll++;
         float[] dwin = win;
         if (dn != null) {
-          long t0 = System.nanoTime();
+          long t0 = System.nanoTime(), c0 = android.os.Debug.threadCpuTimeNanos();
           float[] o = dn.run(win, 16000).getSamples();
           if (dnLen + o.length > dnBuf.length) dnBuf = Arrays.copyOf(dnBuf, 2 * (dnLen + o.length));
           System.arraycopy(o, 0, dnBuf, dnLen, o.length); dnLen += o.length;
           dwin = new float[win.length];                   // выхода ещё нет (задержка шумодава) — тишина
           if (dnLen >= win.length) { System.arraycopy(dnBuf, 0, dwin, 0, win.length); System.arraycopy(dnBuf, win.length, dnBuf, 0, dnLen - win.length); dnLen -= win.length; }
-          dnNs += System.nanoTime() - t0; dnFrames++;
+          dnNs += System.nanoTime() - t0; dnCpu += android.os.Debug.threadCpuTimeNanos() - c0; dnFrames++;
         }
-        dnCostMode = dnMode; dnCostNs = dnNs; dnCostFrames = dnFrames; dnCostAll = dnAll;
+        dnCostMode = dnMode; dnCostNs = dnNs; dnCostCpu = dnCpu; dnCostFrames = dnFrames; dnCostAll = dnAll;
         if (vadReset) { vadReset = false; eng.vad.reset(); if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; } }
         eng.vad.acceptWaveform(eff.equals("raw") ? win : dwin);
         boolean sp = eng.vad.isSpeechDetected();

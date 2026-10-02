@@ -129,7 +129,7 @@ seg = [p for p in seg if len(p) >= 20 and p[1] in ("asr", "silence", "skip_short
 num = lambda i: [float(p[i]) for p in seg if p[i] not in ("", "NaN")]
 med = lambda xs: "%.1f" % st.median(xs) if xs else "?"
 avg = lambda xs: "%.3f" % (sum(xs) / len(xs)) if xs else "?"
-cost = re.search(r"это ([\d.]+) % ядра", open(out + "/dncost.txt", encoding="utf-8").read())
+cost = re.search(r"([\d.]+) % ядра по процессору", open(out + "/dncost.txt", encoding="utf-8").read())
 print("\t".join([rec, "+" + g, m, v, f(r"^WER ([\d.]+)%"), f(r"чисто \d+ \(([\d.]+)%\)"), f(r"на чисто нарезанных: WER ([\d.]+)%"),
                  f(r"не дошло (\d+) \("), str(sum(1 for p in seg if p[1] == "asr")),
                  med(num(15)), med(num(16)), avg(num(17)), avg(num(18)), avg(num(19)), cost.group(1) if cost else "-"]))
