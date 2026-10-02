@@ -248,7 +248,7 @@ class Gate:
         return -1
 
 
-def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False):
+def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=None):
     """TranslatorService.startVad при 0 дБ. variant: raw — silero и порог по исходному; dn — silero, порог и
     его фон по очищенному; dn_sil — silero по очищенному, порог по исходному. Шумодав — потоком, кадр за
     кадром, как в приложении: его выход копится и отдаётся по 512 отсчётов, пока выхода нет — тишина.
@@ -288,7 +288,11 @@ def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False):
             else: dwin = np.zeros(FRAME, np.float32)
             on_frames += 1
         mode = variant if gate is None else ('dn_sil' if on else 'raw')
-        vad.accept_waveform(np.ascontiguousarray(dwin if mode in ('dn', 'dn_sil') else win))
+        vin = dwin if mode in ('dn', 'dn_sil') else win
+        if quiet is not None:                             # auto3: в тишине детектор слышит дешёвый шумодав (Винер)
+            qw = quiet.run(np.ascontiguousarray(win), SR).samples
+            if not on and not (g is not None and g.music()): vin = qw
+        vad.accept_waveform(np.ascontiguousarray(vin))
         sp = vad.is_speech_detected(VAD['music2'] and g is not None and g.obs >= g.MIN_OBS and g.flat < g.LOG_MUSIC,
                                     noise == 0 or fr >= noise * 10 ** (VAD['gate2'] / 20))
         while not vad.empty():
@@ -361,7 +365,8 @@ def main():
     ap.add_argument('--model', default='gtcrn', help='gtcrn | dpdfnet_baseline | dpdfnet2 …')
     ap.add_argument('--att', type=float, default=0.0, help='предел подавления DPDFNet, дБ (0 — без предела)')
     ap.add_argument('--variants', default='raw,dn,dn_sil', help='raw, dn, dn_sil, auto<порог dBFS> — например auto-47; '
-                    'auto2<порог> — с проверкой на музыку и быстрым включением')
+                    'auto2<порог> — с проверкой на музыку и быстрым включением; auto3<порог> — то же, а в тишине детектор слышит '
+                    'дешёвый шумодав (Винер); wiener — Винер всегда')
     ap.add_argument('--out', default=os.path.join(R, 'results', 'vad_denoise'))
     ap.add_argument('--vad', default='models/silero_vad.onnx', help='модель детектора речи: silero v4 (в приложении), v5 или ten-vad*.onnx')
     ap.add_argument('--thr', type=float, default=0.5, help='порог детектора речи (в приложении 0,5)')
@@ -388,10 +393,14 @@ def main():
         plays = [p for p in plays if os.path.exists(os.path.join(R, 'bench', 'air', 'corpus', lang, p[0][:-4] + '.txt'))]
         res = {'rec': name, 'model': a.model, 'att': a.att, 'variants': {}}
         for v in a.variants.split(','):
-            music = v.startswith('auto2')
-            gate = float(v[5:] if v[4:5] in '12' else v[4:]) if v.startswith('auto') else None
+            music = v.startswith('auto2') or v.startswith('auto3')
+            gate = float(v[5:] if v[4:5] in '123' else v[4:]) if v.startswith('auto') else None
+            quiet = Wiener() if v.startswith('auto3') or v == 'wiener' else None
             t0 = time.time()
-            segs, stat = segment(x, 'dn_sil' if gate is not None else v, a.model, a.att, gate, music)
+            if v == 'wiener':                                 # дешёвый шумодав для детектора всегда, без GTCRN
+                segs, stat = segment(x, 'dn_sil', 'wiener', a.att, None, False)
+            else:
+                segs, stat = segment(x, 'dn_sil' if gate is not None else v, a.model, a.att, gate, music, quiet)
             texts = [asr(x, s_[0], s_[1]) for s_ in segs]
             r = score(segs, texts, plays, gap, lang); r.update(stat); r['seconds'] = round(time.time() - t0)
             res['variants'][v] = r
