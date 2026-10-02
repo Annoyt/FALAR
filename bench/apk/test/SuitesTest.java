@@ -21,5 +21,8 @@ public class SuitesTest {
   @Test void textRules() { assertEquals(0, TextRulesTest.run()); }
   @Test void screen() { assertEquals(0, ScreenTest.run()); }
   @Test void feedback() throws Exception { assertEquals(0, FeedbackTest.run(System.getProperty("falar.root", "../.."))); }
+  @Test void whatsNew() throws Exception { assertEquals(0, WhatsNewTest.run(System.getProperty("falar.whatsnew", "../../bench/apk/whatsnew.txt"),
+      System.getProperty("falar.manifest", "../../bench/apk/AndroidManifest.xml"))); }
+  @Test void denoiseGate() { assertEquals(0, DenoiseGateTest.run()); }
   @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
 }
