@@ -87,7 +87,46 @@ class Asr:
         return self.cache[(a, b)]
 
 
+class Wiener:
+    """Дешёвый шумодав без нейросети — проверить, нужен ли нарезке GTCRN (21–22 % ядра на телефоне). Кадр 512,
+    шаг 256, окно sqrt-Hann, сложение с перекрытием (задержка 256 отсчётов). Шум по каждой полосе — непрерывное
+    слежение за минимумом: вниз быстро, вверх медленно. Усиление — Винер с априорным SNR «по решению»
+    (Ephraim–Malah, α 0,98), не ниже −20 дБ. Тот же интерфейс, что у OnlineSpeechDenoiser: run(кадр).samples."""
+    N, H, ALPHA, GMIN, DOWN, UP, SMOOTH, BIAS = 512, 256, 0.98, 0.1, 0.3, 0.002, 0.3, 2.0
+
+    def __init__(self):
+        self.w = np.sqrt(np.hanning(self.N + 1)[:-1])
+        self.inbuf = np.zeros(self.N); self.outbuf = np.zeros(self.N)
+        self.noise = None; self.prev = None; self.sm = None
+
+    def _frame(self, fr):
+        X = np.fft.rfft(fr * self.w); P = np.abs(X) ** 2
+        if self.noise is None: self.noise = P.copy(); self.sm = P.copy(); self.prev = np.ones_like(P)
+        self.sm += self.SMOOTH * (P - self.sm)                  # сглаженный спектр: минимум по нему смещён меньше
+        k = np.where(self.sm < self.noise, self.DOWN, self.UP)
+        self.noise += k * (self.sm - self.noise)
+        post = P / (self.BIAS * self.noise + 1e-12)              # минимум ниже среднего шума — поправка
+        xi = self.ALPHA * self.prev + (1 - self.ALPHA) * np.maximum(post - 1, 0)
+        g = np.maximum(xi / (1 + xi), self.GMIN)
+        self.prev = g * g * post
+        return np.fft.irfft(X * g, self.N) * self.w
+
+    class _R:
+        def __init__(self, s): self.samples = s
+
+    def run(self, win, sr):
+        out = []
+        for j in range(0, len(win), self.H):
+            self.inbuf = np.concatenate([self.inbuf[self.H:], win[j:j + self.H]])
+            y = self._frame(self.inbuf)
+            self.outbuf = np.concatenate([self.outbuf[self.H:], np.zeros(self.H)]) + y
+            out.append(self.outbuf[:self.H].copy())
+        return self._R(np.concatenate(out).astype(np.float32))
+
+
 def denoiser(model, att):
+    if model == 'wiener':
+        return Wiener()
     if model == 'gtcrn':
         mc = so.OfflineSpeechDenoiserModelConfig(
             gtcrn=so.OfflineSpeechDenoiserGtcrnModelConfig(model=os.path.join(MODELS, 'denoiser', 'gtcrn_simple.onnx')), num_threads=1)
@@ -114,7 +153,102 @@ def mix(x, noise, level_db):
     return np.clip(x + n, -1, 1).astype(np.float32)
 
 
-def segment(x, variant, model='gtcrn', att=0.0, gate=None):
+VAD = {'kind': 'silero', 'model': os.path.join(MODELS, 'silero_vad.onnx'), 'thr': 0.5, 'model2': None, 'thr2': 0.5, 'music2': False, 'gate2': 0.0}
+
+
+def vad_config(model=None, thr=None):
+    """Детектор речи, как Engine.buildVad: тишина у sherpa почти нулевая (0,05 с), речь от 0,25 с, кусок до 15 с.
+    --vad меняет модель (silero v4 — та, что в приложении; silero v5; TEN VAD), --thr — её порог."""
+    model = model or VAD['model']; thr = VAD['thr'] if thr is None else thr
+    if 'ten' in os.path.basename(model):
+        return so.VadModelConfig(ten_vad=so.TenVadModelConfig(model=model, threshold=thr, min_silence_duration=0.05,
+                                 min_speech_duration=0.25, window_size=256, max_speech_duration=15), sample_rate=SR, num_threads=1)
+    return so.VadModelConfig(silero_vad=so.SileroVadModelConfig(model=model, threshold=thr, min_silence_duration=0.05,
+                             min_speech_duration=0.25, window_size=FRAME, max_speech_duration=15), sample_rate=SR, num_threads=1)
+
+
+class Vads:
+    """Один детектор или объединение двух (--vad2): кадр — речь, если речь сказал хоть один. Второй (TEN VAD)
+    принимает мелодию за речь (far-pt, конец: куски вне фраз), поэтому при фоне-музыке он молчит, если music."""
+    def __init__(self):
+        self.v = [so.VoiceActivityDetector(vad_config(), buffer_size_in_seconds=60)]
+        if VAD['model2']:
+            self.v.append(so.VoiceActivityDetector(vad_config(VAD['model2'], VAD['thr2']), buffer_size_in_seconds=60))
+
+    def accept_waveform(self, w):
+        for v in self.v: v.accept_waveform(w)
+
+    def is_speech_detected(self, music=False, loud2=True):
+        """loud2 — кадр достаточно громкий для второго детектора (--gate2: на столько дБ над фоном)."""
+        return self.v[0].is_speech_detected() or (len(self.v) > 1 and not music and loud2 and self.v[1].is_speech_detected())
+
+    def empty(self):
+        for v in self.v:
+            while not v.empty(): v.pop()
+        return True
+
+    def pop(self):
+        pass
+
+
+HANN = np.hanning(FRAME)
+
+
+def log_flatness(win):
+    """Логарифм спектральной плоскостности кадра в полосе речи 300–4000 Гц (бины 10–128 из 512 при 16 кГц):
+    у шума и тишины спектр ровный (0,1–0,4), у музыки — отдельные тоны (около 0,01–0,05)."""
+    p = np.abs(np.fft.rfft(win.astype(np.float64) * HANN)) ** 2 + 1e-12
+    p = p[10:129]
+    return float(np.mean(np.log(p)) - np.log(np.mean(p)))
+
+
+class Gate:
+    """Близнец DenoiseGate: включать ли шумодав нарезки. v1 — только по фону: не ниже t две секунды — включить,
+    ниже t − 3 дБ десять секунд — выключить. v2 (music=True) добавляет:
+      - музыку: средняя логарифма плоскостности кадров без речи (первые сто кадров — простая средняя, дальше
+        скользящая с шагом 0,01) ниже ln 0,08 — фон тональный, шумодав там не помогает и рождает куски из мелодии
+        (far-pt, конец), — не включать, а включённый выключить через 3 с;
+      - быстрое включение: фон не ниже t + 3 дБ полсекунды — включить сразу, чтобы не пропадала первая фраза;
+        только когда о спектре фона уже есть MIN_OBS кадров — иначе в музыке с начала слушания шумодав
+        успевал бы включиться до того, как музыка узнана."""
+    ON_FRAMES, OFF_FRAMES, HYST = 2000 // 32, 10000 // 32, 3.0
+    FAST_DB, FAST_FRAMES = 3.0, 500 // 32
+    LOG_MUSIC, MUSIC_OFF_FRAMES, MIN_OBS, ALPHA = float(np.log(0.08)), 3000 // 32, 8, 0.01
+
+    def __init__(self, t, music=False):
+        self.t, self.music_on = t, music
+        self.on = False; self.on_cnt = self.off_cnt = self.fast_cnt = self.music_cnt = 0
+        self.flat, self.obs = 0.0, 0
+
+    def observe(self, logflat):
+        """Кадр, который детектор речи речью не признал."""
+        self.flat += max(self.ALPHA, 1.0 / (self.obs + 1)) * (logflat - self.flat)
+        self.obs += 1
+
+    def music(self):
+        return self.music_on and self.obs >= self.MIN_OBS and self.flat < self.LOG_MUSIC
+
+    def step(self, room):
+        m = self.music()
+        if not self.on:
+            if m:
+                self.on_cnt = self.fast_cnt = 0
+                return 0
+            self.on_cnt = self.on_cnt + 1 if room >= self.t else 0
+            self.fast_cnt = self.fast_cnt + 1 if self.music_on and self.obs >= self.MIN_OBS and room >= self.t + self.FAST_DB else 0
+            if self.on_cnt < self.ON_FRAMES and (not self.music_on or self.fast_cnt < self.FAST_FRAMES):
+                return 0
+            self.on, self.off_cnt, self.music_cnt = True, 0, 0
+            return 1
+        self.music_cnt = self.music_cnt + 1 if m else 0
+        self.off_cnt = self.off_cnt + 1 if room < self.t - self.HYST else 0
+        if self.off_cnt < self.OFF_FRAMES and self.music_cnt < self.MUSIC_OFF_FRAMES:
+            return 0
+        self.on, self.on_cnt, self.fast_cnt = False, 0, 0
+        return -1
+
+
+def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False):
     """TranslatorService.startVad при 0 дБ. variant: raw — silero и порог по исходному; dn — silero, порог и
     его фон по очищенному; dn_sil — silero по очищенному, порог по исходному. Шумодав — потоком, кадр за
     кадром, как в приложении: его выход копится и отдаётся по 512 отсчётов, пока выхода нет — тишина.
@@ -125,33 +259,28 @@ def segment(x, variant, model='gtcrn', att=0.0, gate=None):
 
     Куски — (начало, конец, место нарезки) в отсчётах; плюс счёт: кадров со включённым шумодавом,
     включений, медиана и 90-й процентиль оценки фона."""
-    cfg = so.VadModelConfig(silero_vad=so.SileroVadModelConfig(model=os.path.join(MODELS, 'silero_vad.onnx'), threshold=0.5,
-                            min_silence_duration=0.05, min_speech_duration=0.25, window_size=FRAME, max_speech_duration=15),
-                            sample_rate=SR, num_threads=1)
-    vad = so.VoiceActivityDetector(cfg, buffer_size_in_seconds=60)
+    vad = Vads()
     F, PRE, TAIL, HANG, MINSP, MAXSP, GATE = 32, 1000 // 32, 300 // 32, 600, 250, 15000, 6.0
-    ON_FR, OFF_FR, HYST = 2000 // 32, 10000 // 32, 3.0
     pre, seg, out = deque(), [], []
     in_sp, silent, voiced, noise, dnoise = False, 0, 0, 0.0, 0.0
     on = gate is None and variant != 'raw'
     dn = denoiser(model, att) if on else None
     buf = np.zeros(0, np.float32)
-    on_cnt = off_cnt = on_frames = switches = 0; rooms = []
+    on_frames = switches = 0; rooms = []
+    # Gate следит и за спектром фона: он нужен шумодаву (auto2) и второму детектору (музыка — молчит).
+    track = music or (VAD['model2'] and VAD['music2'])
+    g = Gate(gate if gate is not None else 0.0, True) if gate is not None or track else None
+    if g is not None and gate is not None: g.music_on = music
     k = 10 ** (GATE / 20)
     for i in range(len(x) // FRAME):
         win = x[i * FRAME:(i + 1) * FRAME]
         fr = float(np.sqrt(np.mean(win.astype(np.float64) ** 2)))
         room = 20 * np.log10(noise) if noise > 0 else -999.0
         if noise > 0: rooms.append(room)
-        if gate is not None:
-            if not on:
-                on_cnt = on_cnt + 1 if room >= gate else 0
-                if on_cnt >= ON_FR:
-                    on, dn, buf, off_cnt, switches = True, denoiser(model, att), np.zeros(0, np.float32), 0, switches + 1
-            else:
-                off_cnt = off_cnt + 1 if room < gate - HYST else 0
-                if off_cnt >= OFF_FR:
-                    on, dn, on_cnt = False, None, 0
+        if g is not None and gate is not None:
+            ev = g.step(room)
+            if ev > 0: on, dn, buf, switches = True, denoiser(model, att), np.zeros(0, np.float32), switches + 1
+            elif ev < 0: on, dn = False, None
         dwin = win
         if on:
             buf = np.concatenate([buf, np.asarray(dn.run(np.ascontiguousarray(win), SR).samples, np.float32)])
@@ -160,9 +289,11 @@ def segment(x, variant, model='gtcrn', att=0.0, gate=None):
             on_frames += 1
         mode = variant if gate is None else ('dn_sil' if on else 'raw')
         vad.accept_waveform(np.ascontiguousarray(dwin if mode in ('dn', 'dn_sil') else win))
-        sp = vad.is_speech_detected()
+        sp = vad.is_speech_detected(VAD['music2'] and g is not None and g.obs >= g.MIN_OBS and g.flat < g.LOG_MUSIC,
+                                    noise == 0 or fr >= noise * 10 ** (VAD['gate2'] / 20))
         while not vad.empty():
             vad.pop()
+        if g is not None and track and not sp: g.observe(log_flatness(win))
         if not sp:
             if noise == 0: noise = fr
             elif fr < noise: noise = 0.9 * noise + 0.1 * fr
@@ -229,13 +360,23 @@ def main():
     ap.add_argument('recs', nargs='+')
     ap.add_argument('--model', default='gtcrn', help='gtcrn | dpdfnet_baseline | dpdfnet2 …')
     ap.add_argument('--att', type=float, default=0.0, help='предел подавления DPDFNet, дБ (0 — без предела)')
-    ap.add_argument('--variants', default='raw,dn,dn_sil', help='raw, dn, dn_sil, auto<порог dBFS> — например auto-47')
+    ap.add_argument('--variants', default='raw,dn,dn_sil', help='raw, dn, dn_sil, auto<порог dBFS> — например auto-47; '
+                    'auto2<порог> — с проверкой на музыку и быстрым включением')
     ap.add_argument('--out', default=os.path.join(R, 'results', 'vad_denoise'))
+    ap.add_argument('--vad', default='models/silero_vad.onnx', help='модель детектора речи: silero v4 (в приложении), v5 или ten-vad*.onnx')
+    ap.add_argument('--thr', type=float, default=0.5, help='порог детектора речи (в приложении 0,5)')
+    ap.add_argument('--vad2', help='второй детектор: речь — если её сказал хоть один из двух')
+    ap.add_argument('--thr2', type=float, default=0.5)
+    ap.add_argument('--music2', action='store_true', help='при фоне-музыке второй детектор молчит')
+    ap.add_argument('--gate2', type=float, default=0.0, help='второй детектор считается, только если кадр на столько дБ громче фона')
     ap.add_argument('--mix', help='запись, чей фон подмешивать')
     ap.add_argument('--mixdb', default='', help='уровни фона, dBFS, через запятую')
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    tag = a.model + ('' if not a.att else '-att%g' % a.att)
+    VAD.update(model=os.path.join(R, a.vad), thr=a.thr, model2=os.path.join(R, a.vad2) if a.vad2 else None, thr2=a.thr2, music2=a.music2, gate2=a.gate2)
+    vtag = '' if a.vad == 'models/silero_vad.onnx' and a.thr == 0.5 else '-%s-thr%g' % (os.path.basename(a.vad)[:-5], a.thr)
+    if a.vad2: vtag += '+%s-thr%g%s%s' % (os.path.basename(a.vad2)[:-5], a.thr2, '-m' if a.music2 else '', '-g%g' % a.gate2 if a.gate2 else '')
+    tag = a.model + ('' if not a.att else '-att%g' % a.att) + vtag
     jobs = [(n, None) for n in a.recs] if not a.mix else [(n, float(d)) for n in a.recs for d in a.mixdb.split(',')]
     noise = room_noise(a.mix) if a.mix else None
     for name, level in jobs:
@@ -247,9 +388,10 @@ def main():
         plays = [p for p in plays if os.path.exists(os.path.join(R, 'bench', 'air', 'corpus', lang, p[0][:-4] + '.txt'))]
         res = {'rec': name, 'model': a.model, 'att': a.att, 'variants': {}}
         for v in a.variants.split(','):
-            gate = float(v[4:]) if v.startswith('auto') else None
+            music = v.startswith('auto2')
+            gate = float(v[5:] if v[4:5] in '12' else v[4:]) if v.startswith('auto') else None
             t0 = time.time()
-            segs, stat = segment(x, 'dn_sil' if gate is not None else v, a.model, a.att, gate)
+            segs, stat = segment(x, 'dn_sil' if gate is not None else v, a.model, a.att, gate, music)
             texts = [asr(x, s_[0], s_[1]) for s_ in segs]
             r = score(segs, texts, plays, gap, lang); r.update(stat); r['seconds'] = round(time.time() - t0)
             res['variants'][v] = r
