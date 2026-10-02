@@ -2171,12 +2171,21 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // бы стендовые флаги первого (например, беззвучный режим прогона записей). Только возвращение.
     if (!svcStarted || bound) return;
     // Сервис мог уйти сам, пока экран был свёрнут: поднимаем его снова, и именно запущенным, а не
-    // только привязанным, — иначе слушать в кармане после сворачивания он не сможет.
-    startForegroundService(new Intent(this, TranslatorService.class).putExtra("fromUi", true));
-    bindSvc();
+    // только привязанным, — иначе слушать в кармане после сворачивания он не сможет. Но запускает его
+    // onResume: с fromUi (сброс стендовых режимов) или без — видно только после onNewIntent, а он
+    // приходит после onStart (onRestart → onStart → onNewIntent → onResume, сверено на Redmi 02.10).
+    bindSvc(); uiStartPending = true;
   }
+  /** Запуск стенда: am start -n … --es … — без действия и с добавками (лаунчер шлёт ACTION_MAIN,
+   *  уведомление — без добавок). При погашенном экране или после «домой» окно останавливается и
+   *  отвязывается, и следующий запуск стенда (подача записи) приходит через onRestart → onStart →
+   *  onNewIntent. Раньше onStart тут же поднимал сервис с fromUi, и тот сбрасывал молчаливый режим и
+   *  закреплённое направление посреди прогона: 02.10 записи near-ru слушались как португальские, а
+   *  far-pt и noisy-pt шли с озвучкой вслух. Флаг и отложенный запуск живут до onResume или onStop. */
+  boolean standStart, uiStartPending;
   @Override protected void onStop() {
     started = false;
+    standStart = uiStartPending = false;   // окно ушло, не показавшись: запуска не будет, решит следующий onResume
     unbindSvc();
     super.onStop();
   }
@@ -2201,6 +2210,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
   @Override protected void onResume() {
     super.onResume();
+    if (uiStartPending) {    // отложенный запуск из onStart: человек вернулся — сброс стендовых режимов, стенд — без сброса
+      uiStartPending = false;
+      Intent si = new Intent(this, TranslatorService.class);
+      if (!standStart) si.putExtra("fromUi", true);
+      startForegroundService(si);
+    }
+    standStart = false;      // запуск стенда при видимом окне onStart не вызывает — флаг не должен дожить до человека
     resumed = true; meter();
     syncGuard();
     if (setupView != null && setupView.getVisibility() == View.VISIBLE) {   // вернулись из настроек приложения
@@ -2457,6 +2473,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     applyOverrideConfiguration(c);
   }
   @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
+    standStart = i.getAction() == null && i.getExtras() != null && !i.getExtras().isEmpty();
     if (i.hasExtra("uitheme")) {
       String t = i.getStringExtra("uitheme");
       themeTest = "day".equals(t) ? 1 : "night".equals(t) ? 2 : 0;

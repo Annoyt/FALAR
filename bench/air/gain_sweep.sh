@@ -16,6 +16,9 @@
 # уточнитель и облако на время выключены — иначе семьдесят реплик подряд будили бы уточнитель и
 # отправляли тестовый разговор в облако. В конце всё как было: частота разбора и облака, выученное
 # и словари из снимка, тестовый разговор и запись удалены.
+# Всё тело — в фигурных скобках: bash прочтёт его целиком до запуска, и правка файла посреди прогона
+# не подсунет ему середину строки.
+{
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd)
 ADB=${ADB:-$R/tools/platform-tools/adb}
@@ -55,7 +58,7 @@ AUTO0=$(sh "grep -E '🎚 (чувствительность: авто, сейч�
 restore() {
   say "== возврат: разбор каждые $REF, облако каждые $CLOUD, авто-чувствительность $AUTO0 дБ"
   $ADB shell "am force-stop $PKG"; sleep 2      # подача могла не кончиться — после сброса она подстроила бы авто снова
-  $ADB shell "am start -n $ACT --es vad 0 --es silent 0 --es refineevery $REF --es cloudevery $CLOUD --es micautodb $AUTO0 $([ -n "${NOSPK:-}" ] && echo "--es modules '$MODS0'")" >/dev/null 2>&1; sleep 3
+  $ADB shell "am start -n $ACT --es vad 0 --es feedonly 0 --es silent 0 --es refineevery $REF --es cloudevery $CLOUD --es micautodb $AUTO0 $([ -n "${NOSPK:-}" ] && echo "--es modules '$MODS0'")" >/dev/null 2>&1; sleep 3
   if [ -n "${NOSPK:-}" ]; then local mm; mm=$(count $LOG); $ADB shell "am start -n $ACT --es modules show" >/dev/null 2>&1; sleep 3
     local now; now=$(sh "tail -n +$((mm+1)) $LOG | grep -m1 '🧩 модули сейчас'" | sed -n 's/.*модули сейчас: \[\([a-z,]*\)\].*/\1/p')
     [ "$now" = "$MODS0" ] && say "  модуль «отпечаток голоса» включён обратно: модули [$now], как до замера" \
@@ -106,20 +109,41 @@ PY
     GX=$([ "$g" = auto ] && echo "--es micauto 1 --es micautodb $AUTOSTART" || echo "--es micgaintest $g")
     L=$([ "$m" = cut ] && echo 0 || echo 1); OUT=$D/$rec-a$ATT-g$g-$m-$v; mkdir -p $OUT
     say "== $rec · ослабление $ATT дБ · усиление +$g дБ$([ "$g" = auto ] && echo " с $AUTOSTART") · $m · нарезка $v"
-    free_phone
-    $ADB shell "am force-stop $PKG"; sleep 2
-    m0=$(count $LOG)
-    $ADB shell "am start -n $ACT --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 --es vaddenoise $v --es refineevery 0 --es cloudevery 0 $GX --es limiter $L" >/dev/null 2>&1
-    # Готов, когда движки подняты («🧩 модули:» пишется сразу после них) и захват идёт: подача
-    # раньше движков теряла бы начало записи — поток нарезки выбрасывает кадры, пока движка нет.
-    ok=0; for _ in $(seq 60); do sleep 2; [ "$(seen $m0 'микрофон:')" != 0 ] && [ "$(seen $m0 '🧩 модули:')" != 0 ] && { ok=1; break; }; done
-    [ $ok = 1 ] || { say "  слушающий не поднялся — прогон пропущен"; continue; }
-    sleep 3; n0=$(count $TSV); m1=$(count $LOG)
-    off=$(( $(sh "date +%s%3N") - $(date +%s%3N) ))
-    $ADB shell "am start -n $ACT --es feedwav $F/replay.wav --es speed $SPEED" >/dev/null 2>&1
-    for _ in $(seq $(( (SEC / SPEED + 240) / 5 ))); do sleep 5; [ "$(seen $m1 'подача закончена')" != 0 ] && break; done
-    # Распознавание догоняет подачу: ждём, пока журнал 20 с не растёт.
-    last=-1; for _ in $(seq 60); do c=$(count $TSV); [ "$c" = "$last" ] && break; last=$c; sleep 20; done
+    ok=0; rm -f $OUT/invalid.txt
+    for try in 1 2; do
+      free_phone
+      $ADB shell "am force-stop $PKG"; sleep 2
+      m0=$(count $LOG)
+      # feedonly: микрофон в нарезку не идёт и вне подачи — до неё и после «подача закончена» нарезка
+      # слушала бы комнату (сборки до 02.10 ключ не знают и слушают — ждать в тишине).
+      $ADB shell "am start -n $ACT --es vad 1 --es feedonly 1 --es silent 1 --es fixdir $DIR --es denoise 0 --es vaddenoise $v --es refineevery 0 --es cloudevery 0 $GX --es limiter $L" >/dev/null 2>&1
+      # Готов, когда движки подняты («🧩 модули:» пишется сразу после них) и захват идёт: подача
+      # раньше движков теряла бы начало записи — поток нарезки выбрасывает кадры, пока движка нет.
+      ok=0; for _ in $(seq 60); do sleep 2; [ "$(seen $m0 'микрофон:')" != 0 ] && [ "$(seen $m0 '🧩 модули:')" != 0 ] && { ok=1; break; }; done
+      [ $ok = 1 ] || { say "  слушающий не поднялся — прогон пропущен"; break; }
+      sleep 3; n0=$(count $TSV); m1=$(count $LOG)
+      off=$(( $(sh "date +%s%3N") - $(date +%s%3N) ))
+      $ADB shell "am start -n $ACT --es feedwav $F/replay.wav --es speed $SPEED" >/dev/null 2>&1
+      # Стенд сброшен посреди прогона («↺ … сброшен» в журнале): сборки до 02.10 при погашенном экране
+      # поднимали сервис с fromUi и возвращали озвучку и направление по кнопкам — near-ru слушался как
+      # португальский, far-pt и noisy-pt шли вслух. Такой прогон не в счёт; Falar сразу останавливается,
+      # чтобы оборвать озвучку. Проверка — каждые 2 с подачи и на каждом шаге ожидания распознавания.
+      reset() { [ "$(seen $m0 'стендовый молчаливый режим сброшен')" != 0 ]; }
+      bad=; for _ in $(seq $(( (SEC / SPEED + 240) / 2 ))); do sleep 2; reset && { bad=1; break; }; [ "$(seen $m1 'подача закончена')" != 0 ] && break; done
+      # Распознавание догоняет подачу: ждём, пока журнал 20 с не растёт.
+      last=-1; [ -z "$bad" ] && for _ in $(seq 60); do reset && { bad=1; break; }; c=$(count $TSV); [ "$c" = "$last" ] && break; last=$c; sleep 20; done
+      if [ -n "$bad" ] || reset; then
+        $ADB shell "am force-stop $PKG"
+        # Чаще всего это человек: открыл Falar посреди прогона, и приложение, как и должно, сбросило
+        # стендовые режимы. Один повтор — когда телефон снова свободен; второй сброс — прогон не в счёт.
+        if [ $try = 1 ]; then say "  стенд сброшен посреди прогона (телефон взяли в руки?) — Falar остановлен, повтор, когда телефон освободится"; continue; fi
+        say "  НЕДЕЙСТВИТЕЛЕН: приложение дважды сбросило стендовые режимы посреди прогона — Falar остановлен, прогон не в счёт"
+        echo "стендовые режимы сброшены посреди прогона" > $OUT/invalid.txt
+        printf '%s\t+%s\t%s\t%s\tнедействителен\n' "$rec" "$g" "$m" "$v" >> $SUM
+      fi
+      break
+    done
+    [ $ok = 1 ] && [ ! -f $OUT/invalid.txt ] || continue
     sh "tail -n +$((n0+1)) $TSV" > $OUT/listener.tsv; echo $off > $OUT/listener.offset; echo "g=$g $m att=$ATT vaddn=$v" > $OUT/seg.txt
     sh "tail -n +$((m1+1)) $LOG | grep '🔇 шумодав нарезки' | tail -1" > $OUT/dncost.txt
     python3 $R/bench/air/air_wer.py $OUT --lang $LANG_ --mode replay --rec $REC > $OUT/wer.txt 2>&1
@@ -140,5 +164,10 @@ print("\t".join([rec, "+" + g, m, v, f(r"^WER ([\d.]+)%"), f(r"чисто \d+ \(
                  med(num(15)), med(num(16)), avg(num(17)), avg(num(18)), avg(num(19)), cost.group(1) if cost else "-"]))
 PY
     tail -1 $SUM | column -t -s$'\t'
+    # Микрофон — выключить сразу: следующий прогон может ждать свободного телефона, и всё это время
+    # слушание писало бы комнату (02.10 так в журнал попали обрывки домашних разговоров).
+    $ADB shell "am force-stop $PKG"
   done; done; done
 done
+exit
+}
