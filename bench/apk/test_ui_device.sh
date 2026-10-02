@@ -20,6 +20,9 @@
 #   U8 «＋» — новый разговор; возврат к прежнему из панели;
 #   U9 дневная и ночная тема (стенд --es uitheme): шапка, фон, текст — и снимки всех экранов uishot;
 #      после пересоздания экрана строка состояния в настройках — от службы, а не «Запуск сервиса…».
+#   U10 обратная связь: «⋯» реплики → «Сообщить о переводе» и «Настройки» → «Написать разработчику» —
+#      кнопки Telegram и GitHub, готовые ссылки (шаблон GitHub, метка топика для бота). Ссылки не
+#      открываются: стенд --es linkdry 1 пишет их в журнал — Telegram на телефоне владельца.
 #
 # Разговоры владельца не трогаются: тестовый разговор — файлом с самым свежим временем; выученное,
 # словари, свои слова, пины и ключи облака возвращаются из снимка; разговоры, появившиеся за проверку,
@@ -480,6 +483,31 @@ if has --text Улучшить; then
   w=$(printf '%s' "$l" | grep -q ': можно' && echo true || echo false)
   chk '[ "$en" = "$w" ]' "U7 «Улучшить» горит так, как решает служба: «$(printf '%s' "$l" | cut -c10-)» → enabled=$en"
 else sk "U7 «Улучшить» не показана — нечем улучшать"; fi
+
+say "== U10: обратная связь"
+fld() { python3 -c 'import sys, urllib.parse as u; print(u.parse_qs(u.urlsplit(sys.argv[1]).query, keep_blank_values=True).get(sys.argv[2], [""])[0])' "$1" "$2"; }
+url() { printf '%s' "$1" | sed 's/.*🔗 //'; }
+m=$(mark); start --es linkdry 1; l=$(wl "$m" '🧪 ссылки: только в журнал' 10)
+chk '[ -n "$l" ]' "U10 стенд: ссылки — в журнал, Telegram и браузер не открываются"
+tapon --desc "Меню реплики"; tapon --text "Сообщить о переводе"; sleep 1; dump
+chk 'has --text Telegram && has --text GitHub && has --text отмена && has --text "видно всем" --contains' "U10 «Сообщить о переводе»: Telegram, GitHub и что уйдёт"
+m=$(mark); tapon --text GitHub; u=$(url "$(wl "$m" '🔗 https://github.com/Annoyt/FALAR/issues/new\?template=translation.yml&' 10)")
+chk '[ -n "$u" ] && ! printf "%s" "$u" | grep -q "labels=" && [ -n "$(fld "$u" source)" ] && fld "$u" device | grep -q "^Falar " && [ ${#u} -le 6000 ]' "U10 → GitHub: шаблон перевода, поля из реплики, без labels=, ссылка ${#u} знаков"
+tapon --desc "Меню реплики"; tapon --text "Сообщить о переводе"; sleep 1
+m=$(mark); tapon --text Telegram; u=$(url "$(wl "$m" '🔗 https://t.me/falar_feedback_bot\?text=' 10)")
+chk '[ -n "$u" ] && fld "$u" text | head -1 | grep -qE "^#перевод · (португальский → русский|русский → португальский)$"' "U10 → Telegram: «$(fld "$u" text | head -1)»"
+tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5
+seek --text "Написать разработчику"; tapon --text "Написать разработчику"; sleep 1; dump
+chk 'has --text "Что-то не работает" && has --text "Идея или пожелание" && has --text Telegram && has --text GitHub' "U10 «Написать разработчику»: ошибка или идея, Telegram или GitHub"
+tapon --text "Идея или пожелание"
+m=$(mark); tapon --text GitHub; u=$(url "$(wl "$m" '🔗 https://github.com/Annoyt/FALAR/issues/new\?template=idea.yml&' 10)")
+chk '[ -n "$u" ] && fld "$u" device | grep -q "^Falar "' "U10 идея → GitHub: шаблон идеи, «$(fld "$u" device)»"
+seek --text "Написать разработчику"; tapon --text "Написать разработчику"; sleep 1
+m=$(mark); tapon --text Telegram; u=$(url "$(wl "$m" '🔗 https://t.me/falar_feedback_bot\?text=' 10)")
+chk '[ -n "$u" ] && fld "$u" text | head -1 | grep -q "^#ошибка · Falar "' "U10 ошибка → Telegram: «$(fld "$u" text | head -1)»"
+m=$(mark); start --es linkdry 0; l=$(wl "$m" '🧪 ссылки: открываются' 10)
+chk '[ -n "$l" ]' "U10 стенд выключен — ссылки снова открываются"
+press; dump; chk '[ "$(title)" = "ТЕСТ интерфейс" ]' "U10 «назад» из настроек — разговор"
 
 say "== U8: «＋» — новый разговор и возврат из панели"
 m=$(mark); tapon --desc "Новый разговор"; l=$(wl "$m" '＋ новый разговор' 10); sleep 1; dump

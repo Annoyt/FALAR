@@ -1,0 +1,40 @@
+# Приложение (меню реплики → «Сообщить о переводе» → GitHub) заполняет поля по их id из ссылки:
+# issues/new?template=translation.yml&title=…&direction=…&source=…&app=…&better=…&device=…
+# Метку ставит сам шаблон — у любого автора; метка из ссылки (labels=) ставится только у тех,
+# кому можно ставить метки.
+name: Плохой перевод
+description: Приложение перевело неправильно или неудачно.
+title: "перевод: "
+labels: [translation]
+body:
+  - type: markdown
+    attributes:
+      value: Обсуждение открытое — всё, что здесь написано, видно всем. Без аккаунта на GitHub можно написать в Telegram, ссылка на странице выбора шаблона.
+  - type: input
+    id: direction
+    attributes:
+      label: Направление
+      placeholder: португальский → русский
+  - type: textarea
+    id: source
+    attributes:
+      label: Исходник
+      description: Что приложение услышало или прочло.
+    validations:
+      required: true
+  - type: textarea
+    id: app
+    attributes:
+      label: Перевод приложения
+    validations:
+      required: true
+  - type: textarea
+    id: better
+    attributes:
+      label: Как правильно
+      description: Ваш вариант, если знаете.
+  - type: input
+    id: device
+    attributes:
+      label: Версия и телефон
+      placeholder: Falar 0.26.1 · Xiaomi Redmi Note 10 Pro · Android 13

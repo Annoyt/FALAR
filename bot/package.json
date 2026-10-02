@@ -1,0 +1,11 @@
+{
+  "name": "falar-feedback-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.mjs"
+  },
+  "devDependencies": {
+    "@tgcloud/cli": "0.1.2"
+  }
+}
