@@ -13,21 +13,37 @@ public class ModulesTest {
   public static int run() {
     fails = 0; checks = 0;
     // D: по умолчанию при установке — под телефон (решение владельца 28.09)
-    eq(Modules.defaults(7_400_000_000L), set(Modules.TTS, Modules.OCR, Modules.CORPUS, Modules.LLM), "D1 «8 ГБ» (7,4 ГБ системе) — с уточнителем");
-    eq(Modules.defaults(5_600_000_000L), set(Modules.TTS, Modules.OCR, Modules.CORPUS), "D1 «6 ГБ» — без уточнителя");
+    eq(Modules.defaults(7_400_000_000L), set(Modules.TTS, Modules.OCR, Modules.DENOISE, Modules.CORPUS, Modules.LLM), "D1 «8 ГБ» (7,4 ГБ системе) — с уточнителем");
+    eq(Modules.defaults(5_600_000_000L), set(Modules.TTS, Modules.OCR, Modules.DENOISE, Modules.CORPUS), "D1 «6 ГБ» — без уточнителя");
+    ok(Modules.defaults(0).contains(Modules.DENOISE), "D4 шумоподавление включено по умолчанию на любом телефоне (владелец 02.10)");
     ok(Modules.defaults(Modules.LLM_RAM).contains(Modules.LLM), "D2 ровно на пороге — с уточнителем");
     ok(!Modules.defaults(Modules.LLM_RAM - 1).contains(Modules.LLM), "D2 на байт меньше — без");
     ok(!Modules.defaults(0).contains(Modules.LLM), "D2 память неизвестна (0) — без уточнителя");
     ok(!Modules.defaults(1L << 40).contains(Modules.CLOUD) && !Modules.defaults(1L << 40).contains(Modules.SPEAKER), "D3 облако и отпечаток голоса по умолчанию выключены при любой памяти");
 
     // U: обновились с версии без модулей — как было
-    eq(Modules.upgraded(set(Modules.TTS, Modules.LLM, Modules.CORPUS), false), set(Modules.TTS, Modules.OCR, Modules.LLM, Modules.CORPUS),
-        "U1 включено скачанное; снимки — новые и маленькие — включены сразу");
-    eq(Modules.upgraded(set(Modules.TTS), true), set(Modules.TTS, Modules.OCR, Modules.CLOUD), "U2 есть ключ — облако включено");
+    eq(Modules.upgraded(set(Modules.TTS, Modules.LLM, Modules.CORPUS), false), set(Modules.TTS, Modules.OCR, Modules.LLM, Modules.CORPUS, Modules.DENOISE),
+        "U1 включено скачанное; снимки и шумоподавление — новые и маленькие — включены сразу");
+    eq(Modules.upgraded(set(Modules.TTS), true), set(Modules.TTS, Modules.OCR, Modules.DENOISE, Modules.CLOUD), "U2 есть ключ — облако включено");
     ok(!Modules.upgraded(set(Modules.TTS, Modules.CLOUD), false).contains(Modules.CLOUD), "U3 без ключа облако не включается, даже если «установлено»");
     ok(!Modules.upgraded(set(), false).contains(Modules.TTS), "U4 голоса не было — озвучка не включается сама");
     ok(Modules.upgraded(set(Modules.SPEAKER, "мусор"), false).contains(Modules.SPEAKER) && !Modules.upgraded(set("мусор"), false).contains("мусор"),
         "U5 чужие имена не проходят");
+
+    // N: новый модуль у обновившегося, который выбор уже сохранял
+    Set<String> old = set(Modules.TTS, Modules.OCR, Modules.LLM, Modules.CLOUD, Modules.SPEAKER, Modules.CORPUS);
+    eq(Modules.withNew(old, null), set(Modules.TTS, Modules.OCR, Modules.LLM, Modules.CLOUD, Modules.SPEAKER, Modules.CORPUS, Modules.DENOISE),
+        "N1 выбор сохранён до шумоподавления (списка известных нет) — шумоподавление включается само");
+    eq(Modules.withNew(set(Modules.TTS), null), set(Modules.TTS, Modules.DENOISE), "N1 и при скромном выборе");
+    Set<String> known = new LinkedHashSet<>(Modules.CHOICE);
+    eq(Modules.withNew(set(Modules.TTS, Modules.OCR), known), set(Modules.TTS, Modules.OCR),
+        "N2 выключил сам, уже зная о модуле, — не включается снова");
+    eq(Modules.withNew(set(Modules.TTS), set(Modules.TTS, Modules.OCR, Modules.LLM, Modules.CLOUD, Modules.SPEAKER, Modules.CORPUS)), set(Modules.TTS, Modules.DENOISE),
+        "N3 записанный список известных без шумоподавления — включается");
+    eq(Modules.withNew(set(), known), set(), "N4 ничего не выбрано и всё известно — пусто");
+    Set<String> was = set(Modules.TTS); Modules.withNew(was, null);
+    eq(was, set(Modules.TTS), "N5 сохранённый выбор не меняется на месте");
+    ok(Modules.CHOICE.containsAll(Modules.NEW_ON) && !Modules.KNOWN_BEFORE.contains(Modules.DENOISE), "N6 новые — среди выбираемых, прежние версии их не знали");
 
     // P: запись выбора
     Set<String> all = new LinkedHashSet<>(Modules.CHOICE);

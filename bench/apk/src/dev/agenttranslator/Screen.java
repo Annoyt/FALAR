@@ -148,6 +148,9 @@ final class Screen {
     if (wait) return new String[]{"ждёт Wi-Fi", "wait"};
     return new String[]{busy ? "в очереди" : "не скачано", "no"};
   }
+  /** Метка модуля, чья модель лежит в самом APK (шумоподавление): качать нечего, включён — работает
+   *  сам, когда вокруг шумно. */
+  static String[] modPillApk(boolean on) { return on ? new String[]{"при шуме", "ok"} : new String[]{"выключен", "no"}; }
   /** Полоса загрузки — у включённого модуля, файлов которого ещё нет на телефоне. */
   static boolean modBar(boolean on, long bytes, boolean onPhone) { return on && bytes > 0 && !onPhone; }
   static String modBarLabel(long done, long bytes) {
@@ -155,7 +158,8 @@ final class Screen {
     return Math.round(d / 1e6) + " из " + Math.round(bytes / 1e6) + " МБ · " + (bytes > 0 ? d * 100 / bytes : 0) + " %";
   }
   static String modSize(long b) {
-    return b == 0 ? "" : b >= 1_000_000_000L ? String.format(Locale.ROOT, "%.1f ГБ", b / 1e9).replace('.', ',') : Math.round(b / 1e6) + " МБ";
+    return b == 0 ? "" : b >= 1_000_000_000L ? String.format(Locale.ROOT, "%.1f ГБ", b / 1e9).replace('.', ',')
+         : b < 950_000 ? String.format(Locale.ROOT, "%.1f МБ", b / 1e6).replace('.', ',') : Math.round(b / 1e6) + " МБ";
   }
   /** Строка над модулями: текст и значок (dl — загрузка, ok — галочка, "" — без значка). */
   static String[] modelsSum(boolean checked, boolean check, boolean busy, boolean wait, long done, long total,

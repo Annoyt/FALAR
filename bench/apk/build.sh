@@ -28,6 +28,16 @@ mkdir -p $OUT/assets && cp $R/models/manifest.json $OUT/assets/models_manifest.j
 cp $R/data/ocr_words_pt.txt.gz $OUT/assets/ocr_words_pt.txt.gz
 # «Что нового» после обновления (WhatsNew): пункты по версиям, окно показывается без сети.
 cp $A/whatsnew.txt $OUT/assets/whatsnew.txt
+# Шумодав нарезки «только при шуме» (DenoiseGate, GTCRN, MIT, 0,5 МБ) — в APK: включён у всех по умолчанию.
+# Файл из зеркала моделей (tools/models_fetch.py), сверяется с models/manifest.json: в APK — ровно проверенное.
+python3 - "$R/models/manifest.json" "$R/models/denoiser/gtcrn_simple.onnx" <<'PY'
+import hashlib, json, os, sys
+mp, f = sys.argv[1:3]
+e = next(x for x in json.load(open(mp, encoding="utf-8"))["files"] if x["path"] == "denoiser/gtcrn_simple.onnx")
+if not os.path.exists(f): sys.exit(f"нет {f} — шумодав нарезки идёт в APK: python3 tools/models_fetch.py (или ссылка на зеркало моделей)")
+if os.path.getsize(f) != e["size"] or hashlib.sha256(open(f, "rb").read()).hexdigest() != e["sha256"]: sys.exit(f"{f} разошёлся с манифестом")
+PY
+cp $R/models/denoiser/gtcrn_simple.onnx $OUT/assets/gtcrn_simple.onnx
 aapt2 link -o $OUT/base.apk --manifest $A/AndroidManifest.xml -I "$AJ" --java $OUT/gen -A $OUT/assets --min-sdk-version 28 --target-sdk-version 33 $OUT/res.zip
 javac --release 11 -nowarn -cp "$AJ:$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/*.java $A/sherpa-java-api/*.java $OUT/gen/app/falar/R.java
 # Код выхода D8 не терять: раньше его вывод шёл через grep с «|| true», и когда 28.09.2026 на

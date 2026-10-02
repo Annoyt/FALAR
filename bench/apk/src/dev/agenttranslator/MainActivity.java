@@ -1770,6 +1770,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       case Modules.LLM: return app.falar.R.drawable.ic_wand;
       case Modules.CLOUD: return app.falar.R.drawable.ic_cloud;
       case Modules.SPEAKER: return app.falar.R.drawable.ic_voice;
+      case Modules.DENOISE: return app.falar.R.drawable.ic_denoise;
       case Modules.CORPUS: return app.falar.R.drawable.ic_books;
       default: return app.falar.R.drawable.ic_mic;
     }
@@ -2536,6 +2537,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       String m = e.getKey(); ModRow r = e.getValue();
       boolean on = Modules.BASE.equals(m) || svc.mod(m);
       if (!Modules.BASE.equals(m)) r.sw.setChecked(on);
+      if (Modules.DENOISE.equals(m)) {                 // модель в самом APK: качать нечего
+        r.size.setText(Screen.modSize(Modules.DENOISE_BYTES)); r.size.setVisibility(View.VISIBLE);
+        String[] pill = Screen.modPillApk(on); rows.pill(r.pill, pill[0], pill[1]); r.barBox.setVisibility(View.GONE);
+        continue;
+      }
       long b = svc.store.bytes(m);
       r.size.setText(Screen.modSize(b));
       r.size.setVisibility(b == 0 ? View.GONE : View.VISIBLE);

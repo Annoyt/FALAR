@@ -118,6 +118,41 @@ public class TranslatorService extends Service {
    *  выключали «Слушать», пока шёл звук (test_hearing_device.sh на Redmi 01.10: два прогона из трёх,
    *  в том числе на 0.26.0 как вышла). */
   volatile boolean vadReset = false;
+  /** Подача записи началась — шумодав нарезки с чистого листа, счёт его времени тоже (стенд --es
+   *  vaddenoise). Счёт ведёт поток нарезки, итог пишет поток подачи, когда очередь кадров разобрана:
+   *  после подачи кадров может не быть вовсе, и ждать следующего кадра, чтобы написать итог, нельзя. */
+  volatile boolean dnReset = false; volatile long dnCostNs, dnCostCpu, dnCostFrames, dnCostAll; volatile String dnCostMode = "raw";
+  /** Модель шумодава нарезки — из APK (assets/gtcrn_simple.onnx, 0,5 МБ, GTCRN, MIT): он включён у всех по
+   *  умолчанию, качать его отдельно незачем. Движку нужен путь к файлу, поэтому модель один раз за жизнь
+   *  процесса сверяется с копией во внутренней папке приложения и, если та другой длины (новая версия,
+   *  обрыв записи), переписывается через временный файл. Не вышло — null, нарезка по исходному. */
+  volatile File dnModelFile;
+  File dnModel() {
+    File f = dnModelFile;
+    if (f != null) return f;
+    f = new File(new File(getFilesDir(), "denoiser"), "gtcrn_simple.onnx");
+    try (java.io.InputStream in = getAssets().open("gtcrn_simple.onnx")) {
+      java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(); byte[] b = new byte[1 << 16]; int n;
+      while ((n = in.read(b)) > 0) bo.write(b, 0, n);
+      if (f.length() != bo.size()) {
+        f.getParentFile().mkdirs();
+        File tmp = new File(f.getPath() + ".part");
+        try (java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) { bo.writeTo(o); }
+        if (!tmp.renameTo(f)) throw new java.io.IOException("не переименовался " + tmp);
+      }
+      return dnModelFile = f;
+    } catch (Exception e) { log("🔇 модель шумодава не легла в папку приложения: " + e); return null; }
+  }
+  /** Во что обошёлся шумодав нарезки: доля времени, когда он работал, и сколько ядра он ест, пока работает, —
+   *  по процессорному времени потока нарезки. Время по часам — справочно: при подаче записи ×4 рядом
+   *  распознаёт parakeet, потоки делят ядра, и часы завышают цену (на первом прогоне — 18 %). */
+  void logDn(String mode, long ns, long cpu, long frames, long all) {
+    if (all == 0) return;
+    double sec = frames * FRAME_MS / 1000.0, core = frames == 0 ? 0 : cpu / 1e9 / sec, wall = frames == 0 ? 0 : ns / 1e9 / sec;
+    log(String.format(Locale.ROOT, "🔇 шумодав нарезки (%s): работал %.0f %% времени (%.0f с из %.0f), пока работает — %.1f %% ядра по процессору потока (по часам %.1f %%)",
+        mode, 100.0 * frames / all, sec, all * FRAME_MS / 1000.0, 100 * core, 100 * wall));
+    tsv("vaddn_cost", mode, "" + frames, "" + all, "" + (cpu / 1000000), "" + (ns / 1000000));
+  }
   /** Фон комнаты по слушанию, dBFS до усиления, и когда он мерился (uptime). Удержанию он нужен,
    *  когда в самой записи тишины нет — заговорили сразу, отпустили сразу. Годен ROOM_MS: комната
    *  за пару минут меняется редко, а устаревший фон занизил бы шум. */
@@ -172,8 +207,17 @@ public class TranslatorService extends Service {
     try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
     catch (Throwable t) { Log.e(TAG, "manifest", t); status("Ошибка манифеста моделей: " + t); return; }
     // Модули: выбор человека; до выбора (новая установка) — по умолчанию под этот телефон.
-    String saved = getSharedPreferences("at", MODE_PRIVATE).getString(PREF_MODULES, null);
+    SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    String saved = sp.getString(PREF_MODULES, null);
     modules = saved != null ? Modules.parse(saved) : Modules.defaults(totalRam());
+    if (saved != null) {
+      // Новый модуль, включённый по умолчанию (шумоподавление), у обновившегося включается сам —
+      // выбор сохраняли, когда его ещё не было (Modules.withNew).
+      Set<String> known = sp.contains(PREF_KNOWN) ? Modules.parse(sp.getString(PREF_KNOWN, "")) : null, was = modules;
+      modules = Modules.withNew(was, known);
+      if (known == null || !modules.equals(was)) sp.edit().putString(PREF_MODULES, Modules.join(modules)).putString(PREF_KNOWN, String.join(",", Modules.CHOICE)).apply();
+      for (String m : modules) if (!was.contains(m)) log("🧩 новый модуль включён: " + Modules.title(m) + " — выключить можно в «Модули и файлы»");
+    }
     modulesChosen = saved != null; store.modules = modules;
     worker.submit(this::boot);
   }
@@ -456,6 +500,7 @@ public class TranslatorService extends Service {
     }
     if (i != null && i.hasExtra("auto")) setAutoDir("1".equals(i.getStringExtra("auto")));
     if (i != null && i.hasExtra("denoise")) setDenoise("1".equals(i.getStringExtra("denoise")));
+    if (i != null && i.hasExtra("vaddenoise")) setVadDenoise(i.getStringExtra("vaddenoise"));
     if (i != null && i.hasExtra("word")) addWord(i.getStringExtra("word"));
     if (i != null && i.hasExtra("vad")) setVad("1".equals(i.getStringExtra("vad")));
     // Каталоги под модели создаёт приложение, а не adb: на Android 16 каталог, созданный shell,
@@ -506,7 +551,7 @@ public class TranslatorService extends Service {
       final int speed = i.getStringExtra("speed") == null ? 1 : Integer.parseInt(i.getStringExtra("speed"));
       new Thread(() -> { try {
         WaveReader wr = new WaveReader(wav); float[] s2 = wr.getSamples();
-        feeding = true; capQ.clear(); noiseRms = 0; vadSamples = 0; listenLiveReset = true;
+        feeding = true; capQ.clear(); noiseRms = 0; vadSamples = 0; listenLiveReset = true; dnReset = true;
         log("▷ подаю " + new File(wav).getName() + ": " + String.format(Locale.ROOT, "%.1f", s2.length / 16000.0) + " с, скорость ×" + speed);
         tsv("feed_begin", new File(wav).getName(), "" + s2.length, "" + speed);
         for (int o = 0; o + 512 <= s2.length && running; o += 512) {
@@ -517,6 +562,7 @@ public class TranslatorService extends Service {
         Thread.sleep(1500);
         feeding = false;
         log("▷ подача закончена"); tsv("feed_end", new File(wav).getName());
+        if (!"raw".equals(dnCostMode)) logDn(dnCostMode, dnCostNs, dnCostCpu, dnCostFrames, dnCostAll);
       } catch (Throwable t) { feeding = false; log("▷ ошибка подачи: " + t); } }, "feed").start();
     }
     // Проверка наушников: куда уходит вывод, какова задержка, и слышит ли микрофон озвучку.
@@ -1018,6 +1064,29 @@ public class TranslatorService extends Service {
     String m = "📝 добавлено: " + e.pt + " ↔ " + e.ru + " · " + words.stats();
     log(m); return m;
   }
+  /** Нарезка по очищенному звуку. По умолчанию auto — «только при шуме» (DenoiseGate, владелец 02.10:
+   *  «включай с порогом −44, если даёт прирост распознавания»): фон комнаты не ниже −44 dBFS две секунды —
+   *  шумодав включается и детектор речи слышит очищенный звук; ниже на 3 дБ десять секунд — выключается.
+   *  Распознавание — всегда по исходному куску. Стенд --es vaddenoise: raw — как раньше, без шумодава
+   *  (так меряют базу); dn — детектор, порог по энергии и его фон по очищенному; dn_sil — детектор по
+   *  очищенному, порог по исходному; auto[:T] — свой порог. Стенд не сохраняется: перезапуск — снова auto.
+   *  Замер — results/2026-10-02-vad-denoise.md. */
+  volatile String vadDn = "auto"; volatile double vadDnGate = DenoiseGate.DEFAULT_T;
+  String vadDnLine() {
+    String m = vadDn;
+    if (m.equals("auto") && !mod(Modules.DENOISE)) return "🔇 нарезка по исходному звуку: модуль «Шумоподавление» выключен";
+    return "🔇 нарезка " + (m.equals("raw") ? "по исходному звуку" : m.equals("auto")
+        ? String.format(Locale.ROOT, "по очищенному только при шуме: фон не ниже %.0f dBFS (распознавание — по исходному)", vadDnGate)
+        : "по очищенному: " + m + " (распознавание — по исходному)");
+  }
+  public void setVadDenoise(String v) {
+    String m = v == null ? "raw" : v.trim();
+    if (m.equals("0") || m.equals("off")) m = "raw";
+    if (m.startsWith("auto:")) { try { vadDnGate = Double.parseDouble(m.substring(5)); } catch (NumberFormatException e) { log("🔇 нарезка: порог «" + m.substring(5) + "» не число"); return; } m = "auto"; }
+    if (!m.equals("raw") && !m.equals("dn") && !m.equals("dn_sil") && !m.equals("auto")) { log("🔇 нарезка: не знаю «" + v + "» — raw, dn, dn_sil или auto[:порог]"); return; }
+    vadDn = m; log(vadDnLine());
+    tsv("vaddn", m, m.equals("auto") ? "" + vadDnGate : "");
+  }
   public void setDenoise(boolean on) { if (eng != null) { eng.denoiseOn = on && eng.denoiser != null; log("🔇 шумоподавитель " + (eng.denoiseOn ? "включён" : "выключен")); } }
   public void setAutoDir(boolean on) {
     autoDir = on;
@@ -1048,6 +1117,8 @@ public class TranslatorService extends Service {
   // ---------- модули ----------
 
   static final String PREF_MODULES = "modules";
+  /** Какие модули знала версия, сохранившая выбор: по нему новый модуль включается у обновившегося один раз. */
+  static final String PREF_KNOWN = "modules_known";
   /** Включённые модули (Modules). Выбор человека при установке или в «Системе» → «Модули». */
   public volatile Set<String> modules = new LinkedHashSet<>();
   /** Выбор уже сделан (или взят «как было» у обновившегося); до него — умолчания под телефон. */
@@ -1076,7 +1147,7 @@ public class TranslatorService extends Service {
   }
   void setModules(Set<String> s, String why) {
     modules = new LinkedHashSet<>(s); store.modules = modules; modulesChosen = true; autoFetchTried = false;
-    getSharedPreferences("at", MODE_PRIVATE).edit().putString(PREF_MODULES, Modules.join(modules)).apply();
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString(PREF_MODULES, Modules.join(modules)).putString(PREF_KNOWN, String.join(",", Modules.CHOICE)).apply();
     log("🧩 модули (" + why + "): " + modulesLine());
     worker.submit(store::summarize);                   // сверка может читать файлы — не на экранном потоке
   }
@@ -1119,6 +1190,7 @@ public class TranslatorService extends Service {
       case Modules.TTS: if (!eng.hasTts() && eng.loadTts()) log("🔊 озвучка подключена"); break;
       case Modules.SPEAKER: if (spk == null || !spk.ready) { spk = new Speaker(modelsDir, true); if (spk.ready) log("🎤 отпечаток голоса подключён: " + spk.describe()); } break;
       case Modules.CORPUS: if (pb != null && pb.minedCount == 0 && new File(modelsDir, "phrasebook_tatoeba.tsv").exists()) pb.loadMined(new File(modelsDir, "phrasebook_tatoeba.tsv")); break;
+      case Modules.DENOISE: log(vadDnLine()); break;
       case Modules.LLM:   // уточнитель на месте — контекст включается, если человек не выключал его сам
         if (contextMode || !hasLlm()) break;           // уже включён — второй строки в журнале не нужно
         if (!getSharedPreferences("at", MODE_PRIVATE).contains("ctx")) { log("🧠 уточнитель на месте — включаю контекст"); setContext(true, false); }
@@ -1134,6 +1206,7 @@ public class TranslatorService extends Service {
       case Modules.TTS: sayQ.clear(); synchronized (tts) { if (eng != null) eng.releaseTts(); } log("🔇 озвучка выключена: перевод только на экране"); break;
       case Modules.LLM: contextMode = false; unloadLlm("модуль выключен"); break;
       case Modules.SPEAKER: spk = new Speaker(modelsDir, false); autoDir = false; break;
+      case Modules.DENOISE: log(vadDnLine()); break;   // поток нарезки сам отпустит шумодав на следующем кадре
       case Modules.CORPUS: if (pb != null) pb.dropMined(); break;
       default: break;
     }
@@ -2266,6 +2339,10 @@ public class TranslatorService extends Service {
       // Счётчики входа по кадрам — рядом с самими кадрами: после усиления исходного звука уже нет.
       ArrayDeque<Gain.Stats> preSt = new ArrayDeque<>(); List<Gain.Stats> segSt = new ArrayList<>();
       boolean inSpeech = false; int silent = 0, voiced = 0;
+      // Шумодав нарезки: свой выход копится и отдаётся кадрами по 512; включает его DenoiseGate.
+      OnlineSpeechDenoiser dn = null; String dnMode = "raw"; float[] dnBuf = new float[4096]; int dnLen = 0;
+      double dnNoise = 0; long dnNs = 0, dnCpu = 0, dnFrames = 0, dnAll = 0; DenoiseGate gate = new DenoiseGate();
+      log(vadDnLine());
       while (running) {
         if (probing) { try { Thread.sleep(20); } catch (InterruptedException e) { return; } continue; }
         float[] win;
@@ -2287,8 +2364,46 @@ public class TranslatorService extends Service {
         levelDb = (float) Math.max(db(frame), levelDb - 1.5); levelOver = fs.over > 0; levelAt = System.currentTimeMillis();
         listenLive.frame(db(frame), noiseRms > 0 ? db(noiseRms) : Double.NaN);
         liveQ = (float) listenLive.q(listenLive.speechDb()); liveSpeech = listenLive.voiced();
-        if (vadReset) { vadReset = false; eng.vad.reset(); }
-        eng.vad.acceptWaveform(win);
+        String mode = vadDn;
+        if (mode.equals("auto") && !mod(Modules.DENOISE)) mode = "raw";     // модуль «Шумоподавление» выключен
+        if (!mode.equals(dnMode)) {
+          if (!dnMode.equals("raw")) logDn(dnMode, dnNs, dnCpu, dnFrames, dnAll);
+          if (dn != null) { dn.release(); dn = null; }
+          dnMode = mode; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0; gate.reset();
+          if ((mode.equals("dn") || mode.equals("dn_sil")) && (dn = eng.onlineDenoiser(dnModel())) == null) { log("🔇 нет модели шумодава — нарезка по исходному"); vadDn = dnMode = "raw"; }
+        }
+        if (dnReset) {
+          dnReset = false; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0;
+          if (dnMode.equals("auto")) { gate.reset(); if (dn != null) { dn.release(); dn = null; } } else if (dn != null) dn.reset();
+        }
+        // «Только при шуме»: решает фон комнаты до этого кадра — та же оценка, что у «как слышно».
+        if (dnMode.equals("auto")) {
+          double room = noiseRms > 0 ? db(noiseRms) - gainListen.db : DenoiseGate.NONE;
+          gate.t = vadDnGate;
+          int ev = gate.step(room);
+          if (ev > 0) {
+            if ((dn = eng.onlineDenoiser(dnModel())) == null) { log("🔇 нет модели шумодава — нарезка по исходному"); vadDn = dnMode = "raw"; gate.reset(); }
+            else { dnLen = 0; log(String.format(Locale.ROOT, "🔇 фон %.0f dBFS — шумодав нарезки включён", room)); tsv("vaddn_gate", "on", String.format(Locale.ROOT, "%.1f", room)); }
+          } else if (ev < 0 && dn != null) {
+            dn.release(); dn = null;
+            log(String.format(Locale.ROOT, "🔇 фон %.0f dBFS — шумодав нарезки выключен", room)); tsv("vaddn_gate", "off", String.format(Locale.ROOT, "%.1f", room));
+          }
+        }
+        String eff = dnMode.equals("auto") ? (gate.on() ? "dn_sil" : "raw") : dnMode;
+        if (!dnMode.equals("raw")) dnAll++;
+        float[] dwin = win;
+        if (dn != null) {
+          long t0 = System.nanoTime(), c0 = android.os.Debug.threadCpuTimeNanos();
+          float[] o = dn.run(win, 16000).getSamples();
+          if (dnLen + o.length > dnBuf.length) dnBuf = Arrays.copyOf(dnBuf, 2 * (dnLen + o.length));
+          System.arraycopy(o, 0, dnBuf, dnLen, o.length); dnLen += o.length;
+          dwin = new float[win.length];                   // выхода ещё нет (задержка шумодава) — тишина
+          if (dnLen >= win.length) { System.arraycopy(dnBuf, 0, dwin, 0, win.length); System.arraycopy(dnBuf, win.length, dnBuf, 0, dnLen - win.length); dnLen -= win.length; }
+          dnNs += System.nanoTime() - t0; dnCpu += android.os.Debug.threadCpuTimeNanos() - c0; dnFrames++;
+        }
+        dnCostMode = dnMode; dnCostNs = dnNs; dnCostCpu = dnCpu; dnCostFrames = dnFrames; dnCostAll = dnAll;
+        if (vadReset) { vadReset = false; eng.vad.reset(); if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; } }
+        eng.vad.acceptWaveform(eff.equals("raw") ? win : dwin);
         boolean sp = eng.vad.isSpeechDetected();
         while (!eng.vad.empty()) eng.vad.pop();          // внутренняя сборка sherpa не используется
         // Фон копим только в тишине: без этого «SNR» мерил бы речь относительно самой себя.
@@ -2304,6 +2419,11 @@ public class TranslatorService extends Service {
         }
         if (noiseRms > 0) { roomDb = db(noiseRms) - gainListen.db; roomAt = android.os.SystemClock.uptimeMillis(); }
         boolean loud = noiseRms == 0 || frame >= noiseRms * Math.pow(10, gateDb / 20);
+        if (eff.equals("dn")) {                           // порог и его фон — по очищенному; фон для экрана и журнала — прежний
+          double df = rms(dwin, dwin.length);
+          if (!sp) { if (dnNoise == 0) dnNoise = df; else if (df < dnNoise) dnNoise = 0.9 * dnNoise + 0.1 * df; else dnNoise = 0.999 * dnNoise + 0.001 * Math.min(df, 2 * dnNoise); }
+          loud = dnNoise == 0 || df >= dnNoise * Math.pow(10, gateDb / 20);
+        }
         boolean speech = sp && loud;
         if (speech) lastSpeechAt = System.currentTimeMillis();   // отсюда отсчитывается пауза до озвучки
 
