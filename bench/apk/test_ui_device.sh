@@ -528,13 +528,16 @@ if mod tts; then
   m=$(mark); tapon --text $b; l=$(wl "$m" "$pb" 10)
   chk '[ -n "$l" ]' "U11 «$b» — служба: $(printf '%s' "$l" | cut -c10-)"
   press; dump
-  m=$(mark); start --es voicewhat pt; wl "$m" '🔈 озвучиваю только португальский' 10 >/dev/null
-  m=$(mark); start --es feedtext "Bom dia, tudo certo?"; l=$(wl "$m" 'pt2ru . Bom dia' 30); sleep 1; l=$(since "$m" | grep -E -m1 -A2 'pt2ru . Bom dia' | tr '\n' ' ')
+  # Прогон идёт в молчаливом режиме, а он глушит озвучку раньше выбора языка: на две реплики он
+  # выключается («RU» скажет вслух короткое «спасибо за терпение») и после включается снова.
+  # Текст — в кавычках внутри строки am start: иначе оболочка телефона режет его по пробелам.
+  m=$(mark); start --es voicewhat pt --es silent 0; wl "$m" '🔈 озвучиваю только португальский' 10 >/dev/null
+  m=$(mark); start "--es feedtext 'Bom dia, tudo certo?'"; l=$(wl "$m" 'pt2ru . Bom dia' 30); sleep 1; l=$(since "$m" | grep -E -m1 -A2 'pt2ru . Bom dia' | tr '\n' ' ')
   chk 'printf "%s" "$l" | grep -q "без озвучки: выбрано озвучивать только португальский"' "U11 «PT»: русский перевод не звучит — «без озвучки»"
   m=$(mark); start --es voicewhat ru; wl "$m" '🔈 озвучиваю только русский' 10 >/dev/null
-  m=$(mark); start --es feedtext "Obrigado pela paciência"; l=$(wl "$m" 'pt2ru . Obrigado pela' 30); sleep 1; l=$(since "$m" | grep -E -m1 -A2 'pt2ru . Obrigado pela' | tr '\n' ' ')
+  m=$(mark); start "--es feedtext 'Obrigado pela paciência'"; l=$(wl "$m" 'pt2ru . Obrigado pela' 30); sleep 1; l=$(since "$m" | grep -E -m1 -A2 'pt2ru . Obrigado pela' | tr '\n' ' ')
   chk '[ -n "$l" ] && ! printf "%s" "$l" | grep -q "без озвучки"' "U11 «RU»: русский перевод звучит"
-  m=$(mark); start --es voicewhat ${VW:-auto}; wl "$m" '🔈 озв' 10 >/dev/null
+  m=$(mark); start --es voicewhat ${VW:-auto} --es silent 1; wl "$m" '🔈 молчаливый режим' 10 >/dev/null
 else sk "U11 модуль «Озвучка» выключен — выбор не показывается"; fi
 
 
