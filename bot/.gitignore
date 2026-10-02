@@ -1,6 +1,8 @@
-# Состояние и токен tgcloud CLI (токен — секрет), зависимости
-.tgcloud/
 node_modules/
-# Пишется bot/tg.sh из ~/.config/falar/bot.env: id разработчика в публичный репозиторий не кладём
-lib/owner.js
-lib/owner.js.new
+# Собирается bot/cf.sh из wrangler.template.jsonc: номер базы D1 — данные аккаунта, в репозиторий не кладём
+wrangler.jsonc
+.wrangler/
+.cf-schema.sql
+.dev.vars
+.wrangler-e2e.jsonc
+.cf-deploy.log

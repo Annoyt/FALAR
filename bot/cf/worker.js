@@ -1,0 +1,27 @@
+// Cloudflare Worker бота обратной связи: Telegram шлёт обновления POST-запросом на /telegram
+// (webhook ставит bot/cf.sh deploy). Чужие запросы отсекаются по секрету в заголовке: его знают
+// только Telegram и этот Worker.
+
+import handle from 'handlers/message';
+import { bind } from 'sdk';
+import { setOwner } from 'lib/owner';
+
+export default {
+  async fetch(req, env) {
+    const url = new URL(req.url);
+    if (url.pathname !== '/telegram') return new Response('Falar: бот обратной связи — https://t.me/falar_feedback_bot\n', { status: 404 });
+    if (req.method !== 'POST') return new Response('POST only\n', { status: 405 });
+    if (!env.WEBHOOK_SECRET || req.headers.get('X-Telegram-Bot-Api-Secret-Token') !== env.WEBHOOK_SECRET) {
+      return new Response('forbidden\n', { status: 403 });
+    }
+    let u;
+    try { u = await req.json(); } catch (e) { return new Response('bad json\n', { status: 400 }); }
+    bind(env); setOwner(env.OWNER);
+    // Ошибка обработки — в журнал (wrangler tail), а Telegram всё равно получает 200: иначе он
+    // повторял бы то же обновление снова и снова.
+    if (u && u.message) {
+      try { await handle(u.message, { update: u }); } catch (e) { console.error('handler', (e && e.stack) || e); }
+    }
+    return new Response('ok\n');
+  },
+};

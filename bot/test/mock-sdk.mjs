@@ -2,10 +2,11 @@
 //   api — записывает вызовы Bot API и отвечает как Telegram (номера сообщений по порядку);
 //         отказ задаётся api.fail(method, description, code) на один следующий вызов;
 //   db  — db.run/get/all поверх node:sqlite в памяти: те же голые запросы, что и в облаке;
-//   table/integer/text/index — ровно столько DSL schema.js, сколько нужно, чтобы построить по нему
-//         таблицы: так проверка ловит и расхождение запросов lib/store со схемой.
+//   table/integer/text/index — DSL schema.js из cf/dsl.mjs: таблицы строятся тем же SQL, что уходит
+//         в D1, и проверка ловит расхождение запросов lib/store со схемой.
 
 import { DatabaseSync } from 'node:sqlite';
+import { table, integer, text, index, ddl } from '../cf/dsl.mjs';
 
 export class BotApiError extends Error {
   constructor(method, code, description) { super(description); this.method = method; this.code = code; this.description = description; }
@@ -36,45 +37,12 @@ export const db = {
   async all(q, p = {}) { return sqlite.prepare(q).all(p); },
 };
 
-/** Пустая база с таблицами из schema.js. */
+/** Пустая база с таблицами из schema.js — тем же SQL, что уходит в D1 (cf/dsl.mjs). */
 export function resetDb(schema) {
   sqlite = new DatabaseSync(':memory:');
-  for (const t of Object.values(schema)) {
-    if (!t || !t._table) continue;
-    const cols = Object.entries(t.cols).map(([key, b]) => {
-      const c = b._c, name = c.name || key;
-      let d = name + ' ' + c.type;
-      if (c.pk) d += ' PRIMARY KEY' + (c.ai ? ' AUTOINCREMENT' : '');
-      if (c.nn) d += ' NOT NULL';
-      if (c.uq) d += ' UNIQUE';
-      if (c.def !== undefined) d += ' DEFAULT ' + (typeof c.def === 'string' ? "'" + c.def.replace(/'/g, "''") + "'" : c.def);
-      return d;
-    });
-    sqlite.exec('CREATE TABLE ' + t._table + ' (' + cols.join(', ') + ')');
-    if (t.extra) {
-      for (const ix of Object.values(t.extra(t.cols))) {
-        sqlite.exec('CREATE INDEX ' + ix.name + ' ON ' + t._table + ' (' + ix.cols.map((b) => b._c.name).join(', ') + ')');
-      }
-    }
-  }
+  for (const q of ddl(schema)) sqlite.exec(q);
 }
 export function rows(q, p = {}) { return sqlite.prepare(q).all(p); }
 
-function column(type) {
-  return (name) => {
-    const c = { name, type, pk: false, ai: false, nn: false, uq: false, def: undefined };
-    const b = {
-      _c: c,
-      primaryKey(o) { c.pk = true; c.ai = !!(o && o.autoIncrement); return b; },
-      notNull() { c.nn = true; return b; },
-      unique() { c.uq = true; return b; },
-      default(v) { c.def = v; return b; },
-    };
-    return b;
-  };
-}
-export const integer = column('INTEGER');
-export const text = column('TEXT');
-export function index(name) { return { on: (...cols) => ({ name, cols }) }; }
-export function table(name, cols, extra) { return { _table: name, cols, extra }; }
+export { table, integer, text, index };
 export async function fetch() { throw new Error('fetch в проверках не используется'); }

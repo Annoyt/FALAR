@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const MAP = { 'sdk': 'test/mock-sdk.mjs', 'sdk/db': 'test/mock-sdk.mjs', 'schema': 'schema.js', 'lib/owner': 'test/owner.mjs' };
+const MAP = { 'sdk': 'test/mock-sdk.mjs', 'sdk/db': 'test/mock-sdk.mjs', 'schema': 'schema.js' };
 registerHooks({
   resolve(spec, ctx, next) {
     if (MAP[spec]) return { url: pathToFileURL(path.join(ROOT, MAP[spec])).href, shortCircuit: true };
@@ -209,6 +209,27 @@ eq(calls().length, 0, 'X1 чужие группы и боты — тишина')
 const bobRow = sdk.rows('SELECT name FROM people WHERE id = :id', { ':id': BORIS.id })[0];
 eq(bobRow.name, 'Борис', 'X2 в базе — имя, текста сообщений нет');
 ok(!sdk.rows('PRAGMA table_info(relays)').some((x) => /text|body/.test(x.name)), 'X2 в связях нет текста');
+
+// ---- прослойка Cloudflare (cf/sdk.js): именованные параметры для D1 и Bot API через fetch
+const cf = await import(pathToFileURL(path.join(ROOT, 'cf/sdk.js')).href);
+eq(cf.positional('SELECT * FROM t WHERE a = :a AND b = :b OR a = :a', { ':a': 1, ':b': 'x' }),
+   { sql: 'SELECT * FROM t WHERE a = ?1 AND b = ?2 OR a = ?1', values: [1, 'x'] }, 'CF1 :имя → ?N, повтор — тот же номер');
+eq(cf.positional('UPDATE t SET v = :v WHERE k = :k', { ':k': 'a' }).values, [null, 'a'], 'CF1 нет значения — NULL, а не undefined');
+eq(cf.positional('SELECT 1', {}), { sql: 'SELECT 1', values: [] }, 'CF1 без параметров');
+ok(cf.api.then === undefined, 'CF2 api не «thenable»');
+const realFetch = globalThis.fetch, seen = [];
+globalThis.fetch = async (url, o) => { seen.push([url, JSON.parse(o.body)]);
+  return { status: 200, json: async () => (url.endsWith('/getMe') ? { ok: true, result: { id: 9 } } : { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }) }; };
+cf.bind({ BOT_TOKEN: 'T', TG_API: 'http://t/' });
+eq(await cf.api.getMe(), { id: 9 }, 'CF3 ответ без обёртки ok/result');
+eq(seen[0][0], 'http://t/botT/getMe', 'CF3 адрес: база без лишней «/», токен, метод');
+let err = null;
+try { await cf.api.sendMessage({ chat_id: 1, text: 'x' }); } catch (e) { err = e; }
+ok(err instanceof cf.BotApiError && err.code === 403 && /blocked/.test(err.description), 'CF4 ошибка Telegram — BotApiError с кодом и описанием');
+globalThis.fetch = async () => ({ status: 502, json: async () => { throw new SyntaxError('html'); } });
+err = null; try { await cf.api.getMe(); } catch (e) { err = e; }
+ok(err instanceof cf.BotApiError && err.code === 502, 'CF4 не JSON (502 от прокси) — BotApiError с HTTP-кодом');
+globalThis.fetch = realFetch;
 
 console.log((fails ? 'ПРОВАЛОВ: ' + fails : 'Всё прошло') + ' (проверок: ' + checks + ')');
 process.exit(fails ? 1 : 0);
