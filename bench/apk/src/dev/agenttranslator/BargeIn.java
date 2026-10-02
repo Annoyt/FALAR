@@ -42,6 +42,12 @@ final class BargeIn {
   /** Шагов с заметным эхом на прогрев новой громкости: с нулевого усиления громкое эхо само выглядело бы человеком. */
   static final int WARM = 150;
   static final int NONE = 0, HOLD = 1, STOP = 2, RESUME = 3;
+  /** Голоса разговора включены: на паузе сначала сверяется голос перебившего. Речи (кадров громче фона) — сначала
+   *  VERIFY1_S; явно чужой — сразу отбой, неясно — дослушать до VERIFY2_S; не набралось и за VERIFY_MAX_S — отбой.
+   *  По замеру голосов (results/2026-10-01-voices.md, §5) отрезок 1 с узнаётся в 55 % случаев, 2 с — в 97 %. */
+  static final double VERIFY1_S = 1.0, VERIFY2_S = 2.0, VERIFY_MAX_S = 4.0;
+  /** Явно чужой: ниже порога голоса больше чем на столько (свой на 1 с — медиана около 0,45, чужой — около 0,15). */
+  static final float CLEAR = 0.12f;
 
   static final double[] WIN = new double[N];
   /** Полоса b — бины [B0[b], B1[b]). */
@@ -220,6 +226,14 @@ final class BargeIn {
     double d = 0;
     if (best > 0 && best < maxLag) { double y0 = c[best - 1], y1 = c[best], y2 = c[best + 1], den = y0 - 2 * y1 + y2; if (den < 0) d = 0.5 * (y0 - y2) / den; }
     return new double[]{best + d, c[best]};
+  }
+
+  /** Чей голос на паузе: 1 — голос разговора (озвучке смолкнуть), −1 — чужой (продолжить), 0 — неясно, дослушать.
+   *  last — дослушано до конца: неясное — тоже чужое. */
+  static int whose(boolean hit, float score, float thr, boolean last) {
+    if (hit) return 1;
+    if (last || Float.isNaN(thr) || score < thr - CLEAR) return -1;
+    return 0;
   }
 
   /** Кольцо последних решений: hits — M1, hits2 — M2. */

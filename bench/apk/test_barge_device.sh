@@ -11,7 +11,9 @@
 #  B1 перебивание само сверяет время динамика по эху (поправка меток времени) и учит эхо этой громкости;
 #  B2 только озвучка, без человека: ни одной остановки (провалы громкости считаются и печатаются);
 #  B3 человек поверх озвучки с перебиванием: озвучка смолкла, его слова распознаны — сколько из сказанных;
-#  B4 то же без перебивания (--es barge 0), как было до него: сколько слов человека распознано.
+#  B4 то же без перебивания (--es barge 0), как было до него: сколько слов человека распознано;
+#  B5 голоса разговора включены, «собеседник 1» записан фразой кнопкой FALAR — он перебивает озвучку;
+#  B6 чужой голос (его в разговоре нет) озвучку не обрывает: пауза — и она продолжается с того же места.
 # Главное число — B3 против B4: доля слов человека, сказанных поверх озвучки, в распознанном.
 #
 # Данные владельца не трогаются: тестовый разговор «ТЕСТ перебивание» с самым свежим временем, в конце
@@ -181,7 +183,15 @@ Meu vizinho toca violão todas as noites, mas ninguém do prédio reclama.
 A gente pode dividir a conta do jantar em partes iguais, se todos concordarem.
 O porteiro guardou o pacote que chegou para você na segunda-feira.
 Amanhã começa a feira de livros na praça, e a entrada é gratuita.
-O trem para o litoral sai às sete, então precisamos acordar bem cedo.""".split('\n')
+O trem para o litoral sai às sete, então precisamos acordar bem cedo.
+A loja de ferragens fecha mais cedo aos sábados, então vamos lá pela manhã.
+Meu primo trabalha num hospital e quase nunca tem folga nos fins de semana.
+A ponte velha vai ficar fechada por três meses para uma reforma completa.
+Eu prefiro café sem açúcar, mas com um pouco de leite quente, por favor.
+O cachorro da vizinha late toda vez que alguém passa na frente do portão.
+Na semana que vem começa o curso de inglês que você me recomendou.
+O mercado municipal tem um pastel famoso que todo turista quer provar.
+A internet caiu ontem à noite e só voltou depois das duas da manhã.""".split('\n')
 open(f'{D}/say.txt', 'w', encoding='utf-8').write('\n'.join(say) + '\n')
 # «человек» — живые фразы корпуса, 2–4 с, разные дикторы
 import wave
@@ -196,8 +206,29 @@ for lang in ('pt', 'ru'):
                 cl.append(f'{d}/{f[:-4]}')
 rnd.shuffle(cl)
 open(f'{D}/human.txt', 'w', encoding='utf-8').write('\n'.join(cl[:16]) + '\n')
+# B5/B6: собеседник — диктор alexmarcelo (pt), чужой — Silfarle (pt); фразы 2–4,5 с
+import bz2, shutil
+idx = {}
+with bz2.open(f'{R}/data/tatoeba/raw/por_sentences_with_audio.tsv.bz2', 'rt', encoding='utf-8') as f:
+    for line in f:
+        c = line.rstrip('\n').split('\t')
+        if len(c) >= 3: idx[c[1]] = c[2]
+def who(user):
+    out = []
+    for l in open(f'{R}/bench/air/corpus/pt/LICENSES.tsv', encoding='utf-8'):
+        stem, aid = l.split('\t')[:2]
+        if idx.get(aid) == user:
+            p = f'{R}/bench/air/corpus/pt/{stem}'
+            with wave.open(p + '.wav') as w:
+                s = w.getnframes() / w.getframerate()
+            out.append((p, s))
+    return sorted(out)
+A = who('alexmarcelo'); C = who('Silfarle')
+for i in (0, 1): shutil.copy(A[i][0] + '.wav', f'{D}/bv_A{i + 1}.wav')        # фраза кнопкой — чистый звук, как у телефона в руке
+trialA = [p for p, s in A[2:] if 2.0 <= s <= 4.5][:4]; trialC = [p for p, s in C if 2.0 <= s <= 4.5][:4]
+open(f'{D}/voice_a.txt', 'w').write('\n'.join(trialA) + '\n'); open(f'{D}/voice_c.txt', 'w').write('\n'.join(trialC) + '\n')
 EOF
-mapfile -t SAY < "$D/say.txt"; mapfile -t HUM < "$D/human.txt"
+mapfile -t SAY < "$D/say.txt"; mapfile -t HUM < "$D/human.txt"; mapfile -t VA < "$D/voice_a.txt"; mapfile -t VC < "$D/voice_c.txt"
 
 # ---- снимок, модули, настройки, тестовый разговор --------------------------------------------------
 say "== снимок перед проверкой"
@@ -329,6 +360,21 @@ read _ rec_off n_off stops_off _ < <(grep '^off ' "$D/b34")
 [ "${stops_off:-0}" = 0 ] && res 0 "B4 выключенное перебивание не срабатывает" || res 1 "B4 остановок при выключенном: $stops_off"
 cp "$D"/b34 "$D"/log_*.txt "$D"/played_*.tsv "$STATE/" 2>/dev/null
 mkdir -p "$STATE/barge-last" && cp "$D"/b0 "$D"/b34 "$D"/log_*.txt "$D"/played_*.tsv "$STATE/barge-last/" 2>/dev/null
+say "== B5/B6: голоса разговора — свой перебивает, чужой озвучку не обрывает"
+MODS_ON=$(printf '%s' ",$MODS_RUN,speaker," | tr ',' '\n' | grep -v '^$' | sort -u | paste -sd,)
+for w in bv_A1.wav bv_A2.wav; do $ADB push "$D/$w" "$F/$w" >/dev/null 2>&1; done; echo "wavs bv_A1.wav bv_A2.wav" >> "$PEND"
+m=$(mark); launch "--es modules '$MODS_ON'"
+if ! wl "$m" '🎤 отпечаток голоса (готов|подключён)' 90 >/dev/null; then res 1 "B5 отпечаток голоса не поднялся"; else
+  for w in bv_A1 bv_A2; do m=$(mark); launch --es testwav "$F/$w.wav" --es ptt 1; l=$(wl "$m" '🎤 (новый голос|голос узнан)|голос не записан' 60); say "  $w: ${l:-нет строки}"; calm; done
+  m5=$(mark); for c in "${VA[@]}"; do human "$c"; done; since "$m5" > "$D/log_b5.txt"
+  m6=$(mark); for c in "${VC[@]}"; do human "$c"; done; since "$m6" > "$D/log_b6.txt"
+  s5=$(grep -c '🗣 перебил «' "$D/log_b5.txt"); r5=$(grep -c 'озвучка продолжается (пауза' "$D/log_b5.txt")
+  s6=$(grep -c '🗣 перебил' "$D/log_b6.txt"); r6=$(grep -c 'озвучка продолжается (пауза' "$D/log_b6.txt")
+  grep -E '🗣 (перебил|.*продолжается \(пауза)' "$D/log_b5.txt" "$D/log_b6.txt" | sed 's/^[^:]*log_\(b[56]\).txt:/  \1 /' | cut -c1-200
+  [ "$s5" -ge 2 ] && res 0 "B5 собеседник из голосов разговора перебил озвучку: $s5 из ${#VA[@]} (отпущен как чужой: $r5)" || res 1 "B5 собеседник перебил только $s5 из ${#VA[@]} (отпущен как чужой: $r5)"
+  [ "$s6" = 0 ] && res 0 "B6 чужой голос озвучку не оборвал ни разу (паузы с продолжением: $r6 из ${#VC[@]})" || res 1 "B6 чужой голос оборвал озвучку $s6 раз из ${#VC[@]}"
+  mkdir -p "$STATE/barge-last"; cp "$D"/log_b5.txt "$D"/log_b6.txt "$STATE/barge-last/" 2>/dev/null
+fi
 # Падения за прогон
 cr=$(sh "logcat -d -b crash -T '$T0'" | grep -c "Process: $PKG")
 [ "$cr" = 0 ] && res 0 "B· Falar не падал" || res 1 "B· падений Falar в logcat: $cr"

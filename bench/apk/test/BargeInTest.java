@@ -54,6 +54,13 @@ public class BargeInTest {
     ok(a.size() >= 2 && a.get(0)[1] == BargeIn.HOLD && a.get(1)[1] == BargeIn.STOP && a.get(0)[0] * BargeIn.HOP >= 40000 - BargeIn.N,
         "E3 человек поверх эха — пауза, потом замолчать, не раньше человека: " + str(a));
 
+    // чей голос на паузе: свой — смолкнуть; явно чужой — сразу продолжить; рядом с порогом — дослушать, а дослушанное
+    // неясное — тоже чужое; без голосов разговора (порога нет) — чужое
+    ok(BargeIn.whose(true, 0.45f, 0.40f, false) == 1 && BargeIn.whose(true, 0.41f, 0.40f, true) == 1, "W1 голос разговора — озвучке смолкнуть");
+    ok(BargeIn.whose(false, 0.15f, 0.40f, false) == -1, "W2 явно чужой — продолжить сразу, не дослушивая");
+    ok(BargeIn.whose(false, 0.33f, 0.40f, false) == 0 && BargeIn.whose(false, 0.33f, 0.40f, true) == -1, "W3 рядом с порогом — дослушать; дослушано и не дотянул — чужой");
+    ok(BargeIn.whose(false, 0f, Float.NaN, false) == -1, "W4 нет голосов — чужой");
+
     // эталон tools/barge_eval.py
     File gj = new File(dir, "barge_golden.json");
     if (!gj.isFile()) System.out.println("  (эталона нет — сверка пропущена)");

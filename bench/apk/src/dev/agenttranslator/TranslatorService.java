@@ -3567,6 +3567,10 @@ public class TranslatorService extends Service {
   final ArrayList<Double> offEst = new ArrayList<>();
   final AudioTimestamp bargeRts = new AudioTimestamp(), bargeAts = new AudioTimestamp();
   final ExecutorService bargeExec = Executors.newSingleThreadExecutor();
+  // проверка голоса перебившего — только поток захвата
+  boolean verifying = false; long verifyFrom = 0, verifyAtMs = 0; int verifyStep = 0, verifyVoiced = 0, verifyHops = 0;
+  java.util.concurrent.Future<float[]> verifyPrint;
+  final ArrayList<float[]> verifyAudio = new ArrayList<>();
   /** Подпор до подозрения и затухание эха в комнате после остановки (−20 дБ за ~80 мс по концам фраз). */
   static final int PRE_MS = 500, OPEN_MS = 120;
   static final double[] QUIET = new double[BargeIn.NB];
@@ -3647,7 +3651,7 @@ public class TranslatorService extends Service {
     long nowMs = System.currentTimeMillis();
     if (bargeForget) { bargeForget = false; Arrays.fill(barge.g, 0); Arrays.fill(barge.att, BargeIn.ATT0); warmHops = 0; offEst.clear(); envN = 0; }
     if (bargeNew) {
-      bargeNew = false; barge.reset(); duckStart = -1; envN = 0; tsD = Double.NaN; tsHold = Double.NaN; tsAt = 0;
+      bargeNew = false; barge.reset(); duckStart = -1; envN = 0; tsD = Double.NaN; tsHold = Double.NaN; tsAt = 0; verifying = false;
       if (ttsVol != bargeVol) loadGain(ttsVol); else if (nowMs - gainSavedAt > 30000) saveGain();
     }
     AudioTrack tr = track;
@@ -3679,6 +3683,7 @@ public class TranslatorService extends Service {
       long h = bargeHop; bargeHop += BargeIn.HOP;
       if (micEnd - h > micRing.length - 2048) continue;                 // отстали — не бывает, но кольцо конечно
       double[] m = BargeIn.power(micSlice(h, BargeIn.N), 0);
+      if (verifying) { taken |= verifyHop(h, m, tr, nowMs); continue; }
       boolean on = playing && !Double.isNaN(tsD);
       // Фраза доиграла по-настоящему — последний отданный отсчёт прозвучал и отзвучал (250 мс): дальше датчику ждать
       // нечего. Конец по расчёту (playEndMs) приходит раньше настоящего, и в зазоре тишина после фразы сходила за
@@ -3727,26 +3732,77 @@ public class TranslatorService extends Service {
             d, am, Math.round(barge.bestShare * BargeIn.NB), BargeIn.NB, barge.bestSnr, barge.bestRel));
         tsv("barge", "resume", "" + (nowMs - phraseAtMs), "" + d, f1(am)); saveGain();
       } else if (a == BargeIn.STOP) {
-        bargeStop = true;
-        // недоигранное — выбросить сразу: поток озвучки может ждать места в дорожке на паузе, flush его отпускает
-        try { if (tr != null) { tr.pause(); tr.flush(); } } catch (Throwable e) {}
-        // подпор: от PRE_MS до подозрения; пока приглушение ещё не слышно (+ OPEN_MS на затухание) — с погашенным эхом
-        long from = Math.max(micEnd - micRing.length + 2048, duckStart + BargeIn.N - PRE_MS * 16L);
-        int len = (int) (micEnd - from), upto = (int) (duckStart + BargeIn.N + (BargeIn.STOP_MS + OPEN_MS) * 16L - from);
-        // сыгранное для гашения — по совмещению до паузы (на паузе оно сброшено); нет его — подпор без гашения
-        double tsG = Double.isNaN(tsD) ? tsHold : tsD;
-        float[] x = micSlice(from, len), y = Double.isNaN(tsG) ? x : BargeIn.gate(x, refSlice(Math.round(from - micBase + tsG - off * 16), len), barge.g, upto);
-        for (int o = 0; o < len; o += 512) if (!capQ.offer(Arrays.copyOfRange(y, o, Math.min(len, o + 512)))) framesDropped++;
-        taken = true;
-        muteUntil = nowMs; playEndMs = nowMs; spokenPtEnd = Math.min(spokenPtEnd, nowMs);
-        bargeExec.submit(() -> { synchronized (tts) { if (bargeStop && !writingSpeech) hush(); } });
-        log(String.format(Locale.ROOT, "🗣 перебили — озвучка смолкла: человек замечен через %.1f с от начала фразы, подтверждён за %d мс · голос %.0f дБ · слушанию отдано %.1f с",
-            (duckAtMs - phraseAtMs) / 1000.0, nowMs - duckAtMs, barge.lev, len / 16000.0));
-        tsv("barge", "stop", "" + (duckAtMs - phraseAtMs), "" + (nowMs - duckAtMs), f1(barge.lev), f3(len / 16000.0));
+        // Человек на паузе есть. Голоса разговора включены — сначала чей он: чужой (в людном месте) озвучку не
+        // обрывает, она продолжится с того же места (владелец 02.10: «чтобы чужие голоса не глушили озвучку»).
+        if (voicesOn() && !chats.voices.isEmpty()) {
+          verifying = true; verifyFrom = duckStart + BargeIn.N + BargeIn.STOP_MS * 16L; verifyStep = 1; verifyPrint = null;
+          verifyAudio.clear(); verifyVoiced = 0; verifyHops = 0; verifyAtMs = nowMs;
+          log("🗣 на паузе человек — сверяю голос с голосами разговора");
+        } else taken = bargeCut(tr, nowMs, off, null);
+        continue;
       }
     }
     if (!playing && envN >= 120) calibrate();                            // фраза кончилась — сверить по тому, что набрали
     return taken;
+  }
+  /** Перебили: озвучка смолкает (недоигранное — вон), слушание получает звук с подпора до текущего кадра. */
+  boolean bargeCut(AudioTrack tr, long nowMs, double off, String who) {
+    bargeStop = true;
+    // недоигранное — выбросить сразу: поток озвучки может ждать места в дорожке на паузе, flush его отпускает
+    try { if (tr != null) { tr.pause(); tr.flush(); } } catch (Throwable e) {}
+    // подпор: от PRE_MS до подозрения; пока пауза ещё не слышна (+ OPEN_MS на затухание) — с погашенным эхом
+    long from = Math.max(micEnd - micRing.length + 2048, duckStart + BargeIn.N - PRE_MS * 16L);
+    int len = (int) (micEnd - from), upto = (int) (duckStart + BargeIn.N + (BargeIn.STOP_MS + OPEN_MS) * 16L - from);
+    // сыгранное для гашения — по совмещению до паузы (на паузе оно сброшено); нет его — подпор без гашения
+    double tsG = Double.isNaN(tsD) ? tsHold : tsD;
+    float[] x = micSlice(from, len), y = Double.isNaN(tsG) ? x : BargeIn.gate(x, refSlice(Math.round(from - micBase + tsG - off * 16), len), barge.g, upto);
+    for (int o = 0; o < len; o += 512) if (!capQ.offer(Arrays.copyOfRange(y, o, Math.min(len, o + 512)))) framesDropped++;
+    muteUntil = nowMs; playEndMs = nowMs; spokenPtEnd = Math.min(spokenPtEnd, nowMs);
+    bargeExec.submit(() -> { synchronized (tts) { if (bargeStop && !writingSpeech) hush(); } });
+    log(String.format(Locale.ROOT, "🗣 перебил%s — озвучка смолкла: человек замечен через %.1f с от начала фразы, подтверждён за %d мс · голос %.0f дБ · слушанию отдано %.1f с",
+        who == null ? "и" : " " + who, (duckAtMs - phraseAtMs) / 1000.0, nowMs - duckAtMs, barge.lev, len / 16000.0));
+    tsv("barge", "stop", "" + (duckAtMs - phraseAtMs), "" + (nowMs - duckAtMs), f1(barge.lev), f3(len / 16000.0), who == null ? "" : who);
+    return true;
+  }
+  /** Чей голос перебил: звук после того, как пауза дошла до микрофона (эха в нём нет), только кадры громче
+   *  фона; отпечаток — на фоне, как у слушания. Свой — озвучка смолкает; чужой, или речи так и не набралось, —
+   *  продолжается с того же места, и до конца фразы датчик больше не решает. */
+  boolean verifyHop(long h, double[] m, AudioTrack tr, long nowMs) {
+    if (h + BargeIn.N <= verifyFrom) return false;
+    verifyHops++;
+    double ms = 0, ns = 0; for (int b = 0; b < BargeIn.NB; b++) { ms += m[b]; ns += barge.noise == null ? 0 : barge.noise[b]; }
+    if (ms > 4 * ns) { verifyAudio.add(micSlice(h + BargeIn.N - BargeIn.HOP, BargeIn.HOP)); verifyVoiced++; }
+    double voiced = verifyVoiced * BargeIn.HOP / 16000.0, total = verifyHops * BargeIn.HOP / 16000.0;
+    if (verifyPrint == null) {
+      boolean enough = voiced >= (verifyStep == 1 ? BargeIn.VERIFY1_S : BargeIn.VERIFY2_S);
+      if (!enough && total < BargeIn.VERIFY_MAX_S) return false;
+      if (voiced < Speaker.MIN_SECONDS) { resumeAfterVerify(tr, nowMs, String.format(Locale.ROOT, "речи на паузе мало (%.1f с)", voiced), Float.NaN, Float.NaN); return false; }
+      float[] x = new float[verifyAudio.size() * BargeIn.HOP]; int o = 0;
+      for (float[] c : verifyAudio) { System.arraycopy(c, 0, x, o, c.length); o += c.length; }
+      final Speaker sp = spk;
+      verifyPrint = spkExec.submit(() -> sp.embed(x, 16000));
+      return false;
+    }
+    if (!verifyPrint.isDone()) return false;
+    float[] e = null; try { e = verifyPrint.get(); } catch (Exception ignore) {}
+    verifyPrint = null;
+    Voices.Match mt = chats.voices.best(e, true);
+    int w = BargeIn.whose(e != null && mt.hit(), mt.score, mt.thr, verifyStep == 2);
+    if (w > 0) {
+      verifying = false;
+      return bargeCut(tr, nowMs, Double.isNaN(bargeOffMs) ? 0 : bargeOffMs, String.format(Locale.ROOT, "«%s» (%.2f, нужно %.2f)", Voices.label(mt.v), mt.score, mt.thr));
+    }
+    if (w < 0) { resumeAfterVerify(tr, nowMs, e == null ? "отпечаток не посчитался" : String.format(Locale.ROOT, "чужой голос: ближе всех «%s» — %.2f, нужно %.2f", Voices.label(mt.v), mt.score, mt.thr), mt.score, mt.thr); return false; }
+    verifyStep = 2;                                                    // неясно — дослушать ещё
+    return false;
+  }
+  void resumeAfterVerify(AudioTrack tr, long nowMs, String why, float score, float thr) {
+    verifying = false;
+    try { if (tr != null) tr.play(); } catch (Throwable e) {}
+    long d = nowMs - duckAtMs;
+    if (writingSpeech) pausedMs += d; else { playEndMs += d; if (muteUntil != Long.MAX_VALUE && muteUntil > nowMs - d) muteUntil += d; }
+    log(String.format(Locale.ROOT, "🗣 %s — озвучка продолжается (пауза %.1f с); до конца фразы не перебиваю", why, d / 1000.0));
+    tsv("barge", "stranger", "" + (duckAtMs - phraseAtMs), "" + d, Float.isNaN(score) ? "" : f3(score), Float.isNaN(thr) ? "" : f3(thr));
   }
   void dumpBarge() {
     int len = 16000 * 7; long from = micEnd - len; int k = ++dumpK;
