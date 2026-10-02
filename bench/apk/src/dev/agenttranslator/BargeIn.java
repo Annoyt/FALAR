@@ -23,18 +23,15 @@ final class BargeIn {
   static final int SR = 16000, N = 512, HOP = 256, NB = 20;
   static final double F_LO = 150, F_HI = 6000;
   static final double THETA1 = 10, SHARE1 = 0.10; static final int K1 = 2, M1 = 2;
-  static final double THETA2 = 8, SHARE2 = 0.25; static final int K2 = 3, M2 = 4;
+  static final double THETA2 = 8, SHARE2 = 0.15; static final int K2 = 3, M2 = 4;
   /** И полосы «за человеком» вместе громче фона в них на столько: колебания фона после конца фразы проходили порог
    *  полосы, и озвучку «перебивала» тишина (прогон 02.10, громкость 10). */
   static final double SNR2 = 10;
-  /** И не тише недавнего эха больше чем на столько: собеседник рядом говорит примерно как озвучка, а слабый звук на
-   *  паузе («голос 7 дБ» при эхе ~30) останавливал фразу посередине (прогон 02.10, громкость 15). */
-  static final double LEV2 = -20;
   static final double DECAY = 4, NOISE_DB = 6, SPREAD_DB = -25;
   /** На подозрении озвучка на паузе, а не тише: на громкости 15 у Redmi приглушение на 20/30/40 дБ в цифре гасило
    *  эхо у микрофона лишь на 5–11 дБ (обработка звука подтягивает тихое). На паузе эха нет — остаётся хвост в
-   *  комнате и фон; сколько, учится по отбоям (от ATT0, не ниже HOLD_DB). */
-  static final double HOLD_DB = -40, ATT0 = -30;
+   *  комнате и фон. Остаток не учится: в «отбоях» на телефоне звучал и сам человек, и выученный остаток дорастал до −20 дБ. */
+  static final double HOLD_DB = -40, ATT0 = HOLD_DB;
   static final int TAIL = 10, JIT = 1, GRACE = 10;
   /** После решения звук ещё идёт: пауза доходит до микрофона через 110–190 мс (стенд vr_k/m/n на Redmi, 02.10), и эхо
    *  ещё гаснет в комнате. Раньше было 100 мс — проверка начиналась при живом эхе и принимала его за человека. */
@@ -146,8 +143,6 @@ final class BargeIn {
       if (now >= fireT + EFF + WIN2) {
         state = "listen"; nHits = 0;
         since = 0;                              // после паузы — снова не решаем GRACE шагов: метки времени догоняют
-        // отбой — человека не было: сколько эха на самом деле остаётся на паузе, учим по полосам
-        for (int b = 0; b < NB; b++) if (nobs[b] >= 5) att[b] = Math.max(HOLD_DB, Math.min(0, att[b] + 0.3 * (obs[b] / nobs[b] - att[b])));
         return RESUME;
       }
       double seenAt = Math.pow(10, 15 / 10.0);
@@ -156,9 +151,8 @@ final class BargeIn {
       score = share(c);
       double cm = 0, cn = 0, ce = 0; for (int b = 0; b < NB; b++) if (c[b]) { cm += m[b]; cn += noise[b]; ce += elev[b]; }
       double snr = 10 * Math.log10(cm / (cn + 1e-12) + 1e-12);
-      boolean loud = cm >= ce * Math.pow(10, LEV2 / 10);                 // в тех же полосах, что человек
       if (score > bestShare || (score == bestShare && snr > bestSnr)) { bestShare = score; bestSnr = snr; bestRel = 10 * Math.log10(cm / (ce + 1e-12) + 1e-12); }
-      push(hits2, score >= SHARE2 && snr >= SNR2 && loud, true);
+      push(hits2, score >= SHARE2 && snr >= SNR2, true);
       if (count(hits2, nHits2) >= K2) {
         state = "stopped";
         double v = 0; for (int b = 0; b < NB; b++) if (c[b]) v += m[b];

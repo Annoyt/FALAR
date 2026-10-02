@@ -3790,10 +3790,8 @@ public class TranslatorService extends Service {
     if (bargeVol >= 0) saveGain();
     bargeVol = vol;
     android.content.SharedPreferences pr = getSharedPreferences("at", MODE_PRIVATE);
-    String gs = pr.getString("barge_g_" + vol, null), as = pr.getString("barge_att_" + vol, null);
-    // Ослабление эха приглушением — своё у каждой громкости (у громкой усилитель сжимает): нет выученного — с ATT0.
-    Arrays.fill(barge.att, BargeIn.ATT0);
-    if (as != null) { String[] p = as.split(","); for (int b = 0; b < BargeIn.NB && b < p.length; b++) try { barge.att[b] = Double.parseDouble(p[b]); } catch (NumberFormatException e) {} }
+    String gs = pr.getString("barge_g_" + vol, null);
+    Arrays.fill(barge.att, BargeIn.ATT0);                               // остаток эха на паузе — не учится (был выучен в прежних сборках)
     if (gs == null) { warmHops = 0; return; }                          // учиться заново — от выученного для прежней громкости
     String[] p = gs.split(",");
     for (int b = 0; b < BargeIn.NB && b < p.length; b++) try { barge.g[b] = Double.parseDouble(p[b]); } catch (NumberFormatException e) {}
@@ -3802,10 +3800,9 @@ public class TranslatorService extends Service {
   void saveGain() {
     if (bargeVol < 0) return;
     gainSavedAt = System.currentTimeMillis();
-    StringBuilder b = new StringBuilder(), a = new StringBuilder();
+    StringBuilder b = new StringBuilder();
     for (double v : barge.g) b.append(b.length() > 0 ? "," : "").append(String.format(Locale.ROOT, "%.3f", v));
-    for (double v : barge.att) a.append(a.length() > 0 ? "," : "").append(String.format(Locale.ROOT, "%.2f", v));
-    getSharedPreferences("at", MODE_PRIVATE).edit().putString("barge_g_" + bargeVol, b.toString()).putString("barge_att_" + bargeVol, a.toString())
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString("barge_g_" + bargeVol, b.toString()).remove("barge_att_" + bargeVol)
         .putInt("barge_warm_" + bargeVol, warmHops).apply();
   }
 
