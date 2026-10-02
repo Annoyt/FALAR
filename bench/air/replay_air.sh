@@ -1,13 +1,34 @@
 #!/bin/bash
 # Прогнать записанную комнату через нарезку с заданными настройками.
 #
+# УСТАРЕЛ (03.10.2026). Прогон не отделён от разговоров владельца: реплики ложатся в его текущий
+# разговор, модуль отпечатка голоса не выключается — при включённых голосах куски отбрасываются
+# («в разговоре ещё нет голосов»), и WER выходит 100 % (так было 02.10). До 03.10 скрипт ещё и
+# оставлял приложение слушать комнату после выхода (44 минуты 02.10). То же самое правильно делает
+# bash bench/air/gain_sweep.sh --rec near-pt --seg "preroll=800 …": отдельный тестовый разговор,
+# модули на время выключены и возвращены, ждёт свободный телефон; WER — asr_device.py, как в проверке
+# качества перед выпуском. Запуск этого — только с FORCE=1.
+#
 #   bash bench/air/replay_air.sh --listener <serial> --rec bench/air/rec/near-pt \
 #        --seg "preroll=300 tail=300 gate=6 minspeech=250" --label g6
 #
 # Комната зафиксирована в записи, поэтому два прогона отличаются ровно настройками — в отличие
 # от прогонов через живой воздух, где разница между комнатами больше разницы между настройками.
+# Стенд --es feedonly 1 держит микрофон глухим и вне подачи: до неё и после «подача закончена» в нарезку
+# шли живые фразы комнаты и попадали в listener.tsv (02.10 так 16 минут не кончался gain_sweep). На выходе
+# — feedonly 0, иначе приложение осталось бы глухим, пока его не откроют с рабочего стола.
 set -e
+if [ "${FORCE:-}" != 1 ]; then
+  echo "replay_air.sh устарел: пишет в текущий разговор владельца и не выключает отпечаток голоса (WER тогда 100 %)." >&2
+  echo "Вместо него: bash bench/air/gain_sweep.sh --rec <запись> --seg \"preroll=… gate=…\". Всё же запустить — FORCE=1." >&2
+  exit 2
+fi
 R=$(cd "$(dirname "$0")/../.." && pwd)
+# Один прогон на телефоне за раз — и отдельный скрипт, и вызванный из других (как у test_*_device.sh).
+if [ -z "$FALAR_STAND_LOCK" ]; then
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
+fi
 ADB=$R/tools/platform-tools/adb
 PKG=app.falar
 LIS=""; REC=""; SEG=""; LABEL=""; SPEED=4
@@ -45,7 +66,8 @@ $L push "$REC/room.wav" "$EXT/replay.wav" >/dev/null
 N0_L=$(lines); N0_LOG=$($L shell "test -f $EXT/at.log && wc -l < $EXT/at.log || echo 0" | tr -d '\r ')
 
 $L shell am force-stop $PKG >/dev/null 2>&1 || true; sleep 2
-$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es vad 1 --es silent 1 --es fixdir $DIR --es denoise 0 $SEGARGS >/dev/null
+trap '$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es vad 0 --es feedonly 0 >/dev/null 2>&1 || true' EXIT
+$L shell am start -n $PKG/dev.agenttranslator.MainActivity --es vad 1 --es silent 1 --es feedonly 1 --es fixdir $DIR --es denoise 0 $SEGARGS >/dev/null
 READY=0
 for _ in $(seq 40); do sleep 2; [ "$(tailgrep "$N0_LOG" 'микрофон:')" != 0 ] && { READY=1; break; }; done
 [ "$READY" = 1 ] || { echo "слушающий не поднялся"; exit 1; }

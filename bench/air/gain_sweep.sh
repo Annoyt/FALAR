@@ -4,6 +4,12 @@
 #
 #   bash bench/air/gain_sweep.sh [--rec "near-pt near-ru"] [--gains "0 12 24 auto"] [--modes "cut limit"]
 #                                [--att <дБ>] [--autostart <дБ>] [--speed 4] [--vaddn "raw dn dn_sil"]
+#                                [--seg "preroll=300 tail=300 gate=6 minspeech=250"]
+#
+# --seg — любые ключи стенда на все прогоны этого запуска: «ключ=значение» уходит в am start как
+# --es ключ значение (нарезка — preroll/tail/gate/minspeech/hang, порог silero — vadthr=0.4 и т. п.;
+# приложение держит их только до перезапуска, поэтому сами сбрасываются). Ради настроек нарезки был
+# replay_air.sh — он устарел: писал в разговор владельца и не выключал отпечаток голоса.
 #
 # Каждый прогон: приложение перезапускается с --es micgaintest <дБ> --es limiter <0|1> (в настройки
 # не пишется; auto — вместо числа: чувствительность подбирается сама, --es micauto 1), запись комнаты
@@ -24,10 +30,10 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log; TSV=$F/at.tsv
-RECS="near-pt"; GAINS="0 12 24"; MODES="cut limit"; ATT=0; SPEED=4; AUTOSTART=0; VADDN=raw
+RECS="near-pt"; GAINS="0 12 24"; MODES="cut limit"; ATT=0; SPEED=4; AUTOSTART=0; VADDN=raw; SEG=""
 while [ $# -gt 0 ]; do
   case "$1" in --rec) RECS=$2; shift 2;; --gains) GAINS=$2; shift 2;; --modes) MODES=$2; shift 2;;
-    --att) ATT=$2; shift 2;; --speed) SPEED=$2; shift 2;; --autostart) AUTOSTART=$2; shift 2;; --vaddn) VADDN=$2; shift 2;;
+    --att) ATT=$2; shift 2;; --speed) SPEED=$2; shift 2;; --autostart) AUTOSTART=$2; shift 2;; --vaddn) VADDN=$2; shift 2;; --seg) SEG=$2; shift 2;;
     *) echo "не знаю ключ: $1"; exit 2;; esac
 done
 D=$(mktemp -d /tmp/falar-gain.XXXX); SNAP=$D/snap; mkdir -p $SNAP; TID=$(date +%s%3N); SUM=$D/summary.tsv
@@ -104,6 +110,8 @@ o = wave.open(dst, "wb"); o.setparams(p); o.writeframes(a.tobytes()); o.close()
 PY
   $ADB push "$D/feed.wav" "$F/replay.wav" >/dev/null
   SEC=$(python3 -c "import wave; w=wave.open('$D/feed.wav'); print(int(w.getnframes()/w.getframerate()))")
+  SEGARGS=""; for kv in $SEG; do SEGARGS="$SEGARGS --es ${kv%%=*} ${kv#*=}"; done
+  [ -n "$SEG" ] && say "  нарезка на все прогоны: $SEG"
   for g in $GAINS; do for m in $MODES; do for v in $VADDN; do
     [ "$g" = 0 ] && [ "$m" != "$(echo $MODES | awk '{print $NF}')" ] && continue   # при 0 дБ режимы совпадают
     GX=$([ "$g" = auto ] && echo "--es micauto 1 --es micautodb $AUTOSTART" || echo "--es micgaintest $g")
@@ -116,7 +124,7 @@ PY
       m0=$(count $LOG)
       # feedonly: микрофон в нарезку не идёт и вне подачи — до неё и после «подача закончена» нарезка
       # слушала бы комнату (сборки до 02.10 ключ не знают и слушают — ждать в тишине).
-      $ADB shell "am start -n $ACT --es vad 1 --es feedonly 1 --es silent 1 --es fixdir $DIR --es denoise 0 --es vaddenoise $v --es refineevery 0 --es cloudevery 0 $GX --es limiter $L" >/dev/null 2>&1
+      $ADB shell "am start -n $ACT --es vad 1 --es feedonly 1 --es silent 1 --es fixdir $DIR --es denoise 0 --es vaddenoise $v --es refineevery 0 --es cloudevery 0 $GX --es limiter $L $SEGARGS" >/dev/null 2>&1
       # Готов, когда движки подняты («🧩 модули:» пишется сразу после них) и захват идёт: подача
       # раньше движков теряла бы начало записи — поток нарезки выбрасывает кадры, пока движка нет.
       ok=0; for _ in $(seq 60); do sleep 2; [ "$(seen $m0 'микрофон:')" != 0 ] && [ "$(seen $m0 '🧩 модули:')" != 0 ] && { ok=1; break; }; done
