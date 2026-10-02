@@ -81,7 +81,9 @@ final class BargeIn {
   int nh = 0;
   final double[] smax = new double[NB];
   int since = -1, t = 0, fireT = -1;
-  double elev = 0;                      // недавняя громкость эха (сумма по полосам), медленно спадает
+  final double[] elev = new double[NB]; // недавняя громкость эха по полосам, медленно спадает
+  /** Лучший шаг проверки на текущей паузе — для журнала, почему не подтвердилось: доля полос, над фоном и к эху, дБ. */
+  double bestShare, bestSnr = -99, bestRel = -99;
   final boolean[] hits = new boolean[M1], hits2 = new boolean[M2];
   int nHits = 0, nHits2 = 0;
   String state = "listen";
@@ -152,9 +154,10 @@ final class BargeIn {
       for (int b = 0; b < NB; b++) { double e0 = s[b] * Math.pow(10, g[b] / 10); if (e0 > noise[b] * seenAt) { obs[b] += 10 * Math.log10(m[b] / (e0 + 1e-12)); nobs[b]++; } }
       boolean[] c = cells(m, s, add(g, att), 0, THETA2, e);
       score = share(c);
-      double cm = 0, cn = 0; for (int b = 0; b < NB; b++) if (c[b]) { cm += m[b]; cn += noise[b]; }
+      double cm = 0, cn = 0, ce = 0; for (int b = 0; b < NB; b++) if (c[b]) { cm += m[b]; cn += noise[b]; ce += elev[b]; }
       double snr = 10 * Math.log10(cm / (cn + 1e-12) + 1e-12);
-      boolean loud = cm >= elev * Math.pow(10, LEV2 / 10);
+      boolean loud = cm >= ce * Math.pow(10, LEV2 / 10);                 // в тех же полосах, что человек
+      if (score > bestShare || (score == bestShare && snr > bestSnr)) { bestShare = score; bestSnr = snr; bestRel = 10 * Math.log10(cm / (ce + 1e-12) + 1e-12); }
       push(hits2, score >= SHARE2 && snr >= SNR2 && loud, true);
       if (count(hits2, nHits2) >= K2) {
         state = "stopped";
@@ -169,7 +172,7 @@ final class BargeIn {
     boolean[] c = cells(m, s, g, 0, THETA1, e);
     score = share(c);
     double es = 0, ns = 0; for (int b = 0; b < NB; b++) { es += e[b]; ns += noise[b]; }
-    elev = Math.max(elev * Math.pow(10, -0.02), es);
+    double ed = Math.pow(10, -0.02); for (int b = 0; b < NB; b++) elev[b] = Math.max(elev[b] * ed, e[b]);
     if (since < 0 && es > ns) since = 0; else if (since >= 0) since++;
     boolean hit = score >= SHARE1 && since > GRACE;
     push(hits, hit, false);
@@ -179,7 +182,8 @@ final class BargeIn {
     for (int b = 0; b < NB; b++) smax[b] = Math.max(smax[b] * dec, s[b]);
     if (learn && count(hits, nHits) == 0)
       for (int b = 0; b < NB; b++) if (teach(b, s, e)) g[b] += 10 * Math.log10(m[b] / (s[b] + 1e-12)) > g[b] ? 0.375 : -0.125;
-    if (count(hits, nHits) >= K1) { state = "ducked"; fireT = now; nHits2 = 0; java.util.Arrays.fill(obs, 0); java.util.Arrays.fill(nobs, 0); return HOLD; }
+    if (count(hits, nHits) >= K1) { state = "ducked"; fireT = now; nHits2 = 0; java.util.Arrays.fill(obs, 0); java.util.Arrays.fill(nobs, 0);
+      bestShare = 0; bestSnr = -99; bestRel = -99; return HOLD; }
     return NONE;
   }
   int frame(double[] m, double[] rNext) { return frame(m, rNext, true); }

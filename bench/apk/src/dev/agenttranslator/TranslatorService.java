@@ -3723,7 +3723,8 @@ public class TranslatorService extends Service {
         // фраза звучит дольше на паузу: заглушка микрофона и конец звучания — тоже
         if (writingSpeech) pausedMs += d; else { playEndMs += d; if (muteUntil != Long.MAX_VALUE && muteUntil > nowMs - d) muteUntil += d; }
         double am = 0; for (double v : barge.att) am += v / BargeIn.NB;
-        log(String.format(Locale.ROOT, "🗣 не подтвердилось — озвучка продолжается (пауза %d мс; эха на паузе остаётся %.0f дБ)", d, am));
+        log(String.format(Locale.ROOT, "🗣 не подтвердилось — озвучка продолжается (пауза %d мс; эха на паузе остаётся %.0f дБ; лучший шаг: полос %d из %d, над фоном %.0f дБ, к эху %.0f дБ)",
+            d, am, Math.round(barge.bestShare * BargeIn.NB), BargeIn.NB, barge.bestSnr, barge.bestRel));
         tsv("barge", "resume", "" + (nowMs - phraseAtMs), "" + d, f1(am)); saveGain();
       } else if (a == BargeIn.STOP) {
         bargeStop = true;

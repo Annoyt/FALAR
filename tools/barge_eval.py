@@ -103,7 +103,7 @@ class Barge:
         self.hist = []
         self.smax = np.full(NB, 1e-12)
         self.since = -1                  # шагов с начала звука у микрофона
-        self.elev = 0.0                  # недавняя громкость эха (сумма по полосам), медленно спадает
+        self.elev = np.zeros(NB)         # недавняя громкость эха по полосам, медленно спадает
         self.hits = []
         self.hits2 = []
         self.state = 'listen'
@@ -169,7 +169,7 @@ class Barge:
             c, _ = self.cells(m, s, self.g + self.att, THETA2)
             self.score = c.mean()
             snr = 10 * np.log10((m * c).sum() / ((self.noise * c).sum() + 1e-12) + 1e-12)
-            loud = (m * c).sum() >= self.elev * 10 ** (LEV2 / 10)
+            loud = (m * c).sum() >= (self.elev * c).sum() * 10 ** (LEV2 / 10)   # в тех же полосах, что человек
             self.hits2 = (self.hits2 + [self.score >= SHARE2 and snr >= SNR2 and loud])[-M2:]
             if sum(self.hits2) >= K2:
                 self.state = 'stopped'
@@ -181,7 +181,7 @@ class Barge:
         self.noise = np.where(quiet, self.track_noise(m), self.noise)
         c, e = self.cells(m, s, self.g, THETA1)
         self.score = c.mean()
-        self.elev = max(self.elev * 10 ** (-0.02), float(e.sum()))
+        self.elev = np.maximum(self.elev * 10 ** (-0.02), e)
         if self.since < 0 and e.sum() > self.noise.sum():
             self.since = 0
         elif self.since >= 0:
