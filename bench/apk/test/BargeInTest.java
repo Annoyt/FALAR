@@ -53,6 +53,23 @@ public class BargeInTest {
     List<int[]> a = closed(mic, ref, human, warm.g);
     ok(a.size() >= 2 && a.get(0)[1] == BargeIn.HOLD && a.get(1)[1] == BargeIn.STOP && a.get(0)[0] * BargeIn.HOP >= 40000 - BargeIn.N,
         "E3 человек поверх эха — пауза, потом замолчать, не раньше человека: " + str(a));
+    // громкая комната: короткие всплески поверх озвучки каждую секунду — пауза и отбой, но не больше MAX_RESUME раз
+    // за фразу, дальше озвучка идёт без рывков; новая фраза — датчик снова решает
+    float[] bursts = new float[n];
+    for (int k = 0; k < 3; k++) for (int i = 16000 * (k + 1); i < 16000 * (k + 1) + 1600; i++) bursts[i] = (float) (rnd.nextGaussian() * 0.05);
+    List<int[]> q = closed(mic, ref, bursts, warm.g);
+    int holds = 0, resumes = 0; for (int[] x : q) { if (x[1] == BargeIn.HOLD) holds++; if (x[1] == BargeIn.RESUME) resumes++; }
+    ok(holds == BargeIn.MAX_RESUME && resumes == BargeIn.MAX_RESUME && q.get(q.size() - 1)[1] == BargeIn.RESUME,
+        "E4 всплески каждую секунду — " + BargeIn.MAX_RESUME + " паузы с отбоем, третьей нет: " + str(q));
+    float[] mix = new float[n]; for (int i = 0; i < n; i++) mix[i] = mic[i] + bursts[i];
+    BargeIn qd = new BargeIn(warm.g, null); qd.state = "quiet"; qd.resumes = BargeIn.MAX_RESUME;
+    int early = 0, firstHold = -1;
+    for (int t = 0; t < hops(mix) - 1; t++) {
+      if (t == 140) qd.reset();                                         // 2,24 с: новая фраза, всплеск на 3 с — уже в ней
+      int act = qd.frame(BargeIn.power(mix, t * BargeIn.HOP), BargeIn.power(ref, (t + 1) * BargeIn.HOP));
+      if (act != BargeIn.NONE) { if (t < 140) early++; else if (firstHold < 0 && act == BargeIn.HOLD) firstHold = t; }
+    }
+    ok(early == 0 && firstHold > 0, "E4 до конца фразы — без действий (было " + early + "), новая фраза — снова пауза на всплеске (шаг " + firstHold + ")");
 
     // чей голос на паузе: свой — смолкнуть; явно чужой — сразу продолжить; ниже порога, но не явно — дослушать, а
     // дослушанное неясное — тоже чужое; без голосов разговора (порога нет) — чужое

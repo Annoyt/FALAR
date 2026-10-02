@@ -42,6 +42,11 @@ final class BargeIn {
   /** Шагов с заметным эхом на прогрев новой громкости: с нулевого усиления громкое эхо само выглядело бы человеком. */
   static final int WARM = 150;
   static final int NONE = 0, HOLD = 1, STOP = 2, RESUME = 3;
+  /** Пауз впустую за фразу — не больше стольких, дальше до конца фразы датчик не решает. В громкой комнате (фон
+   *  −32 dBFS, речь вокруг) подозрение срабатывало каждые 0,75 с, а проверка на паузе его не подтверждала: озвучка
+   *  шла рывками, 8 пауз за одну фразу (прогон 02.10). Настоящий перебивающий подтверждался с первой паузы или со
+   *  второй: из 15 остановок на телефоне 14 — без пауз впустую, одна — после одной. */
+  static final int MAX_RESUME = 2;
   /** Голоса разговора включены: на паузе сначала сверяется голос перебившего — по речи (кадрам громче фона) в
    *  VERIFY_S секунд, ступень за ступенью. Узнан на любой — свой; явно чужой (ниже LOW) — отбой сразу; иначе —
    *  дослушать до следующей; не узнан и на последней или за VERIFY_MAX_S — чужой. По замеру голосов
@@ -95,7 +100,8 @@ final class BargeIn {
   /** Лучший шаг проверки на текущей паузе — для журнала, почему не подтвердилось: доля полос, над фоном и к эху, дБ. */
   double bestShare, bestSnr = -99, bestRel = -99;
   final boolean[] hits = new boolean[M1], hits2 = new boolean[M2];
-  int nHits = 0, nHits2 = 0;
+  int nHits = 0, nHits2 = 0, resumes = 0;
+  /** listen — слушает; ducked — пауза, проверка; stopped — замолчал; quiet — до конца фразы не решает (MAX_RESUME). */
   String state = "listen";
   double score, lev = -200;
 
@@ -104,7 +110,7 @@ final class BargeIn {
   BargeIn(double[] gDb, double[] noise, double[] attDb) { this(gDb, noise); if (attDb != null) att = attDb.clone(); }
 
   /** Новая фраза озвучки: всё, кроме усиления тракта и фона. */
-  void reset() { nh = 0; nHits = 0; nHits2 = 0; since = -1; state = "listen"; fireT = -1; }
+  void reset() { nh = 0; nHits = 0; nHits2 = 0; since = -1; state = "listen"; fireT = -1; resumes = 0; }
 
   /** Фон: вниз быстро, вверх не быстрее 0,03 дБ за шаг (2 дБ/с). Вверх по 0,01 линейно он за пару секунд речи между
    *  фразами дорастал до самой речи, и на паузе человек был «не громче фона»; а «не больше чем вдвое за шаг по 0,002»
@@ -149,12 +155,12 @@ final class BargeIn {
     hist[nh++] = rNext.clone();
     double[] s = smear();
     if (noise == null) noise = m.clone();
-    if (state.equals("stopped")) return NONE;
+    if (state.equals("stopped") || state.equals("quiet")) return NONE;
     double[] e = new double[NB];
     if (state.equals("ducked")) {
       if (now < fireT + EFF) return NONE;
       if (now >= fireT + EFF + WIN2) {
-        state = "listen"; nHits = 0;
+        state = ++resumes >= MAX_RESUME ? "quiet" : "listen"; nHits = 0;
         since = 0;                              // после паузы — снова не решаем GRACE шагов: метки времени догоняют
         return RESUME;
       }

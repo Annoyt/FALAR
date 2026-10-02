@@ -59,6 +59,8 @@ STOP_MS = 250                               # после решения звук
 LAT_MS = 150                                # а в смесях действие доходит до микрофона через столько (медиана замера)
 EFF = -(-(N + STOP_MS * 16) // HOP)         # через столько шагов после решения приглушение уже слышно
 WIN2 = 15                                   # шагов на проверку, потом — отбой
+MAX_RESUME = 2                              # пауз впустую за фразу — дальше до конца фразы не решаем: в громкой комнате
+                                            # подозрение срабатывало каждые 0,75 с, 8 пауз за фразу (прогон 02.10)
 OPEN_MS = 120                               # после остановки эхо гаснет в комнате (−20 дБ за ~80 мс, по концам фраз)
 PRE_MS = 500                                # подпор: столько звука до подозрения отдаётся распознаванию
 MUTE_TAIL_MS = 400                          # как сейчас: микрофон глух до конца озвучки и ещё столько
@@ -106,6 +108,7 @@ class Barge:
         self.hits = []
         self.hits2 = []
         self.state = 'listen'
+        self.resumes = 0
         self.t = 0
         self.fire_t = None
         self.score = 0.0
@@ -149,13 +152,14 @@ class Barge:
         s = self.smear()
         if self.noise is None:
             self.noise = np.array(m, float)
-        if self.state == 'stopped':
+        if self.state in ('stopped', 'quiet'):
             return NONE
         if self.state == 'ducked':
             if t < self.fire_t + EFF:
                 return NONE
             if t >= self.fire_t + EFF + WIN2:
-                self.state = 'listen'
+                self.resumes += 1
+                self.state = 'quiet' if self.resumes >= MAX_RESUME else 'listen'
                 self.hits = []
                 self.since = 0                      # после паузы — снова не решаем GRACE шагов: метки времени догоняют
                 return RESUME
@@ -223,7 +227,7 @@ class Barge:
     def reset(self):
         """Новая фраза озвучки: всё, кроме усиления тракта и фона."""
         self.hist, self.hits, self.hits2 = [], [], []
-        self.since, self.state, self.fire_t = -1, 'listen', None
+        self.since, self.state, self.fire_t, self.resumes = -1, 'listen', None, 0
 
 
 def closed_loop(echo, human, ref, bg, start, g0, noise0, sim_db=None, att0=None):

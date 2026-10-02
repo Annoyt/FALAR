@@ -3734,8 +3734,9 @@ public class TranslatorService extends Service {
         // фраза звучит дольше на паузу: заглушка микрофона и конец звучания — тоже
         if (writingSpeech) pausedMs += d; else { playEndMs += d; if (muteUntil != Long.MAX_VALUE && muteUntil > nowMs - d) muteUntil += d; }
         double am = 0; for (double v : barge.att) am += v / BargeIn.NB;
-        log(String.format(Locale.ROOT, "🗣 не подтвердилось — озвучка продолжается (пауза %d мс; эха на паузе остаётся %.0f дБ; лучший шаг: полос %d из %d, над фоном %.0f дБ, к эху %.0f дБ)",
-            d, am, Math.round(barge.bestShare * BargeIn.NB), BargeIn.NB, barge.bestSnr, barge.bestRel));
+        log(String.format(Locale.ROOT, "🗣 не подтвердилось — озвучка продолжается (пауза %d мс; эха на паузе остаётся %.0f дБ; лучший шаг: полос %d из %d, над фоном %.0f дБ, к эху %.0f дБ)%s",
+            d, am, Math.round(barge.bestShare * BargeIn.NB), BargeIn.NB, barge.bestSnr, barge.bestRel,
+            "quiet".equals(barge.state) ? "; пауз впустую " + barge.resumes + " — до конца фразы не перебиваю" : ""));
         tsv("barge", "resume", "" + (nowMs - phraseAtMs), "" + d, f1(am)); saveGain();
       } else if (a == BargeIn.STOP) {
         // Человек на паузе есть. Голоса разговора включены — сначала чей он: чужой (в людном месте) озвучку не
