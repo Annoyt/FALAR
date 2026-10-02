@@ -118,9 +118,10 @@ public class TranslatorService extends Service {
    *  выключали «Слушать», пока шёл звук (test_hearing_device.sh на Redmi 01.10: два прогона из трёх,
    *  в том числе на 0.26.0 как вышла). */
   volatile boolean vadReset = false;
-  /** Подача записи началась — шумодав нарезки с чистого листа, счёт его времени тоже; кончилась — поток
-   *  нарезки пишет, во что он обошёлся (стенд --es vaddenoise). */
-  volatile boolean feedDone = false, dnReset = false;
+  /** Подача записи началась — шумодав нарезки с чистого листа, счёт его времени тоже (стенд --es
+   *  vaddenoise). Счёт ведёт поток нарезки, итог пишет поток подачи, когда очередь кадров разобрана:
+   *  после подачи кадров может не быть вовсе, и ждать следующего кадра, чтобы написать итог, нельзя. */
+  volatile boolean dnReset = false; volatile long dnCostNs, dnCostFrames, dnCostAll; volatile String dnCostMode = "raw";
   /** Во что обошёлся шумодав нарезки: доля времени, когда он работал, и его RTF — доля ядра, пока работает. */
   void logDn(String mode, long ns, long frames, long all) {
     if (all == 0) return;
@@ -528,7 +529,8 @@ public class TranslatorService extends Service {
         while (!capQ.isEmpty() && running) Thread.sleep(50);
         Thread.sleep(1500);
         feeding = false;
-        log("▷ подача закончена"); tsv("feed_end", new File(wav).getName()); feedDone = true;
+        log("▷ подача закончена"); tsv("feed_end", new File(wav).getName());
+        if (!"raw".equals(dnCostMode)) logDn(dnCostMode, dnCostNs, dnCostFrames, dnCostAll);
       } catch (Throwable t) { feeding = false; log("▷ ошибка подачи: " + t); } }, "feed").start();
     }
     // Проверка наушников: куда уходит вывод, какова задержка, и слышит ли микрофон озвучку.
@@ -2361,7 +2363,7 @@ public class TranslatorService extends Service {
           if (dnLen >= win.length) { System.arraycopy(dnBuf, 0, dwin, 0, win.length); System.arraycopy(dnBuf, win.length, dnBuf, 0, dnLen - win.length); dnLen -= win.length; }
           dnNs += System.nanoTime() - t0; dnFrames++;
         }
-        if (feedDone) { feedDone = false; if (!dnMode.equals("raw")) logDn(dnMode, dnNs, dnFrames, dnAll); }
+        dnCostMode = dnMode; dnCostNs = dnNs; dnCostFrames = dnFrames; dnCostAll = dnAll;
         if (vadReset) { vadReset = false; eng.vad.reset(); if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; } }
         eng.vad.acceptWaveform(eff.equals("raw") ? win : dwin);
         boolean sp = eng.vad.isSpeechDetected();
