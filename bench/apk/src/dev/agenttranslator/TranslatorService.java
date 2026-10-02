@@ -2379,7 +2379,7 @@ public class TranslatorService extends Service {
     double sec = 0; final long[] w0 = {0};
     try { GeneratedAudio ga = eng.speak(tgt, text, chunk -> { if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
       sec = ga.getSamples().length / (double) rate;
-    } finally { if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec); if (!dup) muteUntil = until; } }
+    } finally { if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec) + pausedMs; playEndMs += pausedMs; if (!dup) muteUntil = until; } }
     }
   }
   /** Очистка выученного. Ярус копится сам и молча, поэтому убрать его должно быть можно
@@ -3305,7 +3305,7 @@ public class TranslatorService extends Service {
       long now = System.currentTimeMillis(), until = muteAfter(w0[0] == 0 ? now : w0[0], audioS);
       boolean cut = phraseEnd();
       if (cut) { playEndMs = now; until = now; }                           // перебили: дорожка уже пуста, микрофон открыт
-      else if (!dup) muteUntil = until;
+      else { if (pausedMs > 0) { playEndMs += pausedMs; until += pausedMs; } if (!dup) muteUntil = until; }
       if (audioS >= 3 && until > now) log(String.format(Locale.ROOT, "🔊 %.1f с звука · микрофон глух до %+.1f с от отдачи последнего куска (прежний расчёт: %+.1f с)",
           audioS, (until - now) / 1000.0, audioS + 0.4));
       // Что и когда проговорено по-португальски — для отсева эха: хвост озвучки и отражение от стен
@@ -3502,8 +3502,8 @@ public class TranslatorService extends Service {
 
   // ---------- Перебивание (BargeIn) ----------
   // Человек заговорил поверх озвучки: датчик видит его по микрофону и по тому, что в тот же миг играло, озвучка
-  // приглушается, на приглушённом эхе человек виден ясно — озвучка смолкает, а слушание получает звук с полсекунды
-  // до подозрения (эхо в нём погашено по полосам). Не подтвердилось — громкость обратно. Только для динамика:
+  // встаёт на паузу, на паузе человек виден ясно — озвучка смолкает, а слушание получает звук с полсекунды до
+  // подозрения (эхо в нём погашено по полосам). Не подтвердилось — озвучка продолжается с того же места. Только для динамика:
   // в наушник микрофон и так не глушится. Замеры и пороги — results/2026-10-02-barge.md.
   volatile boolean bargeOn = true;
   /** Перебили: синтез и запись в дорожку прекращаются, недоигранное выбрасывается вместе с дорожкой. */
@@ -3511,6 +3511,8 @@ public class TranslatorService extends Service {
   /** Фраза отдаётся в дорожку (speakTurn/speakOut); датчику — что началась новая; выход — в динамик. */
   volatile boolean writingSpeech = false, bargeNew = false, bargeForget = false, bargeSpk = false;
   volatile int ttsVol = -1;
+  /** Сколько текущая фраза простояла на паузе перебивания, пока ещё писалась: конец звучания позже на столько. */
+  volatile long pausedMs = 0;
   /** Кадр дорожки, с которого началась текущая фраза: метки времени раньше него — от прежней фразы. */
   volatile long phraseFrame0 = 0;
   /** Поправка меток времени этого телефона, мс: часть буферов вывода и ввода метки не видят (Redmi — 78 мс).
@@ -3555,7 +3557,7 @@ public class TranslatorService extends Service {
     synchronized (refRing) { phraseFrame0 = trackWritten; }
     try { ttsVol = getSystemService(AudioManager.class).getStreamVolume(AudioManager.STREAM_MUSIC); } catch (Throwable e) {}
     bargeSpk = trackCh == 1 && !"device".equals(split) && !btDuplex();
-    writingSpeech = true; bargeNew = true;
+    pausedMs = 0; writingSpeech = true; bargeNew = true;
   }
   /** Первый кусок фразы ушёл в дорожку — метка для стенда (test_barge_device.sh). */
   void phraseSounds(String lang) { phraseAtMs = System.currentTimeMillis(); tsv("say_begin", lang); }
@@ -3664,20 +3666,26 @@ public class TranslatorService extends Service {
         continue;
       }
       int a = barge.frame(m, r, true);
-      if (a == BargeIn.DUCK) {
+      if (a == BargeIn.HOLD) {
+        // Пауза, а не тише: приглушение на 20–40 дБ в цифре гасило эхо у микрофона лишь на 5–11 дБ (громкость 15).
+        // Недоигранное ждёт в дорожке и продолжится с того же места — не подтвердится, слушатель ничего не потеряет.
         duckStart = h; duckAtMs = nowMs;
-        try { tr.setVolume((float) Math.pow(10, BargeIn.DUCK_DB / 20)); } catch (Throwable e) {}
-        log(String.format(Locale.ROOT, "🗣 похоже, перебивают (%d полос из %d, %.1f с от начала фразы) — озвучка тише",
+        try { tr.pause(); } catch (Throwable e) {}
+        log(String.format(Locale.ROOT, "🗣 похоже, перебивают (%d полос из %d, %.1f с от начала фразы) — озвучка на паузе",
             Math.round(barge.score * BargeIn.NB), BargeIn.NB, (nowMs - phraseAtMs) / 1000.0));
-        tsv("barge", "duck", "" + (nowMs - phraseAtMs), f3(barge.score));
-      } else if (a == BargeIn.UNDUCK) {
-        try { if (tr != null) tr.setVolume(1f); } catch (Throwable e) {}
+        tsv("barge", "hold", "" + (nowMs - phraseAtMs), f3(barge.score));
+      } else if (a == BargeIn.RESUME) {
+        try { if (tr != null) tr.play(); } catch (Throwable e) {}
+        long d = nowMs - duckAtMs;
+        // фраза звучит дольше на паузу: заглушка микрофона и конец звучания — тоже
+        if (writingSpeech) pausedMs += d; else { playEndMs += d; if (muteUntil != Long.MAX_VALUE && muteUntil > nowMs - d) muteUntil += d; }
         double am = 0; for (double v : barge.att) am += v / BargeIn.NB;
-        log(String.format(Locale.ROOT, "🗣 не подтвердилось — озвучка снова в полную громкость (приглушение глушит эхо на %.0f дБ)", -am));
-        tsv("barge", "unduck", "" + (nowMs - phraseAtMs), f1(am)); saveGain();
+        log(String.format(Locale.ROOT, "🗣 не подтвердилось — озвучка продолжается (пауза %d мс; эха на паузе остаётся %.0f дБ)", d, am));
+        tsv("barge", "resume", "" + (nowMs - phraseAtMs), "" + d, f1(am)); saveGain();
       } else if (a == BargeIn.STOP) {
         bargeStop = true;
-        try { if (tr != null) tr.setVolume(0f); } catch (Throwable e) {}
+        // недоигранное — выбросить сразу: поток озвучки может ждать места в дорожке на паузе, flush его отпускает
+        try { if (tr != null) { tr.pause(); tr.flush(); } } catch (Throwable e) {}
         // подпор: от PRE_MS до подозрения; пока приглушение ещё не слышно (+ OPEN_MS на затухание) — с погашенным эхом
         long from = Math.max(micEnd - micRing.length + 2048, duckStart + BargeIn.N - PRE_MS * 16L);
         int len = (int) (micEnd - from), upto = (int) (duckStart + BargeIn.N + (BargeIn.STOP_MS + OPEN_MS) * 16L - from);

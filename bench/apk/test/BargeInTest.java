@@ -51,8 +51,8 @@ public class BargeInTest {
     float[] human = new float[n];
     for (int i = 40000; i < n; i++) human[i] = (float) (rnd.nextGaussian() * 0.05);
     List<int[]> a = closed(mic, ref, human, warm.g);
-    ok(a.size() >= 2 && a.get(0)[1] == BargeIn.DUCK && a.get(1)[1] == BargeIn.STOP && a.get(0)[0] * BargeIn.HOP >= 40000 - BargeIn.N,
-        "E3 человек поверх эха — приглушить, потом замолчать, не раньше человека: " + str(a));
+    ok(a.size() >= 2 && a.get(0)[1] == BargeIn.HOLD && a.get(1)[1] == BargeIn.STOP && a.get(0)[0] * BargeIn.HOP >= 40000 - BargeIn.N,
+        "E3 человек поверх эха — пауза, потом замолчать, не раньше человека: " + str(a));
 
     // эталон tools/barge_eval.py
     File gj = new File(dir, "barge_golden.json");
@@ -78,7 +78,7 @@ public class BargeInTest {
       JSONArray ea = g.getJSONArray("actions"); List<int[]> want = new ArrayList<>();
       for (int k = 0; k < ea.length(); k++) want.add(new int[]{ea.getJSONArray(k).getInt(0), ea.getJSONArray(k).getInt(1)});
       ok(str(got).equals(str(want)), "G4 действия " + str(got) + " = " + str(want));
-      boolean undo = false, stop = false; for (int[] x : want) { undo |= x[1] == BargeIn.UNDUCK; stop |= x[1] == BargeIn.STOP; }
+      boolean undo = false, stop = false; for (int[] x : want) { undo |= x[1] == BargeIn.RESUME; stop |= x[1] == BargeIn.STOP; }
       ok(undo && stop, "G5 в эталоне есть и отбой (стук), и остановка (человек)");
       JSONArray ge = g.getJSONArray("gain_db"); double gw = 0; for (int b = 0; b < BargeIn.NB; b++) gw = Math.max(gw, Math.abs(d.g[b] - ge.getDouble(b)));
       ok(gw < 1e-6, "G6 усиление тракта в конце совпало (" + gw + " дБ)");
@@ -114,9 +114,9 @@ public class BargeInTest {
       int a = d.frame(BargeIn.power(x, t * BargeIn.HOP), BargeIn.power(ref, (t + 1) * BargeIn.HOP));
       if (a == BargeIn.NONE) continue;
       out.add(new int[]{t, a});
-      int at = t * BargeIn.HOP + BargeIn.N + BargeIn.STOP_MS * 16;
-      double v = a == BargeIn.DUCK ? Math.pow(10, BargeIn.DUCK_DB / 20) : a == BargeIn.STOP ? 0 : 1;
-      for (int i = at; i < echo.length; i++) scale[i] = a == BargeIn.UNDUCK ? 1 : Math.min(scale[i], v);
+      int at = t * BargeIn.HOP + BargeIn.N + 150 * 16;                // пауза доходит до микрофона через ~150 мс (замер)
+      double v = a == BargeIn.HOLD ? Math.pow(10, BargeIn.HOLD_DB / 20) : a == BargeIn.STOP ? 0 : 1;   // пауза — эха почти нет
+      for (int i = at; i < echo.length; i++) scale[i] = a == BargeIn.RESUME ? 1 : Math.min(scale[i], v);
     }
     return out;
   }

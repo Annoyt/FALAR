@@ -12,14 +12,14 @@ vr_e<k> — только эхо фразы k, vr_d<k> — человек из к
 неточности совмещения (±JIT шагов), умноженная на усиление тракта «динамик → микрофон» (учится по ходу,
 пока человека не видно), плюс доля всего эха (искажения динамика) и фон. Полоса «за человеком», если
 микрофон громче ожидаемого на THETA дБ и громче фона на NOISE_DB.
-  Ступень 1 — подозрение: таких полос не меньше SHARE1 в K1 кадрах из M1 → озвучка приглушается на 20 дБ.
-  Ступень 2 — проверка на приглушённом эхе (ожидаемое эхо тоже на 20 дБ ниже): человек теперь громче эха
-  в большинстве полос; SHARE2 в K2 из M2 за WIN2 шагов → озвучка замолкает, слушание получает звук с
-  подпором; не подтвердилось → громкость возвращается (провал на полсекунды вместо обрыва фразы).
+  Ступень 1 — подозрение: таких полос не меньше SHARE1 в K1 кадрах из M1 → озвучка на паузе.
+  Ступень 2 — проверка на паузе (эха почти нет — остаток выучен): человек громче остатка в большинстве
+  полос; SHARE2 в K2 из M2 за WIN2 шагов → озвучка замолкает совсем, слушание получает звук с подпором;
+  не подтвердилось → озвучка продолжается с того же места (задержка на полсекунды, ничего не теряется).
 
 Что считается:
   0. Совмещение по меткам времени Android (кадр N снят/прозвучал в момент T) против взаимной корреляции.
-  1. Только эхо: подозрения (провалы громкости) и ложные остановки.
+  1. Только эхо: подозрения (паузы в озвучке) и ложные остановки.
   2. Живой человек поверх озвучки: через сколько заподозрен (вторую ступень на готовой записи не
      проверить — эхо в ней не приглушишь).
   3. Смеси с телефона (эхо из записи «только эхо» + человек из записи «только человек»; обе записаны
@@ -45,18 +45,20 @@ DECAY, TAIL, JIT = 4.0, 10, 1               # затухание отражен�
 NOISE_DB = 6.0                              # полоса считается, только если громче фона на столько
 SPREAD_DB = -25.0                           # искажения динамика: доля всего эха, что ложится в любую полосу
 GRACE = 10                                  # шагов после начала звука не решаем: щелчок усилителя и начало эха
-DUCK_DB = -20.0                             # приглушение на подозрении (цифровое, setVolume)
-ATT0 = -10.0                                # насколько тише при этом эхо в комнате — сначала считаем, что мало:
-                                            # на громкости 15 у Redmi −20 дБ в цифре дают −10…−11 дБ у микрофона
-                                            # (усилитель на пределе сжимает); дальше учится по отбоям
-SIM_ATT = {}                                # для смесей: громкость → настоящее ослабление эха при приглушении, дБ
-STOP_MS = 100                               # после решения звук ещё идёт: буферы вывода за меткой времени (~80 мс)
+HOLD_DB = -40.0                             # на подозрении озвучка на паузе: эха нет, остаётся хвост в комнате и фон
+ATT0 = -30.0                                # сколько эха ждать на паузе, пока не выучено (учится по отбоям, ≥ HOLD_DB).
+                                            # Не приглушение: на громкости 15 у Redmi −20/−30/−40 дБ в цифре гасили
+                                            # эхо у микрофона лишь на 5–11 дБ — обработка звука подтягивает тихое
+SIM_ATT = {}                                # для смесей: громкость → сколько эха остаётся на паузе, дБ (по умолчанию HOLD_DB)
+STOP_MS = 250                               # после решения звук ещё идёт: пауза/приглушение доходят до микрофона через 110–190 мс
+                                            # (стенд vr_k/m/n, 02.10), и эхо ещё гаснет в комнате — проверка ждёт с запасом
+LAT_MS = 150                                # а в смесях действие доходит до микрофона через столько (медиана замера)
 EFF = -(-(N + STOP_MS * 16) // HOP)         # через столько шагов после решения приглушение уже слышно
-WIN2 = 25                                   # шагов на проверку, потом — отбой
+WIN2 = 15                                   # шагов на проверку, потом — отбой
 OPEN_MS = 120                               # после остановки эхо гаснет в комнате (−20 дБ за ~80 мс, по концам фраз)
 PRE_MS = 500                                # подпор: столько звука до подозрения отдаётся распознаванию
 MUTE_TAIL_MS = 400                          # как сейчас: микрофон глух до конца озвучки и ещё столько
-NONE, DUCK, STOP, UNDUCK = 0, 1, 2, 3
+NONE, HOLD, STOP, RESUME = 0, 1, 2, 3
 
 
 def mel(f):
@@ -86,7 +88,7 @@ def bands(x):
 
 class Barge:
     """Потоковый датчик: frame(m, r_next) на каждом шаге — мощности кадра микрофона и сыгранного на шаг
-    вперёд (сыгранное известно заранее). Возвращает действие: NONE, DUCK, STOP, UNDUCK."""
+    вперёд (сыгранное известно заранее). Возвращает действие: NONE, HOLD, STOP, RESUME."""
 
     def __init__(self, g_db=None, noise=None, att=None):
         self.g = np.zeros(NB) if g_db is None else np.array(g_db, float)     # усиление тракта, дБ
@@ -136,10 +138,11 @@ class Barge:
             if t >= self.fire_t + EFF + WIN2:
                 self.state = 'listen'
                 self.hits = []
-                # отбой — человека не было: как на самом деле приглушение ослабило эхо, учим по полосам
+                self.since = 0                      # после паузы — снова не решаем GRACE шагов: метки времени догоняют
+                # отбой — человека не было: сколько эха на самом деле остаётся на паузе, учим по полосам
                 ok = self.nobs >= 5
-                self.att = np.where(ok, np.clip(self.att + 0.3 * (self.obs / np.maximum(self.nobs, 1) - self.att), DUCK_DB, 0), self.att)
-                return UNDUCK
+                self.att = np.where(ok, np.clip(self.att + 0.3 * (self.obs / np.maximum(self.nobs, 1) - self.att), HOLD_DB, 0), self.att)
+                return RESUME
             e0 = s * 10 ** (self.g / 10)
             seen = e0 > self.noise * 10 ** (15 / 10)
             self.obs += np.where(seen, 10 * np.log10(m / (e0 + 1e-12)), 0); self.nobs += seen
@@ -175,7 +178,7 @@ class Barge:
             self.fire_t = t
             self.hits2 = []
             self.obs, self.nobs = np.zeros(NB), np.zeros(NB)
-            return DUCK
+            return HOLD
         return NONE
 
     def learn(self, m, r_next):
@@ -215,7 +218,7 @@ def closed_loop(echo, human, ref, bg, start, g0, noise0, sim_db=None, att0=None)
     scale = np.ones(n)
     Rb = bands(ref)
     b = Barge(g0, noise0, att0)
-    duck = 10 ** ((DUCK_DB if sim_db is None else sim_db) / 20)       # настоящее ослабление эха в комнате
+    floor = 10 ** ((HOLD_DB if sim_db is None else sim_db) / 20)     # что остаётся от эха на паузе
     acts = []
     for t in range(max(0, start - 2), min(len(Rb) - 1, (n - N) // HOP)):
         seg = slice(t * HOP, t * HOP + N)
@@ -225,14 +228,15 @@ def closed_loop(echo, human, ref, bg, start, g0, noise0, sim_db=None, att0=None)
         if a == NONE:
             continue
         acts.append((t, a))
-        at = t * HOP + N + STOP_MS * 16
-        if a == DUCK:
-            scale[at:] = np.minimum(scale[at:], duck)
-        elif a == UNDUCK:
+        at = t * HOP + N + LAT_MS * 16
+        if a == HOLD:                                                    # пауза: эхо гаснет, как после остановки
+            tt = np.arange(n - at)
+            scale[at:] = np.minimum(scale[at:], np.maximum(floor, 10 ** (-0.25 * tt / 16 / 20)))   # −0,25 дБ/мс
+        elif a == RESUME:
             scale[at:] = 1.0
         elif a == STOP:
             tt = np.arange(n - at)
-            scale[at:] = np.minimum(scale[at:], duck * 10 ** (-0.25 * tt / 16 / 20))   # −0,25 дБ/мс
+            scale[at:] = np.minimum(scale[at:], 10 ** (-0.25 * tt / 16 / 20))
     heard = echo * scale + bg * (1 - scale) + human
     return acts, heard, b
 
@@ -456,7 +460,7 @@ def section1(recs):
     ech = echoes(recs)
     learned = {id(r): learn_gain(r) for r in ech}
     prior = {v: np.mean([learned[id(r)] for r in ech if r['vol'] == v], axis=0) for v in {r['vol'] for r in ech}}
-    print('\n## 1. Только эхо: подозрения (провал громкости) и ложные остановки\n')
+    print('\n## 1. Только эхо: подозрения (пауза в озвучке) и ложные остановки\n')
     print('Усиление тракта для каждой фразы — выученное на остальных фразах той же громкости (в приложении оно '
           'хранится между фразами и дообучается по ходу).\n')
     print('| запись | громкость | эхо, dBFS | подозрений | ложных остановок |')
@@ -467,7 +471,7 @@ def section1(recs):
         s0 = (r['at'] + r['al']) // HOP
         bg = np.tile(r['mic'][max(0, r['at'] - 8000):r['at']], 60)[:len(r['mic'])]
         acts, _, _ = closed_loop(r['mic'], np.zeros(len(r['mic'])), aligned(r, r['al']), bg, s0, g0, noise_of(r['mic'], s0), SIM_ATT.get(r['vol']))
-        d = sum(a == DUCK for _, a in acts); s = sum(a == STOP for _, a in acts)
+        d = sum(a == HOLD for _, a in acts); s = sum(a == STOP for _, a in acts)
         sus += d; stops += s; sec += len(r['ref']) / SR
         e = r['mic'][r['at'] + r['al']:r['at'] + r['al'] + len(r['ref'])]
         print(f'| {r["cfg"]} | {r["vol"]} | {db(e):.1f} | {d} | {s} |')
@@ -490,7 +494,7 @@ def section2(recs, prior):
         first = early = None
         for t in range(max(0, s0 - 2), len(Mb) - 1):
             b.t = t
-            if b.frame(Mb[t], Rb[t + 1]) == DUCK:
+            if b.frame(Mb[t], Rb[t + 1]) == HOLD:
                 if t * HOP + N < k:
                     early = early or t; b.state = 'listen'; b.hits = []      # мимо: ищем дальше
                 else:
@@ -516,7 +520,7 @@ def section3(recs, prior, with_asr=True):
         print('\n(для смесей нужны записи «только эхо» и «только человек»)'); return
     print('\n## 3. Смеси: эхо телефона + человек, оба записаны телефоном в комнате, сложены цифрово\n')
     print(f'Фраз эха {len(ech)}, фраз человека {len(hum)}; человек вступает через 0,3 / 1,0 / 2,0 с после начала '
-          f'озвучки. Действия датчика меняют эхо дальше по записи: приглушение на {-DUCK_DB:.0f} дБ и остановка '
+          f'озвучки. Действия датчика меняют эхо дальше по записи: пауза и остановка '
           f'слышны через {STOP_MS} мс после решения. Распознаётся звук с подпором {PRE_MS} мс до подозрения (эхо в '
           f'подпоре погашено по полосам). Как сейчас: микрофон глух до конца озвучки + {MUTE_TAIL_MS} мс.\n')
     rows = {}
@@ -543,9 +547,9 @@ def section3(recs, prior, with_asr=True):
                                                                  rec_now=[], rec=[], top=[], leak=[]))
                     st['n'] += 1
                     h = (h_at - 1600) // HOP
-                    st['dips'] += sum(1 for t, a in acts if a == DUCK and t < h)
+                    st['dips'] += sum(1 for t, a in acts if a == HOLD and t < h)
                     stop = next((t for t, a in acts if a == STOP and t * HOP < end), None)
-                    duck = max((t for t, a in acts if a == DUCK and (stop is None or t < stop)), default=None)
+                    duck = max((t for t, a in acts if a == HOLD and (stop is None or t < stop)), default=None)
                     if stop is not None and stop < h:
                         st['early'] += 1
                     elif stop is not None:
@@ -566,7 +570,7 @@ def section3(recs, prior, with_asr=True):
                         hy = hy_now
                     st['rec'].append(recall(txt, hy)); st['leak'].append(recall(tts_txt[id(e)], hy))
                     st['top'].append(recall(txt, asr(hseg[:hl + 4800])))
-    print('| громкость | смесей | остановлено | остановлено раньше человека | провалов до человека | подозрение через, мс (медиана · p90) | остановка через, мс | слов человека: сейчас | с перебиванием | человек без озвучки | слов озвучки протекло |')
+    print('| громкость | смесей | остановлено | остановлено раньше человека | пауз до человека | подозрение через, мс (медиана · p90) | остановка через, мс | слов человека: сейчас | с перебиванием | человек без озвучки | слов озвучки протекло |')
     print('|---|---|---|---|---|---|---|---|---|---|---|')
     pct = lambda a: f'{np.mean(a) * 100:.0f} %' if a else '—'
     for (v, lv), st in sorted(rows.items()):
@@ -587,7 +591,7 @@ def section3(recs, prior, with_asr=True):
 def gate_ref(mic, ref, g0, act):
     """Подпор вокруг остановки в эталоне: отрезок от PRE_MS до подозрения, погашен до момента, когда
     приглушение уже слышно, + OPEN_MS — как в приложении."""
-    duck = max(t for t, a in act if a == DUCK)
+    duck = max(t for t, a in act if a == HOLD)
     a0 = max(0, duck * HOP + N - PRE_MS * 16); a1 = min(len(mic), a0 + 2 * SR)
     upto = duck * HOP + N + STOP_MS * 16 + OPEN_MS * 16 - a0
     y = gate(mic[a0:a1], ref[a0:a1], g0, upto)

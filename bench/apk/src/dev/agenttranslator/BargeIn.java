@@ -9,9 +9,9 @@ package dev.agenttranslator;
  *  умноженная на усиление тракта «динамик → микрофон» (учится по ходу, пока человека не видно), плюс доля
  *  всего эха (искажения динамика) и фон. Полоса «за человеком», если микрофон громче ожидаемого на THETA дБ
  *  и громче фона на NOISE_DB.
- *  Ступень 1 — подозрение: таких полос не меньше SHARE1 в K1 кадрах из M1 → DUCK (озвучка тише на 20 дБ).
- *  Ступень 2 — проверка на приглушённом эхе: человек теперь громче эха в большинстве полос → STOP; за WIN2
- *  шагов не подтвердилось → UNDUCK (вместо оборванной фразы — провал громкости на полсекунды).
+ *  Ступень 1 — подозрение: таких полос не меньше SHARE1 в K1 кадрах из M1 → HOLD (озвучка на паузе).
+ *  Ступень 2 — проверка на паузе: эха почти нет, человек громче остатка в большинстве полос → STOP; за WIN2
+ *  шагов не подтвердилось → RESUME (озвучка продолжается с того же места — задержка, а не потеря).
  *
  *  Свой линейный подавитель эха и встроенный в Android не дают распознать человека поверх озвучки вовсе
  *  (results/2026-10-01-voices.md §12, results/2026-10-02-barge.md); перебивание не очищает звук, а только
@@ -24,19 +24,21 @@ final class BargeIn {
   static final double F_LO = 150, F_HI = 6000;
   static final double THETA1 = 10, SHARE1 = 0.10; static final int K1 = 2, M1 = 2;
   static final double THETA2 = 8, SHARE2 = 0.25; static final int K2 = 3, M2 = 4;
-  static final double DECAY = 4, NOISE_DB = 6, SPREAD_DB = -25, DUCK_DB = -20;
-  /** Насколько тише эхо в комнате при приглушении на DUCK_DB — сначала считаем, что мало: на громкости 15 у Redmi
-   *  −20 дБ в цифре дают −10…−11 дБ у микрофона (усилитель на пределе сжимает). Дальше учится по отбоям. */
-  static final double ATT0 = -10;
+  static final double DECAY = 4, NOISE_DB = 6, SPREAD_DB = -25;
+  /** На подозрении озвучка на паузе, а не тише: на громкости 15 у Redmi приглушение на 20/30/40 дБ в цифре гасило
+   *  эхо у микрофона лишь на 5–11 дБ (обработка звука подтягивает тихое). На паузе эха нет — остаётся хвост в
+   *  комнате и фон; сколько, учится по отбоям (от ATT0, не ниже HOLD_DB). */
+  static final double HOLD_DB = -40, ATT0 = -30;
   static final int TAIL = 10, JIT = 1, GRACE = 10;
-  /** После решения звук ещё идёт: буферы вывода после метки времени, ~80 мс на Redmi. */
-  static final int STOP_MS = 100;
-  /** Через столько шагов после подозрения приглушение уже слышно микрофону. */
+  /** После решения звук ещё идёт: пауза доходит до микрофона через 110–190 мс (стенд vr_k/m/n на Redmi, 02.10), и эхо
+   *  ещё гаснет в комнате. Раньше было 100 мс — проверка начиналась при живом эхе и принимала его за человека. */
+  static final int STOP_MS = 250;
+  /** Через столько шагов после подозрения пауза уже слышна микрофону. */
   static final int EFF = (N + STOP_MS * 16 + HOP - 1) / HOP;
-  static final int WIN2 = 25;
+  static final int WIN2 = 15;
   /** Шагов с заметным эхом на прогрев новой громкости: с нулевого усиления громкое эхо само выглядело бы человеком. */
   static final int WARM = 150;
-  static final int NONE = 0, DUCK = 1, STOP = 2, UNDUCK = 3;
+  static final int NONE = 0, HOLD = 1, STOP = 2, RESUME = 3;
 
   static final double[] WIN = new double[N];
   /** Полоса b — бины [B0[b], B1[b]). */
@@ -121,9 +123,10 @@ final class BargeIn {
       if (now < fireT + EFF) return NONE;
       if (now >= fireT + EFF + WIN2) {
         state = "listen"; nHits = 0;
-        // отбой — человека не было: как на самом деле приглушение ослабило эхо, учим по полосам
-        for (int b = 0; b < NB; b++) if (nobs[b] >= 5) att[b] = Math.max(DUCK_DB, Math.min(0, att[b] + 0.3 * (obs[b] / nobs[b] - att[b])));
-        return UNDUCK;
+        since = 0;                              // после паузы — снова не решаем GRACE шагов: метки времени догоняют
+        // отбой — человека не было: сколько эха на самом деле остаётся на паузе, учим по полосам
+        for (int b = 0; b < NB; b++) if (nobs[b] >= 5) att[b] = Math.max(HOLD_DB, Math.min(0, att[b] + 0.3 * (obs[b] / nobs[b] - att[b])));
+        return RESUME;
       }
       double seenAt = Math.pow(10, 15 / 10.0);
       for (int b = 0; b < NB; b++) { double e0 = s[b] * Math.pow(10, g[b] / 10); if (e0 > noise[b] * seenAt) { obs[b] += 10 * Math.log10(m[b] / (e0 + 1e-12)); nobs[b]++; } }
@@ -152,7 +155,7 @@ final class BargeIn {
     for (int b = 0; b < NB; b++) smax[b] = Math.max(smax[b] * dec, s[b]);
     if (learn && count(hits, nHits) == 0)
       for (int b = 0; b < NB; b++) if (teach(b, s, e)) g[b] += 10 * Math.log10(m[b] / (s[b] + 1e-12)) > g[b] ? 0.375 : -0.125;
-    if (count(hits, nHits) >= K1) { state = "ducked"; fireT = now; nHits2 = 0; java.util.Arrays.fill(obs, 0); java.util.Arrays.fill(nobs, 0); return DUCK; }
+    if (count(hits, nHits) >= K1) { state = "ducked"; fireT = now; nHits2 = 0; java.util.Arrays.fill(obs, 0); java.util.Arrays.fill(nobs, 0); return HOLD; }
     return NONE;
   }
   int frame(double[] m, double[] rNext) { return frame(m, rNext, true); }
