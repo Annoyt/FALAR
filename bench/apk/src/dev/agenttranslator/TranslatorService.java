@@ -122,6 +122,27 @@ public class TranslatorService extends Service {
    *  vaddenoise). Счёт ведёт поток нарезки, итог пишет поток подачи, когда очередь кадров разобрана:
    *  после подачи кадров может не быть вовсе, и ждать следующего кадра, чтобы написать итог, нельзя. */
   volatile boolean dnReset = false; volatile long dnCostNs, dnCostCpu, dnCostFrames, dnCostAll; volatile String dnCostMode = "raw";
+  /** Модель шумодава нарезки — из APK (assets/gtcrn_simple.onnx, 0,5 МБ, GTCRN, MIT): он включён у всех по
+   *  умолчанию, качать его отдельно незачем. Движку нужен путь к файлу, поэтому модель один раз за жизнь
+   *  процесса сверяется с копией во внутренней папке приложения и, если та другой длины (новая версия,
+   *  обрыв записи), переписывается через временный файл. Не вышло — null, нарезка по исходному. */
+  volatile File dnModelFile;
+  File dnModel() {
+    File f = dnModelFile;
+    if (f != null) return f;
+    f = new File(new File(getFilesDir(), "denoiser"), "gtcrn_simple.onnx");
+    try (java.io.InputStream in = getAssets().open("gtcrn_simple.onnx")) {
+      java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(); byte[] b = new byte[1 << 16]; int n;
+      while ((n = in.read(b)) > 0) bo.write(b, 0, n);
+      if (f.length() != bo.size()) {
+        f.getParentFile().mkdirs();
+        File tmp = new File(f.getPath() + ".part");
+        try (java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) { bo.writeTo(o); }
+        if (!tmp.renameTo(f)) throw new java.io.IOException("не переименовался " + tmp);
+      }
+      return dnModelFile = f;
+    } catch (Exception e) { log("🔇 модель шумодава не легла в папку приложения: " + e); return null; }
+  }
   /** Во что обошёлся шумодав нарезки: доля времени, когда он работал, и сколько ядра он ест, пока работает, —
    *  по процессорному времени потока нарезки. Время по часам — справочно: при подаче записи ×4 рядом
    *  распознаёт parakeet, потоки делят ядра, и часы завышают цену (на первом прогоне — 18 %). */
@@ -1034,23 +1055,26 @@ public class TranslatorService extends Service {
     String m = "📝 добавлено: " + e.pt + " ↔ " + e.ru + " · " + words.stats();
     log(m); return m;
   }
-  /** Стенд: нарезка по очищенному звуку. raw — как всегда; dn — детектор речи, порог по энергии и его
-   *  фон — по очищенному; dn_sil — детектор по очищенному, порог по исходному; auto[:T] — «только при
-   *  шуме» (владелец 02.10: шумодав грузит процессор, включать его, только когда есть что убирать):
-   *  фон комнаты (roomDb — та же оценка, что у «как слышно») не ниже T dBFS две секунды — шумодав
-   *  создаётся и нарезка идёт как dn_sil; ниже T − 3 дБ десять секунд — выключается. Распознавание —
-   *  всегда по исходному куску. Не сохраняется: замер results/2026-10-02-vad-denoise.md. */
-  volatile String vadDn = "raw"; volatile double vadDnGate = -47;
-  static final int DN_ON_FRAMES = 2000 / TranslatorService.FRAME_MS, DN_OFF_FRAMES = 10000 / TranslatorService.FRAME_MS; static final double DN_HYST = 3;
+  /** Нарезка по очищенному звуку. По умолчанию auto — «только при шуме» (DenoiseGate, владелец 02.10:
+   *  «включай с порогом −44, если даёт прирост распознавания»): фон комнаты не ниже −44 dBFS две секунды —
+   *  шумодав включается и детектор речи слышит очищенный звук; ниже на 3 дБ десять секунд — выключается.
+   *  Распознавание — всегда по исходному куску. Стенд --es vaddenoise: raw — как раньше, без шумодава
+   *  (так меряют базу); dn — детектор, порог по энергии и его фон по очищенному; dn_sil — детектор по
+   *  очищенному, порог по исходному; auto[:T] — свой порог. Стенд не сохраняется: перезапуск — снова auto.
+   *  Замер — results/2026-10-02-vad-denoise.md. */
+  volatile String vadDn = "auto"; volatile double vadDnGate = DenoiseGate.DEFAULT_T;
+  String vadDnLine() {
+    String m = vadDn;
+    return "🔇 нарезка " + (m.equals("raw") ? "по исходному звуку" : m.equals("auto")
+        ? String.format(Locale.ROOT, "по очищенному только при шуме: фон не ниже %.0f dBFS (распознавание — по исходному)", vadDnGate)
+        : "по очищенному: " + m + " (распознавание — по исходному)");
+  }
   public void setVadDenoise(String v) {
     String m = v == null ? "raw" : v.trim();
     if (m.equals("0") || m.equals("off")) m = "raw";
     if (m.startsWith("auto:")) { try { vadDnGate = Double.parseDouble(m.substring(5)); } catch (NumberFormatException e) { log("🔇 нарезка: порог «" + m.substring(5) + "» не число"); return; } m = "auto"; }
     if (!m.equals("raw") && !m.equals("dn") && !m.equals("dn_sil") && !m.equals("auto")) { log("🔇 нарезка: не знаю «" + v + "» — raw, dn, dn_sil или auto[:порог]"); return; }
-    vadDn = m;
-    log("🔇 нарезка " + (m.equals("raw") ? "по исходному звуку" : m.equals("auto")
-        ? String.format(Locale.ROOT, "по очищенному только при шуме: фон не ниже %.0f dBFS (распознавание — по исходному)", vadDnGate)
-        : "по очищенному: " + m + " (распознавание — по исходному)"));
+    vadDn = m; log(vadDnLine());
     tsv("vaddn", m, m.equals("auto") ? "" + vadDnGate : "");
   }
   public void setDenoise(boolean on) { if (eng != null) { eng.denoiseOn = on && eng.denoiser != null; log("🔇 шумоподавитель " + (eng.denoiseOn ? "включён" : "выключен")); } }
@@ -2301,9 +2325,10 @@ public class TranslatorService extends Service {
       // Счётчики входа по кадрам — рядом с самими кадрами: после усиления исходного звука уже нет.
       ArrayDeque<Gain.Stats> preSt = new ArrayDeque<>(); List<Gain.Stats> segSt = new ArrayList<>();
       boolean inSpeech = false; int silent = 0, voiced = 0;
-      // Шумодав нарезки (стенд --es vaddenoise): свой выход копится и отдаётся кадрами по 512.
+      // Шумодав нарезки: свой выход копится и отдаётся кадрами по 512; включает его DenoiseGate.
       OnlineSpeechDenoiser dn = null; String dnMode = "raw"; float[] dnBuf = new float[4096]; int dnLen = 0;
-      double dnNoise = 0; long dnNs = 0, dnCpu = 0, dnFrames = 0, dnAll = 0; boolean gateOn = false; int onCnt = 0, offCnt = 0;
+      double dnNoise = 0; long dnNs = 0, dnCpu = 0, dnFrames = 0, dnAll = 0; DenoiseGate gate = new DenoiseGate();
+      log(vadDnLine());
       while (running) {
         if (probing) { try { Thread.sleep(20); } catch (InterruptedException e) { return; } continue; }
         float[] win;
@@ -2329,31 +2354,27 @@ public class TranslatorService extends Service {
         if (!mode.equals(dnMode)) {
           if (!dnMode.equals("raw")) logDn(dnMode, dnNs, dnCpu, dnFrames, dnAll);
           if (dn != null) { dn.release(); dn = null; }
-          dnMode = mode; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0; gateOn = false; onCnt = 0; offCnt = 0;
-          if ((mode.equals("dn") || mode.equals("dn_sil")) && (dn = eng.onlineDenoiser()) == null) { log("🔇 нет models/denoiser/gtcrn_simple.onnx — нарезка по исходному"); vadDn = dnMode = "raw"; }
+          dnMode = mode; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0; gate.reset();
+          if ((mode.equals("dn") || mode.equals("dn_sil")) && (dn = eng.onlineDenoiser(dnModel())) == null) { log("🔇 нет модели шумодава — нарезка по исходному"); vadDn = dnMode = "raw"; }
         }
         if (dnReset) {
-          dnReset = false; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0; onCnt = 0; offCnt = 0;
-          if (dnMode.equals("auto") && dn != null) { dn.release(); dn = null; gateOn = false; } else if (dn != null) dn.reset();
+          dnReset = false; dnLen = 0; dnNoise = 0; dnNs = 0; dnCpu = 0; dnFrames = 0; dnAll = 0;
+          if (dnMode.equals("auto")) { gate.reset(); if (dn != null) { dn.release(); dn = null; } } else if (dn != null) dn.reset();
         }
         // «Только при шуме»: решает фон комнаты до этого кадра — та же оценка, что у «как слышно».
         if (dnMode.equals("auto")) {
-          double room = noiseRms > 0 ? db(noiseRms) - gainListen.db : -999;
-          if (!gateOn) {
-            onCnt = room >= vadDnGate ? onCnt + 1 : 0;
-            if (onCnt >= DN_ON_FRAMES) {
-              if ((dn = eng.onlineDenoiser()) == null) { log("🔇 нет models/denoiser/gtcrn_simple.onnx — нарезка по исходному"); vadDn = dnMode = "raw"; }
-              else { gateOn = true; offCnt = 0; dnLen = 0; log(String.format(Locale.ROOT, "🔇 фон %.0f dBFS — шумодав нарезки включён", room)); tsv("vaddn_gate", "on", String.format(Locale.ROOT, "%.1f", room)); }
-            }
-          } else {
-            offCnt = room < vadDnGate - DN_HYST ? offCnt + 1 : 0;
-            if (offCnt >= DN_OFF_FRAMES) {
-              dn.release(); dn = null; gateOn = false; onCnt = 0;
-              log(String.format(Locale.ROOT, "🔇 фон %.0f dBFS — шумодав нарезки выключен", room)); tsv("vaddn_gate", "off", String.format(Locale.ROOT, "%.1f", room));
-            }
+          double room = noiseRms > 0 ? db(noiseRms) - gainListen.db : DenoiseGate.NONE;
+          gate.t = vadDnGate;
+          int ev = gate.step(room);
+          if (ev > 0) {
+            if ((dn = eng.onlineDenoiser(dnModel())) == null) { log("🔇 нет модели шумодава — нарезка по исходному"); vadDn = dnMode = "raw"; gate.reset(); }
+            else { dnLen = 0; log(String.format(Locale.ROOT, "🔇 фон %.0f dBFS — шумодав нарезки включён", room)); tsv("vaddn_gate", "on", String.format(Locale.ROOT, "%.1f", room)); }
+          } else if (ev < 0 && dn != null) {
+            dn.release(); dn = null;
+            log(String.format(Locale.ROOT, "🔇 фон %.0f dBFS — шумодав нарезки выключен", room)); tsv("vaddn_gate", "off", String.format(Locale.ROOT, "%.1f", room));
           }
         }
-        String eff = dnMode.equals("auto") ? (gateOn ? "dn_sil" : "raw") : dnMode;
+        String eff = dnMode.equals("auto") ? (gate.on() ? "dn_sil" : "raw") : dnMode;
         if (!dnMode.equals("raw")) dnAll++;
         float[] dwin = win;
         if (dn != null) {
