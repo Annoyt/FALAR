@@ -277,6 +277,27 @@ eq(cs.map((c) => c.method), ['answerCallbackQuery', 'answerCallbackQuery', 'answ
 await handle(dm(GLEB, '🌐 Перевод'));
 eq(calls().map((c) => c.params.text), [F.PROMPTS.translation], 'KB11 кнопка под полем ввода в любой момент меняет тему');
 
+// ---- режим проверки разработчика
+await handle(dm(ME, '/test'));
+eq(calls().map((c) => c.params.text), [F.TEST_ON], 'T1 /test — режим проверки включён');
+await handle(dm(ME, '/start'));
+cs = calls();
+ok(cs[0].params.text === F.GREETING && !!cs[0].params.reply_markup, 'T2 в режиме проверки /start — как у человека, с кнопками');
+await handle(dm(ME, '💡 Предложение'));
+eq(calls().map((c) => c.params.text), [F.PROMPTS.idea], 'T3 кнопка — как у человека');
+await handle(dm(ME, 'проверка связи'));
+s = sent(calls(), 'sendMessage');
+eq([s[0].params.chat_id, s[0].params.message_thread_id], [GROUP, topic.idea], 'T4 сообщение без метки — в «Идеи», как у человека');
+const myCopy = sdk.rows('SELECT msg FROM relays WHERE person = :p ORDER BY id DESC LIMIT 1', { ':p': OWNER })[0].msg;
+await handle(dm(ME, 'ответ себе', { reply_to_message: { message_id: myCopy, from: BOT, chat: { id: OWNER, type: 'private' } } }));
+eq(sent(calls(), 'copyMessage').length, 0, 'T5 ответ (reply) в личке — по-прежнему разработчика, не пересылается в группу');
+NOW += F.TEST_FOR + 1;
+await handle(dm(ME, 'после получаса'));
+eq(calls().map((c) => c.params.text), [F.OWNER_HINT], 'T6 через полчаса режим гаснет сам');
+await handle(dm(ME, '/test'));
+await handle(dm(ME, '/test'));
+eq(calls().map((c) => c.params.text), [F.TEST_ON, F.TEST_OFF], 'T7 повторный /test — выключить');
+
 // ---- прослойка Cloudflare (cf/sdk.js): именованные параметры для D1 и Bot API через fetch
 const cf = await import(pathToFileURL(path.join(ROOT, 'cf/sdk.js')).href);
 eq(cf.positional('SELECT * FROM t WHERE a = :a AND b = :b OR a = :a', { ':a': 1, ':b': 'x' }),

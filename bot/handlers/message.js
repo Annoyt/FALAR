@@ -19,7 +19,13 @@ export default async function (m) {
   const owner = m.from.id === OWNER;
   if (!priv) { if (owner) await fromOwner(m, text); return; }            // в группе слушаем только разработчика
   // Разработчик в личке: ответы и команды. Помеченное (#перевод…) — как от человека: проверка приложения.
-  if (owner && (m.reply_to_message || F.command(text) || !F.tagOf(text))) return fromOwner(m, text);
+  // В режиме проверки (/test, полчаса) — всё, кроме ответов и /test, как от человека: /start, кнопки.
+  if (owner) {
+    const cmd = F.command(text);
+    if (cmd === 'test') return testMode(m, now);
+    const testing = Number((await store.setting('owner_test_until')) || 0) > now;
+    if (m.reply_to_message || (!testing && (cmd || !F.tagOf(text)))) return fromOwner(m, text);
+  }
   return fromPerson(m, text, now);
 }
 
@@ -123,6 +129,13 @@ async function fromOwner(m, text) {
   } catch (e) {
     await say(m.chat.id, 'Не доставлено: ' + ((e && e.description) || e), thread, m.message_id);
   }
+}
+
+/** /test — полчаса бот видит разработчика обычным человеком; повтор — выключить. */
+async function testMode(m, now) {
+  const on = Number((await store.setting('owner_test_until')) || 0) > now;
+  await store.setSetting('owner_test_until', on ? null : now + F.TEST_FOR);
+  return say(m.chat.id, on ? F.TEST_OFF : F.TEST_ON);
 }
 
 /** /setup в группе с топиками: группа запоминается, недостающие топики создаются. Повтор — безопасен. */
