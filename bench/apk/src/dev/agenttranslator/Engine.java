@@ -29,6 +29,34 @@ public class Engine {
         .setMinSilenceDuration(minSilence).setMinSpeechDuration(0.25f).setWindowSize(512).setMaxSpeechDuration(15f).build();
     return new Vad(VadModelConfig.builder().setSileroVadModelConfig(sv).setSampleRate(16000).setNumThreads(1).setDebug(false).build());
   }
+  /** Второй детектор речи — стенд --es vad2 ten:0.4[:дБ] (results/2026-10-03-noise-detect.md). silero v4 после
+   *  динамика и комнаты не признаёт речью голоса отдельных людей: вероятность 0,44–0,70 при пороге 0,5, и фраза
+   *  пропадает целиком; второй детектор их ловит. Кадр — речь, если её сказал хоть один; при фоне-музыке второй
+   *  молчит (TEN VAD принимает мелодию за речь). Третье поле — второй считается, только если кадр на столько дБ
+   *  громче фона. Модель — models/vad2/ten-vad.onnx (или silero_vad.onnx; нет — тот же, что у первого).
+   *  Трогает его только поток нарезки: замена объекта из чужого потока роняла sherpa (TESTS.md, № 23).
+   *  null — выключен, по умолчанию. */
+  public Vad vad2; public float vad2Gate = 0;
+  public String setVad2(String spec) {
+    Vad old = vad2; vad2 = null; vad2Gate = 0;
+    if (old != null) try { old.release(); } catch (Throwable ignore) {}
+    if (spec == null || spec.isEmpty() || spec.equals("off") || spec.equals("0")) return "второй детектор речи выключен";
+    String[] p = spec.split(":"); String kind = p[0]; float thr, gate;
+    try { thr = p.length > 1 ? Float.parseFloat(p[1]) : 0.5f; gate = p.length > 2 ? Float.parseFloat(p[2]) : 0; }
+    catch (NumberFormatException e) { return "второй детектор: не число в «" + spec + "»"; }
+    File f = new File(new File(m, "vad2"), kind.equals("ten") ? "ten-vad.onnx" : "silero_vad.onnx");
+    if (kind.equals("silero") && !f.exists()) f = new File(vadModelPath);
+    if (!f.exists()) return "второго детектора нет: " + f;
+    VadModelConfig.Builder b = VadModelConfig.builder().setSampleRate(16000).setNumThreads(1).setDebug(false);
+    if (kind.equals("ten")) b.setTenVadModelConfig(TenVadModelConfig.builder().setModel(f.getAbsolutePath()).setThreshold(thr)
+        .setMinSilenceDuration(vadMinSilence).setMinSpeechDuration(0.25f).setWindowSize(256).setMaxSpeechDuration(15f).build());
+    else if (kind.equals("silero")) b.setSileroVadModelConfig(SileroVadModelConfig.builder().setModel(f.getAbsolutePath()).setThreshold(thr)
+        .setMinSilenceDuration(vadMinSilence).setMinSpeechDuration(0.25f).setWindowSize(512).setMaxSpeechDuration(15f).build());
+    else return "второй детектор: не знаю «" + kind + "» — ten или silero";
+    vad2 = new Vad(b.build()); vad2Gate = gate;
+    return String.format(java.util.Locale.ROOT, "второй детектор речи: %s, порог %.2f%s; при музыке молчит", kind, thr,
+        gate > 0 ? String.format(java.util.Locale.ROOT, ", только громче фона на %.0f дБ", gate) : "");
+  }
   public synchronized void retuneVad(float threshold, float minSilence) {
     vadThreshold = threshold; vadMinSilence = minSilence;
     Vad old = vad; vad = buildVad(threshold, minSilence);

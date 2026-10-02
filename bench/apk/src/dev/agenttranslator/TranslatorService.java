@@ -536,6 +536,7 @@ public class TranslatorService extends Service {
       log("🎚 нарезка: подпор " + preRollMs + " мс · хвост " + tailMs + " мс · порог +" + gateDb + " дБ над фоном · минимум речи " + minSpeechMs + " мс · выдержка " + hangMs + " мс");
       tsv("segcfg", "" + preRollMs, "" + tailMs, "" + gateDb, "" + minSpeechMs, "" + hangMs);
     }
+    if (i != null && i.hasExtra("vad2")) { vad2Want = i.getStringExtra("vad2") == null ? "off" : i.getStringExtra("vad2"); tsv("vad2", vad2Want); }
     if (i != null && (i.hasExtra("vadthr") || i.hasExtra("vadsil"))) {
       float thr = i.getStringExtra("vadthr") == null ? eng.vadThreshold : Float.parseFloat(i.getStringExtra("vadthr"));
       float sil = i.getStringExtra("vadsil") == null ? eng.vadMinSilence : Float.parseFloat(i.getStringExtra("vadsil"));
@@ -2373,6 +2374,9 @@ public class TranslatorService extends Service {
   volatile int preRollMs = 1000, tailMs = 300, minSpeechMs = 250, maxSpeechMs = 15000, hangMs = 600;
   volatile double gateDb = 6;
 
+  /** Стенд --es vad2: что поставить вторым детектором (Engine.setVad2); применяет поток нарезки. */
+  volatile String vad2Want = null; volatile long vad2Frames = 0;
+
   void startVad() {
     if (vadThread != null && vadThread.isAlive()) return;
     vadThread = new Thread(() -> {
@@ -2451,11 +2455,20 @@ public class TranslatorService extends Service {
           dnNs += System.nanoTime() - t0; dnCpu += android.os.Debug.threadCpuTimeNanos() - c0; dnFrames++;
         }
         dnCostMode = dnMode; dnCostNs = dnNs; dnCostCpu = dnCpu; dnCostFrames = dnFrames; dnCostAll = dnAll;
-        if (vadReset) { vadReset = false; eng.vad.reset(); if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; } }
-        eng.vad.acceptWaveform(eff.equals("raw") ? win : dwin);
+        if (vad2Want != null) { String w = vad2Want; vad2Want = null; log("🎚 " + eng.setVad2(w)); }
+        Vad v2 = eng.vad2;
+        if (vadReset) { vadReset = false; eng.vad.reset(); if (v2 != null) v2.reset(); if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; } }
+        float[] vin = eff.equals("raw") ? win : dwin;
+        eng.vad.acceptWaveform(vin);
         boolean sp = eng.vad.isSpeechDetected();
         while (!eng.vad.empty()) eng.vad.pop();          // внутренняя сборка sherpa не используется
-        if (dnMode.equals("auto") && gate.v2 && !sp) gate.observeFrame(win);   // спектр фона: шум или музыка
+        if (v2 != null) {                                 // второй детектор: те же кадры, при музыке молчит
+          v2.acceptWaveform(vin);
+          boolean loud2 = eng.vad2Gate <= 0 || noiseRms == 0 || frame >= noiseRms * Math.pow(10, eng.vad2Gate / 20);
+          if (!sp && loud2 && !gate.music() && v2.isSpeechDetected()) { sp = true; vad2Frames++; }
+          while (!v2.empty()) v2.pop();
+        }
+        if (((dnMode.equals("auto") && gate.v2) || v2 != null) && !sp) gate.observeFrame(win);   // спектр фона: шум или музыка
         // Фон копим только в тишине: без этого «SNR» мерил бы речь относительно самой себя.
         // Вклад кадра ограничен сверху: речь, которую VAD не признал речью, иначе поднимает
         // «фон» разом на десяток децибел и портит SNR следующих сегментов.
