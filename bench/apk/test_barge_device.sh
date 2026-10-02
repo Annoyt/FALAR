@@ -5,6 +5,7 @@
 #   bash bench/apk/test_barge_device.sh --restore  # только вернуть телефон после оборванного прогона
 #   VOL=10 …   # громкость озвучки на время прогона (прежняя возвращается); без VOL — нужна не ниже 5 из 15
 #   DUMP=3 …   # только записать совмещение микрофона и сыгранного на концах трёх фраз (barge-dump)
+#   B56ONLY=1 … # только B0, B1, B5, B6; DUMPV=1 — звук сверки голоса на стол (barge-dump)
 #
 # Проверяет (в отдельном тестовом разговоре, «человек» — колонки ПК, живые фразы из bench/air/corpus):
 #  B0 короткая фраза (2,8 с) начинает звучать сразу, а не когда придёт следующая (порог старта дорожки);
@@ -293,12 +294,6 @@ off=$(printf '%s' "$l" | sed -n 's/.*поправка \([0-9-]*\) мс.*/\1/p')
 l=$(since "$m1" | grep -m1 '🗣 перебивание готово'); say "  ${l:-нет строки о готовности}"
 [ -n "$l" ] && res 0 "B1 эхо этой громкости выучено (фраз: $k)" || res 1 "B1 перебивание не готово после $k фраз"
 
-say "== B2: только озвучка — ни одной остановки"
-m2=$(mark)
-for i in 1 2 3 4 5 6; do speak >/dev/null; calm; done
-dips=$(since "$m2" | grep -c '🗣 похоже, перебивают'); stops=$(since "$m2" | grep -c '🗣 перебили')
-[ "$stops" = 0 ] && res 0 "B2 6 фраз без человека: остановок 0 (пауз в озвучке: $dips)" || res 1 "B2 ложных остановок: $stops (пауз $dips)"
-
 # фраза человека поверх озвучки: колонки ПК через 0,6–1,6 с после начала звука
 human() {
   local clip=$1 at dly
@@ -321,6 +316,13 @@ if ! since "$m1" | grep -q '🗣 перебивание готово'; then
   since "$m1" | grep -E '🗣' | sed 's/^/  /' | tail -12
   say "B3/B4 пропущены: перебивание не готово"; exit 1
 fi
+if [ "${B56ONLY:-0}" != 1 ]; then
+say "== B2: только озвучка — ни одной остановки"
+m2=$(mark)
+for i in 1 2 3 4 5 6; do speak >/dev/null; calm; done
+dips=$(since "$m2" | grep -c '🗣 похоже, перебивают'); stops=$(since "$m2" | grep -c '🗣 перебили')
+[ "$stops" = 0 ] && res 0 "B2 6 фраз без человека: остановок 0 (пауз в озвучке: $dips)" || res 1 "B2 ложных остановок: $stops (пауз $dips)"
+
 say "== B3: человек поверх озвучки — с перебиванием"
 trial on "${HUM[@]:0:8}"
 say "== B4: то же без перебивания — как было"
@@ -360,12 +362,14 @@ read _ rec_off n_off stops_off _ < <(grep '^off ' "$D/b34")
 [ "${stops_off:-0}" = 0 ] && res 0 "B4 выключенное перебивание не срабатывает" || res 1 "B4 остановок при выключенном: $stops_off"
 cp "$D"/b34 "$D"/log_*.txt "$D"/played_*.tsv "$STATE/" 2>/dev/null
 mkdir -p "$STATE/barge-last" && cp "$D"/b0 "$D"/b34 "$D"/log_*.txt "$D"/played_*.tsv "$STATE/barge-last/" 2>/dev/null
+fi
 say "== B5/B6: голоса разговора — свой перебивает, чужой озвучку не обрывает"
 MODS_ON=$(printf '%s' ",$MODS_RUN,speaker," | tr ',' '\n' | grep -v '^$' | sort -u | paste -sd,)
 for w in bv_A1.wav bv_A2.wav; do $ADB push "$D/$w" "$F/$w" >/dev/null 2>&1; done; echo "wavs bv_A1.wav bv_A2.wav" >> "$PEND"
 m=$(mark); launch "--es modules '$MODS_ON'"
 if ! wl "$m" '🎤 отпечаток голоса (готов|подключён)' 90 >/dev/null; then res 1 "B5 отпечаток голоса не поднялся"; else
   for w in bv_A1 bv_A2; do m=$(mark); launch --es testwav "$F/$w.wav" --es ptt 1; l=$(wl "$m" '🎤 (новый голос|голос узнан)|голос не записан' 60); say "  $w: ${l:-нет строки}"; calm; done
+  [ "${DUMPV:-0}" = 1 ] && { launch --es bargedump 99; sleep 1; }    # стенд: звук сверки голоса — в files/barge_*
   m5=$(mark); for c in "${VA[@]}"; do human "$c"; done; since "$m5" > "$D/log_b5.txt"
   m6=$(mark); for c in "${VC[@]}"; do human "$c"; done; since "$m6" > "$D/log_b6.txt"
   s5=$(grep -c '🗣 перебил «' "$D/log_b5.txt"); r5=$(grep -c 'озвучка продолжается (пауза' "$D/log_b5.txt")
@@ -374,6 +378,9 @@ if ! wl "$m" '🎤 отпечаток голоса (готов|подключё�
   [ "$s5" -ge 2 ] && res 0 "B5 собеседник из голосов разговора перебил озвучку: $s5 из ${#VA[@]} (отпущен как чужой: $r5)" || res 1 "B5 собеседник перебил только $s5 из ${#VA[@]} (отпущен как чужой: $r5)"
   [ "$s6" = 0 ] && res 0 "B6 чужой голос озвучку не оборвал ни разу (паузы с продолжением: $r6 из ${#VC[@]})" || res 1 "B6 чужой голос оборвал озвучку $s6 раз из ${#VC[@]}"
   mkdir -p "$STATE/barge-last"; cp "$D"/log_b5.txt "$D"/log_b6.txt "$STATE/barge-last/" 2>/dev/null
+  if [ "${DUMPV:-0}" = 1 ]; then rm -rf "$STATE/barge-dump"; mkdir -p "$STATE/barge-dump"
+    for f in $(sh "ls $F" | grep -E '^barge_[0-9]+'); do $ADB pull "$F/$f" "$STATE/barge-dump/" >/dev/null 2>&1 && $ADB shell "rm -f $F/$f" < /dev/null; done
+    cp "$D/voice_a.txt" "$D/voice_c.txt" "$D/bv_A1.wav" "$D/bv_A2.wav" "$STATE/barge-dump/" 2>/dev/null; say "  звук сверки: $(ls "$STATE/barge-dump" | wc -l) файлов в $STATE/barge-dump"; fi
 fi
 # Падения за прогон
 cr=$(sh "logcat -d -b crash -T '$T0'" | grep -c "Process: $PKG")

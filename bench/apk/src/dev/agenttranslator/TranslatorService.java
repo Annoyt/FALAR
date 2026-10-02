@@ -3584,12 +3584,14 @@ public class TranslatorService extends Service {
   }
   /** Начало фразы в дорожку (под замком tts): перебитую прежнюю — выбросить; громкость полная; датчику — новая фраза. */
   void phraseBegin(int rate) {
-    if (bargeStop) hush();
-    ensureTrack(rate);
     // Дорожка могла остаться на паузе перебивания: подозрение пришлось на конец прежней фразы, а новая началась
     // раньше отбоя — датчик сбрасывается на новой фразе, и «продолжить» уже некому. Тогда все следующие фразы
-    // писались в стоящую дорожку и не звучали (прогон 02.10). Недоигранный хвост прежней — выбросить.
-    try { if (track.getPlayState() != AudioTrack.PLAYSTATE_PLAYING) { track.pause(); track.flush(); track.play(); } } catch (Throwable e) {}
+    // писались в стоящую дорожку и не звучали (прогон 02.10). Недоигранный хвост прежней — выбросить вместе с
+    // дорожкой: flush на той же дорожке сбрасывал её счёт кадров, а наш (trackWritten) — нет, и совмещение по
+    // меткам времени больше не находилось до конца сессии (прогон 02.10: B5/B6 без единого подозрения).
+    boolean stale = false; try { stale = track != null && track.getPlayState() != AudioTrack.PLAYSTATE_PLAYING; } catch (Throwable e) {}
+    if (bargeStop || stale) hush();
+    ensureTrack(rate);
     try { track.setVolume(1f); } catch (Throwable e) {}
     synchronized (refRing) { phraseFrame0 = trackWritten; }
     try { ttsVol = getSystemService(AudioManager.class).getStreamVolume(AudioManager.STREAM_MUSIC); } catch (Throwable e) {}
@@ -3785,6 +3787,12 @@ public class TranslatorService extends Service {
       for (float[] c : verifyAudio) { System.arraycopy(c, 0, x, o, c.length); o += c.length; }
       final Speaker sp = spk;
       verifyPrint = spkExec.submit(() -> sp.embed(x, 16000));
+      if (bargeDump > 0) try {                                          // стенд: звук сверки — на стол (tools/voiceprint_ref.py)
+        int k = ++dumpK; long from = verifyFrom;
+        new DenoisedAudio(x, 16000).save(new File(getExternalFilesDir(null), "barge_" + k + "_verify.wav").getAbsolutePath());
+        new DenoisedAudio(micSlice(from, (int) Math.min(micEnd - from, 16000 * 6)), 16000).save(new File(getExternalFilesDir(null), "barge_" + k + "_pause.wav").getAbsolutePath());
+        log("🗣 стенд: звук сверки записан — barge_" + k + "_verify.wav (" + String.format(Locale.ROOT, "%.1f с речи", x.length / 16000.0) + ")");
+      } catch (Throwable e) { log("🗣 стенд: звук сверки не записался — " + e); }
       return false;
     }
     if (!verifyPrint.isDone()) return false;
