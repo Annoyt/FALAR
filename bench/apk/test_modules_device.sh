@@ -178,7 +178,9 @@ else
   l=$(wl "$m" 'только при шуме: фон не ниже' 20); say "  $l"
   [ -n "$l" ] && res 0 "D6 включили — снова «только при шуме»" || res 1 "D6 нет строки «только при шуме»"
   if front && mods_screen; then
-    dump; r=$(ui up --text 'Шумоподавление' --levels 1 | paste -sd'|' -); say "  строка модуля: $r"
+    # Модулей восемь — строка шумоподавления ниже края экрана: листаем, пока не покажется.
+    for i in 1 2 3 4 5; do dump; ui find --text 'Шумоподавление' >/dev/null && break; front && $ADB shell "input swipe 540 1500 540 900 350"; sleep 1.2; done
+    r=$(ui up --text 'Шумоподавление' --levels 1 | paste -sd'|' -); say "  строка модуля: $r"
     printf '%s' "$r" | grep -q '0,5 МБ|при шуме' && res 0 "D6 в «Модули и файлы» — «0,5 МБ · при шуме»" || res 1 "D6 строка модуля: $r"
     front && { $ADB shell "input keyevent 4"; sleep 1; $ADB shell "input keyevent 4"; sleep 1; }
   else sk "D6 экран «Модули и файлы» — впереди не Falar"; fi
