@@ -2171,10 +2171,21 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // бы стендовые флаги первого (например, беззвучный режим прогона записей). Только возвращение.
     if (!svcStarted || bound) return;
     // Сервис мог уйти сам, пока экран был свёрнут: поднимаем его снова, и именно запущенным, а не
-    // только привязанным, — иначе слушать в кармане после сворачивания он не сможет.
-    startForegroundService(new Intent(this, TranslatorService.class).putExtra("fromUi", true));
+    // только привязанным, — иначе слушать в кармане после сворачивания он не сможет. fromUi — сброс
+    // стендовых режимов при возвращении человека; но не сразу после запуска стенда (standStart).
+    boolean ui = !standStart; standStart = false;
+    Intent si = new Intent(this, TranslatorService.class);
+    if (ui) si.putExtra("fromUi", true);
+    startForegroundService(si);
     bindSvc();
   }
+  /** Запуск стенда: am start -n … --es … — без действия и с добавками (лаунчер шлёт ACTION_MAIN,
+   *  уведомление — без добавок). При погашенном экране окно сразу уходит в onStop и отвязывается, и
+   *  следующий запуск стенда (подача записи) приходит как onNewIntent → onRestart → onStart. fromUi в
+   *  этом onStart сбросил бы молчаливый режим и закреплённое направление посреди прогона: 02.10 записи
+   *  near-ru слушались как португальские, а far-pt и noisy-pt шли с озвучкой вслух. Флаг живёт до
+   *  ближайшего onStart или onResume. */
+  boolean standStart;
   @Override protected void onStop() {
     started = false;
     unbindSvc();
@@ -2201,6 +2212,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }
   @Override protected void onResume() {
     super.onResume();
+    standStart = false;      // запуск стенда при видимом экране onStart не вызывает — флаг не должен дожить до человека
     resumed = true; meter();
     syncGuard();
     if (setupView != null && setupView.getVisibility() == View.VISIBLE) {   // вернулись из настроек приложения
@@ -2457,6 +2469,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     applyOverrideConfiguration(c);
   }
   @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
+    standStart = i.getAction() == null && i.getExtras() != null && !i.getExtras().isEmpty();
     if (i.hasExtra("uitheme")) {
       String t = i.getStringExtra("uitheme");
       themeTest = "day".equals(t) ? 1 : "night".equals(t) ? 2 : 0;

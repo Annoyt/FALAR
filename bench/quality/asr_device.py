@@ -20,11 +20,20 @@ LINE = re.compile(r"^(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s{2}(.*)$")
 
 def main():
     src, out = sys.argv[1], sys.argv[2]
-    results, summary = [], {}
-    for wer_txt in sorted(glob.glob(os.path.join(src, "*", "wer.txt"))):
-        run = os.path.basename(os.path.dirname(wer_txt))
+    results, summary, invalid = [], {}, []
+    for run_dir in sorted(d for d in glob.glob(os.path.join(src, "*")) if os.path.isdir(d) and "-a" in os.path.basename(d)):
+        run = os.path.basename(run_dir)
         rec = run.split("-a")[0]                      # near-pt-a0-gauto-limit-auto → near-pt
         lang = rec.rsplit("-", 1)[-1]
+        bad = os.path.join(run_dir, "invalid.txt")    # gain_sweep: стенд сбросили посреди прогона
+        if os.path.exists(bad):
+            why = open(bad, encoding="utf-8").read().strip()
+            summary[rec] = {"run": run, "invalid": why}
+            invalid.append(f"{rec}: {why}")
+            continue
+        wer_txt = os.path.join(run_dir, "wer.txt")
+        if not os.path.exists(wer_txt):
+            continue
         text = open(wer_txt, encoding="utf-8").read()
         rows = 0
         for line in text.splitlines():
@@ -38,11 +47,15 @@ def main():
         lost = re.search(r"не дошло (\d+) \(", text)
         summary[rec] = {"run": run, "files": rows, "wer": float(w.group(1)) if w else None,
                         "lost": int(lost.group(1)) if lost else None}
-    if not results:
+    if not results and not invalid:
         sys.exit(f"в {src} нет ни одного разобранного прогона (wer.txt)")
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"summary": summary, "results": results}, f, ensure_ascii=False, indent=1)
-    print("asr_device: " + " · ".join(f"{k} WER {v['wer']} %, не дошло {v['lost']}" for k, v in summary.items()))
+    print("asr_device: " + " · ".join(f"{k} WER {v['wer']} %, не дошло {v['lost']}" for k, v in summary.items()
+                                      if "invalid" not in v))
+    if invalid:
+        print("asr_device: НЕДЕЙСТВИТЕЛЬНЫ — " + "; ".join(invalid))
+        sys.exit(3)
 
 
 if __name__ == "__main__":

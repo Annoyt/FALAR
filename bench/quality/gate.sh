@@ -118,8 +118,13 @@ if [ $DEVICE = 1 ]; then
     FALAR_STAND_LOCK=1 bash "$R/bench/air/gain_sweep.sh" --rec "$RECS" --gains auto --modes limit --vaddn auto > "$RUN/device.log" 2>&1
     exec 8>&-
     D=$(sed -n 's/^прогоны: //p' "$RUN/device.log" | tail -1)
-    [ -n "$D" ] && $PY "$Q/asr_device.py" "$D" "$RUN/asr_device.json" | tee -a "$RUN/gate.log"
-    [ -f "$RUN/asr_device.json" ] || fail "прогон на телефоне не дал результата: $RUN/device.log"
+    [ -n "$D" ] || fail "прогон на телефоне не дал результата: $RUN/device.log"
+    $PY "$Q/asr_device.py" "$D" "$RUN/asr_device.json" | tee -a "$RUN/gate.log"
+    case "${PIPESTATUS[0]}" in
+      0) ;;
+      3) fail "прогон на телефоне недействителен — приложение сбросило стендовые режимы посреди прогона (сборка без правки 02.10?): $RUN/device.log";;
+      *) fail "прогон на телефоне не разобрался: $RUN/device.log";;
+    esac
     STAGES="$STAGES device"
     if [ ! -f "$DBASE/asr_device.json" ]; then
       mkdir -p "$DBASE"; cp "$RUN/asr_device.json" "$DBASE/"

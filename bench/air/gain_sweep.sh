@@ -117,9 +117,21 @@ PY
     sleep 3; n0=$(count $TSV); m1=$(count $LOG)
     off=$(( $(sh "date +%s%3N") - $(date +%s%3N) ))
     $ADB shell "am start -n $ACT --es feedwav $F/replay.wav --es speed $SPEED" >/dev/null 2>&1
-    for _ in $(seq $(( (SEC / SPEED + 240) / 5 ))); do sleep 5; [ "$(seen $m1 'подача закончена')" != 0 ] && break; done
+    # Стенд сброшен посреди прогона («↺ … сброшен» в журнале): сборки до 02.10 при погашенном экране
+    # поднимали сервис с fromUi и возвращали озвучку и направление по кнопкам — near-ru слушался как
+    # португальский, far-pt и noisy-pt шли вслух. Такой прогон не в счёт; Falar сразу останавливается,
+    # чтобы оборвать озвучку. Проверка — каждые 2 с подачи и на каждом шаге ожидания распознавания.
+    reset() { [ "$(seen $m0 'стендовый молчаливый режим сброшен')" != 0 ]; }
+    bad=; for _ in $(seq $(( (SEC / SPEED + 240) / 2 ))); do sleep 2; reset && { bad=1; break; }; [ "$(seen $m1 'подача закончена')" != 0 ] && break; done
     # Распознавание догоняет подачу: ждём, пока журнал 20 с не растёт.
-    last=-1; for _ in $(seq 60); do c=$(count $TSV); [ "$c" = "$last" ] && break; last=$c; sleep 20; done
+    last=-1; [ -z "$bad" ] && for _ in $(seq 60); do reset && { bad=1; break; }; c=$(count $TSV); [ "$c" = "$last" ] && break; last=$c; sleep 20; done
+    if [ -n "$bad" ] || reset; then
+      $ADB shell "am force-stop $PKG"
+      say "  НЕДЕЙСТВИТЕЛЕН: приложение сбросило стендовые режимы посреди прогона — Falar остановлен, прогон не в счёт"
+      echo "стендовые режимы сброшены посреди прогона" > $OUT/invalid.txt
+      printf '%s\t+%s\t%s\t%s\tнедействителен\n' "$rec" "$g" "$m" "$v" >> $SUM
+      continue
+    fi
     sh "tail -n +$((n0+1)) $TSV" > $OUT/listener.tsv; echo $off > $OUT/listener.offset; echo "g=$g $m att=$ATT vaddn=$v" > $OUT/seg.txt
     sh "tail -n +$((m1+1)) $LOG | grep '🔇 шумодав нарезки' | tail -1" > $OUT/dncost.txt
     python3 $R/bench/air/air_wer.py $OUT --lang $LANG_ --mode replay --rec $REC > $OUT/wer.txt 2>&1
@@ -140,5 +152,8 @@ print("\t".join([rec, "+" + g, m, v, f(r"^WER ([\d.]+)%"), f(r"чисто \d+ \(
                  med(num(15)), med(num(16)), avg(num(17)), avg(num(18)), avg(num(19)), cost.group(1) if cost else "-"]))
 PY
     tail -1 $SUM | column -t -s$'\t'
+    # Микрофон — выключить сразу: следующий прогон может ждать свободного телефона, и всё это время
+    # слушание писало бы комнату (02.10 так в журнал попали обрывки домашних разговоров).
+    $ADB shell "am force-stop $PKG"
   done; done; done
 done
