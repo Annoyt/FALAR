@@ -73,6 +73,13 @@ restore() {
   for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do
     [ -f "$SNAP/$(basename $f)" ] && $ADB push "$SNAP/$(basename $f)" "$F/$f" >/dev/null 2>&1; done
   $ADB shell "rm -f $F/chats/$TID.json $F/replay.wav"
+  # Больше 500 реплик — разговор продолжается в новом файле «ТЕСТ чувствительность · продолжение» с новым id
+  # (Chats.KEEP). 03.10 так остались два продолжения, и одно стало бы у владельца текущим: девять прогонов по
+  # ~80 фраз. Убираем всё, что появилось за прогон с этим именем; разговоры владельца имени не меняют.
+  for c in $(sh "ls $F/chats/" | tr -d '\r'); do
+    case " $CH0 " in *" $c "*) continue;; esac
+    sh "head -c 300 $F/chats/$c" | grep -q '"name": *"ТЕСТ чувствительность' && { $ADB shell "rm -f $F/chats/$c"; say "  убрано продолжение тестового разговора: $c"; }
+  done
   say "  тестовый разговор удалён · текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
   free_phone; $ADB shell "am start -n $ACT" >/dev/null 2>&1
   say; say "итог:"; column -t -s$'\t' $SUM 2>/dev/null; say "прогоны: $D"
@@ -81,6 +88,7 @@ trap restore EXIT
 
 $ADB wait-for-device; free_phone
 for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do $ADB pull "$F/$f" "$SNAP/" >/dev/null 2>&1; done
+CH0=$(sh "ls $F/chats/" | tr -d '\r' | tr '\n' ' ')            # разговоры до прогона: их возврат не трогает
 printf '{"id": %s, "name": "ТЕСТ чувствительность", "named": true, "saved": %s, "turns": []}\n' $TID $TID > $D/t.json
 $ADB shell "am force-stop $PKG"; sleep 1; $ADB push $D/t.json "$F/chats/$TID.json" >/dev/null 2>&1
 # Голоса разговора (ветка voices): слушание переводит только голоса, записанные кнопкой FALAR, а в
