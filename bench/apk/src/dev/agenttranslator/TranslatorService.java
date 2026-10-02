@@ -261,6 +261,7 @@ public class TranslatorService extends Service {
       log("🎚 чувствительность: " + (micAuto ? String.format(Locale.ROOT, "авто, сейчас %+.1f дБ", autoDb) : "вручную, " + micGainDb + " дБ"));
       micSource = pr.getString("micsrc", "builtin");
       holdMs = pr.getInt("hold", 1500);
+      bargeOn = pr.getBoolean("barge", true); bargeOffMs = pr.getFloat("barge_off", Float.NaN);
       refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
       readGuard = pr.getInt("read_guard", 1);
       restoreContext();
@@ -360,6 +361,14 @@ public class TranslatorService extends Service {
       getSharedPreferences("at", MODE_PRIVATE).edit().putInt("hold", holdMs).apply();
       log(holdMs == 0 ? "🔊 озвучка сразу, без ожидания паузы"
                       : "🔊 озвучка ждёт " + String.format(Locale.ROOT, "%.1f", holdMs / 1000.0) + " с тишины");
+    }
+    // Перебивание (BargeIn): --es barge 1|0 — включить/выключить и запомнить; --es barge forget — забыть выученное
+    // (поправку времени и усиление тракта) и учиться заново.
+    if (i != null && i.hasExtra("barge")) {
+      String v = i.getStringExtra("barge"); android.content.SharedPreferences.Editor ed = getSharedPreferences("at", MODE_PRIVATE).edit();
+      if ("forget".equals(v)) { for (String k : getSharedPreferences("at", MODE_PRIVATE).getAll().keySet()) if (k.startsWith("barge_")) ed.remove(k);
+        bargeOffMs = Double.NaN; bargeVol = -1; bargeForget = true; ed.apply(); log("🗣 перебивание: выученное забыто, учусь заново"); }
+      else { bargeOn = "1".equals(v); ed.putBoolean("barge", bargeOn).apply(); log(bargeOn ? "🗣 перебивание включено" : "🗣 перебивание выключено: пока телефон говорит, микрофон глух"); }
     }
     // Стенд: модели по манифесту. modelsbase — локальный сервер вместо Hugging Face (adb reverse), не сохраняется.
     if (i != null && i.hasExtra("modelsbase") && store != null) { String b = i.getStringExtra("modelsbase"); store.baseOverride = b == null || b.isEmpty() || "off".equals(b) ? null : b; log("⬇ стенд: источник моделей " + (store.baseOverride == null ? "Hugging Face" : store.baseOverride)); }
@@ -609,12 +618,14 @@ public class TranslatorService extends Service {
     // в разных наушниках. Оговорка, которую надо проверить ухом: многие TWS сводят каналы в моно,
     // когда надет один вкладыш, — тогда разведение не сработает.
     // Длинный тон в один канал: короткие фразы на слух не локализуются, а три секунды — да.
-    // Стенд: эхо озвучки в микрофоне (--es aectest vr,vr_aec,vc,vc_aec). Телефон говорит фразу через
-    // динамик и сам же её записывает — по конфигурации за раз: источник VOICE_RECOGNITION (как у
-    // приложения) или VOICE_COMMUNICATION, со встроенным эхоподавителем Android
-    // (AcousticEchoCanceler на сессии записи) или без. Режим звука и маршрут не трогаются. Пишет
-    // files/aec_<cfg>.wav (16 кГц), aec_ref.wav (что играли) и aec.json (когда начали играть по
-    // каждой записи) — разбор на столе (tools/aec_eval.py). Слушание на время стенда выключается.
+    // Стенд: эхо озвучки в микрофоне (--es aectest vr,vr_aec,vc,vc_aec или vr_e1,vr_d1,vr_q1,…). Телефон
+    // говорит фразу через динамик и сам же её записывает — по конфигурации за раз: источник
+    // VOICE_RECOGNITION (как у приложения) или VOICE_COMMUNICATION, со встроенным эхоподавителем Android
+    // (AcousticEchoCanceler на сессии записи) или без; vr_e<k> / vr_d<k> / vr_q<k> — фраза k из
+    // AEC_PHRASES: только эхо, человек из колонок стенда поверх неё, только человек. Режим звука и
+    // маршрут не трогаются. Пишет files/aec_<cfg>.wav (16 кГц), aec_ref*.wav (что играли) и aec.json
+    // (когда начали играть, метки времени записи и дорожки) — разбор на столе (tools/aec_eval.py,
+    // tools/barge_eval.py). Слушание на время стенда выключается.
     if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
       new Thread(() -> { try { aecStand(cfgs); } catch (Throwable t) { log("🔁 эхо-стенд: ошибка — " + t); } }, "aec").start(); }
     if (i != null && i.hasExtra("devtest") && !voice()) log("🔇 devtest: озвучка выключена или голосов нет");
@@ -2173,28 +2184,54 @@ public class TranslatorService extends Service {
     final String tgt = t[0].substring(3), text = t[2];
     worker.submit(() -> { try { speakOut(tgt, text); } catch (Throwable e) { log("🔊 " + e); } });
   }
+  /** Фразы стенда эха: 0 — прежняя, по ней записаны первые замеры; дальше по три на язык, разной длины. */
+  static final String[][] AEC_PHRASES = {
+    {"pt", "Olha, o carro chegou ontem com um barulho estranho na frente, e quando a gente levantou vimos que a correia dentada estava muito gasta."},
+    {"pt", "Bom dia! Eu queria saber se ainda tem quarto livre para esta noite."},
+    {"pt", "A farmácia fica logo depois da praça, do lado esquerdo, perto do banco."},
+    {"pt", "Pode me trazer a conta, por favor? Vou pagar com cartão."},
+    {"ru", "Добрый вечер. Мы хотели бы заказать столик на четверых на восемь часов."},
+    {"ru", "Скажите, пожалуйста, сколько стоит билет до центра и где его можно купить?"},
+    {"ru", "Я забыл телефон в такси, водитель был в синей куртке."},
+    {"ru", "Спасибо большое, вы нам очень помогли, мы обязательно придём ещё раз."},
+  };
+  /** vr_e3 — только эхо фразы 3 (колонки стенда молчат), vr_d3 — человек из колонок поверх неё, vr_q3 — только
+   *  человек, телефон молчит. Прежние имена (vr, vr_aec, vc, vr_q_1) — фраза 0: «_q» — тишина, иначе играю. */
+  static final java.util.regex.Pattern AEC_CFG = java.util.regex.Pattern.compile("(v[rc])(_aec)?_([edq])(\\d+)");
+
   void aecStand(String cfgs) throws Exception {
     if (eng == null || !voice()) { log("🔁 эхо-стенд: движок или озвучка не готовы"); return; }
     if (listenPt || listenRu) setListen(false, false);
     Thread.sleep(800);
-    String lang = "pt", text = "Olha, o carro chegou ontem com um barulho estranho na frente, e quando a gente levantou vimos que a correia dentada estava muito gasta.";
-    final List<float[]> parts = new ArrayList<>();
-    GeneratedAudio ga = eng.speak(lang, text, chunk -> { parts.add(chunk.clone()); return 1; });
-    final int rate = ga.getSampleRate(); final float[] ref = ga.getSamples();
     File dir = getExternalFilesDir(null);
-    new DenoisedAudio(ref, rate).save(new File(dir, "aec_ref.wav").getAbsolutePath());
+    // Фраза синтезируется один раз: все записи с ней играют одно и то же.
+    final Map<Integer, List<float[]>> parts = new HashMap<>(); final Map<Integer, int[]> fmt = new HashMap<>();
     boolean bt = false;
     for (AudioDeviceInfo d : getSystemService(AudioManager.class).getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
       int t = d.getType(); if (t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_BLE_HEADSET) bt = true; }
-    log(String.format(Locale.ROOT, "🔁 эхо-стенд: фраза %.1f с, %d Гц · AcousticEchoCanceler %s · NoiseSuppressor %s%s", ref.length / (double) rate, rate,
-        android.media.audiofx.AcousticEchoCanceler.isAvailable() ? "есть" : "нет", android.media.audiofx.NoiseSuppressor.isAvailable() ? "есть" : "нет",
-        bt ? " · подключён Bluetooth — VOICE_COMMUNICATION пропускаю (§5 плана)" : ""));
-    org.json.JSONObject meta = new org.json.JSONObject().put("ref_rate", rate).put("text", text);
+    AudioManager am = getSystemService(AudioManager.class);
+    log("🔁 эхо-стенд: AcousticEchoCanceler " + (android.media.audiofx.AcousticEchoCanceler.isAvailable() ? "есть" : "нет")
+        + " · NoiseSuppressor " + (android.media.audiofx.NoiseSuppressor.isAvailable() ? "есть" : "нет")
+        + " · громкость " + am.getStreamVolume(AudioManager.STREAM_MUSIC) + "/" + am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        + (bt ? " · подключён Bluetooth — VOICE_COMMUNICATION пропускаю (§5 плана)" : ""));
+    JSONObject meta = new JSONObject().put("volume", am.getStreamVolume(AudioManager.STREAM_MUSIC)).put("text", AEC_PHRASES[0][1]);
+    JSONArray phr = new JSONArray(); for (String[] p : AEC_PHRASES) phr.put(new JSONArray().put(p[0]).put(p[1])); meta.put("phrases", phr);
     for (String cfg : cfgs.split(",")) {
       cfg = cfg.trim(); if (cfg.isEmpty()) continue;
-      // _q — без озвучки: только запись (голос человека из колонок стенда — чем режим записи портит его сам по себе)
-      boolean vc = cfg.startsWith("vc"), aec = cfg.contains("_aec"), quiet = cfg.contains("_q");
+      java.util.regex.Matcher m = AEC_CFG.matcher(cfg); boolean multi = m.matches();
+      final boolean vc = cfg.startsWith("vc"), aec = cfg.contains("_aec");
+      final char mode = multi ? m.group(3).charAt(0) : cfg.contains("_q") ? 'q' : 'd';
+      final int k = multi ? Integer.parseInt(m.group(4)) : 0;
+      if (k >= AEC_PHRASES.length) { log("🔁 эхо-стенд: фразы " + k + " нет — " + cfg + " пропускаю"); continue; }
       if (vc && bt) continue;
+      if (!parts.containsKey(k)) {
+        final List<float[]> ps = new ArrayList<>();
+        GeneratedAudio ga = eng.speak(AEC_PHRASES[k][0], AEC_PHRASES[k][1], chunk -> { ps.add(chunk.clone()); return 1; });
+        parts.put(k, ps); fmt.put(k, new int[]{ga.getSampleRate(), ga.getSamples().length});
+        new DenoisedAudio(ga.getSamples(), ga.getSampleRate()).save(new File(dir, k == 0 ? "aec_ref.wav" : "aec_ref" + k + ".wav").getAbsolutePath());
+        log(String.format(Locale.ROOT, "🔁 эхо-стенд: фраза %d · %s · %.1f с, %d Гц", k, AEC_PHRASES[k][0], ga.getSamples().length / (double) ga.getSampleRate(), ga.getSampleRate()));
+      }
+      final int rate = fmt.get(k)[0], len = fmt.get(k)[1]; final String lang = AEC_PHRASES[k][0];
       int min = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT);
       AudioRecord rec = new AudioRecord.Builder().setAudioSource(vc ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.VOICE_RECOGNITION)
           .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(16000).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
@@ -2204,27 +2241,44 @@ public class TranslatorService extends Service {
       android.media.audiofx.AcousticEchoCanceler ec = null; String ecState = "выкл";
       if (aec) try { ec = android.media.audiofx.AcousticEchoCanceler.create(rec.getAudioSessionId());
         if (ec == null) ecState = "не создался"; else { ec.setEnabled(true); ecState = ec.getEnabled() ? "вкл" : "не включился"; } } catch (Throwable t) { ecState = "ошибка " + t.getMessage(); }
-      final float[] buf = new float[(int) (16000 * (ref.length / (double) rate + 3.0))];
+      final float[] buf = new float[(int) (16000 * (len / (double) rate + 3.0))];
       final int[] got = {0}; final long[] recStart = {0};
+      // Метки времени: «кадр N снят (прозвучал) в момент T», часы CLOCK_MONOTONIC у обеих сторон. По ним
+      // видно, можно ли сопоставить звук микрофона с тем, что в тот же миг играло, без взаимной корреляции.
+      final JSONArray tsRec = new JSONArray(), tsTrack = new JSONArray();
       rec.startRecording(); recStart[0] = System.nanoTime();
-      Thread rt = new Thread(() -> { float[] w = new float[512];
-        while (got[0] < buf.length) { int n = rec.read(w, 0, Math.min(512, buf.length - got[0]), AudioRecord.READ_BLOCKING); if (n <= 0) break; System.arraycopy(w, 0, buf, got[0], n); got[0] += n; } }, "aecrec");
+      Thread rt = new Thread(() -> { float[] w = new float[512]; AudioTimestamp ts = new AudioTimestamp(); int next = 0;
+        while (got[0] < buf.length) { int n = rec.read(w, 0, Math.min(512, buf.length - got[0]), AudioRecord.READ_BLOCKING); if (n <= 0) break; System.arraycopy(w, 0, buf, got[0], n); got[0] += n;
+          if (got[0] >= next) { next = got[0] + 1600;
+            try { if (rec.getTimestamp(ts, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS)
+              synchronized (tsRec) { tsRec.put(new JSONArray().put(ts.framePosition).put(ts.nanoTime).put(got[0])); } } catch (Throwable e) {} } } }, "aecrec");
       rt.start();
       Thread.sleep(700);
-      long playAt; double playOff;
-      // Метка для стенда на ПК: по ней колонки начинают фразу человека — поверх озвучки или в тишине.
-      log("🔁 эхо-стенд: " + (quiet ? "тишина " : "играю ") + cfg);
+      long playAt; double playOff; long head0;
+      // Метка для стенда на ПК: «играю» и «тишина» — колонки начинают фразу человека, «эхо» — молчат.
+      log("🔁 эхо-стенд: " + (mode == 'e' ? "эхо " : mode == 'q' ? "тишина " : "играю ") + cfg);
+      final boolean[] done = {false};
+      Thread tt = null;
       synchronized (tts) {
         ensureTrack(rate);
+        head0 = track.getPlaybackHeadPosition() & 0xffffffffL;      // дорожка простаивала: всё прежнее доиграло
+        final AudioTrack tr = track;
+        if (mode != 'q') { tt = new Thread(() -> { AudioTimestamp ats = new AudioTimestamp();
+            while (!done[0]) { try { if (tr.getTimestamp(ats)) synchronized (tsTrack) { tsTrack.put(new JSONArray().put(ats.framePosition).put(ats.nanoTime)); } } catch (Throwable e) {}
+              try { Thread.sleep(100); } catch (InterruptedException e) { return; } } }, "aects"); tt.start(); }
         playAt = System.nanoTime(); playOff = got[0];
-        if (!quiet) for (float[] c : parts) writeOut(c, c.length, lang);
+        if (mode != 'q') for (float[] c : parts.get(k)) writeOut(c, c.length, lang);
       }
-      if (quiet) Thread.sleep((long) (ref.length * 1000.0 / rate));
+      long left = playAt + (long) (len * 1e9 / rate) + 300_000_000L - System.nanoTime();
+      if (left > 0) Thread.sleep(left / 1_000_000L);
+      done[0] = true; if (tt != null) tt.join(1000);
       rt.join(15000);
       rec.stop(); rec.release(); if (ec != null) try { ec.release(); } catch (Throwable ignore) {}
       new DenoisedAudio(Arrays.copyOf(buf, got[0]), 16000).save(new File(dir, "aec_" + cfg + ".wav").getAbsolutePath());
-      meta.put(cfg, new org.json.JSONObject().put("play_sample", playOff).put("play_ms_after_start", (playAt - recStart[0]) / 1e6).put("aec", ecState).put("samples", got[0]));
-      log("🔁 эхо-стенд: " + cfg + " · эхоподавитель " + ecState + String.format(Locale.ROOT, " · записано %.1f с", got[0] / 16000.0));
+      meta.put(cfg, new JSONObject().put("phrase", k).put("lang", lang).put("ref", k == 0 ? "aec_ref.wav" : "aec_ref" + k + ".wav").put("ref_rate", rate)
+          .put("mode", String.valueOf(mode)).put("play_sample", playOff).put("play_ms_after_start", (playAt - recStart[0]) / 1e6).put("aec", ecState).put("samples", got[0])
+          .put("rec_start_nano", recStart[0]).put("play_nano", playAt).put("track_head0", head0).put("ts_rec", tsRec).put("ts_track", tsTrack));
+      log("🔁 эхо-стенд: " + cfg + " · эхоподавитель " + ecState + String.format(Locale.ROOT, " · записано %.1f с · меток записи %d, дорожки %d", got[0] / 16000.0, tsRec.length(), tsTrack.length()));
       Thread.sleep(800);
     }
     java.nio.file.Files.write(new File(dir, "aec.json").toPath(), meta.toString(1).getBytes("UTF-8"));
@@ -2235,12 +2289,12 @@ public class TranslatorService extends Service {
     if (!voice()) { hint("🔇 озвучка выключена — «Система» → «Модули»"); return; }
     synchronized (tts) {
     if (!voice()) return;
-    int rate = eng.ttsSampleRate(tgt); ensureTrack(rate);
+    int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     final boolean dup = btDuplex(); if (!dup) muteUntil = Long.MAX_VALUE;
     double sec = 0; final long[] w0 = {0};
-    try { GeneratedAudio ga = eng.speak(tgt, text, chunk -> { if (w0[0] == 0) w0[0] = System.currentTimeMillis(); writeOut(chunk, chunk.length, tgt); return 1; });
+    try { GeneratedAudio ga = eng.speak(tgt, text, chunk -> { if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
       sec = ga.getSamples().length / (double) rate;
-    } finally { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec); if (!dup) muteUntil = until; }
+    } finally { if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec); if (!dup) muteUntil = until; } }
     }
   }
   /** Очистка выученного. Ярус копится сам и молча, поэтому убрать его должно быть можно
@@ -2375,8 +2429,13 @@ public class TranslatorService extends Service {
         // Во время подачи записи микрофон в очередь не пускаем: иначе в замер подмешивается
         // живая комната и повтор перестаёт быть повтором.
         // Чувствительность — в потоке нарезки (startVad), здесь звук идёт как есть.
-        if (vadMode && !feeding && eng != null && !readingAloud && System.currentTimeMillis() > muteUntil)
-          if (!capQ.offer(n == win.length ? win.clone() : Arrays.copyOf(win, n))) framesDropped++;
+        if (vadMode && !feeding && eng != null && !readingAloud) {
+          // Перебивание смотрит каждый кадр слушания, и заглушённый тоже: по нему видно человека поверх озвучки.
+          // true — кадр уже отдан нарезке вместе с подпором.
+          boolean taken = bargeOn && bargeFrame(rec, win, n);
+          if (!taken && System.currentTimeMillis() > muteUntil)
+            if (!capQ.offer(n == win.length ? win.clone() : Arrays.copyOf(win, n))) framesDropped++;
+        }
       }
       rec.stop(); rec.release(); capRouted = null;
       log("🎙 микрофон отпущен");
@@ -3097,7 +3156,7 @@ public class TranslatorService extends Service {
     if (!voice()) return 0;                            // модуль «Озвучка» выключен или голосов ещё нет: перевод на экране
     synchronized (tts) {
     if (!voice()) return 0;                            // выключили, пока ждали очередь
-    int rate = eng.ttsSampleRate(tgt); ensureTrack(rate);
+    int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     // В наушник — значит озвучка не попадает в комнату и микрофон можно не глушить:
     // собеседник продолжает говорить, пока в ухе идёт перевод. Замер протечки: −13…+0,1 дБ,
     // то есть микрофон не слышит наушник вовсе (results/2026-09-13-headphones.md).
@@ -3107,17 +3166,19 @@ public class TranslatorService extends Service {
     final long[] w0 = {0};                 // когда отдан первый кусок — с него фраза и звучит
     float[] cached = pb.audio(dir, mt);
     try {                                  // без finally одно исключение в синтезе делало приложение глухим навсегда
-      if (cached != null) { if (first != null && first[0] == 0) first[0] = System.nanoTime(); w0[0] = System.currentTimeMillis(); writeOut(cached, cached.length, tgt); audioS = cached.length / (double) rate; }
-      else { GeneratedAudio ga = eng.speak(tgt, mt, chunk -> { if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) w0[0] = System.currentTimeMillis(); writeOut(chunk, chunk.length, tgt); return 1; });
-        audioS = ga.getSamples().length / (double) rate; if (cacheable) pb.putAudio(dir, mt, ga.getSamples(), rate); }
+      if (cached != null) { if (first != null && first[0] == 0) first[0] = System.nanoTime(); w0[0] = System.currentTimeMillis(); phraseSounds(tgt); writeOut(cached, cached.length, tgt); audioS = cached.length / (double) rate; }
+      else { GeneratedAudio ga = eng.speak(tgt, mt, chunk -> { if (bargeStop) return 0; if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
+        audioS = ga.getSamples().length / (double) rate; if (cacheable && !bargeStop) pb.putAudio(dir, mt, ga.getSamples(), rate); }
     } finally {
       long now = System.currentTimeMillis(), until = muteAfter(w0[0] == 0 ? now : w0[0], audioS);
-      if (!dup) muteUntil = until;
-      if (audioS >= 3) log(String.format(Locale.ROOT, "🔊 %.1f с звука · микрофон глух до %+.1f с от отдачи последнего куска (прежний расчёт: %+.1f с)",
+      boolean cut = phraseEnd();
+      if (cut) { playEndMs = now; until = now; }                           // перебили: дорожка уже пуста, микрофон открыт
+      else if (!dup) muteUntil = until;
+      if (audioS >= 3 && until > now) log(String.format(Locale.ROOT, "🔊 %.1f с звука · микрофон глух до %+.1f с от отдачи последнего куска (прежний расчёт: %+.1f с)",
           audioS, (until - now) / 1000.0, audioS + 0.4));
       // Что и когда проговорено по-португальски — для отсева эха: хвост озвучки и отражение от стен
       // доходят до микрофона и после этих 400 мс.
-      if ("pt".equals(tgt)) { spokenPt = mt; spokenPtEnd = System.currentTimeMillis() + (long) (audioS * 1000); }
+      if ("pt".equals(tgt)) { spokenPt = mt; spokenPtEnd = cut ? now : System.currentTimeMillis() + (long) (audioS * 1000); }
     }
     return audioS;
     }
@@ -3218,8 +3279,11 @@ public class TranslatorService extends Service {
     int min = AudioTrack.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_FLOAT);
     track = new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
       .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(rate).setChannelMask(mask).build()).setBufferSizeInBytes(Math.max(min, rate * ch * 4 * 3)).setTransferMode(AudioTrack.MODE_STREAM).build();
+    startEarly(track, rate);
     track.play(); trackRate = rate; trackCh = ch;
-    log("выход: " + outName() + (btDuplex() ? " · дуплекс (микрофон не глушим)" : ""));
+    synchronized (refRing) { trackWritten = 0; refNext = 0; refLast = 0; }
+    log("выход: " + outName() + (btDuplex() ? " · дуплекс (микрофон не глушим)" : "")
+        + (Build.VERSION.SDK_INT >= 31 ? " · звучит с " + track.getStartThresholdInFrames() + " кадров" : ""));
   }
   String micName() {
     try {
@@ -3265,6 +3329,7 @@ public class TranslatorService extends Service {
         .setBufferSizeInBytes(Math.max(min, rate * 4 * 3)).setTransferMode(AudioTrack.MODE_STREAM).build();
     for (AudioDeviceInfo d : getSystemService(AudioManager.class).getDevices(AudioManager.GET_DEVICES_OUTPUTS))
       if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { spkTrack.setPreferredDevice(d); break; }
+    startEarly(spkTrack, rate);
     spkTrack.play(); spkRate = rate;
     AudioDeviceInfo r = spkTrack.getRoutedDevice();
     log("🔉 вторая дорожка в динамик: " + (r == null ? "?" : "тип " + r.getType()) + (r != null && r.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? " — динамик" : " — НЕ динамик"));
@@ -3285,7 +3350,13 @@ public class TranslatorService extends Service {
     if (trackCh == 1) {
       float[] out = new float[n];
       for (int k = 0; k < n; k++) out[k] = clip(mono[k] * g);
-      synchronized (warmLock) { track.write(out, 0, n, AudioTrack.WRITE_BLOCKING); }
+      // Кусками по ~90 мс: перебивание обрывает запись между ними, а недописанное не звучит вовсе. Каждый кусок —
+      // и в кольцо сыгранного: по нему датчик знает, какое эхо ждать.
+      for (int o = 0; o < n && !bargeStop; o += 2048) {
+        int len = Math.min(2048, n - o);
+        refPut(out, o, len);
+        synchronized (warmLock) { track.write(out, o, len, AudioTrack.WRITE_BLOCKING); }
+      }
       return;
     }
     boolean left = "pt".equals(lang) == "pt-left".equals(split);   // pt-left: pt влево, ru вправо
@@ -3296,6 +3367,211 @@ public class TranslatorService extends Service {
     synchronized (warmLock) { track.write(out, 0, n * 2, AudioTrack.WRITE_BLOCKING); }
   }
   static float clip(double v) { return (float) (v > 0.99 ? 0.99 : v < -0.99 ? -0.99 : v); }
+
+  // ---------- Перебивание (BargeIn) ----------
+  // Человек заговорил поверх озвучки: датчик видит его по микрофону и по тому, что в тот же миг играло, озвучка
+  // приглушается, на приглушённом эхе человек виден ясно — озвучка смолкает, а слушание получает звук с полсекунды
+  // до подозрения (эхо в нём погашено по полосам). Не подтвердилось — громкость обратно. Только для динамика:
+  // в наушник микрофон и так не глушится. Замеры и пороги — results/2026-10-02-barge.md.
+  volatile boolean bargeOn = true;
+  /** Перебили: синтез и запись в дорожку прекращаются, недоигранное выбрасывается вместе с дорожкой. */
+  volatile boolean bargeStop = false;
+  /** Фраза отдаётся в дорожку (speakTurn/speakOut); датчику — что началась новая; выход — в динамик. */
+  volatile boolean writingSpeech = false, bargeNew = false, bargeForget = false, bargeSpk = false;
+  volatile int ttsVol = -1;
+  /** Поправка меток времени этого телефона, мс: часть буферов вывода и ввода метки не видят (Redmi — 78 мс).
+   *  Находится по самому эху (BargeIn.lag) и хранится; NaN — ещё не найдена, перебивание пока только учится. */
+  volatile double bargeOffMs = Double.NaN;
+  final BargeIn barge = new BargeIn();
+  /** Сыгранное — кольцо отсчётов 16 кГц по номеру кадра дорожки: пишет поток озвучки, читает поток захвата. */
+  final float[] refRing = new float[16000 * 8];
+  long refNext = 0, trackWritten = 0; float refLast = 0;
+  // дальше — только поток захвата
+  final float[] micRing = new float[16000 * 4];
+  long micEnd = 0, micBase = 0, bargeHop = 0, duckStart = -1, tsAt = 0, duckAtMs = 0, gainSavedAt = 0;
+  volatile long phraseAtMs = 0;
+  /** Номер отсчёта сыгранного (16 кГц) минус номер кадра записи — по меткам времени, без поправки телефона. */
+  double tsD = Double.NaN;
+  int bargeVol = -1, warmHops = 0, envN = 0;
+  final double[] envMic = new double[512], envRef = new double[512];
+  final ArrayList<Double> offEst = new ArrayList<>();
+  final AudioTimestamp bargeRts = new AudioTimestamp(), bargeAts = new AudioTimestamp();
+  final ExecutorService bargeExec = Executors.newSingleThreadExecutor();
+  /** Подпор до подозрения и затухание эха в комнате после остановки (−20 дБ за ~80 мс по концам фраз). */
+  static final int PRE_MS = 500, OPEN_MS = 120;
+  static final double[] QUIET = new double[BargeIn.NB];
+  static { Arrays.fill(QUIET, 1e-12); }
+
+  /** Порог старта дорожки. По умолчанию поток начинает играть, только когда буфер (3 с) заполнен целиком: фраза
+   *  короче молчала до прихода следующей (стенд эха 02.10 — фразы по 2,8 с не звучали все 3 с записи и прозвучали
+   *  вместе со следующей). 20 мс — играть сразу. До Android 12 порога нет. */
+  static void startEarly(AudioTrack t, int rate) {
+    if (Build.VERSION.SDK_INT >= 31) try { t.setStartThresholdInFrames(Math.max(1, rate / 50)); } catch (Throwable e) {}
+  }
+  /** Начало фразы в дорожку (под замком tts): перебитую прежнюю — выбросить; громкость полная; датчику — новая фраза. */
+  void phraseBegin(int rate) {
+    if (bargeStop) hush();
+    ensureTrack(rate);
+    try { track.setVolume(1f); } catch (Throwable e) {}
+    try { ttsVol = getSystemService(AudioManager.class).getStreamVolume(AudioManager.STREAM_MUSIC); } catch (Throwable e) {}
+    bargeSpk = trackCh == 1 && !"device".equals(split) && !btDuplex();
+    writingSpeech = true; bargeNew = true;
+  }
+  /** Первый кусок фразы ушёл в дорожку — метка для стенда (test_barge_device.sh). */
+  void phraseSounds(String lang) { phraseAtMs = System.currentTimeMillis(); tsv("say_begin", lang); }
+  /** Конец фразы (под замком tts, в finally): true — её перебили, дорожка выброшена. */
+  boolean phraseEnd() {
+    writingSpeech = false;
+    if (!bargeStop) return false;
+    hush(); return true;
+  }
+  /** Недоигранное — вместе с дорожкой: у новой счёт кадров с нуля, к нему привязано кольцо сыгранного. Под tts. */
+  void hush() {
+    AudioTrack t = track; track = null; trackRate = 0;
+    if (t != null) try { t.pause(); t.flush(); t.release(); } catch (Throwable e) {}
+    bargeStop = false;
+  }
+  /** Сыгранное — в кольцо 16 кГц по номеру кадра дорожки (линейная интерполяция из частоты синтеза). */
+  void refPut(float[] x, int o, int n) {
+    if (n <= 0 || trackRate <= 0) return;
+    synchronized (refRing) {
+      double step = trackRate / 16000.0;
+      long w0 = trackWritten;
+      while (true) {
+        double pos = refNext * step - w0;
+        if (pos > n - 1) break;
+        if (pos < -1) { refNext = (long) Math.ceil((w0 - 1) / step); continue; }
+        int i = (int) Math.floor(pos); double f = pos - i;
+        float a = i < 0 ? refLast : x[o + i], b = x[o + Math.min(n - 1, i + 1)];
+        refRing[(int) (refNext % refRing.length)] = (float) (a + (b - a) * f);
+        refNext++;
+      }
+      refLast = x[o + n - 1]; trackWritten += n;
+    }
+  }
+  float[] refSlice(long j, int n) {
+    float[] y = new float[n];
+    synchronized (refRing) {
+      for (int k = 0; k < n; k++) { long q = j + k; if (q >= 0 && q < refNext && refNext - q <= refRing.length) y[k] = refRing[(int) (q % refRing.length)]; }
+    }
+    return y;
+  }
+  float[] micSlice(long j, int n) {
+    float[] y = new float[n];
+    for (int k = 0; k < n; k++) { long q = j + k; if (q >= 0 && q < micEnd && micEnd - q <= micRing.length) y[k] = micRing[(int) (q % micRing.length)]; }
+    return y;
+  }
+
+  /** Каждый кадр слушания, заглушённый тоже (поток захвата). true — кадр уже отдан нарезке вместе с подпором. */
+  boolean bargeFrame(AudioRecord rec, float[] win, int n) {
+    // Кольцо идёт только по кадрам слушания, запись — по всем (удержание FALAR, чтение вслух, новая запись с нуля):
+    // номер кадра записи = номер в кольце − micBase, пересчитывается на каждом кадре.
+    micBase = micEnd - (samplesRead - n);
+    for (int k = 0; k < n; k++) micRing[(int) ((micEnd + k) % micRing.length)] = win[k];
+    micEnd += n;
+    long nowMs = System.currentTimeMillis();
+    if (bargeForget) { bargeForget = false; Arrays.fill(barge.g, 0); warmHops = 0; offEst.clear(); envN = 0; }
+    if (bargeNew) {
+      bargeNew = false; barge.reset(); duckStart = -1; envN = 0; tsD = Double.NaN; tsAt = 0;
+      if (ttsVol != bargeVol) loadGain(ttsVol); else if (nowMs - gainSavedAt > 30000) saveGain();
+    }
+    AudioTrack tr = track;
+    boolean playing = bargeSpk && tr != null && (writingSpeech || nowMs < playEndMs + 300);
+    // метки времени — раз в 50 мс, пока дорожка играет: «кадр N снят / прозвучал в момент T»
+    if (playing && System.nanoTime() - tsAt > 50_000_000L) {
+      tsAt = System.nanoTime();
+      try {
+        if (rec.getTimestamp(bargeRts, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS && tr.getTimestamp(bargeAts)
+            && bargeAts.framePosition > 0 && trackRate > 0)
+          tsD = bargeAts.framePosition * 16000.0 / trackRate - bargeRts.framePosition + (bargeRts.nanoTime - bargeAts.nanoTime) * 16e-6;
+      } catch (Throwable e) {}
+    }
+    boolean taken = false;
+    while (bargeHop + BargeIn.N <= micEnd) {
+      long h = bargeHop; bargeHop += BargeIn.HOP;
+      if (micEnd - h > micRing.length - 2048) continue;                 // отстали — не бывает, но кольцо конечно
+      double[] m = BargeIn.power(micSlice(h, BargeIn.N), 0);
+      boolean on = playing && !Double.isNaN(tsD);
+      if (!on && !"ducked".equals(barge.state)) {
+        if (!playing) barge.learn(m, QUIET);                            // между фразами — только фон
+        continue;                                                       // звучит, но меток ещё нет — эхо не фон, пропуск
+      }
+      double off = Double.isNaN(bargeOffMs) ? 0 : bargeOffMs;
+      long j = on ? Math.round(h - micBase + tsD - off * 16) : 0;
+      double[] r = on ? BargeIn.power(refSlice(j + BargeIn.HOP, BargeIn.N), 0) : QUIET;
+      if (on && envN < envMic.length && "listen".equals(barge.state)) {   // сверка времени по огибающим эха
+        double[] rc = BargeIn.power(refSlice(Math.round(h - micBase + tsD), BargeIn.N), 0); double sm = 0, sr = 0;
+        for (int b = 0; b < BargeIn.NB; b++) { sm += m[b]; sr += rc[b]; }
+        envMic[envN] = sm; envRef[envN] = sr; if (++envN == envMic.length) calibrate();
+      }
+      if (Double.isNaN(bargeOffMs)) continue;                           // время динамика ещё не сверено
+      if (warmHops < BargeIn.WARM) {
+        if (barge.learn(m, r) && ++warmHops == BargeIn.WARM) { saveGain(); log("🗣 перебивание готово: эхо при громкости " + bargeVol + " выучено"); }
+        continue;
+      }
+      int a = barge.frame(m, r, true);
+      if (a == BargeIn.DUCK) {
+        duckStart = h; duckAtMs = nowMs;
+        try { tr.setVolume((float) Math.pow(10, BargeIn.DUCK_DB / 20)); } catch (Throwable e) {}
+        log(String.format(Locale.ROOT, "🗣 похоже, перебивают (%d полос из %d, %.1f с от начала фразы) — озвучка тише",
+            Math.round(barge.score * BargeIn.NB), BargeIn.NB, (nowMs - phraseAtMs) / 1000.0));
+        tsv("barge", "duck", "" + (nowMs - phraseAtMs), f3(barge.score));
+      } else if (a == BargeIn.UNDUCK) {
+        try { if (tr != null) tr.setVolume(1f); } catch (Throwable e) {}
+        log("🗣 не подтвердилось — озвучка снова в полную громкость"); tsv("barge", "unduck", "" + (nowMs - phraseAtMs));
+      } else if (a == BargeIn.STOP) {
+        bargeStop = true;
+        try { if (tr != null) tr.setVolume(0f); } catch (Throwable e) {}
+        // подпор: от PRE_MS до подозрения; пока приглушение ещё не слышно (+ OPEN_MS на затухание) — с погашенным эхом
+        long from = Math.max(micEnd - micRing.length + 2048, duckStart + BargeIn.N - PRE_MS * 16L);
+        int len = (int) (micEnd - from), upto = (int) (duckStart + BargeIn.N + (BargeIn.STOP_MS + OPEN_MS) * 16L - from);
+        float[] y = BargeIn.gate(micSlice(from, len), refSlice(Math.round(from - micBase + (Double.isNaN(tsD) ? 0 : tsD) - off * 16), len), barge.g, upto);
+        for (int o = 0; o < len; o += 512) if (!capQ.offer(Arrays.copyOfRange(y, o, Math.min(len, o + 512)))) framesDropped++;
+        taken = true;
+        muteUntil = nowMs; playEndMs = nowMs; spokenPtEnd = Math.min(spokenPtEnd, nowMs);
+        bargeExec.submit(() -> { synchronized (tts) { if (bargeStop && !writingSpeech) hush(); } });
+        log(String.format(Locale.ROOT, "🗣 перебили — озвучка смолкла: человек замечен через %.1f с от начала фразы, подтверждён за %d мс · голос %.0f дБ · слушанию отдано %.1f с",
+            (duckAtMs - phraseAtMs) / 1000.0, nowMs - duckAtMs, barge.lev, len / 16000.0));
+        tsv("barge", "stop", "" + (duckAtMs - phraseAtMs), "" + (nowMs - duckAtMs), f1(barge.lev), f3(len / 16000.0));
+      }
+    }
+    if (!playing && envN >= 120) calibrate();                            // фраза кончилась — сверить по тому, что набрали
+    return taken;
+  }
+  /** Поправка меток времени — по огибающим эха одной фразы; принимается, когда две-три фразы сошлись. */
+  void calibrate() {
+    int n = envN; envN = 0;
+    double[] l = BargeIn.lag(envMic, envRef, n, 24);
+    if (Double.isNaN(l[0]) || l[1] < 0.5) return;
+    offEst.add(l[0] * BargeIn.HOP / 16.0);
+    while (offEst.size() > 7) offEst.remove(0);
+    ArrayList<Double> c = new ArrayList<>(offEst); Collections.sort(c);
+    double med = c.get(c.size() / 2);
+    boolean first = Double.isNaN(bargeOffMs);
+    if (first ? c.size() >= 2 && c.get(c.size() - 1) - c.get(0) < 15 : Math.abs(med - bargeOffMs) > 5) {
+      bargeOffMs = med;
+      getSharedPreferences("at", MODE_PRIVATE).edit().putFloat("barge_off", (float) med).apply();
+      log(String.format(Locale.ROOT, "🗣 перебивание: время динамика сверено по эху — поправка %.0f мс (сходство %.2f, фраз %d)", med, l[1], c.size()));
+    }
+  }
+  /** Усиление тракта «динамик → микрофон» хранится по громкости: своё у каждой ступени. */
+  void loadGain(int vol) {
+    if (bargeVol >= 0) saveGain();
+    bargeVol = vol;
+    android.content.SharedPreferences pr = getSharedPreferences("at", MODE_PRIVATE);
+    String gs = pr.getString("barge_g_" + vol, null);
+    if (gs == null) { warmHops = 0; return; }                          // учиться заново — от выученного для прежней громкости
+    String[] p = gs.split(",");
+    for (int b = 0; b < BargeIn.NB && b < p.length; b++) try { barge.g[b] = Double.parseDouble(p[b]); } catch (NumberFormatException e) {}
+    warmHops = pr.getInt("barge_warm_" + vol, 0);
+  }
+  void saveGain() {
+    if (bargeVol < 0) return;
+    gainSavedAt = System.currentTimeMillis();
+    StringBuilder b = new StringBuilder();
+    for (double v : barge.g) b.append(b.length() > 0 ? "," : "").append(String.format(Locale.ROOT, "%.3f", v));
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString("barge_g_" + bargeVol, b.toString()).putInt("barge_warm_" + bargeVol, warmHops).apply();
+  }
 
   /** Имя устройства вывода. Наушник против динамика решает, можно ли слушать во время озвучки. */
   String outName() {

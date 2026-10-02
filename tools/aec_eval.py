@@ -148,7 +148,7 @@ def near(d, meta, ref16):
     print('| запись | озвучка | его слов распознано | слов озвучки в распознанном | уровень записи, dBFS |')
     print('|---|---|---|---|---|')
     agg = {}
-    for cfg, clip, _ in rows:
+    for cfg, clip, *_ in rows:
         p = os.path.join(d, f'aec_{cfg}.wav')
         if not os.path.exists(p) or cfg not in meta:
             continue

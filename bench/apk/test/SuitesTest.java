@@ -22,5 +22,6 @@ public class SuitesTest {
   @Test void screen() { assertEquals(0, ScreenTest.run()); }
   @Test void voices() throws Exception { assertEquals(0, VoicesTest.run()); }
   @Test void fbank() throws Exception { assertEquals(0, FbankTest.run(System.getProperty("falar.vpgold", "/нет"), new java.io.File(System.getProperty("falar.root", ".")))); }
+  @Test void bargeIn() throws Exception { assertEquals(0, BargeInTest.run(new java.io.File(System.getProperty("falar.bargegold", "../../bench/apk/test")))); }
   @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
 }

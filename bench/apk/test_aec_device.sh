@@ -2,12 +2,14 @@
 # Эхо озвучки в микрофоне телефона: сколько его остаётся при разных настройках записи.
 #
 #   bash bench/apk/test_aec_device.sh [vr,vr_aec,vc,vc_aec]      # INSTALL=1 — сначала поставить сборку
+#   NEAR=1 VOL=15 bash bench/apk/test_aec_device.sh vr_e1,vr_d1,vr_q1,…   # для перебивания (tools/barge_eval.py)
 #
-# Телефон говорит одну фразу через динамик и сам себя пишет — по конфигурации за раз (--es aectest,
+# Телефон говорит фразу через динамик и сам себя пишет — по конфигурации за раз (--es aectest,
 # TranslatorService.aecStand): vr — источник VOICE_RECOGNITION, как у приложения; vc — VOICE_COMMUNICATION;
-# _aec — со встроенным эхоподавителем Android на сессии записи. Режим звука и маршрут не трогаются;
+# _aec — со встроенным эхоподавителем Android на сессии записи; _e<k> / _d<k> / _q<k> — фраза k: только эхо,
+# человек из колонок ПК поверх неё (NEAR=1), только человек. Режим звука и маршрут не трогаются;
 # VOICE_COMMUNICATION при подключённом Bluetooth пропускается (§5 плана). Записи и что играли —
-# в ~/.cache/falar-stand/aec-<время>/, на телефоне удаляются; разбор — tools/aec_eval.py.
+# в ~/.cache/falar-stand/aec-<время>/, на телефоне удаляются; разбор — tools/aec_eval.py, tools/barge_eval.py.
 #
 # Только на свободный телефон: экран погашен или впереди Falar/рабочий стол, экрана не касались 3 минуты,
 # журнал Falar молчит 3 минуты и владелец не слушает. Замок общий с test_all_device.sh.
@@ -69,9 +71,10 @@ sh "cmd media_session volume --stream 3 --set ${VOL:-10}" >/dev/null; say "  г�
 m=$(mark); $ADB shell "am start -n $ACT" >/dev/null 2>&1
 wl "$m" '🧩 модули:' 150 >/dev/null; sleep 3
 m=$(mark)
-# NEAR=1 — «человек» из колонок ПК: на каждую метку стенда («играю …» или «тишина …») через 1 с колонки
-# говорят следующую живую фразу из корпуса; микрофон ПК пишет всё (по нему видно, не тише ли сама
-# озвучка телефона в другом режиме записи). Какие фразы и когда — в near.tsv.
+# NEAR=1 — «человек» из колонок ПК: на каждую метку стенда «играю …» или «тишина …» колонки говорят
+# следующую живую фразу из корпуса — в тишине через 1 с, поверх озвучки через случайные 0,4–2,4 с (человек
+# вступает в разные места фразы); на «эхо …» молчат. Микрофон ПК пишет всё (по нему видно, не тише ли сама
+# озвучка телефона в другом режиме записи). Какие фразы, когда и через сколько — в near.tsv.
 if [ "${NEAR:-0}" = 1 ]; then
   PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3
   "$PY" - "$R" "$OUT" <<'EOF'
@@ -96,17 +99,18 @@ EOF
       seen=$((seen + ${l%%:*})); case "$l" in *готово*) break;; esac
       cfg=$(printf '%s' "$l" | sed -n 's/.*: \(играю\|тишина\) \([a-z_0-9]*\).*/\2/p')
       clip=$(sed -n "$((k % 40 + 1))p" "$OUT/near-list.txt"); k=$((k+1))
-      sleep 1.0
-      printf '%s\t%s\t%s\n' "$cfg" "$clip" "$(date +%s%3N)" >> "$OUT/near.tsv"
+      case "$l" in *играю*) dly=$(LC_ALL=C awk -v s="$RANDOM" 'BEGIN { srand(s); printf "%.1f", 0.4 + 2.0 * rand() }');; *) dly=1.0;; esac
+      sleep "$dly"
+      printf '%s\t%s\t%s\t%s\n' "$cfg" "$clip" "$(date +%s%3N)" "$dly" >> "$OUT/near.tsv"
       pw-play "$clip.wav" 2>/dev/null
     done
   ) & PLAYER=$!
 fi
 $ADB shell "am start -n $ACT --es aectest $CFGS" >/dev/null 2>&1
-wl "$m" '🔁 эхо-стенд: (готово|ошибка|движок)' 300 >/dev/null
+wl "$m" '🔁 эхо-стенд: (готово|ошибка|движок)' $(( $(printf '%s\n' "$CFGS" | tr ',' '\n' | grep -c .) * 20 + 120 )) >/dev/null
 if [ -n "$PLAYER" ]; then sleep 1; kill $PLAYER 2>/dev/null; kill -INT $PCREC 2>/dev/null; wait $PCREC 2>/dev/null; fi
 sh "tail -n +$((m+1)) $LOG" | grep '🔁' | tee "$OUT/log.txt" | sed 's/^/  /'
-for f in aec.json aec_ref.wav $(printf '%s\n' "$CFGS" | tr ',' '\n' | sed 's/^/aec_/; s/$/.wav/'); do
-  $ADB pull "$F/$f" "$OUT/" >/dev/null 2>&1 && $ADB shell "rm -f $F/$f"
+for f in aec.json $(sh "ls $F" | grep -E '^aec_.*\.wav$'); do
+  $ADB pull "$F/$f" "$OUT/" >/dev/null 2>&1 && $ADB shell "rm -f $F/$f" < /dev/null
 done
 ls "$OUT" | tr '\n' ' '; say; say "записи: $OUT"
