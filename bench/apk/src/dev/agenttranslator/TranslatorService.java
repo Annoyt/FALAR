@@ -3568,7 +3568,7 @@ public class TranslatorService extends Service {
   final AudioTimestamp bargeRts = new AudioTimestamp(), bargeAts = new AudioTimestamp();
   final ExecutorService bargeExec = Executors.newSingleThreadExecutor();
   // проверка голоса перебившего — только поток захвата
-  boolean verifying = false; long verifyFrom = 0, verifyAtMs = 0; int verifyStep = 0, verifyVoiced = 0, verifyHops = 0;
+  boolean verifying = false, verifyLast = false; long verifyFrom = 0, verifyAtMs = 0; int verifyStep = 0, verifyVoiced = 0, verifyHops = 0, verifyQuiet = 0;
   java.util.concurrent.Future<float[]> verifyPrint;
   final ArrayList<float[]> verifyAudio = new ArrayList<>();
   /** Подпор до подозрения и затухание эха в комнате после остановки (−20 дБ за ~80 мс по концам фраз). */
@@ -3742,7 +3742,7 @@ public class TranslatorService extends Service {
         // обрывает, она продолжится с того же места (владелец 02.10: «чтобы чужие голоса не глушили озвучку»).
         if (voicesOn()) {
           verifying = true; verifyFrom = duckStart + BargeIn.N + BargeIn.STOP_MS * 16L; verifyStep = 1; verifyPrint = null;
-          verifyAudio.clear(); verifyVoiced = 0; verifyHops = 0; verifyAtMs = nowMs;
+          verifyAudio.clear(); verifyVoiced = 0; verifyHops = 0; verifyQuiet = 0; verifyAtMs = nowMs;
           log("🗣 на паузе человек — сверяю голос с голосами разговора");
         } else taken = bargeCut(tr, nowMs, off, null);
         continue;
@@ -3772,17 +3772,20 @@ public class TranslatorService extends Service {
   }
   /** Чей голос перебил: звук после того, как пауза дошла до микрофона (эха в нём нет), только кадры громче
    *  фона; отпечаток — на фоне, как у слушания. Свой — озвучка смолкает; чужой, или речи так и не набралось, —
-   *  продолжается с того же места, и до конца фразы датчик больше не решает. */
+   *  продолжается с того же места, и до конца фразы датчик больше не решает. Человек замолчал (BargeIn.QUIET_S
+   *  без речи) — решается по тому, что есть: озвучка не стоит на паузе зря до VERIFY_MAX_S. */
   boolean verifyHop(long h, double[] m, AudioTrack tr, long nowMs) {
     if (h + BargeIn.N <= verifyFrom) return false;
     verifyHops++;
     double ms = 0, ns = 0; for (int b = 0; b < BargeIn.NB; b++) { ms += m[b]; ns += barge.noise == null ? 0 : barge.noise[b]; }
-    if (ms > 4 * ns) { verifyAudio.add(micSlice(h + BargeIn.N - BargeIn.HOP, BargeIn.HOP)); verifyVoiced++; }
+    if (ms > 4 * ns) { verifyAudio.add(micSlice(h + BargeIn.N - BargeIn.HOP, BargeIn.HOP)); verifyVoiced++; verifyQuiet = 0; } else verifyQuiet++;
     double voiced = verifyVoiced * BargeIn.HOP / 16000.0, total = verifyHops * BargeIn.HOP / 16000.0;
+    boolean done = total >= BargeIn.VERIFY_MAX_S || verifyQuiet * BargeIn.HOP >= BargeIn.QUIET_S * 16000;
     if (verifyPrint == null) {
-      boolean enough = voiced >= (verifyStep == 1 ? BargeIn.VERIFY1_S : BargeIn.VERIFY2_S);
-      if (!enough && total < BargeIn.VERIFY_MAX_S) return false;
+      boolean enough = voiced >= BargeIn.VERIFY_S[verifyStep - 1];
+      if (!enough && !done) return false;
       if (voiced < Speaker.MIN_SECONDS) { resumeAfterVerify(tr, nowMs, String.format(Locale.ROOT, "речи на паузе мало (%.1f с)", voiced), Float.NaN, Float.NaN); return false; }
+      verifyLast = done || verifyStep == BargeIn.VERIFY_S.length;
       float[] x = new float[verifyAudio.size() * BargeIn.HOP]; int o = 0;
       for (float[] c : verifyAudio) { System.arraycopy(c, 0, x, o, c.length); o += c.length; }
       final Speaker sp = spk;
@@ -3799,13 +3802,16 @@ public class TranslatorService extends Service {
     float[] e = null; try { e = verifyPrint.get(); } catch (Exception ignore) {}
     verifyPrint = null;
     Voices.Match mt = chats.voices.best(e, true);
-    int w = BargeIn.whose(e != null && mt.hit(), mt.score, mt.thr, verifyStep == 2);
+    int w = BargeIn.whose(e != null && mt.hit(), mt.score, mt.thr, verifyLast || total >= BargeIn.VERIFY_MAX_S);
     if (w > 0) {
       verifying = false;
       return bargeCut(tr, nowMs, Double.isNaN(bargeOffMs) ? 0 : bargeOffMs, String.format(Locale.ROOT, "«%s» (%.2f, нужно %.2f)", Voices.label(mt.v), mt.score, mt.thr));
     }
     if (w < 0) { resumeAfterVerify(tr, nowMs, e == null ? "отпечаток не посчитался" : String.format(Locale.ROOT, "чужой голос: ближе всех «%s» — %.2f, нужно %.2f", Voices.label(mt.v), mt.score, mt.thr), mt.score, mt.thr); return false; }
-    verifyStep = 2;                                                    // неясно — дослушать ещё
+    // неясно — дослушать ещё; в журнал — с чем ушли на следующую ступень (разбор прогонов стенда)
+    log(String.format(Locale.ROOT, "🗣 голос на паузе: ближе всех «%s» — %.2f, нужно %.2f (речи %.1f с) — дослушиваю",
+        Voices.label(mt.v), mt.score, mt.thr, BargeIn.VERIFY_S[verifyStep - 1]));
+    verifyStep++;
     return false;
   }
   void resumeAfterVerify(AudioTrack tr, long nowMs, String why, float score, float thr) {

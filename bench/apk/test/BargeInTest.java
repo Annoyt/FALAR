@@ -54,12 +54,16 @@ public class BargeInTest {
     ok(a.size() >= 2 && a.get(0)[1] == BargeIn.HOLD && a.get(1)[1] == BargeIn.STOP && a.get(0)[0] * BargeIn.HOP >= 40000 - BargeIn.N,
         "E3 человек поверх эха — пауза, потом замолчать, не раньше человека: " + str(a));
 
-    // чей голос на паузе: свой — смолкнуть; явно чужой — сразу продолжить; рядом с порогом — дослушать, а дослушанное
-    // неясное — тоже чужое; без голосов разговора (порога нет) — чужое
+    // чей голос на паузе: свой — смолкнуть; явно чужой — сразу продолжить; ниже порога, но не явно — дослушать, а
+    // дослушанное неясное — тоже чужое; без голосов разговора (порога нет) — чужое
     ok(BargeIn.whose(true, 0.45f, 0.40f, false) == 1 && BargeIn.whose(true, 0.41f, 0.40f, true) == 1, "W1 голос разговора — озвучке смолкнуть");
-    ok(BargeIn.whose(false, 0.15f, 0.40f, false) == -1, "W2 явно чужой — продолжить сразу, не дослушивая");
+    ok(BargeIn.whose(false, 0.05f, 0.40f, false) == -1 && BargeIn.whose(false, BargeIn.LOW - 0.01f, 0.40f, false) == -1, "W2 явно чужой — продолжить сразу, не дослушивая");
     ok(BargeIn.whose(false, 0.33f, 0.40f, false) == 0 && BargeIn.whose(false, 0.33f, 0.40f, true) == -1, "W3 рядом с порогом — дослушать; дослушано и не дотянул — чужой");
+    // своя речь по 1 с дальнего звука — медиана 0,33, у 5 % ниже 0,14: на первой секунде такие не отбрасываются
+    ok(BargeIn.whose(false, 0.15f, 0.40f, false) == 0 && BargeIn.whose(false, BargeIn.LOW, 0.40f, false) == 0, "W5 далеко от порога, но не явно чужой — дослушать");
     ok(BargeIn.whose(false, 0f, Float.NaN, false) == -1, "W4 нет голосов — чужой");
+    ok(BargeIn.VERIFY_S.length >= 2 && BargeIn.VERIFY_S[BargeIn.VERIFY_S.length - 1] <= BargeIn.VERIFY_MAX_S, "W6 ступени сверки растут и укладываются в предел паузы");
+    for (int i = 1; i < BargeIn.VERIFY_S.length; i++) ok(BargeIn.VERIFY_S[i] > BargeIn.VERIFY_S[i - 1], "W6 ступень " + i + " длиннее прежней");
 
     // эталон tools/barge_eval.py
     File gj = new File(dir, "barge_golden.json");

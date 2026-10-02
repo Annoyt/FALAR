@@ -207,7 +207,7 @@ for lang in ('pt', 'ru'):
                 cl.append(f'{d}/{f[:-4]}')
 rnd.shuffle(cl)
 open(f'{D}/human.txt', 'w', encoding='utf-8').write('\n'.join(cl[:16]) + '\n')
-# B5/B6: собеседник — диктор alexmarcelo (pt), чужой — Silfarle (pt); фразы 2–4,5 с
+# B5/B6: собеседник — диктор alexmarcelo (pt), чужой — Silfarle (pt); фразы 1,9–4,5 с
 import bz2, shutil
 idx = {}
 with bz2.open(f'{R}/data/tatoeba/raw/por_sentences_with_audio.tsv.bz2', 'rt', encoding='utf-8') as f:
@@ -226,7 +226,29 @@ def who(user):
     return sorted(out)
 A = who('alexmarcelo'); C = who('Silfarle')
 for i in (0, 1): shutil.copy(A[i][0] + '.wav', f'{D}/bv_A{i + 1}.wav')        # фраза кнопкой — чистый звук, как у телефона в руке
-trialA = [p for p, s in A[2:] if 2.0 <= s <= 4.5][:4]; trialC = [p for p, s in C if 2.0 <= s <= 4.5][:4]
+# Оба — одной громкости, как «человек» B3. Записи alexmarcelo в корпусе на 12 дБ тише остальных (речь −30 dBFS
+# против −18): «собеседник» доходил до телефона вровень с фоном комнаты, и голос по такому звуку не узнаётся
+# (прогон 02.10: свой 0,04–0,36 при пороге 0,40). Речь — кадры 20 мс не тише громкого на 30 дБ — к −18 dBFS
+# (медиана корпуса), копии — в папку прогона. Записи Silfarle сведены по пику к −1 dBFS, и речь у части из них
+# тише −18 — такие без перегруза не поднять, берутся те, что поднимаются.
+import numpy as np
+def pcm(src):
+    with wave.open(src + '.wav') as w:
+        return w.getparams(), np.frombuffer(w.readframes(w.getnframes()), dtype='<i2').astype(np.float64) / 32768
+def gain(x):
+    e = np.array([np.mean(x[i:i + 320] ** 2) for i in range(0, len(x) - 320, 160)]) + 1e-12
+    sp = 10 * np.log10(e[e > e.max() / 1000].mean())
+    return sp, min(10 ** ((-18 - sp) / 20), 10 ** (-1 / 20) / (np.abs(x).max() + 1e-9))
+def level(src, dst):
+    pr, x = pcm(src); sp, g = gain(x)
+    with wave.open(dst + '.wav', 'wb') as w:
+        w.setparams(pr); w.writeframes(np.round(np.clip(x * g, -1, 32767 / 32768) * 32768).astype('<i2').tobytes())
+    print(f'  {os.path.basename(src)}: речь {sp:.1f} → {sp + 20 * np.log10(g):.1f} dBFS', file=sys.stderr)
+    return dst
+def loud(p):
+    sp, g = gain(pcm(p)[1]); return sp + 20 * np.log10(g) > -18.1
+trialA = [p for p, s in A[2:] if 1.9 <= s <= 4.5 and loud(p)][:4]; trialC = [p for p, s in C if 1.9 <= s <= 4.5 and loud(p)][:4]
+trialA = [level(p, f'{D}/va_{i}') for i, p in enumerate(trialA)]; trialC = [level(p, f'{D}/vc_{i}') for i, p in enumerate(trialC)]
 open(f'{D}/voice_a.txt', 'w').write('\n'.join(trialA) + '\n'); open(f'{D}/voice_c.txt', 'w').write('\n'.join(trialC) + '\n')
 EOF
 mapfile -t SAY < "$D/say.txt"; mapfile -t HUM < "$D/human.txt"; mapfile -t VA < "$D/voice_a.txt"; mapfile -t VC < "$D/voice_c.txt"
@@ -380,7 +402,7 @@ if ! wl "$m" '🎤 отпечаток голоса (готов|подключё�
   mkdir -p "$STATE/barge-last"; cp "$D"/log_b5.txt "$D"/log_b6.txt "$STATE/barge-last/" 2>/dev/null
   if [ "${DUMPV:-0}" = 1 ]; then rm -rf "$STATE/barge-dump"; mkdir -p "$STATE/barge-dump"
     for f in $(sh "ls $F" | grep -E '^barge_[0-9]+'); do $ADB pull "$F/$f" "$STATE/barge-dump/" >/dev/null 2>&1 && $ADB shell "rm -f $F/$f" < /dev/null; done
-    cp "$D/voice_a.txt" "$D/voice_c.txt" "$D/bv_A1.wav" "$D/bv_A2.wav" "$STATE/barge-dump/" 2>/dev/null; say "  звук сверки: $(ls "$STATE/barge-dump" | wc -l) файлов в $STATE/barge-dump"; fi
+    cp "$D/voice_a.txt" "$D/voice_c.txt" "$D/bv_A1.wav" "$D/bv_A2.wav" "$D"/va_*.wav "$D"/vc_*.wav "$STATE/barge-dump/" 2>/dev/null; say "  звук сверки: $(ls "$STATE/barge-dump" | wc -l) файлов в $STATE/barge-dump"; fi
 fi
 # Падения за прогон
 cr=$(sh "logcat -d -b crash -T '$T0'" | grep -c "Process: $PKG")
