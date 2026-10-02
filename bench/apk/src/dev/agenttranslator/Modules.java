@@ -20,8 +20,17 @@ public final class Modules {
   private Modules() {}
 
   public static final String BASE = "base", TTS = "tts", OCR = "ocr", LLM = "llm", CLOUD = "cloud", SPEAKER = "speaker", CORPUS = "corpus";
+  /** Шумоподавление нарезки (DenoiseGate): модель в самом APK, качать нечего. */
+  public static final String DENOISE = "denoise";
   /** Выбираемые модули в порядке показа. */
-  public static final List<String> CHOICE = Collections.unmodifiableList(Arrays.asList(TTS, OCR, LLM, CLOUD, SPEAKER, CORPUS));
+  public static final List<String> CHOICE = Collections.unmodifiableList(Arrays.asList(TTS, OCR, LLM, CLOUD, SPEAKER, DENOISE, CORPUS));
+  /** Модули, появившиеся после того, как выбор уже сохраняли, и включённые по умолчанию: у
+   *  обновившегося они включаются сами (withNew). */
+  static final List<String> NEW_ON = Collections.unmodifiableList(Arrays.asList(DENOISE));
+  /** Какие модули знали версии, сохранявшие выбор без списка известных (до шумоподавления). */
+  static final Set<String> KNOWN_BEFORE = Collections.unmodifiableSet(new LinkedHashSet<>(Arrays.asList(TTS, OCR, LLM, CLOUD, SPEAKER, CORPUS)));
+  /** Размер модели шумоподавления в APK (assets/gtcrn_simple.onnx) — для строки модуля. */
+  public static final long DENOISE_BYTES = 535_638;
   /** Память, с которой уточнитель отмечен по умолчанию. Телефон «на 8 ГБ» отдаёт системе около
    *  7,4 ГБ (Redmi Note 10 Pro), «на 6 ГБ» — около 5,6. Порог между ними. На 8 ГБ уточнитель
    *  рядом с приложением помещается впритык (results/2026-09-28-memory.md), на 6 ГБ — нет. */
@@ -35,6 +44,7 @@ public final class Modules {
       case LLM: return "🧠 Уточнитель перевода";
       case CLOUD: return "☁ Облако";
       case SPEAKER: return "🎤 Отпечаток голоса";
+      case DENOISE: return "🔉 Шумоподавление";
       case CORPUS: return "📚 Корпус фраз";
       default: return m;
     }
@@ -49,6 +59,7 @@ public final class Modules {
       case LLM: return "переводит заново с учётом разговора: род, отсылки, термины; нужен сильный телефон";
       case CLOUD: return "пересмотр разговора бесплатными моделями OpenRouter, названия разговоров; нужен ключ";
       case SPEAKER: return "узнаёт, кто говорит: авто-направление и разделение говорящих";
+      case DENOISE: return "в шумном месте теряется меньше фраз; работает само, только когда вокруг шумно";
       case CORPUS: return "190 тыс. готовых пар фраз из Tatoeba: частые фразы переводятся мгновенно";
       default: return "";
     }
@@ -56,7 +67,7 @@ public final class Modules {
 
   /** Выбор по умолчанию для новой установки: ram — вся память телефона, байт. */
   public static Set<String> defaults(long ram) {
-    Set<String> s = new LinkedHashSet<>(Arrays.asList(TTS, OCR, CORPUS));
+    Set<String> s = new LinkedHashSet<>(Arrays.asList(TTS, OCR, DENOISE, CORPUS));
     if (ram >= LLM_RAM) s.add(LLM);
     return s;
   }
@@ -68,7 +79,19 @@ public final class Modules {
     Set<String> s = new LinkedHashSet<>();
     for (String m : CHOICE) if (installed.contains(m) && !m.equals(CLOUD)) s.add(m);
     s.add(OCR);
+    s.addAll(NEW_ON);
     if (cloudKey) s.add(CLOUD);
+    return s;
+  }
+
+  /** Выбор, сохранённый до появления нового модуля, плюс сам модуль, если он включён по умолчанию
+   *  (NEW_ON): иначе у обновившегося новая возможность оказалась бы выключенной без его выбора —
+   *  так в 0.25 включили чтение снимков. known — модули, известные версии, сохранившей выбор
+   *  (null — версия не записывала их: всё до шумоподавления). Выключенное потом самим человеком не
+   *  включается: он сохранял выбор, уже зная о модуле. */
+  public static Set<String> withNew(Set<String> saved, Set<String> known) {
+    Set<String> k = known != null ? known : KNOWN_BEFORE, s = new LinkedHashSet<>(saved);
+    for (String m : NEW_ON) if (!k.contains(m)) s.add(m);
     return s;
   }
 

@@ -207,8 +207,17 @@ public class TranslatorService extends Service {
     try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
     catch (Throwable t) { Log.e(TAG, "manifest", t); status("Ошибка манифеста моделей: " + t); return; }
     // Модули: выбор человека; до выбора (новая установка) — по умолчанию под этот телефон.
-    String saved = getSharedPreferences("at", MODE_PRIVATE).getString(PREF_MODULES, null);
+    SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    String saved = sp.getString(PREF_MODULES, null);
     modules = saved != null ? Modules.parse(saved) : Modules.defaults(totalRam());
+    if (saved != null) {
+      // Новый модуль, включённый по умолчанию (шумоподавление), у обновившегося включается сам —
+      // выбор сохраняли, когда его ещё не было (Modules.withNew).
+      Set<String> known = sp.contains(PREF_KNOWN) ? Modules.parse(sp.getString(PREF_KNOWN, "")) : null, was = modules;
+      modules = Modules.withNew(was, known);
+      if (known == null || !modules.equals(was)) sp.edit().putString(PREF_MODULES, Modules.join(modules)).putString(PREF_KNOWN, String.join(",", Modules.CHOICE)).apply();
+      for (String m : modules) if (!was.contains(m)) log("🧩 новый модуль включён: " + Modules.title(m) + " — выключить можно в «Модули и файлы»");
+    }
     modulesChosen = saved != null; store.modules = modules;
     worker.submit(this::boot);
   }
@@ -1065,6 +1074,7 @@ public class TranslatorService extends Service {
   volatile String vadDn = "auto"; volatile double vadDnGate = DenoiseGate.DEFAULT_T;
   String vadDnLine() {
     String m = vadDn;
+    if (m.equals("auto") && !mod(Modules.DENOISE)) return "🔇 нарезка по исходному звуку: модуль «Шумоподавление» выключен";
     return "🔇 нарезка " + (m.equals("raw") ? "по исходному звуку" : m.equals("auto")
         ? String.format(Locale.ROOT, "по очищенному только при шуме: фон не ниже %.0f dBFS (распознавание — по исходному)", vadDnGate)
         : "по очищенному: " + m + " (распознавание — по исходному)");
@@ -1107,6 +1117,8 @@ public class TranslatorService extends Service {
   // ---------- модули ----------
 
   static final String PREF_MODULES = "modules";
+  /** Какие модули знала версия, сохранившая выбор: по нему новый модуль включается у обновившегося один раз. */
+  static final String PREF_KNOWN = "modules_known";
   /** Включённые модули (Modules). Выбор человека при установке или в «Системе» → «Модули». */
   public volatile Set<String> modules = new LinkedHashSet<>();
   /** Выбор уже сделан (или взят «как было» у обновившегося); до него — умолчания под телефон. */
@@ -1135,7 +1147,7 @@ public class TranslatorService extends Service {
   }
   void setModules(Set<String> s, String why) {
     modules = new LinkedHashSet<>(s); store.modules = modules; modulesChosen = true; autoFetchTried = false;
-    getSharedPreferences("at", MODE_PRIVATE).edit().putString(PREF_MODULES, Modules.join(modules)).apply();
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString(PREF_MODULES, Modules.join(modules)).putString(PREF_KNOWN, String.join(",", Modules.CHOICE)).apply();
     log("🧩 модули (" + why + "): " + modulesLine());
     worker.submit(store::summarize);                   // сверка может читать файлы — не на экранном потоке
   }
@@ -1178,6 +1190,7 @@ public class TranslatorService extends Service {
       case Modules.TTS: if (!eng.hasTts() && eng.loadTts()) log("🔊 озвучка подключена"); break;
       case Modules.SPEAKER: if (spk == null || !spk.ready) { spk = new Speaker(modelsDir, true); if (spk.ready) log("🎤 отпечаток голоса подключён: " + spk.describe()); } break;
       case Modules.CORPUS: if (pb != null && pb.minedCount == 0 && new File(modelsDir, "phrasebook_tatoeba.tsv").exists()) pb.loadMined(new File(modelsDir, "phrasebook_tatoeba.tsv")); break;
+      case Modules.DENOISE: log(vadDnLine()); break;
       case Modules.LLM:   // уточнитель на месте — контекст включается, если человек не выключал его сам
         if (contextMode || !hasLlm()) break;           // уже включён — второй строки в журнале не нужно
         if (!getSharedPreferences("at", MODE_PRIVATE).contains("ctx")) { log("🧠 уточнитель на месте — включаю контекст"); setContext(true, false); }
@@ -1193,6 +1206,7 @@ public class TranslatorService extends Service {
       case Modules.TTS: sayQ.clear(); synchronized (tts) { if (eng != null) eng.releaseTts(); } log("🔇 озвучка выключена: перевод только на экране"); break;
       case Modules.LLM: contextMode = false; unloadLlm("модуль выключен"); break;
       case Modules.SPEAKER: spk = new Speaker(modelsDir, false); autoDir = false; break;
+      case Modules.DENOISE: log(vadDnLine()); break;   // поток нарезки сам отпустит шумодав на следующем кадре
       case Modules.CORPUS: if (pb != null) pb.dropMined(); break;
       default: break;
     }
@@ -2351,6 +2365,7 @@ public class TranslatorService extends Service {
         listenLive.frame(db(frame), noiseRms > 0 ? db(noiseRms) : Double.NaN);
         liveQ = (float) listenLive.q(listenLive.speechDb()); liveSpeech = listenLive.voiced();
         String mode = vadDn;
+        if (mode.equals("auto") && !mod(Modules.DENOISE)) mode = "raw";     // модуль «Шумоподавление» выключен
         if (!mode.equals(dnMode)) {
           if (!dnMode.equals("raw")) logDn(dnMode, dnNs, dnCpu, dnFrames, dnAll);
           if (dn != null) { dn.release(); dn = null; }
