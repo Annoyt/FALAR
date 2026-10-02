@@ -23,5 +23,8 @@ public class SuitesTest {
   @Test void voices() throws Exception { assertEquals(0, VoicesTest.run()); }
   @Test void fbank() throws Exception { assertEquals(0, FbankTest.run(System.getProperty("falar.vpgold", "/нет"), new java.io.File(System.getProperty("falar.root", ".")))); }
   @Test void bargeIn() throws Exception { assertEquals(0, BargeInTest.run(new java.io.File(System.getProperty("falar.bargegold", "../../bench/apk/test")))); }
+  @Test void whatsNew() throws Exception { assertEquals(0, WhatsNewTest.run(System.getProperty("falar.whatsnew", "../../bench/apk/whatsnew.txt"),
+      System.getProperty("falar.manifest", "../../bench/apk/AndroidManifest.xml"))); }
+  @Test void denoiseGate() { assertEquals(0, DenoiseGateTest.run()); }
   @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
 }

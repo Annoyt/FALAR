@@ -22,8 +22,11 @@
 #                со сверкой с эталоном tools/ocr_ref.py, если он собран (tools/ocr_golden.py);
 #   OcrWords   — правка слов снимка по словарю: пропущенная буква, ударения, слипшиеся слова, но
 #                не имена и не английский; со сверкой с tools/ocr_words.py (… golden);
+#   DenoiseGate — шумодав нарезки «только при шуме»: когда включается и выключается по фону комнаты;
 #   Screen     — что показывают экраны 0.26.0: ход перевода и загрузки в реплике, строка под названием,
-#                гаснет ли «Улучшить», «Память разговора», метки модулей, «Облако», подсказка «Слов».
+#                гаснет ли «Улучшить», «Память разговора», метки модулей, «Облако», подсказка «Слов»;
+#   WhatsNew   — «Что нового» после обновления: пункты всех пропущенных версий, сначала новое; сам
+#                whatsnew.txt — разбирается, пункты короткие, запись для versionCode манифеста есть.
 # Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
 #   bash bench/apk/test.sh
@@ -51,7 +54,9 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/OcrCore.java $A/test/OcrCoreTest.java \
   $A/src/dev/agenttranslator/OcrWords.java $A/test/OcrWordsTest.java \
   $A/src/dev/agenttranslator/Modules.java $A/test/ModulesTest.java $A/test/TextRulesTest.java \
-  $A/src/dev/agenttranslator/Screen.java $A/test/ScreenTest.java
+  $A/src/dev/agenttranslator/Screen.java $A/test/ScreenTest.java \
+  $A/src/dev/agenttranslator/WhatsNew.java $A/test/WhatsNewTest.java \
+  $A/src/dev/agenttranslator/DenoiseGate.java $A/test/DenoiseGateTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -72,4 +77,6 @@ java -cp "$OUT:$J" dev.agenttranslator.OcrWordsTest "$R/data/ocr_words_pt.txt.gz
 java -cp "$OUT:$J" dev.agenttranslator.ModulesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.TextRulesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ScreenTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.WhatsNewTest "$A/whatsnew.txt" "$A/AndroidManifest.xml" || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.DenoiseGateTest || fail=1
 exit $fail

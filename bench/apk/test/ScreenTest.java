@@ -143,6 +143,11 @@ public class ScreenTest {
     eq(Screen.modSize(0), "", "D6 без файлов — без размера");
     eq(Screen.modSize(305_400_000), "305 МБ", "D6 мегабайты");
     eq(Screen.modSize(1_520_000_000L), "1,5 ГБ", "D6 гигабайты — с запятой");
+    eq(Screen.modSize(Modules.DENOISE_BYTES), "0,5 МБ", "D6 меньше мегабайта — с десятыми (шумоподавление)");
+    eq(Screen.modSize(949_999), "0,9 МБ", "D6 до 0,95 МБ — с десятыми");
+    eq(Screen.modSize(950_000), "1 МБ", "D6 от 0,95 МБ — целыми");
+    eq(String.join("|", Screen.modPillApk(true)), "при шуме|ok", "D7 шумоподавление включено — работает при шуме");
+    eq(String.join("|", Screen.modPillApk(false)), "выключен|no", "D7 выключено");
     eq(String.join("|", Screen.modelsSum(false, false, false, false, 0, 0, 0, 0, 14, 0, 0)), "Проверяю файлы…|", "D7 ещё не проверено");
     eq(String.join("|", Screen.modelsSum(true, true, true, false, 0, 0, 0, 0, 14, 0, 0)), "Проверяю файлы…|dl", "D7 проверка файлов");
     eq(String.join("|", Screen.modelsSum(true, false, true, false, 120_000_000, 305_000_000, 0, 1, 14, 0, 0)), "Качаю · 120.0 из 305.0 МБ|dl", "D7 качаю");
