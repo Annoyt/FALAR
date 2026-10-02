@@ -3655,6 +3655,7 @@ public class TranslatorService extends Service {
       if (ttsVol != bargeVol) loadGain(ttsVol); else if (nowMs - gainSavedAt > 30000) saveGain();
     }
     AudioTrack tr = track;
+    boolean noVoices = voicesOn() && chats.voices.isEmpty();
     // Громкость 0 — озвучки в комнате нет, эха тоже: ни учиться, ни перебивать нечему (02.10 так прошёл целый прогон).
     boolean playing = bargeSpk && ttsVol != 0 && tr != null && (writingSpeech || nowMs < playEndMs + 300);
     // метки времени — раз в 50 мс, пока дорожка играет: «кадр N снят / прозвучал в момент T»
@@ -3708,6 +3709,9 @@ public class TranslatorService extends Service {
         if (barge.learn(m, r) && ++warmHops == BargeIn.WARM) { saveGain(); log("🗣 перебивание готово: эхо при громкости " + bargeVol + " выучено"); }
         continue;
       }
+      // Голоса разговора включены, а в разговоре их ещё нет: «своих» нет — перебивать некому (слушание такую речь
+      // и не переводит, ждёт фразы кнопкой). Только учимся, без пауз.
+      if (noVoices) { barge.learn(m, r); continue; }
       int a = barge.frame(m, r, true);
       if (a == BargeIn.HOLD) {
         // Пауза, а не тише: приглушение на 20–40 дБ в цифре гасило эхо у микрофона лишь на 5–11 дБ (громкость 15).
@@ -3734,7 +3738,7 @@ public class TranslatorService extends Service {
       } else if (a == BargeIn.STOP) {
         // Человек на паузе есть. Голоса разговора включены — сначала чей он: чужой (в людном месте) озвучку не
         // обрывает, она продолжится с того же места (владелец 02.10: «чтобы чужие голоса не глушили озвучку»).
-        if (voicesOn() && !chats.voices.isEmpty()) {
+        if (voicesOn()) {
           verifying = true; verifyFrom = duckStart + BargeIn.N + BargeIn.STOP_MS * 16L; verifyStep = 1; verifyPrint = null;
           verifyAudio.clear(); verifyVoiced = 0; verifyHops = 0; verifyAtMs = nowMs;
           log("🗣 на паузе человек — сверяю голос с голосами разговора");
