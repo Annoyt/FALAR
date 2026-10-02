@@ -67,6 +67,24 @@ phone_idle() {
   local a; a=$($ADB shell dumpsys power 2>/dev/null | tr -d '\r' | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
   [ "${a:-0}" -ge 60000 ]
 }
+# Мерить надо код этого дерева, а не то, что стоит на телефоне: 02.10 там стояла сборка другой ветки, а
+# сверялась одна versionName. Отладочная сборка HEAD ставится поверх (install -r, данные приложения
+# целы), один раз за прогон — для распознавания и снимков на телефоне. Не встала — например, стоит
+# релизная с GitHub с другой подписью — проверка останавливается: удалять приложение ради неё нельзя.
+# Звать под замком стенда.
+INSTALLED=0
+install_head() {
+  [ $INSTALLED = 1 ] && return 0
+  bash "$A/build.sh" > "$RUN/build.log" 2>&1 || fail "сборка для телефона не собралась: $RUN/build.log"
+  local n=0 was res
+  until phone_idle; do n=$((n+1)); [ $n = 1 ] && say "  жду, пока телефон свободен: экран погашен или впереди Falar/рабочий стол и минуту не трогали"; sleep 15; done
+  was=$($ADB shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus)
+  res=$($ADB install --no-incremental -r "$A/Falar.apk" 2>&1 | grep -E '^(Success|Failure)')
+  [ "$res" = Success ] || fail "сборка этого дерева не встала на телефон: ${res:-нет ответа} (другая подпись? поставьте отладочную сборку вручную)"
+  case "$was" in *app.falar*) $ADB shell "am start -n app.falar/dev.agenttranslator.MainActivity" > /dev/null 2>&1;; esac
+  INSTALLED=1
+  say "  телефон: поставлена сборка этого дерева ($(git -C "$R" rev-parse --short HEAD)$(git -C "$R" diff --quiet || echo ', с незакоммиченными правками'))"
+}
 fail() { say "ОШИБКА: $*"; exit 2; }
 t0=$(date +%s); since() { echo "$(( $(date +%s) - $1 )) с"; }
 say "== проверка качества · $(git -C "$R" rev-parse --short HEAD) · $RUN"
@@ -161,17 +179,8 @@ if [ $DEVICE = 1 ]; then
     t=$(date +%s)
     exec 8>"$STATE/lock"
     flock -n 8 || { say "  жду замок стенда (на телефоне идёт другая проверка)…"; flock -w 3600 8 || fail "замок стенда занят больше часа"; }
-    # Мерить надо код этого дерева, а не то, что стоит на телефоне: 02.10 там стояла сборка другой
-    # ветки, а сверялась одна versionName. Отладочная сборка HEAD ставится поверх (install -r, данные
-    # приложения целы). Не встала — например, стоит релизная с GitHub с другой подписью — проверка
-    # останавливается: удалять приложение ради неё нельзя.
-    bash "$A/build.sh" > "$RUN/build.log" 2>&1 || fail "сборка для телефона не собралась: $RUN/build.log"
-    n=0; until phone_idle; do n=$((n+1)); [ $n = 1 ] && say "  жду, пока телефон свободен: экран погашен или впереди Falar/рабочий стол и минуту не трогали"; sleep 15; done
-    was=$($ADB shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus)
-    res=$($ADB install --no-incremental -r "$A/Falar.apk" 2>&1 | grep -E '^(Success|Failure)')
-    [ "$res" = Success ] || fail "сборка этого дерева не встала на телефон: ${res:-нет ответа} (другая подпись? поставьте отладочную сборку вручную)"
-    case "$was" in *app.falar*) $ADB shell "am start -n app.falar/dev.agenttranslator.MainActivity" > /dev/null 2>&1;; esac
-    say "  телефон: поставлена сборка этого дерева ($(git -C "$R" rev-parse --short HEAD)$(git -C "$R" diff --quiet || echo ', с незакоммиченными правками')); записи: $RECS"
+    install_head
+    say "  телефон: записи $RECS"
     FALAR_STAND_LOCK=1 bash "$R/bench/air/gain_sweep.sh" --rec "$RECS" --gains auto --modes limit --vaddn auto > "$RUN/device.log" 2>&1
     GS=$?
     exec 8>&-
@@ -206,9 +215,10 @@ if [ $OCRDEV = 1 ]; then
     fi
   else
     t=$(date +%s)
-    say "  телефон: $(grep -o 'versionName="[^"]*"' "$A/AndroidManifest.xml" | cut -d'"' -f2) в репозитории, на телефоне — $($ADB shell dumpsys package app.falar 2>/dev/null | sed -n 's/.*versionName=\([^ ]*\).*/\1/p' | head -1 | tr -d '\r'); чтение набора bench/ocr"
     exec 8>"$STATE/lock"
     flock -n 8 || { say "  жду замок стенда (на телефоне идёт другая проверка)…"; flock -w 3600 8 || fail "замок стенда занят больше часа"; }
+    install_head          # холодный старт после установки не страшен: ocrbench сам ждёт моделей до 2 минут
+    say "  телефон: чтение набора bench/ocr"
     # эталон строка в строку — свежий, из этапа ПК этого же прогона: сохранённый bench/ocr/runs/ref
     # снят 28.09 старым эталонным кодом и с тех пор разошёлся с ним
     ONLY=O2 OUT="$RUN/ocr_device" OCRREF="$RUN/ocr_ref" FALAR_STAND_LOCK=1 bash "$A/test_ocr_device.sh" > "$RUN/ocr_device.log" 2>&1
