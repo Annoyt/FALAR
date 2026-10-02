@@ -36,6 +36,17 @@ gh api user >/dev/null 2>&1 || { echo "токен GitHub недействите�
 WVER=$(grep -o 'versionName="[^"]*"' $A/AndroidManifest.xml | cut -d'"' -f2); WCODE=$(grep -o 'versionCode="[0-9]*"' $A/AndroidManifest.xml | cut -d'"' -f2)
 grep -qx "== $WVER ($WCODE)" $A/whatsnew.txt || { echo "в bench/apk/whatsnew.txt нет записи «== $WVER ($WCODE)»: что нового в этой версии — коротко, «+» новое, «*» исправлено"; exit 1; }
 ! grep -qx "== следующая" $A/whatsnew.txt || { echo "в bench/apk/whatsnew.txt остался раздел «== следующая»: дайте ему номер «== $WVER ($WCODE)»"; exit 1; }
+# Качество распознавания и перевода — тоже до пароля и сборки (bench/quality/gate.sh): перевод кодом
+# приложения и распознавание на ПК против эталона bench/quality/baseline; если с прошлого выпуска
+# менялось слушание или модели — и на телефоне. Хуже эталона — не выпускаем: исправить или осознанно
+# принять (gate.sh --accept, эталон — в коммит). Владелец, 02.10.2026: «тесты надо автоматизировать и
+# применять в процессе наших изменений в распознавании и переводе». QUALITY=skip — только по его слову.
+PREV=$(git -C $R describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null)
+if [ "${QUALITY:-}" = skip ]; then
+  echo "ВНИМАНИЕ: проверка качества пропущена (QUALITY=skip)"
+elif [ -n "$PREV" ]; then
+  bash $R/bench/quality/gate.sh --release "$PREV" || { echo "проверка качества не пропустила выпуск — журнал выше"; exit 1; }
+fi
 # Пароль спрашиваем здесь и держим только в окружении этого запуска: в команде он попал бы
 # в историю оболочки и в список процессов, а на бумажке его забывают. Ввод не отображается.
 if [ -z "$FALAR_KS_PASS" ]; then

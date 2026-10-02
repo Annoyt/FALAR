@@ -30,13 +30,18 @@ done
 D=$(mktemp -d /tmp/falar-gain.XXXX); SNAP=$D/snap; mkdir -p $SNAP; TID=$(date +%s%3N); SUM=$D/summary.tsv
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" 2>/dev/null | tr -d '\r'; }
-# Свободен: погашен экран (прогону экран не нужен, всё идёт в сервисе), впереди Falar или лаунчер.
+# Свободен: погашен экран (прогону экран не нужен, всё идёт в сервисе) — или впереди Falar либо лаунчер,
+# и экрана не касались минуту, как idle() в test_all_device.sh: телефон рабочий, его могут держать в руках,
+# а прогон перезапускает Falar.
 free_phone() {
-  local n=0
+  local n=0 f a
   while :; do
-    sh "dumpsys power" | grep -q "mWakefulness=Asleep" && return 0
-    local f; f=$(sh "dumpsys window | grep -m1 mCurrentFocus")
-    case "$f" in *$PKG*|*com.miui.home*|*launcher*|*mCurrentFocus=null*) return 0;; esac
+    sh "dumpsys power" | grep -qE "mWakefulness=(Asleep|Dozing)" && return 0
+    f=$(sh "dumpsys window | grep -m1 mCurrentFocus")
+    case "$f" in *$PKG*|*com.miui.home*|*launcher*|*mCurrentFocus=null*)
+      a=$(sh "dumpsys power" | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
+      [ "${a:-0}" -ge 60000 ] && return 0;;
+    esac
     n=$((n+1)); [ $n -eq 1 ] && say "  телефон занят ($f), жду…"; sleep 10
   done
 }

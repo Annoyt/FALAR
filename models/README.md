@@ -67,5 +67,8 @@ Q4_K_M, silero и GTCRN на устройстве совпадают с опуб
 (`tools/placeholder_probe.py`, сверка пивота в `tools/tatoeba_phrasebook.py`).
 `bergamot/` (181 МБ) — отброшенный по качеству движок, оставлен для воспроизводимости замера.
 `opus-onnx/pt2ru/`, `ru2pt/` — fp32-версии, из которых квантованы int8.
+`comet/wmt22-comet-da/` (2,3 ГБ) — COMET, оценка перевода в `mt_bench.py` (`tools/mt_metrics.py`);
+HF `Unbabel/wmt22-comet-da`, Apache-2.0; работает в своём окружении `.venv-comet`, как его поставить —
+в начале `tools/mt_metrics.py`.
 
-Итого каталог ~8,9 ГБ, из них на телефон уезжает ~2,9 ГБ.
+Итого каталог ~11,2 ГБ, из них на телефон уезжает ~2,9 ГБ.

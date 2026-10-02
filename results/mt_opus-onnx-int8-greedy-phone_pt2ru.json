@@ -11,7 +11,21 @@
   "first_ms_med": 40.3,
   "tok_ms_med": 15.5,
   "tokens_avg": 8.5,
-  "ids_identical_to_pc": "39/40"
+  "ids_identical_to_pc": "39/40",
+  "sets": {
+   "situations": {
+    "n": 40,
+    "chrf": 65.61,
+    "chrf_ci": 7.24,
+    "chrfpp": 65.01,
+    "chrfpp_ci": 7.29,
+    "comet": 0.9421,
+    "comet_ci": 0.016
+   }
+  },
+  "set": "situations",
+  "chrfpp": 65.01,
+  "comet": 0.9421
  },
  "results": [
   {
@@ -22,7 +36,8 @@
    "enc_ms": 54.058999,
    "first_ms": 52.076308,
    "tokens": 9,
-   "tok_ms": 26.005803333333333
+   "tok_ms": 26.005803333333333,
+   "comet": 0.9896
   },
   {
    "src": "Você pode me ajudar? Estou procurando a estação de metrô.",
@@ -32,7 +47,8 @@
    "enc_ms": 50.158231,
    "first_ms": 47.25877,
    "tokens": 10,
-   "tok_ms": 17.704046299999998
+   "tok_ms": 17.704046299999998,
+   "comet": 0.9744
   },
   {
    "src": "Desculpa, não entendi. Pode repetir mais devagar, por favor?",
@@ -42,7 +58,8 @@
    "enc_ms": 52.405846,
    "first_ms": 73.816,
    "tokens": 15,
-   "tok_ms": 15.563287133333336
+   "tok_ms": 15.563287133333336,
+   "comet": 0.9214
   },
   {
    "src": "Queria uma mesa para duas pessoas, por favor.",
@@ -52,7 +69,8 @@
    "enc_ms": 11.155308,
    "first_ms": 33.984,
    "tokens": 8,
-   "tok_ms": 15.793788375
+   "tok_ms": 15.793788375,
+   "comet": 0.9331
   },
   {
    "src": "A conta, por favor. Posso pagar com cartão?",
@@ -62,7 +80,8 @@
    "enc_ms": 49.131308000000004,
    "first_ms": 57.85177,
    "tokens": 12,
-   "tok_ms": 13.470442416666666
+   "tok_ms": 13.470442416666666,
+   "comet": 0.8901
   },
   {
    "src": "Quanto tempo demora para chegar ao centro da cidade?",
@@ -72,7 +91,8 @@
    "enc_ms": 23.049231,
    "first_ms": 44.466384,
    "tokens": 10,
-   "tok_ms": 28.5305076
+   "tok_ms": 28.5305076,
+   "comet": 0.9622
   },
   {
    "src": "Você fala inglês ou russo?",
@@ -82,7 +102,8 @@
    "enc_ms": 43.354539,
    "first_ms": 56.863077,
    "tokens": 11,
-   "tok_ms": 32.71741281818182
+   "tok_ms": 32.71741281818182,
+   "comet": 0.9919
   },
   {
    "src": "Estou perdido. Como faço para chegar ao aeroporto?",
@@ -92,7 +113,8 @@
    "enc_ms": 51.811384000000004,
    "first_ms": 74.169692,
    "tokens": 10,
-   "tok_ms": 18.9107231
+   "tok_ms": 18.9107231,
+   "comet": 0.9837
   },
   {
    "src": "Tem algum restaurante bom e barato aqui perto?",
@@ -102,7 +124,8 @@
    "enc_ms": 11.633846,
    "first_ms": 27.617923,
    "tokens": 7,
-   "tok_ms": 16.309604571428572
+   "tok_ms": 16.309604571428572,
+   "comet": 0.9529
   },
   {
    "src": "Não como carne. Vocês têm opções vegetarianas?",
@@ -112,7 +135,8 @@
    "enc_ms": 42.027693,
    "first_ms": 66.707461,
    "tokens": 15,
-   "tok_ms": 15.045236
+   "tok_ms": 15.045236,
+   "comet": 0.9845
   },
   {
    "src": "Pode me trazer um café com leite, por favor?",
@@ -122,7 +146,8 @@
    "enc_ms": 30.441461,
    "first_ms": 50.759308,
    "tokens": 8,
-   "tok_ms": 16.252644375
+   "tok_ms": 16.252644375,
+   "comet": 0.7692
   },
   {
    "src": "Onde fica o banheiro?",
@@ -132,7 +157,8 @@
    "enc_ms": 22.608,
    "first_ms": 27.863385,
    "tokens": 3,
-   "tok_ms": 21.240564000000003
+   "tok_ms": 21.240564000000003,
+   "comet": 0.9627
   },
   {
    "src": "Que horas são agora?",
@@ -142,7 +168,8 @@
    "enc_ms": 14.224538,
    "first_ms": 34.171077,
    "tokens": 3,
-   "tok_ms": 17.174667
+   "tok_ms": 17.174667,
+   "comet": 0.9583
   },
   {
    "src": "A que horas abre o supermercado?",
@@ -152,7 +179,8 @@
    "enc_ms": 24.425231,
    "first_ms": 32.624231,
    "tokens": 5,
-   "tok_ms": 13.7923384
+   "tok_ms": 13.7923384,
+   "comet": 0.993
   },
   {
    "src": "Muito prazer em conhecer você. Meu nome é Alex.",
@@ -162,7 +190,8 @@
    "enc_ms": 51.374847,
    "first_ms": 67.687692,
    "tokens": 8,
-   "tok_ms": 14.279827000000001
+   "tok_ms": 14.279827000000001,
+   "comet": 0.9726
   },
   {
    "src": "De onde você é? Há quanto tempo mora aqui?",
@@ -172,7 +201,8 @@
    "enc_ms": 34.394385,
    "first_ms": 87.983461,
    "tokens": 10,
-   "tok_ms": 15.476138299999999
+   "tok_ms": 15.476138299999999,
+   "comet": 0.9614
   },
   {
    "src": "Estou aqui de férias por duas semanas.",
@@ -182,7 +212,8 @@
    "enc_ms": 19.880615,
    "first_ms": 39.465231,
    "tokens": 9,
-   "tok_ms": 15.450581111111111
+   "tok_ms": 15.450581111111111,
+   "comet": 0.9911
   },
   {
    "src": "O que você recomenda visitar nesta cidade?",
@@ -192,7 +223,8 @@
    "enc_ms": 20.649461,
    "first_ms": 41.148923,
    "tokens": 9,
-   "tok_ms": 18.593418555555555
+   "tok_ms": 18.593418555555555,
+   "comet": 0.979
   },
   {
    "src": "Posso tirar uma foto aqui?",
@@ -202,7 +234,8 @@
    "enc_ms": 26.109846,
    "first_ms": 32.747769,
    "tokens": 6,
-   "tok_ms": 15.488474333333334
+   "tok_ms": 15.488474333333334,
+   "comet": 0.9155
   },
   {
    "src": "Você pode me chamar um táxi, por favor?",
@@ -212,7 +245,8 @@
    "enc_ms": 26.836692,
    "first_ms": 42.913539,
    "tokens": 7,
-   "tok_ms": 15.487120857142857
+   "tok_ms": 15.487120857142857,
+   "comet": 0.9565
   },
   {
    "src": "Quanto fica a corrida até a praia?",
@@ -222,7 +256,8 @@
    "enc_ms": 32.739077,
    "first_ms": 31.799769,
    "tokens": 4,
-   "tok_ms": 17.2470195
+   "tok_ms": 17.2470195,
+   "comet": 0.8053
   },
   {
    "src": "Tem wi-fi grátis aqui? Qual é a senha?",
@@ -232,7 +267,8 @@
    "enc_ms": 34.768923,
    "first_ms": 46.23077,
    "tokens": 10,
-   "tok_ms": 13.7705306
+   "tok_ms": 13.7705306,
+   "comet": 0.9683
   },
   {
    "src": "Preciso de um médico. Não estou me sentindo bem.",
@@ -242,7 +278,8 @@
    "enc_ms": 43.428846,
    "first_ms": 65.469231,
    "tokens": 11,
-   "tok_ms": 15.335286818181817
+   "tok_ms": 15.335286818181817,
+   "comet": 0.9731
   },
   {
    "src": "Sou alérgico a amendoim e frutos do mar.",
@@ -252,7 +289,8 @@
    "enc_ms": 18.773231,
    "first_ms": 48.703385,
    "tokens": 10,
-   "tok_ms": 14.2855691
+   "tok_ms": 14.2855691,
+   "comet": 0.9811
   },
   {
    "src": "Onde posso trocar dólares por reais?",
@@ -262,7 +300,8 @@
    "enc_ms": 21.629846,
    "first_ms": 36.373462,
    "tokens": 9,
-   "tok_ms": 14.46343588888889
+   "tok_ms": 14.46343588888889,
+   "comet": 0.9558
   },
   {
    "src": "Este produto tem desconto?",
@@ -272,7 +311,8 @@
    "enc_ms": 42.037231,
    "first_ms": 29.997461,
    "tokens": 7,
-   "tok_ms": 15.757483714285714
+   "tok_ms": 15.757483714285714,
+   "comet": 0.9721
   },
   {
    "src": "Posso experimentar esta roupa?",
@@ -282,7 +322,8 @@
    "enc_ms": 20.144231,
    "first_ms": 37.717538,
    "tokens": 6,
-   "tok_ms": 16.449679666666665
+   "tok_ms": 16.449679666666665,
+   "comet": 0.9318
   },
   {
    "src": "Vocês têm um tamanho maior?",
@@ -292,7 +333,8 @@
    "enc_ms": 35.448615,
    "first_ms": 24.636615,
    "tokens": 6,
-   "tok_ms": 15.726858833333331
+   "tok_ms": 15.726858833333331,
+   "comet": 0.9836
   },
   {
    "src": "Aceita pagamento por Pix?",
@@ -302,7 +344,8 @@
    "enc_ms": 25.87577,
    "first_ms": 30.035385,
    "tokens": 7,
-   "tok_ms": 18.100252571428573
+   "tok_ms": 18.100252571428573,
+   "comet": 0.9148
   },
   {
    "src": "O ônibus para o centro passa por aqui?",
@@ -312,7 +355,8 @@
    "enc_ms": 24.602692,
    "first_ms": 21.546692,
    "tokens": 6,
-   "tok_ms": 13.103397333333334
+   "tok_ms": 13.103397333333334,
+   "comet": 0.9311
   },
   {
    "src": "Desculpe o atraso, o trânsito estava horrível.",
@@ -322,7 +366,8 @@
    "enc_ms": 27.510154,
    "first_ms": 17.092077,
    "tokens": 11,
-   "tok_ms": 15.029398636363634
+   "tok_ms": 15.029398636363634,
+   "comet": 0.7825
   },
   {
    "src": "Podemos marcar outro dia? Amanhã estou ocupado.",
@@ -332,7 +377,8 @@
    "enc_ms": 51.733846,
    "first_ms": 55.577,
    "tokens": 10,
-   "tok_ms": 13.6344538
+   "tok_ms": 13.6344538,
+   "comet": 0.8674
   },
   {
    "src": "O que você faz da vida?",
@@ -342,7 +388,8 @@
    "enc_ms": 8.659307,
    "first_ms": 45.667,
    "tokens": 4,
-   "tok_ms": 13.97132725
+   "tok_ms": 13.97132725,
+   "comet": 0.9895
   },
   {
    "src": "Trabalho com tecnologia, sou programador.",
@@ -352,7 +399,8 @@
    "enc_ms": 16.368923,
    "first_ms": 35.140923,
    "tokens": 9,
-   "tok_ms": 12.011034222222223
+   "tok_ms": 12.011034222222223,
+   "comet": 0.9663
   },
   {
    "src": "A comida aqui é muito gostosa, parabéns!",
@@ -362,7 +410,8 @@
    "enc_ms": 29.524,
    "first_ms": 16.497923,
    "tokens": 9,
-   "tok_ms": 12.241094111111112
+   "tok_ms": 12.241094111111112,
+   "comet": 0.9376
   },
   {
    "src": "Pode embalar para viagem, por favor?",
@@ -372,7 +421,8 @@
    "enc_ms": 19.448307,
    "first_ms": 33.755693,
    "tokens": 7,
-   "tok_ms": 15.75312057142857
+   "tok_ms": 15.75312057142857,
+   "comet": 0.9221
   },
   {
    "src": "Está muito quente hoje, não acha?",
@@ -382,7 +432,8 @@
    "enc_ms": 24.141924,
    "first_ms": 30.437231,
    "tokens": 8,
-   "tok_ms": 14.950288625000002
+   "tok_ms": 14.950288625000002,
+   "comet": 0.9218
   },
   {
    "src": "Vai chover amanhã, segundo a previsão do tempo.",
@@ -392,7 +443,8 @@
    "enc_ms": 25.832616,
    "first_ms": 33.479308,
    "tokens": 9,
-   "tok_ms": 12.61954711111111
+   "tok_ms": 12.61954711111111,
+   "comet": 0.9732
   },
   {
    "src": "Foi um prazer conversar com você. Até a próxima!",
@@ -402,7 +454,8 @@
    "enc_ms": 39.991769000000005,
    "first_ms": 47.863153000000004,
    "tokens": 10,
-   "tok_ms": 15.9444692
+   "tok_ms": 15.9444692,
+   "comet": 0.9589
   },
   {
    "src": "Boa noite, durma bem. Amanhã a gente se fala.",
@@ -412,7 +465,8 @@
    "enc_ms": 55.212231,
    "first_ms": 50.737538,
    "tokens": 11,
-   "tok_ms": 14.33478336363636
+   "tok_ms": 14.33478336363636,
+   "comet": 0.9059
   }
  ]
 }

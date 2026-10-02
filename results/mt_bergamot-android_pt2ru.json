@@ -7,248 +7,302 @@
     "lat_avg": 0.07,
     "lat_p50": 0.03,
     "lat_p95": 0.45,
-    "n": 40
+    "n": 40,
+    "sets": {
+      "situations": {
+        "n": 40,
+        "chrf": 62.75,
+        "chrf_ci": 6.87,
+        "chrfpp": 60.99,
+        "chrfpp_ci": 6.98,
+        "comet": 0.9194,
+        "comet_ci": 0.0219
+      }
+    },
+    "set": "situations",
+    "chrfpp": 60.99,
+    "comet": 0.9194
   },
   "results": [
     {
       "src": "Oi, tudo bem? Quanto custa isso?",
       "ref": "Привет, как дела? Сколько это стоит?",
       "hyp": "- Привет, в чем дела? Сколько это стоит?",
-      "sec": 0.45
+      "sec": 0.45,
+      "comet": 0.9622
     },
     {
       "src": "Você pode me ajudar? Estou procurando a estação de metrô.",
       "ref": "Вы можете мне помочь? Я ищу станцию метро.",
       "hyp": "Ты можешь мне помочь? Я ищу станцию метро.",
-      "sec": 0.43
+      "sec": 0.43,
+      "comet": 0.9744
     },
     {
       "src": "Desculpa, não entendi. Pode repetir mais devagar, por favor?",
       "ref": "Извините, я не понял. Можете повторить помедленнее, пожалуйста?",
       "hyp": "Извините, я не понимаю. Можете ли вы повторить это медленнее, пожалуйста?",
-      "sec": 0.44
+      "sec": 0.44,
+      "comet": 0.9195
     },
     {
       "src": "Queria uma mesa para duas pessoas, por favor.",
       "ref": "Я бы хотел столик на двоих, пожалуйста.",
       "hyp": "Я хочу стол для двух человек, пожалуйста.",
-      "sec": 0.04
+      "sec": 0.04,
+      "comet": 0.9266
     },
     {
       "src": "A conta, por favor. Posso pagar com cartão?",
       "ref": "Счёт, пожалуйста. Можно заплатить картой?",
       "hyp": "Счет, пожалуйста. Можно ли оплатить картой?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9326
     },
     {
       "src": "Quanto tempo demora para chegar ao centro da cidade?",
       "ref": "Сколько времени занимает дорога до центра города?",
       "hyp": "Сколько времени нужно, чтобы добраться до центра города?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9622
     },
     {
       "src": "Você fala inglês ou russo?",
       "ref": "Вы говорите по-английски или по-русски?",
       "hyp": "Вы говорите по-английски или по-русско-английски?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9613
     },
     {
       "src": "Estou perdido. Como faço para chegar ao aeroporto?",
       "ref": "Я заблудился. Как мне добраться до аэропорта?",
       "hyp": "Я заблудились. Как добраться до аэропорта?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9004
     },
     {
       "src": "Tem algum restaurante bom e barato aqui perto?",
       "ref": "Есть ли поблизости хороший и недорогой ресторан?",
       "hyp": "Есть ли поблизости хороший и дешевый ресторан?",
-      "sec": 0.45
+      "sec": 0.45,
+      "comet": 0.9796
     },
     {
       "src": "Não como carne. Vocês têm opções vegetarianas?",
       "ref": "Я не ем мясо. У вас есть вегетарианские блюда?",
       "hyp": "Не как мясо. Есть ли у вас вегетарианские варианты?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.7904
     },
     {
       "src": "Pode me trazer um café com leite, por favor?",
       "ref": "Можете принести мне кофе с молоком, пожалуйста?",
       "hyp": "Можно выпить кофе с молоком, пожалуйста?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9263
     },
     {
       "src": "Onde fica o banheiro?",
       "ref": "Где находится туалет?",
       "hyp": "Где ванная комната?",
-      "sec": 0.02
+      "sec": 0.02,
+      "comet": 0.8502
     },
     {
       "src": "Que horas são agora?",
       "ref": "Который сейчас час?",
       "hyp": "Сколько сейчас времени?",
-      "sec": 0.02
+      "sec": 0.02,
+      "comet": 0.9341
     },
     {
       "src": "A que horas abre o supermercado?",
       "ref": "Во сколько открывается супермаркет?",
       "hyp": "Во сколько открывается супермаркет?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.993
     },
     {
       "src": "Muito prazer em conhecer você. Meu nome é Alex.",
       "ref": "Очень приятно познакомиться. Меня зовут Алекс.",
       "hyp": "С удовольствием познакомиться с вами. Меня зовут Алекс.",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9522
     },
     {
       "src": "De onde você é? Há quanto tempo mora aqui?",
       "ref": "Откуда вы? Давно здесь живёте?",
       "hyp": "- Откуда ты? Как долго вы здесь живете?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9606
     },
     {
       "src": "Estou aqui de férias por duas semanas.",
       "ref": "Я здесь в отпуске на две недели.",
       "hyp": "Я здесь в отпуске на две недели.",
-      "sec": 0.04
+      "sec": 0.04,
+      "comet": 0.9911
     },
     {
       "src": "O que você recomenda visitar nesta cidade?",
       "ref": "Что вы посоветуете посмотреть в этом городе?",
       "hyp": "Что вы рекомендуете посетить в этом городе?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.979
     },
     {
       "src": "Posso tirar uma foto aqui?",
       "ref": "Можно здесь сфотографировать?",
       "hyp": "Можно здесь сфотографироваться?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9813
     },
     {
       "src": "Você pode me chamar um táxi, por favor?",
       "ref": "Можете вызвать мне такси, пожалуйста?",
       "hyp": "Можешь вызвать меня на такси, пожалуйста?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9571
     },
     {
       "src": "Quanto fica a corrida até a praia?",
       "ref": "Сколько будет стоить поездка до пляжа?",
       "hyp": "Сколько стоит гонка на пляж?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.776
     },
     {
       "src": "Tem wi-fi grátis aqui? Qual é a senha?",
       "ref": "Здесь есть бесплатный вай-фай? Какой пароль?",
       "hyp": "У вас здесь бесплатный Wi-Fi? Что за пароль?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9381
     },
     {
       "src": "Preciso de um médico. Não estou me sentindo bem.",
       "ref": "Мне нужен врач. Я плохо себя чувствую.",
       "hyp": "- Мне нужен врач. Я плохо себя чувствую.",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9799
     },
     {
       "src": "Sou alérgico a amendoim e frutos do mar.",
       "ref": "У меня аллергия на арахис и морепродукты.",
       "hyp": "У меня аллергия на арахис и морепродукты.",
-      "sec": 0.04
+      "sec": 0.04,
+      "comet": 0.9811
     },
     {
       "src": "Onde posso trocar dólares por reais?",
       "ref": "Где я могу обменять доллары на реалы?",
       "hyp": "Где можно обменять доллары на реальную?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.861
     },
     {
       "src": "Este produto tem desconto?",
       "ref": "На этот товар есть скидка?",
       "hyp": "Есть ли у этого продукта скидка?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.976
     },
     {
       "src": "Posso experimentar esta roupa?",
       "ref": "Могу я примерить эту одежду?",
       "hyp": "Можно попробовать этот наряд?",
-      "sec": 0.02
+      "sec": 0.02,
+      "comet": 0.8051
     },
     {
       "src": "Vocês têm um tamanho maior?",
       "ref": "У вас есть размер побольше?",
       "hyp": "У вас больше размера?",
-      "sec": 0.02
+      "sec": 0.02,
+      "comet": 0.8468
     },
     {
       "src": "Aceita pagamento por Pix?",
       "ref": "Вы принимаете оплату через Pix?",
       "hyp": "Принимаете ли вы оплату за Pix?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.8397
     },
     {
       "src": "O ônibus para o centro passa por aqui?",
       "ref": "Автобус в центр проходит здесь?",
       "hyp": "Автобус в центр проходит сюда?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.963
     },
     {
       "src": "Desculpe o atraso, o trânsito estava horrível.",
       "ref": "Извините за опоздание, пробки были ужасные.",
       "hyp": "Извини, я опоздал, трафик был ужасным.",
-      "sec": 0.04
+      "sec": 0.04,
+      "comet": 0.8921
     },
     {
       "src": "Podemos marcar outro dia? Amanhã estou ocupado.",
       "ref": "Можем перенести на другой день? Завтра я занят.",
       "hyp": "Мы можем отметить еще один день? Я завтра занят.",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.7418
     },
     {
       "src": "O que você faz da vida?",
       "ref": "Чем вы занимаетесь?",
       "hyp": "Что вы думаете о жизни?",
-      "sec": 0.02
+      "sec": 0.02,
+      "comet": 0.7313
     },
     {
       "src": "Trabalho com tecnologia, sou programador.",
       "ref": "Я работаю в IT, я программист.",
       "hyp": "Я работаю с технологиями, я программист.",
-      "sec": 0.04
+      "sec": 0.04,
+      "comet": 0.9418
     },
     {
       "src": "A comida aqui é muito gostosa, parabéns!",
       "ref": "Еда здесь очень вкусная, мои комплименты!",
       "hyp": "Еда здесь очень вкусная, поздравляю!",
-      "sec": 0.04
+      "sec": 0.04,
+      "comet": 0.9477
     },
     {
       "src": "Pode embalar para viagem, por favor?",
       "ref": "Можете упаковать с собой, пожалуйста?",
       "hyp": "Можете упаковать вещи для путешествий, пожалуйста?",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.8953
     },
     {
       "src": "Está muito quente hoje, não acha?",
       "ref": "Сегодня очень жарко, как вы считаете?",
       "hyp": "Сегодня слишком жарко, тебе не кажется?",
-      "sec": 0.04
+      "sec": 0.04,
+      "comet": 0.9291
     },
     {
       "src": "Vai chover amanhã, segundo a previsão do tempo.",
       "ref": "Завтра будет дождь, по прогнозу погоды.",
       "hyp": "Завтра будет дождь, согласно прогнозу погоды.",
-      "sec": 0.04
+      "sec": 0.04,
+      "comet": 0.9732
     },
     {
       "src": "Foi um prazer conversar com você. Até a próxima!",
       "ref": "Было приятно с вами поговорить. До встречи!",
       "hyp": "Было приятно с тобой поговорить. До следующего раза!",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.967
     },
     {
       "src": "Boa noite, durma bem. Amanhã a gente se fala.",
       "ref": "Спокойной ночи, спите хорошо. Поговорим завтра.",
       "hyp": "Спокойной ночи, хорошо поспи. Завтра мы поговорим.",
-      "sec": 0.03
+      "sec": 0.03,
+      "comet": 0.9555
     }
   ]
 }

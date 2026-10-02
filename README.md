@@ -47,6 +47,7 @@
 | план: решения, замеры, отброшенные варианты, что открыто | [PLAN.md](PLAN.md) |
 | модели: манифест, откуда берутся, как скачать | [models/README.md](models/README.md), [models/manifest.json](models/manifest.json) |
 | поток приложения и набор проверок на телефоне | [bench/TESTS.md](bench/TESTS.md) |
+| проверка качества распознавания и перевода (перед каждым выпуском) | [bench/quality/gate.sh](bench/quality/gate.sh), [results/2026-10-02-mt-metrics.md](results/2026-10-02-mt-metrics.md) |
 | замеры на устройстве | [results/](results/) |
 | страница для установки | [docs/](docs/), опубликована на [annoyt.github.io/FALAR](https://annoyt.github.io/FALAR/) |
 

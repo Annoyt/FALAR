@@ -1,0 +1,1316 @@
+{
+ "summary": {
+  "engine": "parakeet-tdt-0.6b-v3-int8 (sherpa-onnx, как Engine.asr)",
+  "sec": 25.0,
+  "pt": {
+   "n": 82,
+   "words": 402,
+   "errors": 16,
+   "wer": 3.98
+  },
+  "ru": {
+   "n": 80,
+   "words": 402,
+   "errors": 11,
+   "wer": 2.74
+  }
+ },
+ "results": [
+  {
+   "lang": "pt",
+   "file": "tat_1035724.wav",
+   "ref": "Sei quem é meu inimigo.",
+   "hyp": "Sei quem é meu inimigo.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1061222.wav",
+   "ref": "A que horas começa a prova?",
+   "hyp": "RKA4JL<unk> Que horas começa a prova?",
+   "errors": 2,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1063144.wav",
+   "ref": "Comer em excesso é ruim para a saúde.",
+   "hyp": "Comer em excesso é ruim para a saúde.",
+   "errors": 0,
+   "words": 8
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1063173.wav",
+   "ref": "O inglês não é fácil para mim.",
+   "hyp": "O inglês não é fácil para mim.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1063245.wav",
+   "ref": "Ele é famoso como médico.",
+   "hyp": "Ele é famoso como médico.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1063513.wav",
+   "ref": "A cidade mudou consideravelmente durante esses dois últimos anos.",
+   "hyp": "A cidade mudou consideravelmente durante esses dois últimos anos.",
+   "errors": 0,
+   "words": 9
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1102494.wav",
+   "ref": "O quarto é vasto e claro.",
+   "hyp": "O quarto é vasto e claro.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1111735.wav",
+   "ref": "Que diabos está fazendo?",
+   "hyp": "Que diabos está fazendo?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1112641.wav",
+   "ref": "Todos dizem que são inocentes.",
+   "hyp": "Todos dizem que são inocentes.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1113220.wav",
+   "ref": "Tive que esperar mais de três horas.",
+   "hyp": "Tive que esperar mais de três horas.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1114087.wav",
+   "ref": "Vocês têm aulas sábado?",
+   "hyp": "Vocês têm aula sábado?",
+   "errors": 1,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1146068.wav",
+   "ref": "De que você está falando?",
+   "hyp": "De que você está falando?",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1172131.wav",
+   "ref": "O francês é a língua materna dela.",
+   "hyp": "O francês é a língua materna dela.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1179406.wav",
+   "ref": "O velho falou comigo em francês.",
+   "hyp": "O velho falou comigo em francês.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1323002.wav",
+   "ref": "Esperei por dez minutos.",
+   "hyp": "Esperi por dez minutos.",
+   "errors": 1,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1325544.wav",
+   "ref": "Ela vai me matar.",
+   "hyp": "Ela vai me matar!",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1377214.wav",
+   "ref": "De que vocês estão falando?",
+   "hyp": "De que vocês estão falando?",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1377974.wav",
+   "ref": "Nunca é demasiado tarde para se aprender.",
+   "hyp": "Nunca é demasiado tarde para se aprender.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1378279.wav",
+   "ref": "Faça assim como lhe digo.",
+   "hyp": "Faça assim como lhe digo.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1403886.wav",
+   "ref": "Você sabe onde moramos?",
+   "hyp": "Você sabe onde moramos?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1475216.wav",
+   "ref": "Eu não te conheço.",
+   "hyp": "Eu não te conheço.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_1512318.wav",
+   "ref": "A parte superior da montanha está coberta de neve.",
+   "hyp": "A parte superior da montanha está coberta de neve.",
+   "errors": 0,
+   "words": 9
+  },
+  {
+   "lang": "pt",
+   "file": "tat_182184.wav",
+   "ref": "Preciso ir dormir.",
+   "hyp": "Preciso de dormir",
+   "errors": 1,
+   "words": 3
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2091856.wav",
+   "ref": "Eu quero que você use isso.",
+   "hyp": "Eu quero que você use isso.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2440707.wav",
+   "ref": "Eu sei o que fiz.",
+   "hyp": "Eu sei o que fiz.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2456371.wav",
+   "ref": "Eu não posso levantar.",
+   "hyp": "Eu não posso levantar.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2457867.wav",
+   "ref": "Eu não moro com o Tom.",
+   "hyp": "Eu não moro com um tom.",
+   "errors": 1,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605491.wav",
+   "ref": "Não preciso de tua ajuda.",
+   "hyp": "Não preciso da tua ajuda.",
+   "errors": 1,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605494.wav",
+   "ref": "Não preciso da ajuda de vocês.",
+   "hyp": "Não preciso da ajuda de vocês.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605538.wav",
+   "ref": "Recebi sua carta ontem.",
+   "hyp": "Recebi sua carta ontem.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605548.wav",
+   "ref": "Recebi tua carta ontem.",
+   "hyp": "Recebi tua carta ontem.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605557.wav",
+   "ref": "Que cargo você ocupa?",
+   "hyp": "Que cargo você ocupa?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605569.wav",
+   "ref": "Tuas mãos estão limpas?",
+   "hyp": "Tuas mãos estão limpas?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605659.wav",
+   "ref": "Seu relógio está certo?",
+   "hyp": "Seu relógio está certo.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605771.wav",
+   "ref": "Não quero detê-lo.",
+   "hyp": "Não quero detê-lo.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605785.wav",
+   "ref": "Não quero te deter.",
+   "hyp": "Não quero ter de deter.",
+   "errors": 2,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2605840.wav",
+   "ref": "Não esqueças a passagem.",
+   "hyp": "Não esqueç a passagem.",
+   "errors": 1,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2652877.wav",
+   "ref": "O Tom comeu três cachorros-quentes.",
+   "hyp": "O Tom comeu três cachorros quentes.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2653594.wav",
+   "ref": "Fui picado por uma vespa.",
+   "hyp": "Fui picado por uma vespa.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2655068.wav",
+   "ref": "Quanto custa a entrada?",
+   "hyp": "Quanto custa a entrada?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2668473.wav",
+   "ref": "Não estou precisando de dinheiro.",
+   "hyp": "Não estou precisando de dinheiro.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2699854.wav",
+   "ref": "Sirva-se dos biscoitos.",
+   "hyp": "Siva-se dos biscoitos.",
+   "errors": 1,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2699911.wav",
+   "ref": "Ajuda-me, por favor.",
+   "hyp": "Ajude-me, por favor.",
+   "errors": 1,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2699935.wav",
+   "ref": "Ajudem-me, por favor.",
+   "hyp": "Ajudem-me, por favor!",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2700870.wav",
+   "ref": "Somos irmão e irmã.",
+   "hyp": "Somos irmão e irmã.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2701929.wav",
+   "ref": "Ela se sentou junto dele.",
+   "hyp": "Ela se sentou junto dele.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2702923.wav",
+   "ref": "Perdi o trem das sete.",
+   "hyp": "Perdi o trem da 7.",
+   "errors": 2,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2703232.wav",
+   "ref": "Eles mangaram de mim.",
+   "hyp": "Eles mangaram de mim.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_2703234.wav",
+   "ref": "Posso ver televisão agora?",
+   "hyp": "Posso ver televisão agora?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_340439.wav",
+   "ref": "Nós não conseguimos dormir por causa do barulho.",
+   "hyp": "Nós não conseguimos dormir por causa do barulho.",
+   "errors": 0,
+   "words": 8
+  },
+  {
+   "lang": "pt",
+   "file": "tat_3489553.wav",
+   "ref": "Eu estava falando com vocês.",
+   "hyp": "Eu estava falando com vocês.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_369537.wav",
+   "ref": "Te amo.",
+   "hyp": "Te amo.",
+   "errors": 0,
+   "words": 2
+  },
+  {
+   "lang": "pt",
+   "file": "tat_376502.wav",
+   "ref": "Ela é minha namorada.",
+   "hyp": "Ela é minha namorada.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_395112.wav",
+   "ref": "Muito obrigado!",
+   "hyp": "Muito obrigado.",
+   "errors": 0,
+   "words": 2
+  },
+  {
+   "lang": "pt",
+   "file": "tat_5080466.wav",
+   "ref": "Tom assoou o seu nariz.",
+   "hyp": "Tom assou o seu nariz.",
+   "errors": 1,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_514762.wav",
+   "ref": "Sou um turista.",
+   "hyp": "Sou um turista.",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "pt",
+   "file": "tat_5150001.wav",
+   "ref": "Não é o carro de Tom.",
+   "hyp": "Não é o carro de tom.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_5218298.wav",
+   "ref": "Como você saberia disso, Tom?",
+   "hyp": "Como você saberia disso, Tom?",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_579051.wav",
+   "ref": "Você entende?",
+   "hyp": "Você entende?",
+   "errors": 0,
+   "words": 2
+  },
+  {
+   "lang": "pt",
+   "file": "tat_579080.wav",
+   "ref": "Tudo ocorreu sem problemas.",
+   "hyp": "Tudo ocorreu sem problemas.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_579858.wav",
+   "ref": "Por favor, você poderia falar um pouco mais devagar?",
+   "hyp": "Por favor, você poderia falar um pouco mais devagar.",
+   "errors": 0,
+   "words": 9
+  },
+  {
+   "lang": "pt",
+   "file": "tat_5806748.wav",
+   "ref": "Eu machuquei o meu joelho.",
+   "hyp": "Eu machuquei o meu joelho.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_826362.wav",
+   "ref": "Ela está contente com seu sucesso.",
+   "hyp": "Ela está contente com o seu sucesso.",
+   "errors": 1,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_873614.wav",
+   "ref": "Onde estou agora?",
+   "hyp": "Onde estou agora?",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "pt",
+   "file": "tat_874775.wav",
+   "ref": "Isso é tudo?",
+   "hyp": "Isso é tudo?",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "pt",
+   "file": "tat_886190.wav",
+   "ref": "Eu amo comida coreana.",
+   "hyp": "Eu amo comida coreana.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_886196.wav",
+   "ref": "Minha irmã canta muito bem.",
+   "hyp": "Minha irmã canta muito bem.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_886199.wav",
+   "ref": "Não posso falar.",
+   "hyp": "Não posso falar.",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "pt",
+   "file": "tat_904446.wav",
+   "ref": "Você acha?",
+   "hyp": "Você acha?",
+   "errors": 0,
+   "words": 2
+  },
+  {
+   "lang": "pt",
+   "file": "tat_913261.wav",
+   "ref": "Eu amo você.",
+   "hyp": "Eu amo você.",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "pt",
+   "file": "tat_933784.wav",
+   "ref": "Aquele rádio não é maior do que uma caixa de fósforos.",
+   "hyp": "Aquele rádio não é maior do que uma caixa de fósforos.",
+   "errors": 0,
+   "words": 11
+  },
+  {
+   "lang": "pt",
+   "file": "tat_955619.wav",
+   "ref": "Eu sinto muito.",
+   "hyp": "Eu sinto muito.",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "pt",
+   "file": "tat_957924.wav",
+   "ref": "A vida é curta.",
+   "hyp": "A vida é curta.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "pt",
+   "file": "tat_972432.wav",
+   "ref": "A ideia em si não é ruim.",
+   "hyp": "A ideia em si não é ruim.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "pt",
+   "file": "tat_972580.wav",
+   "ref": "Ela gostou do novo vestido.",
+   "hyp": "Ela gostou do novo vestido.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_972616.wav",
+   "ref": "Esta é uma ideia brilhante.",
+   "hyp": "Esta é uma ideia brilhante.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_972647.wav",
+   "ref": "O sol é mais luminoso que a lua.",
+   "hyp": "O Sol é mais luminoso que a Lua.",
+   "errors": 0,
+   "words": 8
+  },
+  {
+   "lang": "pt",
+   "file": "tat_972806.wav",
+   "ref": "Onde fica a entrada do museu?",
+   "hyp": "Onde fica a entrada do museu?",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "pt",
+   "file": "tat_974376.wav",
+   "ref": "Eu não sei onde estão.",
+   "hyp": "Eu não sei onde estão.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_974384.wav",
+   "ref": "Não posso viver sem ti.",
+   "hyp": "Não posso viver sem ti.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "pt",
+   "file": "tat_978052.wav",
+   "ref": "Ele usa óculos.",
+   "hyp": "Ele usa óculos.",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "pt",
+   "file": "tat_996196.wav",
+   "ref": "Meu tio é rico.",
+   "hyp": "Meu tio é rico.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_1411749.wav",
+   "ref": "В прошлом году он провел три месяца в море.",
+   "hyp": "В прошлом году он провел три месяца в море.",
+   "errors": 0,
+   "words": 9
+  },
+  {
+   "lang": "ru",
+   "file": "tat_1457797.wav",
+   "ref": "Он покинул комнату, не сказав ни слова.",
+   "hyp": "Он покинул комнату, не сказав ни слова.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "ru",
+   "file": "tat_1722534.wav",
+   "ref": "Я спал как убитый.",
+   "hyp": "Я спал, как убитый.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_1826085.wav",
+   "ref": "Она несла своего ребёнка на руках.",
+   "hyp": "Она нес своего ребенка на руках.",
+   "errors": 1,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_2335369.wav",
+   "ref": "Ты говоришь по-французски?",
+   "hyp": "Ты говоришь по-французски?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_2335447.wav",
+   "ref": "Вот почему девушки любят огурцы.",
+   "hyp": "Вот почему девушки любят огурцы.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_2404225.wav",
+   "ref": "По существу я согласен с Вашим мнением.",
+   "hyp": "По существу, я согласен с вашим мнением.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "ru",
+   "file": "tat_2720840.wav",
+   "ref": "Все мы несём ответственность перед законом.",
+   "hyp": "Все мы несем ответственность перед законом.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_2754913.wav",
+   "ref": "Он здесь!",
+   "hyp": "Он здесь.",
+   "errors": 0,
+   "words": 2
+  },
+  {
+   "lang": "ru",
+   "file": "tat_3282130.wav",
+   "ref": "Они не смогут тебя остановить.",
+   "hyp": "Они не смогут тебя остановить.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_3283042.wav",
+   "ref": "Вам нравится белое вино?",
+   "hyp": "Вам нравится белое вино?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_329723.wav",
+   "ref": "Что ты хочешь делать?",
+   "hyp": "Что ты хочешь делать?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_329907.wav",
+   "ref": "Ты слишком много думаешь.",
+   "hyp": "Ты слишком много думаешь.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_330507.wav",
+   "ref": "Символ «&» ставится вместо «и».",
+   "hyp": "Символ амперсант ставится вместо И.",
+   "errors": 1,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_330509.wav",
+   "ref": "«Кто эта девочка?» — «Это Кейко».",
+   "hyp": "Кто это, девочка? Это Кейко.",
+   "errors": 1,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_3354267.wav",
+   "ref": "«Снова ты шоколад ешь. Сильно же ты его любишь». — «Угу, люблю». — «А кого ты любишь больше: шоколад или меня?» — «Само собой, шоколад».",
+   "hyp": "Снова ты шоколад ешь. Си ты его любишь. Угу, люблю. А кого ты любишь больше, шоколад или меня? Само собой- шоколад.",
+   "errors": 2,
+   "words": 22
+  },
+  {
+   "lang": "ru",
+   "file": "tat_337429.wav",
+   "ref": "Во Вселенной есть много галактик.",
+   "hyp": "Во вселенной есть много галактик.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_337437.wav",
+   "ref": "У Майка есть несколько друзей во Флориде.",
+   "hyp": "У Майка есть несколько друзей во Флориде.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "ru",
+   "file": "tat_338488.wav",
+   "ref": "Я не понимаю.",
+   "hyp": "Я не понимаю.",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "ru",
+   "file": "tat_338491.wav",
+   "ref": "Мне нравятся музыка и английский язык.",
+   "hyp": "Мне нравятся музыка и английский язык.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_351203.wav",
+   "ref": "Стиральная машина - замечательное изобретение.",
+   "hyp": "Стиральная машина замечательное изобретение.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_351209.wav",
+   "ref": "Я пробуду здесь недолго.",
+   "hyp": "Я пробуду здесь недолго.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_351210.wav",
+   "ref": "Так вести себя - это на него очень похоже.",
+   "hyp": "Так вести себя, это на него очень похоже.",
+   "errors": 0,
+   "words": 8
+  },
+  {
+   "lang": "ru",
+   "file": "tat_351211.wav",
+   "ref": "Папа купил мне фотоаппарат.",
+   "hyp": "Папа купил мне фотоаппарат.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_351212.wav",
+   "ref": "Собака гналась за кошкой.",
+   "hyp": "Собака гналась за кошкой.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_351673.wav",
+   "ref": "Матч отменили из-за дождя.",
+   "hyp": "Матч отменили из-за дождя.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_351799.wav",
+   "ref": "Как называется эта улица?",
+   "hyp": "Как называется эта улица?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_358165.wav",
+   "ref": "Вы говорите по-японски?",
+   "hyp": "Вы говорите по-японски?",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_366844.wav",
+   "ref": "Я не знаю, что это.",
+   "hyp": "Я не знаю, что это.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_370862.wav",
+   "ref": "Ад и Рай существуют лишь в сердцах людей.",
+   "hyp": "Ад и рай существуют лишь в сердцах людей.",
+   "errors": 0,
+   "words": 8
+  },
+  {
+   "lang": "ru",
+   "file": "tat_374869.wav",
+   "ref": "Спасибо!",
+   "hyp": "Спасибо.",
+   "errors": 0,
+   "words": 1
+  },
+  {
+   "lang": "ru",
+   "file": "tat_376125.wav",
+   "ref": "Читал он очень много.",
+   "hyp": "Читал он очень много.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_379409.wav",
+   "ref": "Пожалуйста.",
+   "hyp": "Пожалуйста.",
+   "errors": 0,
+   "words": 1
+  },
+  {
+   "lang": "ru",
+   "file": "tat_379416.wav",
+   "ref": "Я чуть не оставил зонтик в поезде.",
+   "hyp": "Я чуть не оставил зонтик в поезде.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "ru",
+   "file": "tat_379966.wav",
+   "ref": "Здесь очень опасно ходить ночью.",
+   "hyp": "Здесь очень опасно ходить ночью.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_380004.wav",
+   "ref": "На твоём месте я бы сразу пошёл домой.",
+   "hyp": "На твоем месте я бы сразу пошел домой.",
+   "errors": 0,
+   "words": 8
+  },
+  {
+   "lang": "ru",
+   "file": "tat_380994.wav",
+   "ref": "Он по ошибке взял не ту шляпу.",
+   "hyp": "Он по ошибке взял не ту шляпу.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "ru",
+   "file": "tat_381029.wav",
+   "ref": "Война вступила в завершающую стадию.",
+   "hyp": "Война вступила в завершающую стадию.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_381253.wav",
+   "ref": "Нельзя делать два дела одновременно.",
+   "hyp": "Нельзя делать два дела одновременно.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_381304.wav",
+   "ref": "Не всё то золото, что блестит.",
+   "hyp": "Не все то золото, что блестит.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_381366.wav",
+   "ref": "Плохая яблоня — плохие яблоки.",
+   "hyp": "Плохая яблоня, плохие яблоки.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_381374.wav",
+   "ref": "С глаз долой — из сердца вон.",
+   "hyp": "С глаз долой и сердце вон.",
+   "errors": 2,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_381382.wav",
+   "ref": "Пришла беда — отворяй ворота́.",
+   "hyp": "Пришла беда? отваряй ворота.",
+   "errors": 1,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_389742.wav",
+   "ref": "Я знаю, что она красивая.",
+   "hyp": "Я знаю, что она красивая.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_392752.wav",
+   "ref": "Он сказал, что заболел, и это была ложь.",
+   "hyp": "Он сказал, что заболел, и это была ложь.",
+   "errors": 0,
+   "words": 8
+  },
+  {
+   "lang": "ru",
+   "file": "tat_392934.wav",
+   "ref": "Мы пробовали убедить его.",
+   "hyp": "Мы пробовали убедить его.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_3965392.wav",
+   "ref": "Сегодня вечером мы идём в люди.",
+   "hyp": "Сегодня вечером мы идем люди.",
+   "errors": 1,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_401105.wav",
+   "ref": "Большое спасибо!",
+   "hyp": "Большое спасибо.",
+   "errors": 0,
+   "words": 2
+  },
+  {
+   "lang": "ru",
+   "file": "tat_4549971.wav",
+   "ref": "Мы ехали целыми днями.",
+   "hyp": "Мы ехали целыми днями.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_464804.wav",
+   "ref": "Не так страшен чёрт, как его малюют.",
+   "hyp": "Не так страшен черт, как его молюют.",
+   "errors": 1,
+   "words": 7
+  },
+  {
+   "lang": "ru",
+   "file": "tat_4896581.wav",
+   "ref": "Этот сайт очень полезный.",
+   "hyp": "Этот сайт очень полезный.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5252154.wav",
+   "ref": "Ты не мог бы закрыть окно?",
+   "hyp": "Ты не мог бы закрыть окно.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5409.wav",
+   "ref": "Давайте что-нибудь попробуем!",
+   "hyp": "Давайте что-нибудь попробуем.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5410.wav",
+   "ref": "Мне пора идти спать.",
+   "hyp": "Мне пора идти спать.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5449.wav",
+   "ref": "Я так жить не могу.",
+   "hyp": "Я так жить не могу.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5481.wav",
+   "ref": "Мне потребуется вечность, чтобы всё объяснить.",
+   "hyp": "Мне потребуется вечность, чтобы все объяснить.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5517.wav",
+   "ref": "Я не знал, откуда это пришло.",
+   "hyp": "Я не знал, откуда это пришло.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5561503.wav",
+   "ref": "Кто-то украл мой велосипед.",
+   "hyp": "Кто-то украл мой велосипед.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5565.wav",
+   "ref": "В чем проблема?",
+   "hyp": "В чем проблема?",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5566.wav",
+   "ref": "Я могу только ждать.",
+   "hyp": "Я могу только ждать.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5567.wav",
+   "ref": "Это совсем не удивительно, не так ли?",
+   "hyp": "Это совсем не удивительно, не так ли?",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5568.wav",
+   "ref": "Я люблю тебя!",
+   "hyp": "Я люблю тебя.",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5579.wav",
+   "ref": "Я не хотел, чтобы это случилось.",
+   "hyp": "Я не хотел, чтобы это случилось.",
+   "errors": 0,
+   "words": 6
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5583.wav",
+   "ref": "Не могу сделать ничего лучше.",
+   "hyp": "Не могу сделать ничего лучше.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5592.wav",
+   "ref": "Что ты думаешь, я делал?",
+   "hyp": "Что ты думаешь, я делал?",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5612.wav",
+   "ref": "Я не говорю по-японски.",
+   "hyp": "Я не говорю по-японски.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5648.wav",
+   "ref": "Возьми книгу и прочитай её!",
+   "hyp": "Возьми книгу и прочитай ее.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5652.wav",
+   "ref": "Ты за или против абортов?",
+   "hyp": "Ты за или против абортов?",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5659.wav",
+   "ref": "О чём ты?",
+   "hyp": "О чем ты?",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5660.wav",
+   "ref": "Зима — моё любимое время года.",
+   "hyp": "Зима мое любимое время года.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5773181.wav",
+   "ref": "Можно я съем этот апельсин?",
+   "hyp": "Можно я съем этот апельсин?",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_582675.wav",
+   "ref": "Это книга.",
+   "hyp": "Это книга.",
+   "errors": 0,
+   "words": 2
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5889703.wav",
+   "ref": "Он не продал дом.",
+   "hyp": "Он не продал дом.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_5962471.wav",
+   "ref": "Я помню, как было в первый раз.",
+   "hyp": "Я помню, как было в первый раз.",
+   "errors": 0,
+   "words": 7
+  },
+  {
+   "lang": "ru",
+   "file": "tat_6091105.wav",
+   "ref": "Я регулярно бегаю в парке.",
+   "hyp": "Я регулярно бегаю в парке.",
+   "errors": 0,
+   "words": 5
+  },
+  {
+   "lang": "ru",
+   "file": "tat_6387725.wav",
+   "ref": "Расскажи о своём детстве.",
+   "hyp": "Расскажи о своем детстве.",
+   "errors": 0,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_6454821.wav",
+   "ref": "Сера горит синим пламенем.",
+   "hyp": "Серо горит синим пламенем.",
+   "errors": 1,
+   "words": 4
+  },
+  {
+   "lang": "ru",
+   "file": "tat_650601.wav",
+   "ref": "В чём дело?",
+   "hyp": "В чем дело?",
+   "errors": 0,
+   "words": 3
+  },
+  {
+   "lang": "ru",
+   "file": "tat_660797.wav",
+   "ref": "Иди спать.",
+   "hyp": "Иди спать.",
+   "errors": 0,
+   "words": 2
+  },
+  {
+   "lang": "ru",
+   "file": "tat_882179.wav",
+   "ref": "Я работаю.",
+   "hyp": "Я работаю.",
+   "errors": 0,
+   "words": 2
+  }
+ ]
+}
