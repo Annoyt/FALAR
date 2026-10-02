@@ -7,7 +7,7 @@ import java.net.URLEncoder;
  *  отправляет человек сам. Отдельно от MainActivity, чтобы сборка ссылок проверялась на столе. */
 final class Feedback {
   static final String REPO = "https://github.com/Annoyt/FALAR";
-  static final String BOT = "falar_feedback_bot";
+  static final String BOT = "falar_tbot";
   /** Ссылка на GitHub длиннее ~7 КБ не открывается. Замер 02.10.2026 (curl, без входа в аккаунт):
    *  до 7004 байт GitHub уводит на вход, с 7058 отвечает 500, от ~15 КБ — 414. Берём с запасом.
    *  Русская буква в ссылке — 6 байт: это около 900 букв на исходник, перевод и вариант вместе. */

@@ -48,7 +48,7 @@ eq(F.tagOf('#переводы'), null, 'F1 похожее слово — не м
 eq(F.route('ещё снимок', { topic: 'bug', last_at: NOW - 60 }, NOW), 'bug', 'F2 продолжение — в тот же топик');
 eq(F.route('ещё снимок', { topic: 'bug', last_at: NOW - F.FOLLOW_UP - 1 }, NOW), null, 'F2 через полчаса — в общий');
 eq(F.route('#идея а вот', { topic: 'bug', last_at: NOW }, NOW), 'idea', 'F2 метка главнее продолжения');
-eq(F.command('/block@falar_feedback_bot'), 'block', 'F3 команда с именем бота');
+eq(F.command('/block@falar_tbot'), 'block', 'F3 команда с именем бота');
 eq(F.command('/start abc'), 'start', 'F3 команда с параметром');
 eq(F.command('/'), null, 'F3 голая косая — не команда');
 eq(F.header(ANNA), '👤 Анна Иванова · @anna', 'F4 подпись');
@@ -97,7 +97,7 @@ await handle(dm(ME, '/setup'));
 eq(calls().map((c) => c.params.text), [F.SETUP_PRIVATE], 'S1 /setup в личке — «в группе»');
 await handle(grp('/setup', {}, { id: -1007, type: 'supergroup' }));
 eq(calls().map((c) => c.params.text), [F.SETUP_NO_FORUM], 'S2 группа без топиков');
-await handle(grp('/setup@falar_feedback_bot'));
+await handle(grp('/setup@falar_tbot'));
 cs = calls();
 eq(sent(cs, 'createForumTopic').map((c) => c.params.name), ['Переводы', 'Ошибки', 'Идеи', 'Задачи'], 'S3 четыре топика');
 ok(/^Готово/.test(sent(cs, 'sendMessage')[0].params.text), 'S3 «Готово»');

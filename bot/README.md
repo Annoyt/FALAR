@@ -54,7 +54,7 @@ stdin, а в Bot API — из файла (`cf/tg.mjs`). В командные с
 
 ## Запуск с нуля
 
-1. @BotFather: `/newbot` → имя «Falar», username `falar_feedback_bot`.
+1. @BotFather: `/newbot` → имя «Falar», username `falar_tbot`.
 2. Бесплатный аккаунт на dash.cloudflare.com. Затем `bash bot/cf.sh login`: откроется браузер,
    разрешите доступ.
 3. `bash bot/cf.sh token` — скрипт спросит токен бота и покажет его @username.

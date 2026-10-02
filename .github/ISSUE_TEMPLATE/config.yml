@@ -3,5 +3,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Написать в Telegram
-    url: https://t.me/falar_feedback_bot
+    url: https://t.me/falar_tbot
     about: Без аккаунта на GitHub. Сообщение увидит только разработчик, ответ придёт туда же.

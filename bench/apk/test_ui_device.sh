@@ -494,7 +494,7 @@ chk 'has --text Telegram && has --text GitHub && has --text отмена && has 
 m=$(mark); tapon --text GitHub; u=$(url "$(wl "$m" '🔗 https://github.com/Annoyt/FALAR/issues/new\?template=translation.yml&' 10)")
 chk '[ -n "$u" ] && ! printf "%s" "$u" | grep -q "labels=" && [ -n "$(fld "$u" source)" ] && fld "$u" device | grep -q "^Falar " && [ ${#u} -le 6000 ]' "U10 → GitHub: шаблон перевода, поля из реплики, без labels=, ссылка ${#u} знаков"
 tapon --desc "Меню реплики"; tapon --text "Сообщить о переводе"; sleep 1
-m=$(mark); tapon --text Telegram; u=$(url "$(wl "$m" '🔗 https://t.me/falar_feedback_bot\?text=' 10)")
+m=$(mark); tapon --text Telegram; u=$(url "$(wl "$m" '🔗 https://t.me/falar_tbot\?text=' 10)")
 chk '[ -n "$u" ] && fld "$u" text | head -1 | grep -qE "^#перевод · (португальский → русский|русский → португальский)$"' "U10 → Telegram: «$(fld "$u" text | head -1)»"
 tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5
 seek --text "Написать разработчику"; tapon --text "Написать разработчику"; sleep 1; dump
@@ -503,7 +503,7 @@ tapon --text "Идея или пожелание"
 m=$(mark); tapon --text GitHub; u=$(url "$(wl "$m" '🔗 https://github.com/Annoyt/FALAR/issues/new\?template=idea.yml&' 10)")
 chk '[ -n "$u" ] && fld "$u" device | grep -q "^Falar "' "U10 идея → GitHub: шаблон идеи, «$(fld "$u" device)»"
 seek --text "Написать разработчику"; tapon --text "Написать разработчику"; sleep 1
-m=$(mark); tapon --text Telegram; u=$(url "$(wl "$m" '🔗 https://t.me/falar_feedback_bot\?text=' 10)")
+m=$(mark); tapon --text Telegram; u=$(url "$(wl "$m" '🔗 https://t.me/falar_tbot\?text=' 10)")
 chk '[ -n "$u" ] && fld "$u" text | head -1 | grep -q "^#ошибка · Falar "' "U10 ошибка → Telegram: «$(fld "$u" text | head -1)»"
 m=$(mark); start --es linkdry 0; l=$(wl "$m" '🧪 ссылки: открываются' 10)
 chk '[ -n "$l" ]' "U10 стенд выключен — ссылки снова открываются"

@@ -49,7 +49,7 @@ token)
     echo "Telegram не принял токен (getMe) — проверьте и повторите." >&2; exit 1
   fi
   echo "Сохранён в $ENV. Бот: @$u"
-  [ "$u" = falar_feedback_bot ] || echo "Имя бота не falar_feedback_bot — скажите Claude: ссылки в приложении и на сайте надо поменять."
+  [ "$u" = falar_tbot ] || echo "Имя бота не falar_tbot — скажите Claude: ссылки в приложении и на сайте надо поменять."
   ;;
 deploy)
   [ -n "$(get BOT_TOKEN)" ] || { echo "Сначала: bash bot/cf.sh token" >&2; exit 1; }

@@ -9,7 +9,7 @@ import { setOwner } from 'lib/owner';
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname !== '/telegram') return new Response('Falar: бот обратной связи — https://t.me/falar_feedback_bot\n', { status: 404 });
+    if (url.pathname !== '/telegram') return new Response('Falar: бот обратной связи — https://t.me/falar_tbot\n', { status: 404 });
     if (req.method !== 'POST') return new Response('POST only\n', { status: 405 });
     if (!env.WEBHOOK_SECRET || req.headers.get('X-Telegram-Bot-Api-Secret-Token') !== env.WEBHOOK_SECRET) {
       return new Response('forbidden\n', { status: 403 });
