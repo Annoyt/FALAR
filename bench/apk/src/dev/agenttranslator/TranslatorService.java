@@ -2197,10 +2197,10 @@ public class TranslatorService extends Service {
     {"ru", "Спасибо большое, вы нам очень помогли, мы обязательно придём ещё раз."},
   };
   /** vr_e3 — только эхо фразы 3 (колонки стенда молчат), vr_d3 — человек из колонок поверх неё, vr_q3 — только
-   *  человек, телефон молчит; vr_k3 / vr_m3 — только эхо, но с 1,2 до 2,2 с от начала звука дорожка приглушена
-   *  на 20 / 30 дБ, как при подозрении перебивания: насколько при этом тише эхо в комнате. Прежние имена (vr,
+   *  человек, телефон молчит; vr_k3 / vr_m3 / vr_n3 — только эхо, но с 1,2 до 2,2 с от начала звука дорожка
+   *  приглушена на 20 / 30 / 40 дБ, как при подозрении перебивания: насколько при этом тише эхо в комнате. Прежние имена (vr,
    *  vr_aec, vc, vr_q_1) — фраза 0: «_q» — тишина, иначе играю. */
-  static final java.util.regex.Pattern AEC_CFG = java.util.regex.Pattern.compile("(v[rc])(_aec)?_([edqkm])(\\d+)");
+  static final java.util.regex.Pattern AEC_CFG = java.util.regex.Pattern.compile("(v[rc])(_aec)?_([edqkmn])(\\d+)");
 
   void aecStand(String cfgs) throws Exception {
     if (eng == null || !voice()) { log("🔁 эхо-стенд: движок или озвучка не готовы"); return; }
@@ -2271,8 +2271,8 @@ public class TranslatorService extends Service {
             while (!done[0]) { try { if (tr.getTimestamp(ats)) synchronized (tsTrack) { tsTrack.put(new JSONArray().put(ats.framePosition).put(ats.nanoTime)); } } catch (Throwable e) {}
               try { Thread.sleep(100); } catch (InterruptedException e) { return; } } }, "aects"); tt.start(); }
         playAt = System.nanoTime(); playOff = got[0];
-        if (mode == 'k' || mode == 'm') {
-          final long pa = playAt; final float v = mode == 'k' ? 0.1f : 0.0316f;
+        if (mode == 'k' || mode == 'm' || mode == 'n') {
+          final long pa = playAt; final float v = mode == 'k' ? 0.1f : mode == 'm' ? 0.0316f : 0.01f;
           new Thread(() -> { try {
             Thread.sleep(Math.max(0, (pa + 1_200_000_000L - System.nanoTime()) / 1_000_000L)); tr.setVolume(v); duckNs[0] = System.nanoTime();
             Thread.sleep(1000); tr.setVolume(1f); duckNs[1] = System.nanoTime(); } catch (Throwable e) {} }, "aecduck").start();
@@ -2288,7 +2288,7 @@ public class TranslatorService extends Service {
       meta.put(cfg, new JSONObject().put("phrase", k).put("lang", lang).put("ref", k == 0 ? "aec_ref.wav" : "aec_ref" + k + ".wav").put("ref_rate", rate)
           .put("mode", String.valueOf(mode)).put("play_sample", playOff).put("play_ms_after_start", (playAt - recStart[0]) / 1e6).put("aec", ecState).put("samples", got[0])
           .put("rec_start_nano", recStart[0]).put("play_nano", playAt).put("track_head0", head0).put("ts_rec", tsRec).put("ts_track", tsTrack)
-          .put("duck_on_nano", duckNs[0]).put("duck_off_nano", duckNs[1]).put("duck", mode == 'k' ? 0.1 : mode == 'm' ? 0.0316 : 1.0));
+          .put("duck_on_nano", duckNs[0]).put("duck_off_nano", duckNs[1]).put("duck", mode == 'k' ? 0.1 : mode == 'm' ? 0.0316 : mode == 'n' ? 0.01 : 1.0));
       try { if (track != null) track.setVolume(1f); } catch (Throwable e) {}
       log("🔁 эхо-стенд: " + cfg + " · эхоподавитель " + ecState + String.format(Locale.ROOT, " · записано %.1f с · меток записи %d, дорожки %d", got[0] / 16000.0, tsRec.length(), tsTrack.length()));
       Thread.sleep(800);
