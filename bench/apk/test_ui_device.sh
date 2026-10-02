@@ -23,6 +23,8 @@
 #   U10 обратная связь: «⋯» реплики → «Сообщить о переводе» и «Настройки» → «Написать разработчику» —
 #      кнопки Telegram и GitHub, готовые ссылки (шаблон GitHub, метка топика для бота). Ссылки не
 #      открываются: стенд --es linkdry 1 пишет их в журнал — Telegram на телефоне владельца.
+#   U11 «Что озвучивать»: сегмент «Авто · RU · PT · Оба» в настройках показывает выбор службы и меняет
+#      его; при «PT» русский перевод не звучит (строка реплики «без озвучки»), при «RU» — звучит.
 #
 # Разговоры владельца не трогаются: тестовый разговор — файлом с самым свежим временем; выученное,
 # словари, свои слова, пины и ключи облака возвращаются из снимка; разговоры, появившиеся за проверку,
@@ -153,9 +155,9 @@ restore() {
   local n=0
   until idle; do n=$((n+1)); [ $n -eq 1 ] && say "  телефон занят ($(focus)) — настройки верну, когда освободится"; sleep 15; done
   if [ -n "$REF" ]; then
-    launch --es listen ${LST:-off} --es refineevery $REF --es cloudevery $CLOUD --es readguard $RG; sleep 3
+    launch --es listen ${LST:-off} --es refineevery $REF --es cloudevery $CLOUD --es readguard $RG --es voicewhat ${VW:-auto}; sleep 3
     $ADB shell "am force-stop $PKG"; sleep 1
-    say "  настройки: разбор $REF, облако $CLOUD, чтение вслух $RG, слушание ${LST:-off}"
+    say "  настройки: разбор $REF, облако $CLOUD, чтение вслух $RG, слушание ${LST:-off}, озвучка ${VW:-auto}"
   fi
   say "  текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
   idle && launch; rm -rf "$D"
@@ -185,6 +187,7 @@ st=$(wl "$m" '🧪 настройки:' 20)
 [ -n "$st" ] || { say "у сборки нет стенда --es settings — настройки потом не вернуть, проверку не начинаю"; exit 1; }
 REF=$(printf '%s' "$st" | sed -n 's/.*разбор \([0-9][0-9]*\).*/\1/p'); CLOUD=$(printf '%s' "$st" | sed -n 's/.*облако \([0-9][0-9]*\).*/\1/p')
 RG=$(printf '%s' "$st" | sed -n 's/.*чтение вслух \([0-9]\).*/\1/p'); QUAL=$(printf '%s' "$st" | sed -n 's/.*облако точнее \([01]\).*/\1/p')
+VW=$(printf '%s' "$st" | sed -n 's/.*озвучка \([a-z]*\).*/\1/p')
 L=$(printf '%s' "$st" | sed -n 's/.*слушаю \([a-z]*\) ·.*/\1/p'); LST=$(case "$L" in ptru) echo both;; pt|ru) echo $L;; *) echo off;; esac)
 m=$(mark); launch --es modules show
 MODS=$(wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]')
@@ -508,6 +511,32 @@ chk '[ -n "$u" ] && fld "$u" text | head -1 | grep -q "^#ошибка · Falar "
 m=$(mark); start --es linkdry 0; l=$(wl "$m" '🧪 ссылки: открываются' 10)
 chk '[ -n "$l" ]' "U10 стенд выключен — ссылки снова открываются"
 press; dump; chk '[ "$(title)" = "ТЕСТ интерфейс" ]' "U10 «назад» из настроек — разговор"
+
+say "== U11: «Что озвучивать»"
+if mod tts; then
+  tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5
+  seek --text "Что озвучивать"; seek --text Оба; dump
+  keys=(auto ru pt both); cur=-1
+  for i in 0 3; do [ "$(at --text "$([ $i = 0 ] && echo Авто || echo Оба)" | cut -d' ' -f8)" = true ] && cur=$i; done
+  want=-1; for i in 0 1 2 3; do [ "${keys[$i]}" = "${VW:-auto}" ] && want=$i; done
+  chk 'has --text "Что озвучивать" && has --text Авто && has --text Оба && { [ "$cur" = "$want" ] || [ "$want" = 1 ] || [ "$want" = 2 ]; }' "U11 сегмент на месте и показывает выбор службы («${VW:-auto}»)"
+  # Касание по уже выбранному сегменту ничего не меняет — сначала тот из двух, что не выбран.
+  a=Оба; pa='🔈 озвучиваю оба языка'; b=Авто; pb='🔈 озвучка — авто'
+  [ "$cur" = 3 ] && { a=Авто; pa='🔈 озвучка — авто'; b=Оба; pb='🔈 озвучиваю оба языка'; }
+  m=$(mark); tapon --text $a; l=$(wl "$m" "$pa" 10)
+  chk '[ -n "$l" ]' "U11 «$a» — служба: $(printf '%s' "$l" | cut -c10-)"
+  m=$(mark); tapon --text $b; l=$(wl "$m" "$pb" 10)
+  chk '[ -n "$l" ]' "U11 «$b» — служба: $(printf '%s' "$l" | cut -c10-)"
+  press; dump
+  m=$(mark); start --es voicewhat pt; wl "$m" '🔈 озвучиваю только португальский' 10 >/dev/null
+  m=$(mark); start --es feedtext "Bom dia, tudo certo?"; l=$(wl "$m" 'pt2ru . Bom dia' 30); sleep 1; l=$(since "$m" | grep -E -m1 -A2 'pt2ru . Bom dia' | tr '\n' ' ')
+  chk 'printf "%s" "$l" | grep -q "без озвучки: выбрано озвучивать только португальский"' "U11 «PT»: русский перевод не звучит — «без озвучки»"
+  m=$(mark); start --es voicewhat ru; wl "$m" '🔈 озвучиваю только русский' 10 >/dev/null
+  m=$(mark); start --es feedtext "Obrigado pela paciência"; l=$(wl "$m" 'pt2ru . Obrigado pela' 30); sleep 1; l=$(since "$m" | grep -E -m1 -A2 'pt2ru . Obrigado pela' | tr '\n' ' ')
+  chk '[ -n "$l" ] && ! printf "%s" "$l" | grep -q "без озвучки"' "U11 «RU»: русский перевод звучит"
+  m=$(mark); start --es voicewhat ${VW:-auto}; wl "$m" '🔈 озв' 10 >/dev/null
+else sk "U11 модуль «Озвучка» выключен — выбор не показывается"; fi
+
 
 say "== U8: «＋» — новый разговор и возврат из панели"
 m=$(mark); tapon --desc "Новый разговор"; l=$(wl "$m" '＋ новый разговор' 10); sleep 1; dump

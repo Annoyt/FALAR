@@ -24,6 +24,7 @@
 #                не имена и не английский; со сверкой с tools/ocr_words.py (… golden);
 #   Feedback   — ссылки обратной связи: GitHub по шаблонам не длиннее замеренного предела, бот в Telegram
 #                с меткой топика; сверка полей и меток с .github/ISSUE_TEMPLATE и bot/lib/feedback.js;
+#   VoiceOut   — что озвучивать: «авто» в наушниках только русский, через динамик оба; ручной выбор;
 #   DenoiseGate — шумодав нарезки «только при шуме»: когда включается и выключается по фону комнаты;
 #   Screen     — что показывают экраны 0.26.0: ход перевода и загрузки в реплике, строка под названием,
 #                гаснет ли «Улучшить», «Память разговора», метки модулей, «Облако», подсказка «Слов»;
@@ -59,7 +60,8 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Screen.java $A/test/ScreenTest.java \
   $A/src/dev/agenttranslator/WhatsNew.java $A/test/WhatsNewTest.java \
   $A/src/dev/agenttranslator/DenoiseGate.java $A/test/DenoiseGateTest.java \
-  $A/src/dev/agenttranslator/Feedback.java $A/test/FeedbackTest.java
+  $A/src/dev/agenttranslator/Feedback.java $A/test/FeedbackTest.java \
+  $A/src/dev/agenttranslator/VoiceOut.java $A/test/VoiceOutTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -81,6 +83,7 @@ java -cp "$OUT:$J" dev.agenttranslator.ModulesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.TextRulesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ScreenTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.FeedbackTest "$R" || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.VoiceOutTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WhatsNewTest "$A/whatsnew.txt" "$A/AndroidManifest.xml" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.DenoiseGateTest || fail=1
 exit $fail

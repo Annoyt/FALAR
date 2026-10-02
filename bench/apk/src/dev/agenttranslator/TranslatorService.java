@@ -306,6 +306,7 @@ public class TranslatorService extends Service {
       micSource = pr.getString("micsrc", "builtin");
       holdMs = pr.getInt("hold", 1500);
       bargeOn = pr.getBoolean("barge", true); bargeOffMs = pr.getFloat("barge_off", Float.NaN);
+      voiceWhat = Math.max(0, Math.min(3, pr.getInt("voicewhat", VoiceOut.AUTO)));
       refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
       readGuard = pr.getInt("read_guard", 1);
       restoreContext();
@@ -400,6 +401,7 @@ public class TranslatorService extends Service {
       final String t = i.getStringExtra("feedasr").replace("\\n", "\n");
       worker.submit(() -> processText("pt2ru", unshout(t), true, false, 0, 0, "asr"));
     }
+    if (i != null && i.hasExtra("voicewhat")) setVoiceWhat(VoiceOut.parse(i.getStringExtra("voicewhat")));
     if (i != null && i.hasExtra("hold")) {
       holdMs = Math.max(0, Math.min(6000, Integer.parseInt(i.getStringExtra("hold"))));
       getSharedPreferences("at", MODE_PRIVATE).edit().putInt("hold", holdMs).apply();
@@ -844,7 +846,8 @@ public class TranslatorService extends Service {
     // Из настроек, а не из полей: до загрузки движков поля ещё не прочитаны.
     if (i != null && i.hasExtra("settings")) { android.content.SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
       log("🧪 настройки: разбор " + p.getInt("refine_every", 3) + " · облако " + p.getInt("cloud_every", 0) + " · чтение вслух " + p.getInt("read_guard", 1)
-          + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0)); }
+          + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0)
+          + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))]); }
     if (i != null && i.hasExtra("refineevery")) setRefineEvery(Integer.parseInt(i.getStringExtra("refineevery")));
     if (i != null && i.hasExtra("cloudevery")) setCloudEvery(Integer.parseInt(i.getStringExtra("cloudevery")));
     if (i != null && i.hasExtra("consent")) { getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("cloud_consent", "1".equals(i.getStringExtra("consent"))).apply(); log("☁ согласие на отправку разговора: " + cloudConsent()); }
@@ -2196,7 +2199,7 @@ public class TranslatorService extends Service {
         final String fLastFix = lastFix; final String[] lastRow = all.isEmpty() ? null : all.get(all.size() - 1);
         final Listener l = listener;
         if (l != null) main.post(() -> { l.onHistory(); if (fLastFix != null && lastRow != null) l.onTurn(lastRow[0], lastRow[1], fLastFix, true); if (!r.names.isEmpty()) l.onNames(new ArrayList<>(r.names), manual); });
-        if (manual && fLastFix != null && lastRow != null && !silent) { try { speakOut(lastRow[0].substring(3), fLastFix); } catch (Throwable e) { log("☁ озвучить не вышло: " + e); } }
+        if (manual && fLastFix != null && lastRow != null && !silent) { try { speakChosen(lastRow[0].substring(3), fLastFix); } catch (Throwable e) { log("☁ озвучить не вышло: " + e); } }
       } catch (Throwable e) { Log.e(TAG, "cloud", e); log("☁ ошибка пересмотра: " + e); }
       finally { cloudBusy = false; hint(null); busy("cloud", null, 0, 0); }
     });
@@ -2248,7 +2251,7 @@ public class TranslatorService extends Service {
     log(msg);
     final Listener l = listener;
     if (l != null) main.post(() -> { l.onHistory(); if (last) l.onTurn(dir, src, fx, true); });
-    if (last && !silent) worker.submit(() -> { try { speakOut(dir.substring(3), fx); } catch (Throwable e) { log("🔊 " + e); } });
+    if (last && !silent) worker.submit(() -> { try { speakChosen(dir.substring(3), fx); } catch (Throwable e) { log("🔊 " + e); } });
     return msg;
   }
   /** Произнести реплику ещё раз: улучшенный перевод, если он есть. */
@@ -2368,6 +2371,27 @@ public class TranslatorService extends Service {
     }
     java.nio.file.Files.write(new File(dir, "aec.json").toPath(), meta.toString(1).getBytes("UTF-8"));
     log("🔁 эхо-стенд: готово");
+  }
+  /** Озвучка сама, без отдельной просьбы (после «Улучшить» и правки перевода) — по выбору «Что
+   *  озвучивать». «Произнести ещё раз» и слова — явная просьба, они звучат всегда (speakOut). */
+  void speakChosen(String tgt, String text) throws Exception {
+    boolean hp = headphonesOut();
+    if (!VoiceOut.voice(voiceWhat, tgt, hp)) { log("🔈 " + VoiceOut.silentWhy(voiceWhat, tgt, hp)); return; }
+    speakOut(tgt, text);
+  }
+  public void setVoiceWhat(int m) {
+    voiceWhat = Math.max(0, Math.min(3, m));
+    getSharedPreferences("at", MODE_PRIVATE).edit().putInt("voicewhat", voiceWhat).apply();
+    log(VoiceOut.describe(voiceWhat) + (headphonesOut() ? " · сейчас наушники" : " · сейчас динамик"));
+  }
+  /** Подключены ли наушники, куда Android отправит озвучку (VoiceOut.headphones). Не по дорожке:
+   *  она может быть ещё не создана, а маршрут медиазвука решает само подключение. */
+  boolean headphonesOut() {
+    try {
+      AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+      for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) if (VoiceOut.headphones(d.getType())) return true;
+    } catch (Throwable e) { /* нет сведений — считаем динамиком */ }
+    return false;
   }
   /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). */
   void speakOut(String tgt, String text) throws Exception {
@@ -3231,7 +3255,9 @@ public class TranslatorService extends Service {
       final long[] first = {0}; double audioS = 0;
       final boolean cacheable = r.cacheable;
       // Снимок не озвучивается: его читают глазами (решение владельца 28.09).
+      final boolean hp = headphonesOut();
       if (silent || !here || kind.equals("фото") || !voice()) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : kind.equals("фото") ? " · снимок, без озвучки" : " · озвучка выключена"; }
+      else if (!VoiceOut.voice(voiceWhat, fTgt, hp)) { first[0] = t2; tag += " · " + VoiceOut.silentWhy(voiceWhat, fTgt, hp); }
       // Пауза до озвучки. Перевод уже готов и уже на экране — ждёт только голос, и ждёт он
       // не таймера, а тишины: пока человек говорит, переводы копятся в очереди и произносятся
       // после того, как он замолчал. Иначе на длинном монологе перевод начинает звучать
@@ -3288,6 +3314,7 @@ public class TranslatorService extends Service {
     if (!voice()) return 0;                            // модуль «Озвучка» выключен или голосов ещё нет: перевод на экране
     synchronized (tts) {
     if (!voice()) return 0;                            // выключили, пока ждали очередь
+    if (!VoiceOut.voice(voiceWhat, tgt, headphonesOut())) return 0;   // наушники подключили или выбор сменился, пока ждали
     int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     // В наушник — значит озвучка не попадает в комнату и микрофон можно не глушить:
     // собеседник продолжает говорить, пока в ухе идёт перевод. Замер протечки: −13…+0,1 дБ,
@@ -3322,6 +3349,8 @@ public class TranslatorService extends Service {
   /** Сколько тишины ждать, прежде чем заговорить. Одинаково для обоих языков: длинная фраза
    *  бывает и по-русски, и по-португальски. 0 — говорить сразу, как было раньше. */
   public volatile int holdMs = 1500;
+  /** Что озвучивать: VoiceOut.AUTO / RU / PT / BOTH. Куда звучит — решает Android (VoiceOut). */
+  public volatile int voiceWhat = VoiceOut.AUTO;
   Thread sayThread;
 
   void startSay() {

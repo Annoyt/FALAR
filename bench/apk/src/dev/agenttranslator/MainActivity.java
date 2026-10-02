@@ -21,7 +21,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Крупный текст словами: под каждым словом транскрипция для чтения вслух. */
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
   /** Настройки: строки и сегменты (Rows), переключатели. */
-  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segReadGuard, segMicSrc; Switch tTranslitOther;
+  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segReadGuard, segMicSrc, segVoiceWhat; Switch tTranslitOther;
   ListView histList;
   Button bPin, bWord, bBetter, bClear, bKey; View bModels;
   TextView logLast;
@@ -442,6 +442,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (svc == null) return;
     int g = svc.readGuard;
     svc.setReadingAloud(g >= 1 && holdingRead || g == 2 && cribVisible);
+  }
+  void refreshVoiceWhat() {
+    if (segVoiceWhat == null || svc == null) return;
+    segVoiceWhat.sel(Math.max(0, Math.min(3, svc.voiceWhat)));
   }
   void refreshReadGuard() {
     if (segReadGuard == null || svc == null) return;
@@ -870,7 +874,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (modsView != null) { modsView.setVisibility(tab == 5 ? View.VISIBLE : View.GONE); cloudView.setVisibility(tab == 6 ? View.VISIBLE : View.GONE); journalView.setVisibility(tab == 7 ? View.VISIBLE : View.GONE); }
     // Сегменты — заново у службы при каждом открытии: настройку меняют не только с этого экрана
     // (стенд, другой экран), а сегмент показывал бы прежнее до следующего запуска (test_ui_device.sh U4).
-    if (tab == 2 || tab == 6) { refreshIntervals(); refreshReadGuard(); }
+    if (tab == 2 || tab == 6) { refreshIntervals(); refreshReadGuard(); refreshVoiceWhat(); }
     if (tab == 6) refreshKey(null);
     if (tab == 7 && logScroll != null) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     if (setupView != null) setupView.setVisibility(tab == 4 ? View.VISIBLE : View.GONE);
@@ -1803,6 +1807,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         startService(new Intent(MainActivity.this, TranslatorService.class).putExtra("hold", String.valueOf(sb.getProgress() * 250)));
       }
     });
+    // Что озвучивать. Куда звучит, решает Android: пока подключены наушники, весь звук идёт в них,
+    // и португальский в динамик отдельно не вывести (results/2026-09-13-headphones.md). Поэтому
+    // выбор — какой язык звучит; «Авто» в наушниках озвучивает только русский.
+    r.row(ttsBox, app.falar.R.drawable.ic_speaker, "Что озвучивать", "RU — перевод вам, PT — собеседнику", null);
+    LinearLayout s7 = r.sub(ttsBox, true);
+    segVoiceWhat = r.seg(s7, VoiceOut.LABELS, i -> { if (svc == null) return; svc.setVoiceWhat(i); refreshVoiceWhat(); });
+    r.caption(s7, "«Авто»: в наушниках — только русский, через динамик — оба. Португальский в ваших наушниках собеседник не услышит, он читает крупный текст.");
 
     // ---- перевод
     LinearLayout c3 = r.group(v, "Перевод"); grpTr = (View) c3.getTag();
@@ -2479,7 +2490,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (bigText.length() < 2)
       setHint(svc != null && (svc.listenPt || svc.listenRu) ? "Pode falar · здесь появится перевод"
                                                             : "Микрофон выключен — включите «Слушать» или удержание");
-    refreshChats(); refreshKey(null); markListen(); refreshBetter(); refreshIntervals(); refreshReadGuard(); applyModules();
+    refreshChats(); refreshKey(null); markListen(); refreshBetter(); refreshIntervals(); refreshReadGuard(); refreshVoiceWhat(); applyModules();
     onUpdate(svc == null ? "" : svc.updateState);
   }
   @Override public void onStatus(String s) { status.setText(s); }
