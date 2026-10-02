@@ -691,9 +691,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         })
         .setNegativeButton("отмена", null).show();
   }
-  /** «Сообщить о переводе»: готовое обсуждение на GitHub, человек только нажимает «отправить».
-   *  Ни токенов, ни своего сервера — обычная ссылка в браузер. Разговор публичный, поэтому
-   *  что именно уйдёт, написано в диалоге до того, как браузер открылся, а не после. */
+  /** «Сообщить о переводе»: два пути. Telegram — сообщение боту (bot/ в репозитории), его видит только
+   *  разработчик, ответ приходит туда же; GitHub — открытое обсуждение по шаблону, нужен аккаунт.
+   *  Своего сервера нет ни там, ни там — обычная ссылка, отправляет человек сам. Что уйдёт, написано
+   *  в диалоге до того, как что-то открылось, а не после. */
   void reportTurn(final String dir, final String src, final String dst) {
     LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(40, 8, 40, 0);
     TextView was = new TextView(this); was.setTextSize(14);
@@ -701,30 +702,62 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final EditText in = new EditText(this);
     in.setHint("как надо было перевести"); in.setMinLines(2); in.setTextSize(16); box.addView(in);
     TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(look.soft);
-    note.setText("Откроется страница на GitHub с уже заполненным сообщением — останется нажать «отправить». "
-               + "Обсуждение открытое: эта реплика, ваш вариант, версия приложения и модель телефона будут видны всем. "
-               + "Остальной разговор не отправляется.");
+    note.setText("Уйдут эта реплика, ваш вариант, версия приложения и модель телефона; остальной разговор — нет."
+               + (src.length() + dst.length() > 800 ? " Реплика длинная — уйдёт её начало." : "")
+               + "\nTelegram: сообщение увидит только разработчик, ответ придёт туда же."
+               + "\nGitHub: открытое обсуждение, видно всем, нужен аккаунт GitHub.");
     box.addView(note);
     new android.app.AlertDialog.Builder(this)
         .setTitle("Сообщить о переводе").setView(box)
-        .setPositiveButton("открыть", (d, w) -> openReport(dir, src, dst, in.getText().toString().trim()))
+        .setPositiveButton("Telegram", (d, w) -> toTelegram(Feedback.translationText(dir, src, dst, in.getText().toString().trim(), deviceLine())))
+        .setNeutralButton("GitHub", (d, w) -> openLink(Feedback.githubTranslation(dir, src, dst, in.getText().toString().trim(), deviceLine())))
         .setNegativeButton("отмена", null).show();
   }
-  void openReport(String dir, String src, String dst, String mine) {
+  /** «Написать разработчику» в настройках: ошибка или идея без привязки к реплике, те же два пути. */
+  void writeDev() {
+    LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(40, 8, 40, 0);
+    final RadioGroup kind = new RadioGroup(this);
+    final RadioButton bug = new RadioButton(this); bug.setText("Что-то не работает"); bug.setId(View.generateViewId());
+    RadioButton idea = new RadioButton(this); idea.setText("Идея или пожелание"); idea.setId(View.generateViewId());
+    kind.addView(bug); kind.addView(idea); kind.check(bug.getId()); box.addView(kind);
+    TextView note = new TextView(this); note.setTextSize(12); note.setTextColor(look.soft);
+    note.setText("Версия приложения и модель телефона подставятся сами."
+               + "\nTelegram: сообщение увидит только разработчик, ответ придёт туда же."
+               + "\nGitHub: открытое обсуждение, видно всем, нужен аккаунт GitHub.");
+    box.addView(note);
+    new android.app.AlertDialog.Builder(this)
+        .setTitle("Написать разработчику").setView(box)
+        .setPositiveButton("Telegram", (d, w) -> toTelegram(Feedback.noteText(kind.getCheckedRadioButtonId() == bug.getId(), deviceLine())))
+        .setNeutralButton("GitHub", (d, w) -> openLink(Feedback.githubNote(kind.getCheckedRadioButtonId() == bug.getId(), deviceLine())))
+        .setNegativeButton("отмена", null).show();
+  }
+  /** Чат с ботом обратной связи, текст уже в поле ввода. Он же — в буфере: бота, которого человек
+   *  ни разу не запускал, Telegram открывает с кнопкой «Старт», и поле может оказаться пустым —
+   *  тогда текст вставляют (приветствие бота говорит об этом). */
+  void toTelegram(String text) {
+    if (!linkDry()) try {
+      ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+      if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("Falar", text));
+    } catch (Exception e) { onLog("буфер обмена: " + e); }
+    openLink(Feedback.telegram(text));
+  }
+  void openLink(String url) {
+    if (linkDry()) { journal("🔗 " + url); return; }
+    try { startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))); }
+    catch (Exception e) { onLog("не открылось: " + e); }
+  }
+  /** Стенд (--es linkdry 1): ссылки обратной связи — в журнал, а не в Telegram и браузер, и буфер обмена
+   *  не трогается: Telegram на стенде — владельца. Само гаснет через 15 минут — на случай, если стенд
+   *  оборвался и не вернул «0», а служба держит процесс живым днями. */
+  static long linkDryUntil = 0;
+  static boolean linkDry() { return SystemClock.elapsedRealtime() < linkDryUntil; }
+  /** В журнал службы — его читает стенд; без службы — хотя бы на экран. */
+  void journal(String line) { if (svc != null) svc.log(line); else onLog(line); }
+  /** «Falar 0.26.1 · Xiaomi Redmi Note 10 Pro · Android 13» — в каждое сообщение разработчику. */
+  String deviceLine() {
     String ver;
     try { ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { ver = "?"; }
-    String body = "Направление: " + (dir.startsWith("pt") ? "португальский → русский" : "русский → португальский")
-        + "\nИсходник: " + src
-        + "\nПеревод приложения: " + dst
-        + "\nКак правильно: " + (mine.isEmpty() ? "(не указано)" : mine)
-        + "\n\nFalar " + ver + " · " + Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE;
-    String title = "перевод: " + (src.length() > 60 ? src.substring(0, 60) + "…" : src);
-    try {
-      String url = "https://github.com/Annoyt/FALAR/issues/new?labels=translation"
-          + "&title=" + java.net.URLEncoder.encode(title, "UTF-8")
-          + "&body=" + java.net.URLEncoder.encode(body, "UTF-8");
-      startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
-    } catch (Exception e) { onLog("не открылось: " + e); }
+    return "Falar " + ver + " · " + Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE;
   }
   void editSource(final int idx, String src) {
     final EditText in = new EditText(this);
@@ -1789,6 +1822,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     rowMods = r.nav(c4, app.falar.R.drawable.ic_scan, "Модули и файлы", "", x -> { show(5); refreshModules(); refreshModels(); });
     rowLog = r.nav(c4, app.falar.R.drawable.ic_list, "Журнал", "", x -> show(7));
     logLast = rowLog.sub; logLast.setVisibility(View.VISIBLE); logLast.setSingleLine(true); logLast.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    r.nav(c4, app.falar.R.drawable.ic_pencil, "Написать разработчику", "ошибка или идея — в Telegram или на GitHub", x -> writeDev());
 
     ScrollView outer = new ScrollView(this); outer.setBackgroundColor(look.page); outer.addView(v);
     return outer;
@@ -2412,6 +2446,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       recreate(); return;
     }
     if (i.hasExtra("micanim")) { micDemo(i.getStringExtra("micanim"), i.getStringExtra("micsec")); return; }
+    if (i.hasExtra("linkdry")) {
+      linkDryUntil = "0".equals(i.getStringExtra("linkdry")) ? 0 : SystemClock.elapsedRealtime() + 15 * 60_000L;
+      journal("🧪 ссылки: " + (linkDry() ? "только в журнал" : "открываются")); return;
+    }
     // Стенд: перерисовать окно целиком. Перерисовка обычно частичная — только то, что сдвинулось, —
     // и вылезшее за свои границы видно не всегда: проверка прокрутки (test_scroll_device.sh) один
     // раз прошла на сборке с ошибкой. Целиком — вылезшее видно всегда.

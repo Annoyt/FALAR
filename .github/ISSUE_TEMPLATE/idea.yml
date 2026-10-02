@@ -1,0 +1,23 @@
+# Приложение («Настройки» → «Написать разработчику» → GitHub) заполняет device:
+# issues/new?template=idea.yml&device=…
+name: Идея
+description: Чего не хватает, что сделать удобнее.
+title: "идея: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Идея
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Когда это пригодится
+      description: В какой ситуации вам этого не хватило.
+  - type: input
+    id: device
+    attributes:
+      label: Версия и телефон
+      placeholder: Falar 0.26.1 · Xiaomi Redmi Note 10 Pro · Android 13

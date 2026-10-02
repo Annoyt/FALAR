@@ -1,0 +1,7 @@
+# Шаблоны обращений. Пустое обращение оставлено: ссылки Falar 0.26.1 и старше открывают
+# issues/new?labels=translation&title=…&body=… без шаблона.
+blank_issues_enabled: true
+contact_links:
+  - name: Написать в Telegram
+    url: https://t.me/falar_tbot
+    about: Без аккаунта на GitHub. Сообщение увидит только разработчик, ответ придёт туда же.

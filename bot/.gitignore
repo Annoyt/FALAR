@@ -1,0 +1,8 @@
+node_modules/
+# Собирается bot/cf.sh из wrangler.template.jsonc: номер базы D1 — данные аккаунта, в репозиторий не кладём
+wrangler.jsonc
+.wrangler/
+.cf-schema.sql
+.dev.vars
+.wrangler-e2e.jsonc
+.cf-deploy.log

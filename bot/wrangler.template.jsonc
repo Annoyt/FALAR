@@ -1,0 +1,21 @@
+// Конфиг Worker бота. bot/cf.sh deploy собирает из него wrangler.jsonc (не в git), подставляя номер
+// базы D1 из ~/.config/falar/bot.env. Секреты Worker — BOT_TOKEN, WEBHOOK_SECRET, OWNER — ставит
+// тот же скрипт (`wrangler secret bulk` из stdin), здесь их нет.
+{
+  "name": "falar-feedback-bot",
+  "main": "cf/worker.js",
+  "compatibility_date": "2026-09-01",
+  // Модули бота импортируют друг друга голыми именами, как требует Telegram Serverless: код тот же.
+  "alias": {
+    "sdk": "./cf/sdk.js",
+    "lib/owner": "./lib/owner.js",
+    "lib/feedback": "./lib/feedback.js",
+    "lib/store": "./lib/store.js",
+    "handlers/message": "./handlers/message.js",
+    "handlers/callback_query": "./handlers/callback_query.js"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "falar-feedback", "database_id": "__D1_ID__" }
+  ],
+  "observability": { "enabled": true }
+}

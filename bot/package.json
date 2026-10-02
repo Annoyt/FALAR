@@ -1,0 +1,12 @@
+{
+  "name": "falar-feedback-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.mjs",
+    "e2e": "bash test/e2e.sh"
+  },
+  "devDependencies": {
+    "wrangler": "4.146.0"
+  }
+}

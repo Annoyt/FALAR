@@ -1,0 +1,94 @@
+#!/bin/bash
+# Бот обратной связи на Cloudflare Workers — всё, что требует аккаунта и секретов:
+#   bash bot/cf.sh login        вход в Cloudflare через браузер, один раз (вход хранит wrangler)
+#   bash bot/cf.sh token        токен бота из @BotFather скрытым вводом → ~/.config/falar/bot.env
+#   bash bot/cf.sh deploy       база D1 и таблицы, код, секреты, webhook; повторять после правок кода
+#   bash bot/cf.sh owner <id>   ваш Telegram id (бот присылает его на /id) — сразу в секреты Worker
+#   bash bot/cf.sh status       бот и webhook глазами Telegram: адрес, очередь, последняя ошибка
+#   bash bot/cf.sh tail         живой журнал Worker
+# Секреты — в ~/.config/falar/bot.env (права 600) и в секретах Worker. В репозиторий, в командные строки
+# процессов и в чат не попадают: wrangler получает их через stdin, Bot API — из файла (cf/tg.mjs).
+# wrangler — только свой, из node_modules (версия закреплена в package-lock.json).
+set -e
+B=$(cd "$(dirname "$0")" && pwd); cd "$B"
+ENV=${FALAR_BOT_ENV:-$HOME/.config/falar/bot.env}; export FALAR_BOT_ENV=$ENV
+export WRANGLER_SEND_METRICS=false
+W="npx --no-install wrangler"
+[ -x node_modules/.bin/wrangler ] || npm ci --no-audit --no-fund
+get() { [ -f "$ENV" ] && sed -n "s/^$1=//p" "$ENV" | tail -1; }
+setv() {   # заменить или добавить KEY=VALUE, права 600
+  mkdir -p "$(dirname "$ENV")"; touch "$ENV"; chmod 600 "$ENV"
+  local t; t=$(mktemp "$ENV.XXXX"); grep -v "^$1=" "$ENV" > "$t" || true
+  printf '%s=%s\n' "$1" "$2" >> "$t"; chmod 600 "$t"; mv "$t" "$ENV"
+}
+username() { node cf/tg.mjs getMe 2>/dev/null | sed -n 's/.*"username": "\(.*\)".*/\1/p'; }
+
+case "${1:-}" in
+login)
+  $W login ;;
+token)
+  echo "Токен бота: @BotFather → /mybots → бот → API Token (вида 123456789:AA…)."
+  read -rsp "Вставьте токен (ввод не виден): " RAW; echo
+  # Токен ищется внутри вставленного: вместе с ним мог скопироваться текст сообщения BotFather или
+  # служебные символы вставки. Не нашёлся — сказать, что не так, не показывая самого ввода.
+  T=$(printf '%s' "$RAW" | grep -oE '[0-9]{5,15}:[A-Za-z0-9_-]{30,}' | head -1)
+  if [ -z "$T" ]; then
+    n=${#RAW}; why=""
+    [ "$n" -eq 0 ] && why="вставка не дошла — попробуйте Ctrl+Shift+V или правую кнопку мыши → «Вставить»"
+    [ -z "$why" ] && [[ "$RAW" != *:* ]] && why="нет двоеточия — нужна строка целиком, вида 123456789:AA…"
+    [ -z "$why" ] && [[ "$RAW" =~ [^[:print:]] ]] && why="в тексте служебные символы — скопируйте токен заново"
+    [ -z "$why" ] && why="после двоеточия должно быть 35 букв, цифр, «-» или «_»"
+    echo "Токен не найден во вставленном (знаков: $n): $why." >&2; unset RAW; exit 1
+  fi
+  unset RAW
+  setv BOT_TOKEN "$T"; unset T
+  [ -n "$(get WEBHOOK_SECRET)" ] || setv WEBHOOK_SECRET "$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)"
+  u=$(username)
+  if [ -z "$u" ]; then   # неверный токен не оставляем в файле
+    t=$(mktemp "$ENV.XXXX"); grep -v '^BOT_TOKEN=' "$ENV" > "$t" || true; chmod 600 "$t"; mv "$t" "$ENV"
+    echo "Telegram не принял токен (getMe) — проверьте и повторите." >&2; exit 1
+  fi
+  echo "Сохранён в $ENV. Бот: @$u"
+  [ "$u" = falar_tbot ] || echo "Имя бота не falar_tbot — скажите Claude: ссылки в приложении и на сайте надо поменять."
+  ;;
+deploy)
+  [ -n "$(get BOT_TOKEN)" ] || { echo "Сначала: bash bot/cf.sh token" >&2; exit 1; }
+  [ -n "$(get WEBHOOK_SECRET)" ] || setv WEBHOOK_SECRET "$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)"
+  $W whoami 2>&1 | grep -qiE 'logged in' || { echo "Сначала: bash bot/cf.sh login" >&2; exit 1; }
+  id=$(get CF_D1_ID)
+  if [ -z "$id" ]; then
+    out=$($W d1 create falar-feedback 2>&1) || { printf '%s\n' "$out" >&2; exit 1; }
+    id=$(printf '%s' "$out" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+    [ -n "$id" ] || { echo "Не нашёл номер базы в ответе wrangler:" >&2; printf '%s\n' "$out" >&2; exit 1; }
+    setv CF_D1_ID "$id"; echo "База D1 создана: falar-feedback"
+  fi
+  sed "s/__D1_ID__/$id/" wrangler.template.jsonc > wrangler.jsonc
+  node cf/schema-sql.mjs > .cf-schema.sql
+  $W d1 execute falar-feedback --remote --file .cf-schema.sql --yes > /dev/null
+  echo "Таблицы на месте"
+  $W deploy 2>&1 | tee .cf-deploy.log | grep -vE '^\s*$' | tail -6
+  url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' .cf-deploy.log | head -1); rm -f .cf-deploy.log
+  if [ -z "$url" ]; then
+    echo "Нет адреса *.workers.dev. Если wrangler просит подадрес: откройте dash.cloudflare.com → Workers & Pages," >&2
+    echo "согласитесь на адрес *.workers.dev и повторите bash bot/cf.sh deploy." >&2; exit 1
+  fi
+  setv BOT_URL "$url"
+  node cf/secrets.mjs | $W secret bulk > /dev/null && echo "Секреты Worker обновлены"
+  node cf/tg.mjs setWebhook "{\"url\":\"$url/telegram\",\"allowed_updates\":[\"message\",\"callback_query\"],\"max_connections\":1}" > /dev/null \
+    && echo "Webhook: $url/telegram"
+  echo "Бот: @$(username)"
+  [ -n "$(get FALAR_BOT_OWNER)" ] || echo "Дальше: напишите боту /id и выполните bash bot/cf.sh owner <число>"
+  ;;
+owner)
+  [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "Нужно число: bash bot/cf.sh owner 123456789" >&2; exit 1; }
+  setv FALAR_BOT_OWNER "$2"
+  node cf/secrets.mjs | $W secret bulk > /dev/null && echo "Разработчик: $2 — бот теперь пересылает сообщения вам"
+  ;;
+status)
+  echo "Бот: @$(username)"
+  node cf/tg.mjs getWebhookInfo | grep -E '"(url|pending_update_count|last_error_date|last_error_message|max_connections)"' ;;
+tail)
+  $W tail ;;
+*)
+  sed -n '2,10p' "$0"; exit 1 ;;
+esac
