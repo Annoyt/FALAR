@@ -43,6 +43,9 @@ THETA1, SHARE1, K1, M1 = 10.0, 0.10, 2, 2   # ступень 1: дБ над ож
 THETA2, SHARE2, K2, M2 = 8.0, 0.25, 3, 4    # ступень 2 — на паузе
 SNR2 = 10.0                                 # и полосы «за человеком» вместе громче фона в них на столько: колебания
                                             # фона после конца фразы проходили порог полосы (прогон 02.10, громкость 10)
+LEV2 = -20.0                                # и не тише недавнего эха больше чем на столько: собеседник рядом говорит
+                                            # примерно как озвучка, а слабый звук на паузе («голос 7 дБ» при эхе ~30)
+                                            # останавливал фразу посередине
 DECAY, TAIL, JIT = 4.0, 10, 1               # затухание отражений, дБ на шаг; сколько шагов; ±шагов совмещения
 NOISE_DB = 6.0                              # полоса считается, только если громче фона на столько
 SPREAD_DB = -25.0                           # искажения динамика: доля всего эха, что ложится в любую полосу
@@ -100,6 +103,7 @@ class Barge:
         self.hist = []
         self.smax = np.full(NB, 1e-12)
         self.since = -1                  # шагов с начала звука у микрофона
+        self.elev = 0.0                  # недавняя громкость эха (сумма по полосам), медленно спадает
         self.hits = []
         self.hits2 = []
         self.state = 'listen'
@@ -165,7 +169,8 @@ class Barge:
             c, _ = self.cells(m, s, self.g + self.att, THETA2)
             self.score = c.mean()
             snr = 10 * np.log10((m * c).sum() / ((self.noise * c).sum() + 1e-12) + 1e-12)
-            self.hits2 = (self.hits2 + [self.score >= SHARE2 and snr >= SNR2])[-M2:]
+            loud = (m * c).sum() >= self.elev * 10 ** (LEV2 / 10)
+            self.hits2 = (self.hits2 + [self.score >= SHARE2 and snr >= SNR2 and loud])[-M2:]
             if sum(self.hits2) >= K2:
                 self.state = 'stopped'
                 self.lev = 10 * np.log10((m * c).sum() + 1e-12)
@@ -176,6 +181,7 @@ class Barge:
         self.noise = np.where(quiet, self.track_noise(m), self.noise)
         c, e = self.cells(m, s, self.g, THETA1)
         self.score = c.mean()
+        self.elev = max(self.elev * 10 ** (-0.02), float(e.sum()))
         if self.since < 0 and e.sum() > self.noise.sum():
             self.since = 0
         elif self.since >= 0:

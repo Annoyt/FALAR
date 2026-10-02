@@ -27,6 +27,9 @@ final class BargeIn {
   /** И полосы «за человеком» вместе громче фона в них на столько: колебания фона после конца фразы проходили порог
    *  полосы, и озвучку «перебивала» тишина (прогон 02.10, громкость 10). */
   static final double SNR2 = 10;
+  /** И не тише недавнего эха больше чем на столько: собеседник рядом говорит примерно как озвучка, а слабый звук на
+   *  паузе («голос 7 дБ» при эхе ~30) останавливал фразу посередине (прогон 02.10, громкость 15). */
+  static final double LEV2 = -20;
   static final double DECAY = 4, NOISE_DB = 6, SPREAD_DB = -25;
   /** На подозрении озвучка на паузе, а не тише: на громкости 15 у Redmi приглушение на 20/30/40 дБ в цифре гасило
    *  эхо у микрофона лишь на 5–11 дБ (обработка звука подтягивает тихое). На паузе эха нет — остаётся хвост в
@@ -78,6 +81,7 @@ final class BargeIn {
   int nh = 0;
   final double[] smax = new double[NB];
   int since = -1, t = 0, fireT = -1;
+  double elev = 0;                      // недавняя громкость эха (сумма по полосам), медленно спадает
   final boolean[] hits = new boolean[M1], hits2 = new boolean[M2];
   int nHits = 0, nHits2 = 0;
   String state = "listen";
@@ -150,7 +154,8 @@ final class BargeIn {
       score = share(c);
       double cm = 0, cn = 0; for (int b = 0; b < NB; b++) if (c[b]) { cm += m[b]; cn += noise[b]; }
       double snr = 10 * Math.log10(cm / (cn + 1e-12) + 1e-12);
-      push(hits2, score >= SHARE2 && snr >= SNR2, true);
+      boolean loud = cm >= elev * Math.pow(10, LEV2 / 10);
+      push(hits2, score >= SHARE2 && snr >= SNR2 && loud, true);
       if (count(hits2, nHits2) >= K2) {
         state = "stopped";
         double v = 0; for (int b = 0; b < NB; b++) if (c[b]) v += m[b];
@@ -164,6 +169,7 @@ final class BargeIn {
     boolean[] c = cells(m, s, g, 0, THETA1, e);
     score = share(c);
     double es = 0, ns = 0; for (int b = 0; b < NB; b++) { es += e[b]; ns += noise[b]; }
+    elev = Math.max(elev * Math.pow(10, -0.02), es);
     if (since < 0 && es > ns) since = 0; else if (since >= 0) since++;
     boolean hit = score >= SHARE1 && since > GRACE;
     push(hits, hit, false);

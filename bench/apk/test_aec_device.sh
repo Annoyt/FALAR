@@ -38,6 +38,8 @@ PENDV=$STATE/aec-volume-pending
 # Вернуть громкость из $PENDV и сверить; файл убирается, только если громкость на телефоне та самая.
 putvol() {
   [ -f "$PENDV" ] || return 0
+  # Пустой файл — обрыв питания ПК между записью и сбросом на диск (02.10): прежней громкости не знаем — не трогаем.
+  [ -s "$PENDV" ] || { say "  ВНИМАНИЕ: файл прежней громкости пуст (обрыв питания?) — громкость не трогаю, проверьте ($PENDV)"; return 0; }
   local v now; v=$(cat "$PENDV")
   sh "cmd media_session volume --stream 3 --set $v" >/dev/null
   now=$(sh "cmd media_session volume --stream 3 --get" | sed -n 's/.*volume is \([0-9]*\).*/\1/p')
@@ -69,7 +71,7 @@ mkdir -p "$OUT"
 # следующий запуск (или --restore), как только телефон снова на связи.
 VOL0=$(sh "cmd media_session volume --stream 3 --get" | sed -n 's/.*volume is \([0-9]*\).*/\1/p')
 [ -n "$VOL0" ] || { say "громкость не прочлась — не начинаю"; exit 1; }
-echo "$VOL0" > "$PENDV"
+printf '%s\n' "$VOL0" > "$PENDV.tmp" && sync "$PENDV.tmp" 2>/dev/null; mv -f "$PENDV.tmp" "$PENDV"; sync   # до смены громкости — на диске
 trap 'putvol' EXIT
 sh "cmd media_session volume --stream 3 --set ${VOL:-10}" >/dev/null; say "  громкость: ${VOL:-10} из 15 (была $VOL0)"
 m=$(mark); $ADB shell "am start -n $ACT" >/dev/null 2>&1
