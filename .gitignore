@@ -16,8 +16,10 @@ bench/apk/*.apk
 bench/apk/*.idsig
 
 # Бинарники инструментов и движков: откуда взять, написано в bench/apk/README.md
-bench/apk/jni/
-tools/platform-tools/
+# Без «/» на конце: в рабочих деревьях (falar-wt/*) эти пути — ссылки на основное дерево, а шаблон
+# с «/» ловит только каталог, и ссылку git показывал как новый файл, готовый к случайному коммиту.
+bench/apk/jni
+tools/platform-tools
 tools/platform-tools.zip
 tools/r8.jar
 tools/android.jar
@@ -27,7 +29,7 @@ tools/debug.keystore
 /RTranslator/
 
 # Записи комнаты и голоса: личное
-bench/air/rec/
+bench/air/rec
 
 # Ключи и локальное
 .env
@@ -39,10 +41,10 @@ __pycache__/
 tools/json.jar
 bench/apk/SHA256SUMS.txt
 bench/apk/latest.json
-tools/pit/
+tools/pit
 hs_err_pid*.log
 
 # Проверочный набор OCR: снимки с Wikimedia Commons качаются по bench/ocr/photos.json
-bench/ocr/photos/
+bench/ocr/photos
 bench/ocr/runs/
 results/*.partial.json

@@ -2,6 +2,9 @@
 # Офлайн-чтение снимков на телефоне: докачка моделей, точность на наборе вывесок, время, наложение.
 #
 #   bash bench/apk/test_ocr_device.sh [серийный номер]
+#   ONLY=O2 OUT=<каталог> bash bench/apk/test_ocr_device.sh   # только точность на наборе — так зовёт
+#                                                            # bench/quality/gate.sh; в OUT — вывод
+#                                                            # телефона и оценка по снимкам (JSON)
 #
 # O1 модели чтения докачиваются сами (модуль «Чтение снимков») — как у обновившегося с 0.23: models/ocr на
 #    телефоне удаляется, приложение запускается с локальным источником (tools/models_serve.py через
@@ -28,6 +31,8 @@ F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log; TSV=$F/at.tsv
 BASE=http://127.0.0.1:8765; SRV=""; PY=$R/.venv/bin/python
 D=$(mktemp -d /tmp/falar-ocr.XXXX); SNAP=$D/snap; mkdir -p $SNAP $D/got; TID=$(date +%s%3N)
 pass=0; fail=0; skip=0
+ONLY=${ONLY:-O1,O2,O3}; OUT=${OUT:-}; OCRREF=${OCRREF:-$R/bench/ocr/runs/ref}
+want() { case ",$ONLY," in *",$1,"*) return 0;; esac; return 1; }
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 sk() { skip=$((skip+1)); say "ПРОПУСК $1"; }
@@ -46,6 +51,17 @@ front() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys windo
 mark() { sh "wc -l < $1" | awk '{print $1+0}'; }
 # ожидание строки журнала после метки; шаблон расширенный (grep телефона не понимает «\|» в простом)
 wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
+# --es ocrbench. Сразу после холодного запуска модели чтения ещё поднимаются, и приложение отвечает
+# «моделей чтения нет» — тогда повтор через 10 с, до двух минут (02.10 без O1 перед O2 так пропал целый
+# проход). Ответ — в l.
+ocrbench() {
+  local k m
+  for k in $(seq 12); do
+    m=$(mark $LOG); start_app --es ocrbench $F/ocrbench
+    l=$(wl "$m" '🧪 снимки:' 900)
+    case "$l" in *"моделей чтения нет"*) sleep 10;; *) return 0;; esac
+  done
+}
 serve() { stop_serve; python3 $R/tools/models_serve.py > $D/serve.log 2>&1 & SRV=$!; sleep 0.7; grep -q "источник моделей" $D/serve.log || { say "  сервер не поднялся:"; cat $D/serve.log; exit 2; }; }
 stop_serve() { [ -n "$SRV" ] && kill $SRV 2>/dev/null; SRV=""; for p in $(ss -ltnp 2>/dev/null | grep ':8765 ' | grep -o 'pid=[0-9]*' | cut -d= -f2); do kill $p 2>/dev/null; done; sleep 0.3; }
 size() { sh "stat -c %s $F/models/$1 2>/dev/null || echo 0" | awk '{print $1+0}'; }
@@ -79,6 +95,7 @@ m=$(mark $LOG); start_app --es modules show
 MODS=$(wl "$m" '🧩 модули сейчас' 60 | grep -oE '\[[a-z,]*\]' | tr -d '[]'); say "  модули: [$MODS]"
 printf '%s' "$MODS" | grep -q ocr || { start_app --es modules "'${MODS:+$MODS,}ocr'"; sleep 3; RESTORE_MODS=1; }
 
+if want O1; then
 say "== O1: модели чтения докачиваются сами — как у обновившегося"
 $ADB shell "am force-stop $PKG"; sleep 1
 $ADB shell "rm -rf $F/models/ocr"
@@ -93,18 +110,19 @@ d=$(wl "$m" 'модули докачаны' 300); say "  $d  ($(( $(date +%s) - 
 ok=1; for f in det.onnx rec.onnx; do [ "$(size ocr/$f)" = "$(stat -c %s $R/models/ocr/$f)" ] || ok=0; done
 [ $ok = 1 ] && res 0 "O1 оба файла совпали по размеру (хэш сверило приложение)" || res 1 "O1 файлы не те"
 stop_serve
+fi
 
+if want O2; then
 say "== O2: набор вывесок (bench/ocr) — точность и время на телефоне"
-if [ ! -d $R/bench/ocr/photos ] || [ ! -d $R/bench/ocr/runs/ref ]; then sk "O2 нет снимков или эталона на столе (bench/ocr/photos, bench/ocr/runs/ref)";
+if [ ! -d $R/bench/ocr/photos ] || [ ! -d "$OCRREF" ]; then sk "O2 нет снимков или эталона на столе (bench/ocr/photos, $OCRREF)";
 else
   $ADB shell "rm -rf $F/ocrbench; mkdir -p $F/ocrbench"
   $ADB push $R/bench/ocr/photos/*.jpg $F/ocrbench/ >/dev/null 2>&1
-  m=$(mark $LOG); mt=$(mark $TSV); start_app --es ocrbench $F/ocrbench
-  l=$(wl "$m" '🧪 снимки:' 900); say "  $l"
+  mt=$(mark $TSV); ocrbench; say "  $l"
   for f in $(sh "ls $F/ocrbench | grep -E '\.(txt|para)$'"); do $ADB pull "$F/ocrbench/$f" "$D/got/" >/dev/null 2>&1; done
   n=$(ls $D/got/*.txt 2>/dev/null | wc -l)
   [ "$n" = 32 ] && res 0 "O2 прочитаны все 32 снимка" || res 1 "O2 прочитано $n из 32"
-  e=$($PY $R/tools/ocr_eval.py --got $D/got --ref $R/bench/ocr/runs/ref 2>&1); say "  $(printf '%s' "$e" | sed 's/^/  /')"
+  e=$($PY $R/tools/ocr_eval.py --got $D/got --ref "$OCRREF" 2>&1); say "  $(printf '%s' "$e" | sed 's/^/  /')"
   w=$(printf '%s' "$e" | grep -oE 'слова [0-9.]+%' | head -1 | grep -oE '[0-9.]+')
   awk -v w="$w" 'BEGIN{exit !(w+0 >= 90)}' && res 0 "O2 слов прочитано $w % (на столе 93,3 %)" || res 1 "O2 слов прочитано ${w:-?} %"
   same=$(printf '%s' "$e" | grep -oE 'строка в строку [0-9]+' | grep -oE '[0-9]+')
@@ -117,16 +135,23 @@ from PIL import Image, ImageOps
 for p in sorted(glob.glob('$R/bench/ocr/photos/*.jpg')):
     ImageOps.exif_transpose(Image.open(p)).convert('RGB').save('$D/png/' + os.path.basename(p)[:-4] + '.png')"
   $ADB push $D/png/*.png $F/ocrbench/ >/dev/null 2>&1
-  m=$(mark $LOG); start_app --es ocrbench $F/ocrbench
-  l=$(wl "$m" '🧪 снимки:' 900); say "  $l"
+  ocrbench; say "  $l"
   for f in $(sh "ls $F/ocrbench | grep -E '\.(txt|para)$'"); do $ADB pull "$F/ocrbench/$f" "$D/gotp/" >/dev/null 2>&1; done
-  e2=$($PY $R/tools/ocr_eval.py --got $D/gotp --ref $R/bench/ocr/runs/ref 2>&1); say "  $(printf '%s' "$e2" | sed 's/^/  /')"
+  e2=$($PY $R/tools/ocr_eval.py --got $D/gotp --ref "$OCRREF" 2>&1); say "  $(printf '%s' "$e2" | sed 's/^/  /')"
   same=$(printf '%s' "$e2" | grep -oE 'строка в строку [0-9]+' | grep -oE '[0-9]+')
   [ "${same:-0}" -ge 28 ] && res 0 "O2 на тех же пикселях с эталоном стола строка в строку совпали $same из 32" || res 1 "O2 на тех же пикселях с эталоном совпали ${same:-0} из 32"
   sh "tail -n +$((mt+1)) $TSV" | awk -F'\t' '$2=="ocrbench"{print $3"\t"$4"x"$5"\tрамок "$6"\tмодели "$7"\tдетектор "$8"\tраспознаватель "$9"\tвсего "$11" мс"}' > $D/times.tsv
   say "  время по снимкам (худшие пять):"; sort -t$'\t' -k7 -V $D/times.tsv | tail -5 | sed 's/^/    /'
+  if [ -n "$OUT" ]; then   # для bench/quality/gate.sh: оценка по снимкам — числа и хэш вывода
+    mkdir -p "$OUT"; rm -rf "$OUT/got" "$OUT/gotp"; cp -r $D/got $D/gotp $D/times.tsv "$OUT/"
+    $PY $R/tools/ocr_eval.py --got $D/got --json "$OUT/ocr_device.json" > /dev/null 2>&1
+    $PY $R/tools/ocr_eval.py --got $D/gotp --ref "$OCRREF" --json "$OUT/ocr_device_png.json" > /dev/null 2>&1
+    say "  по снимкам — в $OUT"
+  fi
+fi
 fi
 
+if want O3; then
 say "== O3: весь путь снимка в тестовом разговоре — реплика «📷», без звука, наложение"
 python3 - "$D/t.json" "$TID" <<'EOF'
 import json, sys
@@ -167,3 +192,4 @@ if front; then
   $ADB exec-out screencap -p > /tmp/falar-ocr-overlay.png 2>/dev/null && say "  снимок экрана: /tmp/falar-ocr-overlay.png"
   $ADB shell input keyevent KEYCODE_BACK; sleep 1
 else sk "O3 экран не проверен: погашен или впереди не Falar"; fi
+fi

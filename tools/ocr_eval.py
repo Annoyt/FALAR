@@ -3,6 +3,9 @@
 
   .venv/bin/python tools/ocr_eval.py                      # все варианты эталонным конвейером
   .venv/bin/python tools/ocr_eval.py --got dir/           # вывод приложения: dir/p01.txt …
+  .venv/bin/python tools/ocr_eval.py --models models/ocr  # модели, которые уезжают в приложение
+  … --json файл.json                                       # по снимкам: числа и хэш вывода, без текста
+                                                           # (для bench/quality/gate.sh и verdict.py)
 
 Метрики — по словам, а не по строкам: разбивка на строки и их порядок у детектора и у человека
 расходятся на многоколоночных вывесках, а для перевода важно, прочитано ли слово.
@@ -65,6 +68,19 @@ def total(rows):
                 prec=s['hit'] / max(1, s['got']), cer=s['ed'] / s['chars'], n=s['n'])
 
 
+def to_json(path, what, rows, texts, extra=None):
+    """По снимкам — только числа и sha1 вывода: по хэшу видно, изменилось ли прочитанное, а самого
+    текста в файле нет (эталоны проверки качества лежат и в git)."""
+    import hashlib
+    res = [dict({k: r[k] for k in ('id', 'n', 'hit', 'hit2', 'got', 'ed', 'chars')},
+                sha=hashlib.sha1(texts.get(r['id'], '').encode('utf-8')).hexdigest()) for r in rows]
+    out = dict(what=what, results=res, total=total(rows))
+    if extra:
+        out.update(extra)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+
+
 def phone_like(img, src_max):
     """Снимок так, как его отдаёт приложению jpegOf: уменьшение до src_max по длинной стороне
     и JPEG с качеством 75."""
@@ -78,10 +94,10 @@ def phone_like(img, src_max):
     return np.asarray(Image.open(io.BytesIO(b.getvalue())).convert('RGB'))
 
 
-def run_ref(det, rec, det_max, ids, show=False, src_max=0):
+def run_ref(det, rec, det_max, ids, show=False, src_max=0, kind=None):
     sys.path.insert(0, os.path.join(R, 'tools'))
     import ocr_ref
-    o = ocr_ref.Ocr(det, rec, det_max)
+    o = ocr_ref.Ocr(det, rec, det_max, kind)
     rows, ms, texts = [], [], {}
     G = gt()
     for i in ids:
@@ -104,6 +120,9 @@ if __name__ == '__main__':
     ap.add_argument('--save', help='сохранить вывод варианта --only в каталог')
     ap.add_argument('--src-max', type=int, default=0, help='уменьшить снимок, как jpegOf (0 — как есть)')
     ap.add_argument('--ref', help='с --got: каталог эталона (tools/ocr_eval.py --only … --save) — сверка строка в строку')
+    ap.add_argument('--models', help='каталог с det.onnx и rec.onnx (словарь — вшитый в rec.onnx), как в приложении')
+    ap.add_argument('--kind', default='v6', help='с --models: разбор карты детектора v6 или v5')
+    ap.add_argument('--json', help='записать результат по снимкам (числа и sha1 вывода, без текста)')
     a = ap.parse_args()
     G = gt(); ids = sorted(G)
     if a.got:
@@ -113,6 +132,10 @@ if __name__ == '__main__':
             txt = open(p, encoding='utf-8').read() if os.path.exists(p) else ''
             r = score(G[i], txt); r['id'] = i; rows.append(r)
         t = total(rows)
+        got_texts = {}
+        for i in ids:
+            p = os.path.join(a.got, i + '.txt')
+            got_texts[i] = open(p, encoding='utf-8').read() if os.path.exists(p) else ''
         print(f'{a.got}: слова {t["words"]:.1%} · без диакр. {t["words_na"]:.1%} · точность {t["prec"]:.1%} · CER строк {t["cer"]:.1%} (слов {t["n"]})')
         if a.ref:
             same, diff = 0, []
@@ -122,7 +145,24 @@ if __name__ == '__main__':
                 rt_ = open(r, encoding='utf-8').read() if os.path.exists(r) else None
                 if gt_ is not None and gt_ == rt_: same += 1
                 else: diff.append(i)
+            if a.json:
+                to_json(a.json, 'got ' + a.got, rows, got_texts, dict(same_as_ref=same, differ=diff))
             print(f'сверка с эталоном {a.ref}: совпало строка в строку {same} из {len(ids)}' + (f'; расходятся: {" ".join(diff)}' if diff else ''))
+        if a.json and not a.ref:
+            to_json(a.json, 'got ' + a.got, rows, got_texts)
+        sys.exit()
+    if a.models:
+        rows, ms, texts = run_ref(a.models, a.models, 960, ids, a.show, a.src_max, kind=a.kind)
+        t = total(rows); ms.sort()
+        print(f'{a.models}: слова {t["words"]:.1%} · без диакр. {t["words_na"]:.1%} · точность {t["prec"]:.1%} · '
+              f'CER строк {t["cer"]:.1%} (слов {t["n"]}) · стол {ms[len(ms)//2]:.0f} мс (медиана)', flush=True)
+        if a.json:
+            to_json(a.json, 'models ' + a.models, rows, {i: v[0] for i, v in texts.items()})
+        if a.save:
+            os.makedirs(a.save, exist_ok=True)
+            for i, (txt, para) in texts.items():
+                open(os.path.join(a.save, i + '.txt'), 'w', encoding='utf-8').write(txt)
+                open(os.path.join(a.save, i + '.para'), 'w', encoding='utf-8').write(para)
         sys.exit()
     M = os.path.join(R, 'models', 'ocr-cand')
     variants = {
