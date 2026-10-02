@@ -2,27 +2,43 @@
 
 Движки:
   nllb       — NLLB-200-distilled-600M (CTranslate2 int8), офлайн
-  opus       — OPUS-MT tc-big pt-zle / zle-pt (CTranslate2 int8), офлайн, прямая пара
+  opus       — OPUS-MT tc-big pt-zle / zle-pt (CTranslate2 int8, луч 4), офлайн, прямая пара
+  app        — та же OPUS-MT ровно как в приложении: ONNX int8 с телефона, жадный декод
   bergamot   — Mozilla/Firefox tiny|base через slimt, офлайн, ПИВОТ через английский
   gemma      — Gemma 3 4B it GGUF Q4_K_M (llama.cpp), офлайн, с глоссарием
   openrouter — OpenRouter :free-модели, онлайн-эталон (платные запрещены)
 
+Наборы (--set, по умолчанию оба):
+  tatoeba    — data/mt_test/tatoeba.json: по ~1000 пар на направление из Tatoeba, которых модели не
+               видели при обучении (связи после 2022-01-01, эталон — от носителя; tools/mt_testset.py)
+  situations — data/test_set.json: прежние 40 фраз на направление из бытовых ситуаций
+Оценки (tools/mt_metrics.py): chrF и chrF++ с 95 % интервалом по каждому набору; COMET — если есть
+окружение .venv-comet (иначе --no-comet или позже: .venv-comet/bin/python tools/mt_metrics.py ФАЙЛ).
+Сравнить два прогона: .venv-comet/bin/python tools/mt_metrics.py --compare A.json B.json
+
 Примеры:
   python mt_bench.py --engine nllb --direction pt2ru
   python mt_bench.py --engine gemma --direction ru2pt
-  python mt_bench.py --engine openrouter --model google/gemini-2.0-flash-exp:free
+  python mt_bench.py --engine openrouter --model google/gemini-2.0-flash-exp:free --limit 50
 """
 import argparse
 import re
 import json
 import os
+import subprocess
+import sys
 import time
+import unicodedata
 from pathlib import Path
 
 import poco_limits
 
+sys.path.insert(0, str(Path(__file__).parent / "tools"))
+import mt_metrics  # noqa: E402
+
 PROFILE = poco_limits.apply()
-DATA = Path(__file__).parent / "data" / "test_set.json"
+SETS = {"tatoeba": Path(__file__).parent / "data" / "mt_test" / "tatoeba.json",
+        "situations": Path(__file__).parent / "data" / "test_set.json"}
 GLOSSARY_PATH = Path(__file__).parent / "data" / "glossary.json"
 
 LANG_NAMES = {"pt": "Brazilian Portuguese", "ru": "Russian"}
@@ -82,14 +98,16 @@ class OpusEngine:
     # Поэтому режем по предложениям и переводим батчем за один вызов.
     SPLIT_RE = re.compile(r"(?<=[.!?…])\s+(?=\S)")
 
-    def __init__(self, direction: str, split: bool = True):
+    def __init__(self, direction: str, split: bool = True, beam: int = 4):
         import ctranslate2
         import sentencepiece as spm
         from huggingface_hub import snapshot_download
 
         self.direction = direction
         self.split = split
-        self.name = f"opus-mt-tc-big-{'pt-zle' if direction == 'pt2ru' else 'zle-pt'}-int8" + ("+split" if split else "")
+        self.beam = beam
+        self.name = f"opus-mt-tc-big-{'pt-zle' if direction == 'pt2ru' else 'zle-pt'}-int8" + ("+split" if split else "") \
+            + (f"-beam{beam}" if beam != 4 else "")
         local = Path(__file__).parent / "models" / "opus-hf" / direction
         if (local / "model.safetensors").exists():
             hf_path = local  # скачано параллельными range-запросами (HF отдаёт ~200 KB/s на соединение)
@@ -115,8 +133,102 @@ class OpusEngine:
             # (add_source_eos=false). Без него декодер не находит конец и зацикливается.
             tokens = self.sp_src.encode(sent, out_type=str) + ["</s>"]
             batch.append([tok] + tokens if tok else tokens)
-        results = self.translator.translate_batch(batch, beam_size=4)
+        results = self.translator.translate_batch(batch, beam_size=self.beam)
         return " ".join(self.sp_tgt.decode(r.hypotheses[0]).strip() for r in results)
+
+
+# ---------- OPUS-MT как в приложении (ONNX int8, жадный декод) ----------
+class AppEngine:
+    """Перевод ровно как в приложении (Engine.translate): та же модель, что opus выше, но файлы
+    models/mt/<dir> — ONNX int8, которые едут на телефон; кодировщик сразу отдаёт K/V перекрёстного
+    внимания (encoder_kv_model.onnx), все шаги делает decoder_with_past, декод жадный, до 64 токенов на
+    предложение. Токенизатор — Viterbi по <dir>_source_pieces.tsv, как SpmTokenizer.java, вплоть до
+    float32 в оценках кусков и ASCII-пробелов Java в регулярках. Отличие от opus выше: там CTranslate2
+    и поиск лучом шириной 4, здесь — то, что слышит собеседник. До разговорника и TextRules дело не
+    доходит: меряется только модель."""
+    LAYERS, HEADS, HEAD_DIM, MAX_NEW = 6, 16, 64, 64
+    WS = " \t\n\x0b\f\r"   # \s в Java — только ASCII
+    SPLIT_RE = re.compile(r"(?<=[.!?…])[ \t\n\x0b\f\r]+(?=[^ \t\n\x0b\f\r])")
+    JAVA_TRIM = "".join(chr(c) for c in range(0x21))
+
+    def __init__(self, direction: str):
+        import numpy as np
+        import onnxruntime as ort
+
+        self.np = np
+        self.name = "opus-onnx-int8-greedy-app"
+        d = Path(__file__).parent / "models" / "mt" / direction
+        self.score = {}
+        for line in (d / f"{direction}_source_pieces.tsv").read_text(encoding="utf-8").split("\n"):
+            t = line.rfind("\t")
+            if t >= 0:
+                self.score[line[:t]] = float(np.float32(line[t + 1:]))   # Float.parseFloat
+        self.max_piece = max(map(len, self.score))
+        self.vocab = json.loads((d / f"{direction}_vocab.json").read_text(encoding="utf-8"))
+        self.inv = {v: k for k, v in self.vocab.items()}
+        self.lang = ">>rus<<" if direction == "pt2ru" else None
+        so = ort.SessionOptions()
+        so.intra_op_num_threads, so.inter_op_num_threads = poco_limits.cpu_threads(), 1
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        cpu = ["CPUExecutionProvider"]
+        self.enc = ort.InferenceSession(str(d / "encoder_kv_model.onnx"), so, providers=cpu)
+        self.dec = ort.InferenceSession(str(d / "decoder_with_past_model.onnx"), so, providers=cpu)
+        self.enc_out = [o.name for o in self.enc.get_outputs()]
+        self.dec_out = [o.name for o in self.dec.get_outputs()]
+
+    def pieces(self, text: str) -> list:
+        s = re.sub(f"[{self.WS}]+", " ", unicodedata.normalize("NFKC", text).strip(self.JAVA_TRIM))
+        s = "▁" + s.replace(" ", "▁")
+        n, neg = len(s), float("-inf")
+        best, back = [neg] * (n + 1), [0] * (n + 1)
+        best[0] = 0.0
+        for i in range(n):
+            if best[i] == neg:
+                continue
+            for j in range(i + 1, min(n, i + self.max_piece) + 1):
+                sc = self.score.get(s[i:j])
+                cand = best[i] + sc if sc is not None else (best[i] - 100.0 if j == i + 1 else neg)
+                if cand > best[j]:
+                    best[j], back[j] = cand, i
+        out, j = [], n
+        while j > 0:
+            out.append(s[back[j]:j])
+            j = back[j]
+        return out[::-1]
+
+    def step(self, past: dict, mask, token: int) -> int:
+        np = self.np
+        r = dict(zip(self.dec_out, self.dec.run(None, {**past, "encoder_attention_mask": mask,
+                                                       "input_ids": np.array([[token]], dtype=np.int64)})))
+        for l in range(self.LAYERS):
+            for kv in ("key", "value"):
+                past[f"past_key_values.{l}.decoder.{kv}"] = r[f"present.{l}.decoder.{kv}"]
+        return int(np.argmax(r["logits"][0, -1]))   # первый максимум, как argmax в Engine
+
+    def translate(self, text: str, src: str, tgt: str) -> str:
+        np = self.np
+        start, eos, unk = self.vocab["<pad>"], self.vocab["</s>"], self.vocab["<unk>"]
+        out = []
+        for sent in self.SPLIT_RE.split(text):
+            if not sent.strip(self.JAVA_TRIM):
+                continue
+            ids = ([self.vocab[self.lang]] if self.lang else []) + \
+                  [self.vocab.get(p, unk) for p in self.pieces(sent)] + [eos]
+            inp = np.array([ids], dtype=np.int64)
+            mask = np.ones_like(inp)
+            e = dict(zip(self.enc_out, self.enc.run(None, {"input_ids": inp, "attention_mask": mask})))
+            past = {}
+            for l in range(self.LAYERS):
+                for kv in ("key", "value"):
+                    past[f"past_key_values.{l}.encoder.{kv}"] = e[f"present.{l}.encoder.{kv}"]
+                    past[f"past_key_values.{l}.decoder.{kv}"] = np.zeros((1, self.HEADS, 0, self.HEAD_DIM), np.float32)
+            got, nxt = [], self.step(past, mask, start)
+            while nxt != eos and len(got) < self.MAX_NEW:
+                got.append(nxt)
+                nxt = self.step(past, mask, nxt)
+            piece = "".join(p for p in (self.inv.get(i) for i in got) if p and p not in ("</s>", "<pad>"))
+            out.append(piece.replace("▁", " ").strip(self.JAVA_TRIM))
+        return " ".join(out)
 
 
 # ---------- Bergamot / Mozilla (пивот через английский) ----------
@@ -235,60 +347,98 @@ class OpenRouterEngine:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engine", choices=["nllb", "opus", "bergamot", "gemma", "openrouter"], required=True)
+    ap.add_argument("--engine", choices=["nllb", "opus", "app", "bergamot", "gemma", "openrouter"], required=True)
     ap.add_argument("--tier", default="android", help="bergamot: android (base-memory) | tiny (нет для pt)")
     ap.add_argument("--direction", choices=["pt2ru", "ru2pt"], default="pt2ru")
     ap.add_argument("--model", default="google/gemini-2.0-flash-exp:free")
-    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--set", choices=["all", *SETS], default="all", help="какой набор фраз (по умолчанию оба)")
+    ap.add_argument("--limit", type=int, default=0, help="не больше K фраз из каждого набора")
     ap.add_argument("--no-split", action="store_true", help="opus: не резать вход по предложениям")
+    ap.add_argument("--beam", type=int, default=4, help="opus: ширина луча (1 — жадный, как в приложении)")
+    ap.add_argument("--no-comet", action="store_true", help="без COMET (только chrF и chrF++)")
+    ap.add_argument("--resume", action="store_true", help="продолжить прерванный прогон с .partial.json")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
     src, tgt = args.direction.split("2")
     key = "pt_to_ru" if args.direction == "pt2ru" else "ru_to_pt"
-    items = json.loads(DATA.read_text())[key]
-    if args.limit:
-        items = items[: args.limit]
+    items = []
+    for name, path in SETS.items():
+        if args.set not in ("all", name):
+            continue
+        part = json.loads(path.read_text())[key]
+        items += [dict(it, set=name) for it in (part[: args.limit] if args.limit else part)]
 
     glossary = load_glossary()
     engine = {"nllb": lambda: NLLBEngine(),
-              "opus": lambda: OpusEngine(args.direction, split=not args.no_split),
+              "opus": lambda: OpusEngine(args.direction, split=not args.no_split, beam=args.beam),
+              "app": lambda: AppEngine(args.direction),
               "bergamot": lambda: BergamotEngine(args.direction, tier=args.tier),
               "gemma": lambda: GemmaEngine(glossary),
               "openrouter": lambda: OpenRouterEngine(args.model, glossary)}[args.engine]()
 
-    results, latencies = [], []
+    tag = args.engine + (f"-{args.tier}" if args.engine == "bergamot" else "") \
+        + (f"-beam{args.beam}" if args.engine == "opus" and args.beam != 4 else "")
+    out = Path(args.out) if args.out else Path("results") / f"mt_{tag}_{args.direction}.json"
+    out.parent.mkdir(exist_ok=True)
+    # Длинный прогон (Gemma — час, OpenRouter — суточный лимит) пишет готовое в .partial.json каждые
+    # 25 фраз; --resume продолжает с него, а прежний полный файл не трогается до конца прогона.
+    # Если прогон дошёл до конца и упал только COMET, --resume берёт готовые переводы из полного файла
+    # того же движка и переводит заново лишь то, чего там нет.
+    partial = out.with_suffix(".partial.json")
+    done = {}
+    if args.resume:
+        prev = partial if partial.exists() else out if out.exists() else None
+        if prev is not None:
+            d = json.loads(prev.read_text())
+            if prev == partial or d.get("summary", {}).get("engine") == engine.name:
+                done = {(mt_metrics.set_of(r), r["src"]): r for r in d["results"]}
+        print(f"продолжаю: готово {len(done)} из {len(items)} ({prev})")
+
+    results = []
     for it in items:
+        if (it["set"], it[src]) in done:
+            results.append(done[(it["set"], it[src])])
+            continue
         t0 = time.perf_counter()
         hyp = engine.translate(it[src], src, tgt)
         dt = time.perf_counter() - t0
-        latencies.append(dt)
-        results.append({"src": it[src], "ref": it[tgt], "hyp": hyp, "sec": round(dt, 2)})
-        print(f"[{dt:5.2f}s] {it[src]}\n  -> {hyp}")
+        r = {"set": it["set"], "src": it[src], "ref": it[tgt], "hyp": hyp, "sec": round(dt, 2)}
+        if "pid" in it:
+            r["id"] = f"{it['pid']}-{it['rid']}"   # предложения Tatoeba: por-rus
+            r["added"] = it["added"]
+        results.append(r)
+        print(f"[{dt:5.2f}s] {it[src]}\n  -> {hyp}", flush=True)
+        if len(results) % 25 == 0:
+            partial.write_text(json.dumps({"results": results}, ensure_ascii=False))
 
-    import sacrebleu
-    # references — список ПОТОКОВ эталонов (один поток = список по всем предложениям),
-    # а не список эталонов по предложению; прежняя форма давала фиктивные 100.0
-    chrf = sacrebleu.corpus_chrf([r["hyp"] for r in results],
-                                 [[r["ref"] for r in results]])
+    latencies = [r["sec"] for r in results]
     lat_sorted = sorted(latencies)
     n = len(latencies)
     summary = {
         "engine": engine.name, "direction": args.direction, "profile": PROFILE,
-        "chrf": round(chrf.score, 2),
         "lat_avg": round(sum(latencies) / n, 2),
         "lat_p50": round(lat_sorted[n // 2], 2),
         "lat_p95": round(lat_sorted[int(n * 0.95)], 2),
         "n": n,
     }
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-
-    tag = args.engine + (f"-{args.tier}" if args.engine == "bergamot" else "")
-    out = Path(args.out) if args.out else Path("results") / f"mt_{tag}_{args.direction}.json"
-    out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"summary": summary, "results": results},
                               ensure_ascii=False, indent=2))
+    partial.unlink(missing_ok=True)
     print(f"saved -> {out}")
+    # chrF и chrF++ — здесь; COMET — в своём окружении (torch и старые пины comet не для .venv)
+    print(mt_metrics.line(out.name, mt_metrics.rescore(out)))
+    if args.no_comet:
+        return
+    if not mt_metrics.COMET_PY.exists():
+        print(f"COMET пропущен: нет {mt_metrics.COMET_PY} (как поставить — в начале tools/mt_metrics.py)")
+        return
+    sys.stdout.flush()   # иначе строка COMET из дочернего процесса окажется посреди журнала
+    rc = subprocess.run([str(mt_metrics.COMET_PY), str(Path(mt_metrics.__file__)), str(out)]).returncode
+    if rc:
+        print(f"COMET не досчитан (код {rc}); перевод сохранён в {out}. Досчитать: "
+              f"{mt_metrics.COMET_PY} {mt_metrics.__file__} {out}")
+        sys.exit(3)
 
 
 if __name__ == "__main__":

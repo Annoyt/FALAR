@@ -8,98 +8,127 @@
     "lat_p50": 2.86,
     "lat_p95": 6.86,
     "n": 15,
-    "chrf_old_buggy": 65.27
+    "chrf_old_buggy": 65.27,
+    "sets": {
+      "situations": {
+        "n": 15,
+        "chrf": 83.13,
+        "chrf_ci": 6.69,
+        "chrfpp": 82.47,
+        "chrfpp_ci": 6.9,
+        "comet": 0.9693,
+        "comet_ci": 0.0088
+      }
+    },
+    "set": "situations",
+    "chrfpp": 82.47,
+    "comet": 0.9693
   },
   "results": [
     {
       "src": "Oi, tudo bem? Quanto custa isso?",
       "ref": "Привет, как дела? Сколько это стоит?",
       "hyp": "Привет, всё хорошо? Сколько это стоит?",
-      "sec": 6.86
+      "sec": 6.86,
+      "comet": 0.9637
     },
     {
       "src": "Você pode me ajudar? Estou procurando a estação de metrô.",
       "ref": "Вы можете мне помочь? Я ищу станцию метро.",
       "hyp": "Вы можете мне помочь? Я ищу станцию метро.",
-      "sec": 3.23
+      "sec": 3.23,
+      "comet": 0.9862
     },
     {
       "src": "Desculpa, não entendi. Pode repetir mais devagar, por favor?",
       "ref": "Извините, я не понял. Можете повторить помедленнее, пожалуйста?",
       "hyp": "Извини, я не понял. Можешь повторить медленнее, пожалуйста?",
-      "sec": 2.61
+      "sec": 2.61,
+      "comet": 0.9483
     },
     {
       "src": "Queria uma mesa para duas pessoas, por favor.",
       "ref": "Я бы хотел столик на двоих, пожалуйста.",
       "hyp": "Я бы хотел столик на двоих, пожалуйста.",
-      "sec": 4.67
+      "sec": 4.67,
+      "comet": 0.9813
     },
     {
       "src": "A conta, por favor. Posso pagar com cartão?",
       "ref": "Счёт, пожалуйста. Можно заплатить картой?",
       "hyp": "Счёт, пожалуйста. Можно оплатить картой?",
-      "sec": 2.86
+      "sec": 2.86,
+      "comet": 0.9453
     },
     {
       "src": "Quanto tempo demora para chegar ao centro da cidade?",
       "ref": "Сколько времени занимает дорога до центра города?",
       "hyp": "Сколько времени занимает добраться до центра города?",
-      "sec": 1.78
+      "sec": 1.78,
+      "comet": 0.9785
     },
     {
       "src": "Você fala inglês ou russo?",
       "ref": "Вы говорите по-английски или по-русски?",
       "hyp": "Вы говорите по‑английски или по‑русски?",
-      "sec": 1.08
+      "sec": 1.08,
+      "comet": 0.9763
     },
     {
       "src": "Estou perdido. Como faço para chegar ao aeroporto?",
       "ref": "Я заблудился. Как мне добраться до аэропорта?",
       "hyp": "Я потерялся. Как мне добраться до аэропорта?",
-      "sec": 3.02
+      "sec": 3.02,
+      "comet": 0.955
     },
     {
       "src": "Tem algum restaurante bom e barato aqui perto?",
       "ref": "Есть ли поблизости хороший и недорогой ресторан?",
       "hyp": "Есть здесь неподалёку хороший и недорогой ресторан?",
-      "sec": 4.25
+      "sec": 4.25,
+      "comet": 0.9562
     },
     {
       "src": "Não como carne. Vocês têm opções vegetarianas?",
       "ref": "Я не ем мясо. У вас есть вегетарианские блюда?",
       "hyp": "Я не ем мясо. У вас есть вегетарианские варианты?",
-      "sec": 1.75
+      "sec": 1.75,
+      "comet": 0.9599
     },
     {
       "src": "Pode me trazer um café com leite, por favor?",
       "ref": "Можете принести мне кофе с молоком, пожалуйста?",
       "hyp": "Можешь принести мне кофе с молоком, пожалуйста?",
-      "sec": 4.84
+      "sec": 4.84,
+      "comet": 0.978
     },
     {
       "src": "Onde fica o banheiro?",
       "ref": "Где находится туалет?",
       "hyp": "Где находится туалет?",
-      "sec": 4.82
+      "sec": 4.82,
+      "comet": 0.9929
     },
     {
       "src": "Que horas são agora?",
       "ref": "Который сейчас час?",
       "hyp": "Сколько сейчас времени?",
-      "sec": 1.78
+      "sec": 1.78,
+      "comet": 0.9341
     },
     {
       "src": "A que horas abre o supermercado?",
       "ref": "Во сколько открывается супермаркет?",
       "hyp": "Во сколько открывается супермаркет?",
-      "sec": 1.83
+      "sec": 1.83,
+      "comet": 0.993
     },
     {
       "src": "Muito prazer em conhecer você. Meu nome é Alex.",
       "ref": "Очень приятно познакомиться. Меня зовут Алекс.",
       "hyp": "Очень приятно познакомиться. Меня зовут Алекс.",
-      "sec": 2.18
+      "sec": 2.18,
+      "comet": 0.9914
     }
   ]
 }

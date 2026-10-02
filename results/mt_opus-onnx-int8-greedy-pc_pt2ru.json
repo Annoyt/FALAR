@@ -6,7 +6,21 @@
   "lat_avg": 0.096,
   "lat_p50": 0.095,
   "lat_p95": 0.164,
-  "n": 40
+  "n": 40,
+  "sets": {
+   "situations": {
+    "n": 40,
+    "chrf": 65.26,
+    "chrf_ci": 7.2,
+    "chrfpp": 64.64,
+    "chrfpp_ci": 7.34,
+    "comet": 0.9412,
+    "comet_ci": 0.0162
+   }
+  },
+  "set": "situations",
+  "chrfpp": 64.64,
+  "comet": 0.9412
  },
  "results": [
   {
@@ -28,7 +42,8 @@
      56319,
      21
     ]
-   ]
+   ],
+   "comet": 0.9896
   },
   {
    "src": "Você pode me ajudar? Estou procurando a estação de metrô.",
@@ -50,7 +65,8 @@
      44394,
      28
     ]
-   ]
+   ],
+   "comet": 0.9744
   },
   {
    "src": "Desculpa, não entendi. Pode repetir mais devagar, por favor?",
@@ -77,7 +93,8 @@
      45817,
      21
     ]
-   ]
+   ],
+   "comet": 0.9214
   },
   {
    "src": "Queria uma mesa para duas pessoas, por favor.",
@@ -95,7 +112,8 @@
      49720,
      28
     ]
-   ]
+   ],
+   "comet": 0.9331
   },
   {
    "src": "A conta, por favor. Posso pagar com cartão?",
@@ -119,7 +137,8 @@
      48342,
      21
     ]
-   ]
+   ],
+   "comet": 0.8901
   },
   {
    "src": "Quanto tempo demora para chegar ao centro da cidade?",
@@ -139,7 +158,8 @@
      36601,
      21
     ]
-   ]
+   ],
+   "comet": 0.9622
   },
   {
    "src": "Você fala inglês ou russo?",
@@ -160,7 +180,8 @@
      40090,
      21
     ]
-   ]
+   ],
+   "comet": 0.9919
   },
   {
    "src": "Estou perdido. Como faço para chegar ao aeroporto?",
@@ -182,7 +203,8 @@
      33083,
      21
     ]
-   ]
+   ],
+   "comet": 0.9837
   },
   {
    "src": "Tem algum restaurante bom e barato aqui perto?",
@@ -199,7 +221,8 @@
      53325,
      21
     ]
-   ]
+   ],
+   "comet": 0.9529
   },
   {
    "src": "Não como carne. Vocês têm opções vegetarianas?",
@@ -226,7 +249,8 @@
      33674,
      21
     ]
-   ]
+   ],
+   "comet": 0.9845
   },
   {
    "src": "Pode me trazer um café com leite, por favor?",
@@ -244,7 +268,8 @@
      49720,
      21
     ]
-   ]
+   ],
+   "comet": 0.7692
   },
   {
    "src": "Onde fica o banheiro?",
@@ -257,7 +282,8 @@
      57822,
      21
     ]
-   ]
+   ],
+   "comet": 0.9627
   },
   {
    "src": "Que horas são agora?",
@@ -270,7 +296,8 @@
      59876,
      21
     ]
-   ]
+   ],
+   "comet": 0.9583
   },
   {
    "src": "A que horas abre o supermercado?",
@@ -285,7 +312,8 @@
      56684,
      21
     ]
-   ]
+   ],
+   "comet": 0.993
   },
   {
    "src": "Muito prazer em conhecer você. Meu nome é Alex.",
@@ -305,7 +333,8 @@
      32584,
      28
     ]
-   ]
+   ],
+   "comet": 0.9726
   },
   {
    "src": "De onde você é? Há quanto tempo mora aqui?",
@@ -327,7 +356,8 @@
      38328,
      21
     ]
-   ]
+   ],
+   "comet": 0.9614
   },
   {
    "src": "Estou aqui de férias por duas semanas.",
@@ -346,7 +376,8 @@
      45797,
      28
     ]
-   ]
+   ],
+   "comet": 0.9911
   },
   {
    "src": "O que você recomenda visitar nesta cidade?",
@@ -365,7 +396,8 @@
      36603,
      21
     ]
-   ]
+   ],
+   "comet": 0.979
   },
   {
    "src": "Posso tirar uma foto aqui?",
@@ -381,7 +413,8 @@
      40789,
      21
     ]
-   ]
+   ],
+   "comet": 0.9155
   },
   {
    "src": "Você pode me chamar um táxi, por favor?",
@@ -398,7 +431,8 @@
      49720,
      28
     ]
-   ]
+   ],
+   "comet": 0.9565
   },
   {
    "src": "Quanto fica a corrida até a praia?",
@@ -412,7 +446,8 @@
      49292,
      21
     ]
-   ]
+   ],
+   "comet": 0.8053
   },
   {
    "src": "Tem wi-fi grátis aqui? Qual é a senha?",
@@ -435,7 +470,8 @@
      48530,
      21
     ]
-   ]
+   ],
+   "comet": 0.9298
   },
   {
    "src": "Preciso de um médico. Não estou me sentindo bem.",
@@ -458,7 +494,8 @@
      60279,
      28
     ]
-   ]
+   ],
+   "comet": 0.9731
   },
   {
    "src": "Sou alérgico a amendoim e frutos do mar.",
@@ -478,7 +515,8 @@
      60676,
      28
     ]
-   ]
+   ],
+   "comet": 0.9811
   },
   {
    "src": "Onde posso trocar dólares por reais?",
@@ -497,7 +535,8 @@
      53068,
      21
     ]
-   ]
+   ],
+   "comet": 0.9558
   },
   {
    "src": "Este produto tem desconto?",
@@ -514,7 +553,8 @@
      54722,
      21
     ]
-   ]
+   ],
+   "comet": 0.9721
   },
   {
    "src": "Posso experimentar esta roupa?",
@@ -530,7 +570,8 @@
      42673,
      21
     ]
-   ]
+   ],
+   "comet": 0.9318
   },
   {
    "src": "Vocês têm um tamanho maior?",
@@ -546,7 +587,8 @@
      49333,
      21
     ]
-   ]
+   ],
+   "comet": 0.9836
   },
   {
    "src": "Aceita pagamento por Pix?",
@@ -563,7 +605,8 @@
      17485,
      21
     ]
-   ]
+   ],
+   "comet": 0.9148
   },
   {
    "src": "O ônibus para o centro passa por aqui?",
@@ -579,7 +622,8 @@
      56874,
      21
     ]
-   ]
+   ],
+   "comet": 0.9311
   },
   {
    "src": "Desculpe o atraso, o trânsito estava horrível.",
@@ -600,7 +644,8 @@
      46531,
      28
     ]
-   ]
+   ],
+   "comet": 0.7825
   },
   {
    "src": "Podemos marcar outro dia? Amanhã estou ocupado.",
@@ -622,7 +667,8 @@
      39394,
      28
     ]
-   ]
+   ],
+   "comet": 0.8674
   },
   {
    "src": "O que você faz da vida?",
@@ -636,7 +682,8 @@
      39383,
      21
     ]
-   ]
+   ],
+   "comet": 0.9895
   },
   {
    "src": "Trabalho com tecnologia, sou programador.",
@@ -655,7 +702,8 @@
      51748,
      28
     ]
-   ]
+   ],
+   "comet": 0.9663
   },
   {
    "src": "A comida aqui é muito gostosa, parabéns!",
@@ -674,7 +722,8 @@
      61053,
      16
     ]
-   ]
+   ],
+   "comet": 0.9376
   },
   {
    "src": "Pode embalar para viagem, por favor?",
@@ -691,7 +740,8 @@
      49708,
      21
     ]
-   ]
+   ],
+   "comet": 0.9221
   },
   {
    "src": "Está muito quente hoje, não acha?",
@@ -709,7 +759,8 @@
      59387,
      21
     ]
-   ]
+   ],
+   "comet": 0.9218
   },
   {
    "src": "Vai chover amanhã, segundo a previsão do tempo.",
@@ -728,7 +779,8 @@
      49462,
      28
     ]
-   ]
+   ],
+   "comet": 0.9732
   },
   {
    "src": "Foi um prazer conversar com você. Até a próxima!",
@@ -750,7 +802,8 @@
      52580,
      16
     ]
-   ]
+   ],
+   "comet": 0.9589
   },
   {
    "src": "Boa noite, durma bem. Amanhã a gente se fala.",
@@ -773,7 +826,8 @@
      39139,
      28
     ]
-   ]
+   ],
+   "comet": 0.9059
   }
  ]
 }

@@ -31,6 +31,8 @@ bench/air/rec/
 
 # Ключи и локальное
 .env
+/.venv
+/.venv-comet
 *.log
 __pycache__/
 *.pyc
@@ -43,3 +45,4 @@ hs_err_pid*.log
 # Проверочный набор OCR: снимки с Wikimedia Commons качаются по bench/ocr/photos.json
 bench/ocr/photos/
 bench/ocr/runs/
+results/*.partial.json
