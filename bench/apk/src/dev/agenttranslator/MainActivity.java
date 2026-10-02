@@ -2338,8 +2338,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       sb.append(since).append("\n");
       sb.setSpan(new android.text.style.ForegroundColorSpan(look.soft), 0, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
-    newsSection(sb, "Новое", n.added, n.multi);
-    newsSection(sb, "Исправлено", n.fixed, n.multi);
+    newsSection(sb, "Новое", n.added);
+    newsSection(sb, "Исправлено", n.fixed);
     TextView tv = new TextView(this); tv.setText(sb); tv.setTextSize(15); tv.setTextColor(look.fg); tv.setLineSpacing(0, 1.12f);
     tv.setPadding(dp(24), dp(4), dp(24), dp(4)); tv.setTextIsSelectable(true);
     ScrollView sv = new ScrollView(this); sv.addView(tv);
@@ -2350,21 +2350,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     d.setOnDismissListener(x -> { if (newsBox == d) { newsBox = null; prefs.edit().putBoolean("news_show", false).apply(); } });
     newsBox = d; d.show();
   }
-  void newsSection(android.text.SpannableStringBuilder sb, String head, java.util.List<WhatsNew.Item> items, boolean multi) {
+  /** Раздел окна: заголовок цветом акцента и пункты точками; перенесённая строка пункта встаёт под текст. */
+  void newsSection(android.text.SpannableStringBuilder sb, String head, java.util.List<WhatsNew.Item> items) {
     if (items.isEmpty()) return;
     if (sb.length() > 0) sb.append("\n");
     int a = sb.length(); sb.append(head).append("\n");
     sb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), a, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     sb.setSpan(new android.text.style.ForegroundColorSpan(look.accent), a, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     for (WhatsNew.Item i : items) {
-      int s0 = sb.length(); sb.append(i.text);
-      if (multi) {
-        int v = sb.length(); sb.append("  ").append(i.ver);
-        sb.setSpan(new android.text.style.ForegroundColorSpan(look.soft), v, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        sb.setSpan(new android.text.style.RelativeSizeSpan(0.8f), v, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-      }
-      sb.append("\n");
-      // Точка с отступом: перенесённая строка пункта встаёт под текст, а не под точку.
+      int s0 = sb.length(); sb.append(i.text).append("\n");
       sb.setSpan(new android.text.style.BulletSpan(dp(10), look.accent), s0, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
   }

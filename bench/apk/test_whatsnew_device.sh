@@ -5,16 +5,16 @@
 #
 # Обновление изображается стендом: --es whatsnew ran:<код> записывает, будто прошлый запуск был той
 # версией, и пересоздаёт экран — дальше работает настоящая проверка при запуске (checkNews):
-#   N1 обновление с 0.24.0 (28): окно «Что нового в Falar <версия>», «Обновлено с 0.24.0», сначала
-#      «Новое», потом «Исправлено», пункты всех версий новее 28 с подписью версии — текст целиком,
-#      как его собирает whatsnew.txt из рабочей копии;
+#   N1 обновление с 0.24.0 (28): окно «Что нового в Falar <версия>», «Вы обновились с версии 0.24.0.»,
+#      сначала «Новое», потом «Исправлено», пункты всех версий новее 28 — текст целиком, как его
+#      собирает whatsnew.txt из рабочей копии;
 #   N2 та же сводка — одной записью в журнале;
 #   N3 пересозданный экран (стенд --es uitheme system) показывает окно снова, в журнал второй раз не пишет;
 #   N4 «Понятно» закрывает окно, и пересозданный экран его больше сам не показывает;
 #   N5 «Настройки» → «Что нового в <версия> ›» открывает то же окно;
-#   N6 обновление с предыдущей версии: пункты одной версии, без подписей версий; «назад» — тоже «видели»;
+#   N6 обновление с предыдущей версии: пункты одной версии; «назад» — тоже «видели»;
 #   N7 записи нет (как у всех до 0.26.1 включительно): на сборке 32 окна нет, на более новой — её пункты
-#      без «Обновлено с»;
+#      без строки «Вы обновились с версии…»;
 #   N8 Falar не падал (logcat).
 # Состояние «Что нового» до проверки возвращается стендом --es whatsnew put:<снимок>. Разговоры и
 # настройки не трогаются, наружу ничего не уходит. Телефон — рабочий аппарат владельца: начинаем,
@@ -77,7 +77,7 @@ body = max((n.get('text', '') for n in ns if n.get('class') == 'android.widget.T
 print(title); print(' '.join(body.split()))
 PY
 # Что должно быть по whatsnew.txt — тем же правилом, что WhatsNew.notes: версии from < code ≤ to и
-# «следующая», сначала новое, потом исправления, подписи версий — если версий больше одной.
+# «следующая», сначала новое, потом исправления; номеров версий у пунктов нет.
 cat > $D/exp.py <<'PY'
 import re, sys
 path, frm, to, to_name, from_name, mode = sys.argv[1:7]
@@ -92,23 +92,20 @@ for raw in open(path, encoding='utf-8'):
     (E[-1][2] if s[0] == '+' else E[-1][3]).append(s[2:].strip())
 if mode == 'prev':      # версия перед to — для «обновились с предыдущей»
     c = max((e for e in E if e[1] < to), key=lambda e: e[1]); print(c[1], c[0]); sys.exit()
-add, fix, vers = [], [], []
+add, fix = [], []
 for name, code, a, f in (E if frm < to else []):
     if code != NEXT and (code <= frm or code > to): continue
-    v = to_name if code == NEXT else name
-    if v not in vers: vers.append(v)
-    add += [(t, v) for t in a]; fix += [(t, v) for t in f]
-multi = len(vers) > 1
+    add += a; fix += f
 if mode == 'text':
-    out = ('Обновлено с ' + from_name + '\n') if from_name else ''
+    out = ('Вы обновились с версии ' + from_name + '.\n') if from_name else ''
     for head, items in (('Новое', add), ('Исправлено', fix)):
         if not items: continue
-        out += ('\n' if out else '') + head + '\n' + ''.join(t + ('  ' + v if multi else '') + '\n' for t, v in items)
+        out += ('\n' if out else '') + head + '\n' + ''.join(t + '\n' for t in items)
     print(' '.join(out.split()))
 else:                   # plain — запись журнала
     b = '🆕 Обновлено ' + (from_name + ' → ' + to_name if from_name else 'до ' + to_name)
     for head, items in (('Новое', add), ('Исправлено', fix)):
-        if items: b += '\n' + head + ':' + ''.join('\n• ' + t + (' · ' + v if multi else '') for t, v in items)
+        if items: b += '\n' + head + ':' + ''.join('\n• ' + t for t in items)
     print(' '.join(b.split()))
 PY
 exp() { python3 $D/exp.py "$NEWS" "$@"; }
@@ -166,7 +163,7 @@ tapon --text Понятно; back; dump; chk 'has --desc "Разговоры, с
 say "== N6 с предыдущей версии"
 read -r PREV PNAME <<< "$(exp 0 $CUR $NAME '' prev)"
 m=$(mark); start --es whatsnew ran:$PREV; wl "$m" '🆕 Обновлено' 20 >/dev/null; sleep 1
-dlg_is "$PREV" "$PNAME" "N6 обновились с $PNAME — одна версия, без подписей"
+dlg_is "$PREV" "$PNAME" "N6 обновились с $PNAME — одна версия"
 back; chk no_dlg "N6 «назад» закрывает окно"; chk 'state | grep -q "ждёт 0"' "N6 «назад» — тоже «видели»"
 say "== N7 записи нет"
 m=$(mark); start --es whatsnew forget; sleep 5
@@ -174,7 +171,7 @@ if [ "$CUR" -le 32 ]; then
   chk no_dlg "N7 записи нет, сборка $CUR — не новее 0.26.1: окна нет"
   chk 'state | grep -q "с 32 · окно 0 · ждёт 0"' "N7 «с 32»: пришли с версии без окна"
 else
-  dlg_is 32 "" "N7 записи нет — пункты новее 0.26.1, без «Обновлено с»"; tapon --text Понятно
+  dlg_is 32 "" "N7 записи нет — пункты новее 0.26.1, без строки «Вы обновились…»"; tapon --text Понятно
 fi
 say "== N8 падения"
 crash=$($ADB shell "logcat -d -v time -t '$T0'" 2>/dev/null | tr -d '\r' | grep -A3 'FATAL EXCEPTION' | grep -A1 "Process: $PKG" | grep -vE 'Process:|^--' | head -1)

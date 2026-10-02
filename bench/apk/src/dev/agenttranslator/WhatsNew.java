@@ -40,11 +40,10 @@ public final class WhatsNew {
     public final String text, ver;
     Item(String text, String ver) { this.text = text; this.ver = ver; }
   }
-  /** Что показать: пункты по разделам, новые версии сверху; multi — версий больше одной, и тогда у
-   *  пунктов видна версия. */
+  /** Что показать: пункты по разделам, новые версии сверху. Номера версий у пунктов не показываются:
+   *  владелец 02.10 — с ними текст «странный, нечитаемый»; с какой версии обновились — одной строкой сверху. */
   public static final class Notes {
     public final List<Item> added = new ArrayList<>(), fixed = new ArrayList<>();
-    public boolean multi;
     public boolean isEmpty() { return added.isEmpty() && fixed.isEmpty(); }
   }
 
@@ -94,12 +93,9 @@ public final class WhatsNew {
   public static Notes notes(List<Entry> all, int from, int to, String toName) {
     Notes r = new Notes();
     if (from >= to) return r;
-    String first = null;
     for (Entry e : all) {
       if (e.code != NEXT && (e.code <= from || e.code > to)) continue;
       String v = e.code == NEXT ? toName : e.name;
-      if (first == null) first = v;
-      else if (!first.equals(v)) r.multi = true;
       for (String t : e.added) r.added.add(new Item(t, v));
       for (String t : e.fixed) r.fixed.add(new Item(t, v));
     }
@@ -110,20 +106,19 @@ public final class WhatsNew {
   public static Notes own(List<Entry> all, int to, String toName) { return notes(all, to - 1, to, toName); }
 
   /** Строка под заголовком окна: с какой версии обновились. Неизвестно — пусто. */
-  public static String since(String fromName) { return fromName == null || fromName.isEmpty() ? "" : "Обновлено с " + fromName; }
+  public static String since(String fromName) { return fromName == null || fromName.isEmpty() ? "" : "Вы обновились с версии " + fromName + "."; }
 
-  /** Та же сводка одной записью для журнала: «🆕 Обновлено 0.23.1 → 0.27.0», «Новое», «Исправлено»;
-   *  у пунктов — версия, если версий больше одной. */
+  /** Та же сводка одной записью для журнала: «🆕 Обновлено 0.23.1 → 0.27.0», «Новое», «Исправлено». */
   public static String plain(Notes n, String fromName, String toName) {
     StringBuilder b = new StringBuilder("🆕 Обновлено ");
     b.append(fromName == null || fromName.isEmpty() ? "до " + toName : fromName + " → " + toName);
-    section(b, "Новое", n.added, n.multi);
-    section(b, "Исправлено", n.fixed, n.multi);
+    section(b, "Новое", n.added);
+    section(b, "Исправлено", n.fixed);
     return b.toString();
   }
-  static void section(StringBuilder b, String head, List<Item> items, boolean multi) {
+  static void section(StringBuilder b, String head, List<Item> items) {
     if (items.isEmpty()) return;
     b.append('\n').append(head).append(':');
-    for (Item i : items) b.append("\n• ").append(i.text).append(multi ? " · " + i.ver : "");
+    for (Item i : items) b.append("\n• ").append(i.text);
   }
 }
