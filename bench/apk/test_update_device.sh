@@ -107,6 +107,9 @@ if [ -n "$inst" ]; then
   [ -n "$l" ] && res 0 "U-G отказ дошёл до Falar ответом установщика" || res 1 "U-G ответа установщика об отказе нет"
 else res 1 "U-G окно установки не появилось (впереди: $(focus))"; fi
 
-$ADB shell "am start -n $ACT --es updatebase off" >/dev/null 2>&1
+# Обратно на GitHub и сразу проверка по нему: иначе до завтрашней проверки в настройках висело бы
+# предложение поставить «тест-N».
+m=$(mark); $ADB shell "am start -n $ACT --es updatebase off --es update check" >/dev/null 2>&1
+l=$(wl "$m" '⬆ ' 30 | tail -1); say "  после прогона: ${l:-проверки по GitHub не видно}"
 say ""; say "итог: PASS $pass, FAIL $fail"
 [ $fail -eq 0 ]
