@@ -8,4 +8,6 @@ const env = readEnv(file);
 for (const k of ['BOT_TOKEN', 'WEBHOOK_SECRET']) {
   if (!env[k]) { console.error('нет ' + k + ' в ' + file); process.exit(1); }
 }
-process.stdout.write(JSON.stringify({ BOT_TOKEN: env.BOT_TOKEN, WEBHOOK_SECRET: env.WEBHOOK_SECRET, OWNER: env.FALAR_BOT_OWNER || '0' }));
+const out = { BOT_TOKEN: env.BOT_TOKEN, WEBHOOK_SECRET: env.WEBHOOK_SECRET, OWNER: env.FALAR_BOT_OWNER || '0' };
+if (env.GITHUB_TOKEN) out.GITHUB_TOKEN = env.GITHUB_TOKEN;   // необязательный: сводка скачиваний (cf.sh github)
+process.stdout.write(JSON.stringify(out));

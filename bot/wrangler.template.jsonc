@@ -1,5 +1,5 @@
 // Конфиг Worker бота. bot/cf.sh deploy собирает из него wrangler.jsonc (не в git), подставляя номер
-// базы D1 из ~/.config/falar/bot.env. Секреты Worker — BOT_TOKEN, WEBHOOK_SECRET, OWNER — ставит
+// базы D1 из ~/.config/falar/bot.env. Секреты Worker — BOT_TOKEN, WEBHOOK_SECRET, OWNER, GITHUB_TOKEN — ставит
 // тот же скрипт (`wrangler secret bulk` из stdin), здесь их нет.
 {
   "name": "falar-feedback-bot",
@@ -12,8 +12,12 @@
     "lib/feedback": "./lib/feedback.js",
     "lib/store": "./lib/store.js",
     "handlers/message": "./handlers/message.js",
-    "handlers/callback_query": "./handlers/callback_query.js"
+    "handlers/callback_query": "./handlers/callback_query.js",
+    "lib/stats": "./lib/stats.js",
+    "handlers/scheduled": "./handlers/scheduled.js"
   },
+  // Раз в час, в :05 — handlers/scheduled: сводка скачиваний с GitHub раз в сутки.
+  "triggers": { "crons": ["5 * * * *"] },
   "d1_databases": [
     { "binding": "DB", "database_name": "falar-feedback", "database_id": "__D1_ID__" }
   ],

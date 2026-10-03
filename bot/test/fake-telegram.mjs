@@ -2,9 +2,12 @@
 //   node test/fake-telegram.mjs 8790
 //   GET /calls — все вызовы [{token, method, params}]; POST /reset — забыть их;
 //   POST /fail/<method>/<код> + тело-описание — следующий такой вызов вернёт ошибку.
+// Заодно — API GitHub для сводки скачиваний: GET /repos/<владелец>/<репо>/releases отдаёт список,
+//   заданный POST /gh/releases (тело — JSON); GET /gh/calls — запросы [{url, ua, auth}].
 import http from 'node:http';
 
-const calls = [], fails = [];
+const calls = [], fails = [], ghCalls = [];
+let ghReleases = [];
 let id = 500;
 http.createServer(async (req, res) => {
   let body = '';
@@ -12,6 +15,12 @@ http.createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
   if (req.method === 'GET' && req.url === '/calls') return res.end(JSON.stringify(calls));
   if (req.method === 'POST' && req.url === '/reset') { calls.length = 0; fails.length = 0; return res.end('{}'); }
+  if (req.method === 'POST' && req.url === '/gh/releases') { ghReleases = JSON.parse(body); return res.end('{}'); }
+  if (req.method === 'GET' && req.url === '/gh/calls') return res.end(JSON.stringify(ghCalls));
+  if (req.method === 'GET' && req.url.startsWith('/repos/')) {
+    ghCalls.push({ url: req.url, ua: req.headers['user-agent'] || null, auth: req.headers.authorization || null });
+    return res.end(JSON.stringify(/^\/repos\/[^/]+\/[^/]+\/releases\?/.test(req.url) ? ghReleases : []));
+  }
   let m = /^\/fail\/(\w+)\/(\d+)$/.exec(req.url);
   if (req.method === 'POST' && m) { fails.push({ method: m[1], code: Number(m[2]), description: body }); return res.end('{}'); }
   m = /^\/bot([^/]*)\/(\w+)$/.exec(req.url);

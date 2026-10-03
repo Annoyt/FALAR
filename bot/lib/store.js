@@ -44,6 +44,17 @@ export async function moveRelay(id, chat, msg) {
   await db.run('UPDATE relays SET chat = :c, msg = :m WHERE id = :id', { ':c': chat, ':m': msg, ':id': id });
 }
 
+/** Последний снимок счётчиков GitHub: {day, at, data} или null. */
+export async function lastSnapshot() {
+  return db.get('SELECT * FROM stats ORDER BY day DESC LIMIT 1');
+}
+
+/** Снимок дня: повтор в тот же день заменяет прежний. */
+export async function saveSnapshot(day, at, data) {
+  await db.run('INSERT INTO stats (day, at, data) VALUES (:day, :at, :data) ' +
+    'ON CONFLICT(day) DO UPDATE SET at = excluded.at, data = excluded.data', { ':day': day, ':at': at, ':data': data });
+}
+
 export async function setting(key) {
   const r = await db.get('SELECT value FROM settings WHERE key = :k', { ':k': key });
   return r ? r.value : null;

@@ -27,6 +27,14 @@ export const relays = table('relays', {
   chatMsg: index('idx_relays_chat_msg').on(t.chat, t.msg),
 }));
 
+// Снимки счётчиков скачиваний с GitHub, раз в сутки (handlers/scheduled): только числа —
+// {"counts": {"v0.29.0/Falar.apk": 2, …}, "latest": {…}, "since": "v0.21.0"}. День — разработчика (lib/stats).
+export const stats = table('stats', {
+  day:  text('day').primaryKey(),
+  at:   integer('at').notNull(),
+  data: text('data').notNull(),
+});
+
 // Группа разработчика и номера её топиков: пишет /setup.
 export const settings = table('settings', {
   key:   text('key').primaryKey(),
