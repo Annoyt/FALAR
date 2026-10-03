@@ -91,10 +91,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // приходит в заново созданный экран. Адрес снимка и ждущий снимок — из сохранённого состояния,
     // иначе снимок терялся молча (владелец, 29.09: «реальная картинка из камеры не прилетела»).
     if (b != null) {
-      String pu = b.getString(K_PHOTO_URI), pp = b.getString(K_PENDING);
+      String pu = b.getString(K_PHOTO_URI);
       if (pu != null) photoUri = android.net.Uri.parse(pu);
-      if (pp != null) pendingPhoto = android.net.Uri.parse(pp);
-      cloudPhoto = b.getBoolean(K_CLOUD_PHOTO, false); pendingCloud = b.getBoolean(K_PENDING_CLOUD, false);
+      java.util.ArrayList<String> pp = b.getStringArrayList(K_PENDING); boolean[] pc = b.getBooleanArray(K_PENDING_CLOUD);
+      if (pp != null) for (int k = 0; k < pp.size(); k++) { pendingPhotos.add(android.net.Uri.parse(pp.get(k))); pendingClouds.add(pc != null && k < pc.length && pc[k]); }
+      cloudPhoto = b.getBoolean(K_CLOUD_PHOTO, false);
     }
     prefs = getSharedPreferences("at", MODE_PRIVATE);
     szPt = prefs.getFloat("szPt", 34); szRu = prefs.getFloat("szRu", 17);
@@ -1313,14 +1314,21 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     try { getContentResolver().delete(u, null, null); } catch (Throwable t) { onLog("📷 снимок камеры в галерее не удалился: " + t); }
     photoUri = null;
   }
-  /** Снимок пришёл раньше, чем поднялся сервис с движками: прочитаем в onReady. */
-  android.net.Uri pendingPhoto; boolean pendingCloud;
+  /** Снимки, пришедшие раньше, чем поднялись движки (снимали во время загрузки): прочитаем в onReady по
+   *  порядку. Облачный ли каждый — рядом. */
+  final java.util.ArrayList<android.net.Uri> pendingPhotos = new java.util.ArrayList<>();
+  final java.util.ArrayList<Boolean> pendingClouds = new java.util.ArrayList<>();
 
   @Override protected void onSaveInstanceState(Bundle out) {
     super.onSaveInstanceState(out);
     if (photoUri != null) out.putString(K_PHOTO_URI, photoUri.toString());
-    if (pendingPhoto != null) out.putString(K_PENDING, pendingPhoto.toString());
-    out.putBoolean(K_CLOUD_PHOTO, cloudPhoto); out.putBoolean(K_PENDING_CLOUD, pendingCloud);
+    if (!pendingPhotos.isEmpty()) {
+      java.util.ArrayList<String> pp = new java.util.ArrayList<>(); boolean[] pc = new boolean[pendingClouds.size()];
+      for (android.net.Uri u : pendingPhotos) pp.add(u.toString());
+      for (int k = 0; k < pc.length; k++) pc[k] = pendingClouds.get(k);
+      out.putStringArrayList(K_PENDING, pp); out.putBooleanArray(K_PENDING_CLOUD, pc);
+    }
+    out.putBoolean(K_CLOUD_PHOTO, cloudPhoto);
   }
 
   @Override protected void onActivityResult(int req, int res, Intent data) {
@@ -1332,13 +1340,19 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
     final android.net.Uri u = data != null && data.getData() != null ? data.getData() : photoUri;
     if (u == null) { onLog("📷 снимок не вернулся: камера не отдала файл"); return; }
+    photoArrived(u, cloudPhoto);
+  }
+  /** Снимок пришёл (камера, галерея, стенд). Движки ещё грузятся — в очередь: снимать можно и во время
+   *  загрузки (владелец 03.10), прочитаем по порядку в onReady. */
+  void photoArrived(android.net.Uri u, boolean cloud) {
     if (svc == null || svc.eng == null) {
-      pendingPhoto = u; pendingCloud = cloudPhoto;
-      setHint("📷 снимок получен — прочитаю, как только приложение загрузится");
-      onLog("📷 снимок получен до загрузки приложения — ждёт движков");
+      pendingPhotos.add(u); pendingClouds.add(cloud);
+      setHint(pendingPhotos.size() > 1 ? "📷 снимков получено: " + pendingPhotos.size() + " — прочитаю по порядку, как загружусь"
+                                       : "📷 снимок получен — прочитаю, как загружусь");
+      journal("📷 снимок получен до загрузки приложения — ждёт движков, в очереди " + pendingPhotos.size());
       return;
     }
-    handlePhoto(u, cloudPhoto);
+    handlePhoto(u, cloud);
   }
 
   /** Прочитать снимок u: офлайн — без спроса, облаком — с согласием на каждый снимок. */
@@ -2855,14 +2869,41 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // касанием; что на экране — --es uitexts 1. Ответов стенд не даёт: лесенка — данные владельца.
     if (i.hasExtra("words") || i.hasExtra("review")) { standWords(i.getStringExtra("words"), i.getStringExtra("review")); return; }
     if (i.hasExtra("whatsnew")) { newsStand(i.getStringExtra("whatsnew")); return; }
+    // Стенд: снимок, как будто его только что вернула камера, — тем же путём (photoArrived): во время загрузки
+    // он встаёт в очередь. Файл — в files/ приложения.
+    if (i.hasExtra("photopick")) { photoArrived(android.net.Uri.fromFile(new java.io.File(i.getStringExtra("photopick"))), false); return; }
     if (i.hasExtra("ctx") && svc != null) { tCtx.setChecked(true); }
     if (i.getExtras() != null && !i.getExtras().isEmpty()) startService(new Intent(this, TranslatorService.class).putExtras(i));
     else startService(new Intent(this, TranslatorService.class).putExtra("fromUi", true)); }
+  /** Модели грузятся, а говорить, удерживать, снимать и набирать уже можно (владелец 03.10): кнопки — те же,
+   *  только тусклее, пока не поднялось всё. Сказанное копится и переводится, как поднимется перевод. */
+  @Override public void onEarly() {
+    if (svc == null) return;
+    bMic.setEnabled(true); bInput.setEnabled(true); bListen.setEnabled(true);
+    dimInputs(true);
+    uiSync = true; tListenPt.setChecked(svc.listenPt); tListenRu.setChecked(svc.listenRu); uiSync = false;
+    markListen();
+    setHint(svc.listenPt || svc.listenRu ? "Можно говорить — переведу, как загружусь" : "Удерживайте и говорите — переведу, как загружусь");
+  }
+  /** Тусклые, но рабочие: пока грузятся модели. */
+  void dimInputs(boolean dim) {
+    float a = dim ? 0.5f : 1f;
+    if (bMic != null) bMic.setAlpha(a); if (bInput != null) bInput.setAlpha(a); if (bListen != null) bListen.setAlpha(a);
+  }
+  /** Сказанное во время загрузки распознано: показать, что услышано, — перевод придёт следом. */
+  @Override public void onHeard(String dir, String text) {
+    if (svc != null && svc.eng != null) return;        // уже загрузились — сейчас придёт сама реплика
+    setHint("Услышано: «" + text + "» — переведу, как загружусь");
+  }
   @Override public void onReady() {
-    if (pendingPhoto != null && svc != null) {       // снимок ждал движков — теперь читаем
-      final android.net.Uri u = pendingPhoto; final boolean c = pendingCloud; pendingPhoto = null;
-      new Handler(Looper.getMainLooper()).post(() -> handlePhoto(u, c));
+    if (!pendingPhotos.isEmpty() && svc != null && svc.eng != null) {   // снимки ждали движков — теперь читаем, по порядку
+      for (int k = 0; k < pendingPhotos.size(); k++) {
+        final android.net.Uri u = pendingPhotos.get(k); final boolean c = pendingClouds.get(k);
+        new Handler(Looper.getMainLooper()).post(() -> handlePhoto(u, c));
+      }
+      pendingPhotos.clear(); pendingClouds.clear();
     }
+    dimInputs(svc == null || svc.eng == null);
     bPin.setEnabled(true); bBetter.setEnabled(true);
     tCtx.setEnabled(true); bClear.setEnabled(true); bKey.setEnabled(true); bWord.setEnabled(true);
     bMic.setEnabled(true); bInput.setEnabled(true); bListen.setEnabled(true);
