@@ -92,6 +92,11 @@ say "== проверка качества · $(git -C "$R" rev-parse --short HEA
 # ---- что менялось с прошлого выпуска: телефон нужен, только если трогали слушание или модели
 if [ -n "$RELEASE" ]; then
   CH=$(git -C "$R" diff --name-only "$RELEASE"..HEAD) || fail "нет тега $RELEASE"
+  # Подъём версии меняет в models/manifest.json одно поле "app": модели те же, и телефон ради этого не
+  # нужен. Иначе оба этапа на телефоне шли бы на каждом выпуске: восемь правок манифеста перед 0.29.0
+  # подряд были только подъёмами версии.
+  git -C "$R" diff -U0 "$RELEASE"..HEAD -- models/manifest.json | grep -E '^[+-]' \
+    | grep -vqE '^(\+\+\+|---) |^[+-] *"app": ' || CH=$(printf '%s\n' "$CH" | grep -vx 'models/manifest.json')
   if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(TranslatorService|Engine|DenoiseGate|Wiener|Gain|Hearing)\.java$|^models/manifest\.json$'; then
     DEVICE=1; say "  с $RELEASE менялось слушание или модели — нужен и этап на телефоне"
   fi
