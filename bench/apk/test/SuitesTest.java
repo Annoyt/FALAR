@@ -30,4 +30,6 @@ public class SuitesTest {
   @Test void denoiseGate() { assertEquals(0, DenoiseGateTest.run()); }
   @Test void wiener() { assertEquals(0, WienerTest.run()); }
   @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
+  @Test void clips() throws Exception { assertEquals(0, ClipsTest.run()); }
+  @Test void learn() throws Exception { assertEquals(0, LearnTest.run()); }
 }

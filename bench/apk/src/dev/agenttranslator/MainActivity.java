@@ -32,6 +32,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
   boolean meterOn = false, resumed = false;
   EditText keyIn; SeekBar sMic, sHold; TextView micLbl, holdLbl, micVal; Switch cMicAuto;
+  Switch cKeepAudio; TextView audioLbl; int audioReq = 0;
   View reviewBox; TextView revWord, revRu, revEx, revStat; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart;
   String revCur; boolean revOpen;
   Switch tCtx; ToggleButton tListenPt, tListenRu;
@@ -141,6 +142,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     });
     CompoundButton.OnCheckedChangeListener lis = (v, on) -> {
       if (svc == null || uiSync) return;
+      svc.humanTouch();                     // кнопку нажал человек: метка стенда снимается
       svc.setListen(tListenPt.isChecked(), tListenRu.isChecked());
       setHint(!tListenPt.isChecked() && !tListenRu.isChecked() ? "Микрофон выключен"
           : tListenPt.isChecked() && tListenRu.isChecked() ? "Pode falar · слушаю оба языка, направление по реплике"
@@ -447,6 +449,33 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (segVoiceWhat == null || svc == null) return;
     segVoiceWhat.sel(Math.max(0, Math.min(3, svc.voiceWhat)));
   }
+  /** Строка «Хранить звук собеседников»: включено ли и сколько уже записано. Размер считается в фоне —
+   *  это обход каталога, а экран открывается сразу. */
+  void refreshAudio() {
+    if (audioLbl == null || svc == null) return;
+    final boolean on = svc.keepAudio; final int req = ++audioReq;
+    if (cKeepAudio != null && cKeepAudio.isChecked() != on) cKeepAudio.setChecked(on);
+    new Thread(() -> {
+      long[] s = svc.audioSize();
+      final String txt = Screen.audioLine(on, s[0], s[1]);
+      runOnUiThread(() -> { if (req == audioReq) audioLbl.setText(txt); });
+    }, "audio-size").start();
+  }
+  /** «Удалить звук, оставить текст» — с вопросом: вернуть звук нельзя. */
+  void dropAudioAsk() {
+    if (svc == null) return;
+    new Thread(() -> {
+      final long[] s = svc.audioSize();
+      runOnUiThread(() -> {
+        if (s[0] == 0) { onLog("🎙 записанного звука нет — удалять нечего"); return; }
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Удалить звук?")
+            .setMessage(Screen.audioDropText(s[0], s[1]))
+            .setPositiveButton("удалить", (d, w) -> new Thread(() -> { svc.dropAllAudio(); runOnUiThread(this::refreshAudio); }, "audio-drop").start())
+            .setNegativeButton("отмена", null).show();
+      });
+    }, "audio-size").start();
+  }
   void refreshReadGuard() {
     if (segReadGuard == null || svc == null) return;
     segReadGuard.sel(Math.max(0, Math.min(2, svc.readGuard)));
@@ -678,6 +707,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final java.util.List<String> items = new java.util.ArrayList<>();
     if (photo) items.add("Показать снимок");
     if (mine) { items.add("Исправить текст"); items.add("Исправить перевод"); }
+    if (svc.chats.audioOf(idx) != null) items.add("Послушать, как сказали");   // живой звук собеседника, если хранится
     if (!photo && svc.mod(Modules.TTS)) items.add("Произнести ещё раз");   // снимок не озвучивается; без модуля «Озвучка» — нечем
     items.add("Сообщить о переводе"); items.add("Удалить реплику"); items.add("Перенести в другой разговор");
     String title = t[1].length() > 40 ? t[1].substring(0, 40) + "…" : t[1];
@@ -688,6 +718,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
           if (it.equals("Показать снимок")) openPhoto(idx);
           else if (it.equals("Исправить текст")) editSource(idx, t[1]);
           else if (it.equals("Исправить перевод")) editTranslation(idx, t[1], t[2]);
+          else if (it.equals("Послушать, как сказали")) svc.playClip(idx);
           else if (it.equals("Произнести ещё раз")) svc.sayTurn(idx);
           else if (it.equals("Сообщить о переводе")) reportTurn(t[0], t[1], t[2]);
           else if (it.equals("Удалить реплику")) { boolean wasLast = idx == svc.chats.size() - 1; if (svc.dropTurn(idx)) { refreshHist(); refreshChats(); if (wasLast) showLastTurn(); } }
@@ -874,7 +905,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (modsView != null) { modsView.setVisibility(tab == 5 ? View.VISIBLE : View.GONE); cloudView.setVisibility(tab == 6 ? View.VISIBLE : View.GONE); journalView.setVisibility(tab == 7 ? View.VISIBLE : View.GONE); }
     // Сегменты — заново у службы при каждом открытии: настройку меняют не только с этого экрана
     // (стенд, другой экран), а сегмент показывал бы прежнее до следующего запуска (test_ui_device.sh U4).
-    if (tab == 2 || tab == 6) { refreshIntervals(); refreshReadGuard(); refreshVoiceWhat(); }
+    if (tab == 2 || tab == 6) { refreshIntervals(); refreshReadGuard(); refreshVoiceWhat(); refreshAudio(); }
     if (tab == 6) refreshKey(null);
     if (tab == 7 && logScroll != null) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     if (setupView != null) setupView.setVisibility(tab == 4 ? View.VISIBLE : View.GONE);
@@ -1659,6 +1690,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final int req = ++wordsReq;
     if (stepperRow != null) stepperRow.setVisibility(knownMode ? View.GONE : View.VISIBLE);
     new Thread(() -> {
+      // Разбор — с фоновым приоритетом: экран «Слов» открывают и посреди разговора, а живой перевод главнее.
+      try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); } catch (Throwable ignore) {}
       final java.util.List<Learn.Word> l = knownMode ? svc.learn.knownWords() : svc.learn.top(min, 200);
       // Счётчики на сегментах — «Учу · 200», «Знаю · 48»: второй список тоже из кэша разбора.
       final int nLearn = knownMode ? svc.learn.top(min, 200).size() : l.size(), nKnown = knownMode ? l.size() : svc.learn.knownWords().size();
@@ -1814,6 +1847,20 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     LinearLayout s7 = r.sub(ttsBox, true);
     segVoiceWhat = r.seg(s7, VoiceOut.LABELS, i -> { if (svc == null) return; svc.setVoiceWhat(i); refreshVoiceWhat(); });
     r.caption(s7, "«Авто»: в наушниках — только русский, через динамик — оба. Португальский в ваших наушниках собеседник не услышит, он читает крупный текст.");
+    // Звук собеседников (решение владельца 03.10): португальская речь собеседника остаётся в разговоре на
+    // телефоне — реплику можно переслушать, а «Слова» покажут живой голос. По умолчанию выключено:
+    // приложение не копит молча записи окружающих. В облачную копию не попадает (правила в манифесте).
+    cKeepAudio = r.sw(); cKeepAudio.setChecked(prefs.getBoolean("keep_audio", false));
+    Rows.Row ka = r.row(c2, app.falar.R.drawable.ic_voice, "Хранить звук собеседников", "", cKeepAudio);
+    audioLbl = ka.sub; audioLbl.setVisibility(View.VISIBLE);
+    cKeepAudio.setOnCheckedChangeListener((b, on) -> {
+      if (svc == null) { prefs.edit().putBoolean("keep_audio", on).apply(); return; }
+      if (svc.keepAudio != on) svc.setKeepAudio(on);
+      refreshAudio();
+    });
+    LinearLayout s8 = r.sub(c2, true);
+    r.caption(s8, "Португальская речь собеседника остаётся в разговоре на этом телефоне: реплику можно переслушать из её меню. Удаляется вместе с разговором и в облачную копию не попадает.");
+    r.nav(c2, app.falar.R.drawable.ic_trash, "Удалить звук, оставить текст", null, x -> dropAudioAsk());
 
     // ---- перевод
     LinearLayout c3 = r.group(v, "Перевод"); grpTr = (View) c3.getTag();
@@ -2327,7 +2374,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   boolean ptt(MotionEvent e, String dir) {
     if (svc == null) return false;
     // Кнопкам удержания отклик ставим здесь: общий обработчик касания у них затирается своим.
-    if (e.getAction() == MotionEvent.ACTION_DOWN) { buzz(); svc.pttStart(dir); return true; }
+    if (e.getAction() == MotionEvent.ACTION_DOWN) { buzz(); svc.humanTouch(); svc.pttStart(dir); return true; }
     if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) { svc.pttStop(); return true; }
     return false;
   }

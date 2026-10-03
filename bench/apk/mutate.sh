@@ -29,7 +29,7 @@ TARGETS=$(echo "$T" | tr ',' '\n' | sed 's/^/dev.agenttranslator./' | paste -sd,
 OUT=$A/out/pit; C=$A/out/pit-classes; rm -rf "$C"; mkdir -p "$C" "$OUT"
 JU=$P/junit-platform-console-standalone-1.11.4.jar
 # Компилируем все наборы: обёртка SuitesTest ссылается на каждый. Ограничиваем только то, что мутируется.
-SRC=""; for t in Brief Heard Updates ModelStore Chats Memo WordList Pressure OcrCore OcrWords Modules Screen Voices Fbank BargeIn WhatsNew DenoiseGate Wiener Feedback VoiceOut; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
+SRC=""; for t in Brief Heard Updates ModelStore Chats Memo WordList Pressure OcrCore OcrWords Modules Screen Voices Fbank BargeIn WhatsNew DenoiseGate Wiener Feedback VoiceOut Clips Learn; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
 SRC="$SRC $A/src/dev/agenttranslator/Phrasebook.java $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java $A/test/TextRulesTest.java"
 SRC="$SRC $A/src/dev/agenttranslator/Cloud.java $A/test/CloudTest.java"      # ради Cloud.Review и порядка моделей; заглушки Android — только для сборки
 javac --release 11 -nowarn -g -cp "$J:$JU:$R/tools/android.jar" -d "$C" $SRC $A/test/SuitesTest.java

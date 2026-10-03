@@ -37,6 +37,15 @@ import org.json.*;
  *  диалог: в рабочую историю уточнителя, в облачный пересмотр и в «кто говорит» такие реплики
  *  не идут (dialog(), tail()). Файл снимка удаляется вместе с репликой и с разговором.
  *
+ *  **Живой звук** (`audio`, с 0.29) — имя файла в files/audio: португальская речь собеседника, какой
+ *  её слышал распознаватель (ClipCodec). Пишется, только если человек включил «Хранить звук
+ *  собеседников»; удаляется вместе с репликой и разговором, как снимок. Имя, а не метка `at`: правка
+ *  исходника даёт реплике новую метку, а перенос в другой разговор не должен терять звук.
+ *
+ *  **Стенд** (`stand: 1`, с 0.29) — реплика пришла со стендового прогона (подача записи, комнатный
+ *  прогон в молчаливом режиме). Из разговора не удаляется, но «Слова» её не считают: на 02.10 треть
+ *  реплик в разговорах владельца была корпусом прогонов, и частоты врали.
+ *
  *  Всё лежит на устройстве: это транскрипты приватных разговоров людей, которые не знают,
  *  что их записывают (§7 плана). */
 public class Chats {
@@ -171,6 +180,143 @@ public class Chats {
     }
   }
 
+  /** Каталог живого звука реплик (поле `audio`): рядом с разговорами и снимками. */
+  public File audio() { return new File(dir.getParentFile(), "audio"); }
+
+  /** Файл звука реплики idx текущего разговора, если он записан (в любом формате, Clips.find); иначе null. */
+  public synchronized File audioOf(int idx) {
+    JSONObject x = idx < 0 || idx >= turns.length() ? null : turns.optJSONObject(idx);
+    return x == null ? null : Clips.find(audio(), x.optString("audio", ""));
+  }
+
+  /** Звук, удалённый вместе с репликой раньше, чем его успели записать (запись идёт в фоне после
+   *  реплики): запись его не оставит (claimAudio). Без этого файл появлялся уже без реплики. */
+  final Set<String> droppedAudio = new HashSet<>();
+  /** Растёт на каждом «Удалить звук»: запись, начатая до него, своё не оставляет. */
+  public volatile int audioGen = 0;
+
+  /** Удалить звук у реплик массива — вместе с репликой или разговором, как снимок; в любом формате и
+   *  недописанный. Файла ещё нет — имя запоминается, и фоновая запись его не оставит. */
+  synchronized void dropAudio(JSONArray t, int from, int to) {
+    for (int k = from; k < to && t != null && k < t.length(); k++) {
+      JSONObject x = t.optJSONObject(k); String f = x == null ? "" : x.optString("audio", "");
+      if (f.isEmpty() || f.contains("/")) continue;
+      String b = Clips.base(f); boolean had = false;
+      for (String e : Clips.EXTS) {
+        had |= new File(audio(), b + "." + e).delete();
+        new File(audio(), b + "." + e + ".part").delete();
+      }
+      if (!had) droppedAudio.add(b);
+    }
+  }
+
+  /** Фоновая запись звука закончилась: оставить ли файл. false — реплику удалили, пока он писался. */
+  public synchronized boolean claimAudio(String name) { return !droppedAudio.remove(Clips.base(name)); }
+
+  /** Имена звука (без расширения, Clips.base), на которые ссылаются реплики всех разговоров. Замок
+   *  разговоров — только на время чтения каждого: уборка идёт в фоне, а экран ждать не должен. */
+  Set<String> audioRefs() {
+    Set<String> out = new HashSet<>();
+    List<String[]> l; long cur; String own;
+    synchronized (this) { l = list(); cur = current; own = turns.toString(); }
+    for (String[] c : l) {
+      long id = Long.parseLong(c[0]);
+      JSONArray t;
+      try { if (id == cur) t = new JSONArray(own); else { JSONObject o = load(id); t = o == null ? null : o.optJSONArray("turns"); } }
+      catch (JSONException e) { t = null; }
+      for (int k = 0; t != null && k < t.length(); k++) {
+        JSONObject x = t.optJSONObject(k); String f = x == null ? "" : x.optString("audio", "");
+        if (!f.isEmpty()) out.add(Clips.base(f));
+      }
+    }
+    return out;
+  }
+
+  /** Убрать файлы звука, на которые не ссылается ни одна реплика: стенд удаляет свои разговоры
+   *  мимо приложения (adb), а прерванная запись оставляет «.part». Свежее minAgeMs не трогается —
+   *  его, может быть, ещё дописывают. Файлов нет — разговоры не читаются вовсе. Возвращает {файлов, байт}. */
+  public long[] sweepAudio(long minAgeMs) {
+    File[] fs = audio().listFiles();
+    if (fs == null || fs.length == 0) return new long[]{0, 0};
+    Set<String> refs = audioRefs();
+    long now = System.currentTimeMillis(), n = 0, bytes = 0;
+    for (File f : fs) {
+      if (refs.contains(Clips.base(f.getName())) || now - f.lastModified() < minAgeMs) continue;
+      long len = f.length();
+      if (f.delete()) { n++; bytes += len; }
+    }
+    return new long[]{n, bytes};
+  }
+
+  /** Сколько занимает живой звук: {реплик со звуком, байт}. Реплика — по имени без расширения: её
+   *  недописанный файл и готовый — одна реплика. */
+  public long[] audioSize() {
+    File[] fs = audio().listFiles();
+    Set<String> names = new HashSet<>(); long bytes = 0;
+    for (int k = 0; fs != null && k < fs.length; k++) if (fs[k].isFile()) { names.add(Clips.base(fs[k].getName())); bytes += fs[k].length(); }
+    return new long[]{names.size(), bytes};
+  }
+
+  /** «Удалить звук, оставить текст»: у реплик всех разговоров снимается `audio`, файлы удаляются.
+   *  Возвращает, сколько было: {реплик со звуком, байт}. */
+  public synchronized long[] dropAllAudio() {
+    audioGen++;
+    for (String[] c : list()) {
+      long id = Long.parseLong(c[0]);
+      try {
+        if (id == current) { if (unsetAll(turns, "audio") > 0) save(); continue; }
+        JSONObject o = load(id); JSONArray t = o == null ? null : o.optJSONArray("turns");
+        if (t != null && unsetAll(t, "audio") > 0) write(file(id), o.toString());
+      } catch (Exception ignore) {}
+    }
+    long[] was = audioSize();
+    File[] fs = audio().listFiles();
+    for (int k = 0; fs != null && k < fs.length; k++) fs[k].delete();
+    return was;
+  }
+
+  static int unsetAll(JSONArray t, String key) {
+    int n = 0;
+    for (int k = 0; k < t.length(); k++) { JSONObject x = t.optJSONObject(k); if (x != null && x.has(key)) { x.remove(key); n++; } }
+    return n;
+  }
+
+  /** Пометить реплики стенда: разговор → метки `at`. Возвращает, сколько реплик получили метку. */
+  public synchronized int markStand(Map<Long, Set<Long>> ats) {
+    int n = 0;
+    for (Map.Entry<Long, Set<Long>> e : ats.entrySet()) {
+      long id = e.getKey();
+      try {
+        JSONObject o = id == current ? null : load(id);
+        JSONArray t = id == current ? turns : o == null ? null : o.optJSONArray("turns");
+        int m = 0;
+        for (int k = 0; t != null && k < t.length(); k++) {
+          JSONObject x = t.optJSONObject(k);
+          if (x != null && e.getValue().contains(x.optLong("at", -1)) && x.optInt("stand", 0) != 1) { x.put("stand", 1); m++; }
+        }
+        if (m == 0) continue;
+        n += m;
+        if (id == current) save(); else write(file(id), o.toString());
+      } catch (Exception ignore) {}
+    }
+    return n;
+  }
+
+  /** Снять все метки стенда — на случай, если метка легла на настоящую реплику. Возвращает, сколько снято. */
+  public synchronized int unmarkStand() {
+    int n = 0;
+    for (String[] c : list()) {
+      long id = Long.parseLong(c[0]);
+      try {
+        if (id == current) { int m = unsetAll(turns, "stand"); if (m > 0) { n += m; save(); } continue; }
+        JSONObject o = load(id); JSONArray t = o == null ? null : o.optJSONArray("turns");
+        int m = t == null ? 0 : unsetAll(t, "stand");
+        if (m > 0) { n += m; write(file(id), o.toString()); }
+      } catch (Exception ignore) {}
+    }
+    return n;
+  }
+
   public synchronized int size() { return turns.length(); }
   /** Метка последней реплики текущего разговора; 0, если реплик нет. Служба сверяет по ней,
    *  какую правку показать крупно и произнести — а не по памяти о последней озвучке, которая
@@ -181,7 +327,11 @@ public class Chats {
   public synchronized long newChat(String who) {
     long left = turns.length() > 0 ? current : 0;
     if (left == 0) dropIfEmpty(); else save();
-    current = System.currentTimeMillis();
+    // Номер — время, но не занятый: два новых разговора в одну миллисекунду (переход через KEEP сразу
+    // после «＋ новый», стенд) давали один файл, и save() молча затирал реплики первого пустым списком.
+    long id = System.currentTimeMillis();
+    while (file(id).exists()) id++;
+    current = id;
     name = who == null ? "" : who;
     turns = new JSONArray(); terms = new JSONArray(); topic = ""; memo = ""; memoBy = ""; voices = new Voices();
     save();
@@ -236,7 +386,7 @@ public class Chats {
                         x.optString("fixed", x.optString("dst", "")), String.valueOf(k),
                         x.optString("fixed", "").isEmpty() ? "" : "1", x.optString("by", ""),
                         String.valueOf(x.optLong("at", 0)), x.optString("who", ""),
-                        x.has("photo") ? PHOTO : ""};
+                        x.has("photo") ? PHOTO : "", x.optString("audio", "")};
   }
   /** Метка реплики со снимком в ряду all() (поле 8). */
   public static final String PHOTO = "📷";
@@ -259,7 +409,7 @@ public class Chats {
    *  или чужой разговор, попавший в запись, потом уходит и в уточнение перевода, и в разбор слов. */
   public synchronized boolean deleteTurn(int idx) {
     if (idx < 0 || idx >= turns.length()) return false;
-    dropPhotos(turns, idx, idx + 1);
+    dropPhotos(turns, idx, idx + 1); dropAudio(turns, idx, idx + 1);
     turns.remove(idx);
     save(); return true;
   }
@@ -494,7 +644,7 @@ public class Chats {
   public synchronized boolean delete(long id) {
     JSONObject gone = id == current ? null : load(id);
     JSONArray t = id == current ? turns : gone == null ? null : gone.optJSONArray("turns");
-    if (t != null && file(id).exists()) dropPhotos(t, 0, t.length());
+    if (t != null && file(id).exists()) { dropPhotos(t, 0, t.length()); dropAudio(t, 0, t.length()); }
     boolean ok = file(id).delete();
     if (ok && id == current) {                    // удалили тот, в котором сидим — начинаем чистый
       current = System.currentTimeMillis(); name = ""; turns = new JSONArray(); terms = new JSONArray(); topic = ""; memo = ""; memoBy = "";
