@@ -32,4 +32,6 @@ public class SuitesTest {
   @Test void wordList() throws Exception { assertEquals(0, WordListTest.run(System.getProperty("falar.common", "../../data/common_words.txt"))); }
   @Test void clips() throws Exception { assertEquals(0, ClipsTest.run()); }
   @Test void learn() throws Exception { assertEquals(0, LearnTest.run()); }
+  @Test void cards() { assertEquals(0, CardsTest.run()); }
+  @Test void practice() { assertEquals(0, PracticeTest.run()); }
 }

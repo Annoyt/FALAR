@@ -189,6 +189,20 @@ public class Engine {
     DenoisedAudio d = denoiser.run(s, sr);
     return d.getSamples();
   }
+  /** Распознанное и время токенов: у Parakeet TDT — начало и длительность каждого (шаг 80 мс). По ним реплика
+   *  режется на предложения (Clips.cuts; замер results/2026-10-03-asr-timestamps.md). Без времени (потоковая
+   *  русская модель, шумодав перед распознаванием) — tokens == null. */
+  public static final class Asr {
+    public final String text; public final String[] tokens; public final float[] times, durs;
+    Asr(String text, String[] tokens, float[] times, float[] durs) { this.text = text; this.tokens = tokens; this.times = times; this.durs = durs; }
+  }
+  public Asr asrFull(String lang, float[] s, int sr) {
+    OfflineRecognizer off = asrMulti != null ? asrMulti : (lang.equals("pt") ? asrPt : null);
+    if (off == null || denoiseOn && denoiser != null) return new Asr(asr(lang, s, sr), null, null, null);
+    OfflineStream st = off.createStream(); st.acceptWaveform(s, sr); off.decode(st);
+    OfflineRecognizerResult r = off.getResult(st); st.release();
+    return new Asr(r.getText().trim(), r.getTokens(), r.getTimestamps(), r.getDurations());
+  }
   public String asr(String lang, float[] s, int sr) {
     if (denoiseOn && denoiser != null) { float[] c = denoise(s, sr); if (c != null && c.length > 0) { s = c; sr = denoiser.getSampleRate(); } }
     OfflineRecognizer off = asrMulti != null ? asrMulti : (lang.equals("pt") ? asrPt : null);

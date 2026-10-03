@@ -3,6 +3,7 @@ package dev.agenttranslator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /** Что показывают экраны 0.26.0 — подписи, метки и решения без Android, чтобы их проверял
  *  настольный тест (bench/apk/test/ScreenTest.java). Рисует и раскладывает MainActivity, а здесь —
@@ -199,6 +200,83 @@ final class Screen {
   }
 
   // ---- слова ---------------------------------------------------------------------------------
+
+  /** Вкладки «Слов» (шаг 2, разбор 03.10): слова и связки, повторяющиеся фразы, известное. */
+  static final int TAB_WORDS = 0, TAB_PHRASES = 1, TAB_KNOWN = 2;
+
+  /** Кто сказал пример: собеседник с номером голоса, голос не определён (разговор назван — с его именем), вы. */
+  static String exampleWho(boolean heard, String who, String chatName) {
+    if (!heard) return "вы сказали";
+    if (who != null && who.matches("\\d{1,4}")) return "Собеседник " + who;
+    return chatName == null || chatName.trim().isEmpty() ? "голос не определён" : "голос не определён · " + chatName.trim();
+  }
+
+  /** Сводка голосов фразы: «Собеседник 1 ×2 · Собеседник 3 ×1 · вы ×1» — по убыванию, неизвестные голоса вместе. */
+  static String voicesLine(Map<String, Integer> v) {
+    List<Map.Entry<String, Integer>> l = new ArrayList<>(v.entrySet());
+    l.sort((a, b) -> b.getValue() - a.getValue());
+    StringBuilder s = new StringBuilder();
+    for (Map.Entry<String, Integer> e : l) {
+      String k = e.getKey();
+      String who = Voices.OWNER.equals(k) ? "вы" : k != null && k.matches("\\d{1,4}") ? "Собеседник " + k : "голос не определён";
+      if (s.length() > 0) s.append(" · ");
+      s.append(who).append(" ×").append(e.getValue());
+    }
+    return s.toString();
+  }
+
+  /** Где в предложении слово или связка карточки: {начало, конец} в исходной строке или null. Сравнение — по
+   *  нормализованным словам (Phrasebook.norm: регистр, знаки, «tá» = «está»), выделяется исходный текст. */
+  static int[] highlight(String sentence, String key) {
+    if (sentence == null || key == null || key.isEmpty()) return null;
+    String[] want = key.split(" ");
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\S+").matcher(sentence);
+    List<int[]> span = new ArrayList<>(); List<String> norm = new ArrayList<>();
+    while (m.find()) { span.add(new int[]{m.start(), m.end()}); norm.add(Phrasebook.norm(m.group())); }   // «pro» → «para o» ни с чем не совпадёт
+    for (int i = 0; i + want.length <= norm.size(); i++) {
+      boolean ok = true;
+      for (int j = 0; j < want.length && ok; j++) ok = norm.get(i + j).equals(want[j]);
+      if (!ok) continue;
+      // знак препинания после слова не выделяется
+      int start = span.get(i)[0], end = span.get(i + want.length - 1)[1];
+      while (end > start && !Character.isLetterOrDigit(sentence.charAt(end - 1))) end--;
+      while (start < end && !Character.isLetterOrDigit(sentence.charAt(start))) start++;
+      return new int[]{start, end};
+    }
+    return null;
+  }
+
+  /** Метрика «Слов» за неделю (решение владельца 03.10): с первой попытки в «Скажите сами» и сказанное
+   *  по-португальски самим в живом разговоре. */
+  static String metricLine(int tries, int ok, int said) {
+    if (tries == 0 && said == 0) return "За неделю пока пусто: «Скажите сами» — в карточке слова";
+    String s = "За неделю: с первой попытки " + ok + " из " + tries;
+    return said > 0 ? s + " · сами по-португальски: " + said : s;
+  }
+  /** Повторение (решение владельца 03.10): сколько пора повторить сегодня, а если ничего — когда следующее.
+   *  inDays — через сколько календарных дней ближайший срок (Learn.daysUntil), 0 — сроков нет. */
+  static String reviewLine(int due, int known, int inDays) {
+    if (known == 0) return "Отмечайте «знаю» в «Словах» и «Фразах» — известное будет повторяться здесь";
+    if (due > 0) return "Пора повторить: " + due + " · на слух или вслух";
+    if (inDays <= 0) return "На сегодня всё";
+    return "На сегодня всё · следующее " + (inDays == 1 ? "завтра" : inDays == 2 ? "послезавтра" : "через " + inDays + " " + plural(inDays, "день", "дня", "дней"));
+  }
+  /** После ответа: когда спросим снова — «через 3 дня», «завтра». */
+  static String reviewNext(boolean ok, int inDays) {
+    String when = inDays <= 1 ? "завтра" : inDays == 2 ? "послезавтра" : "через " + inDays + " " + plural(inDays, "день", "дня", "дней");
+    return (ok ? "получилось · снова " : "не получилось · снова ") + when;
+  }
+
+  /** Подсказка над вкладкой: что в ней и что делает касание. */
+  static String cardsHint(int tab, int n, int min, boolean computed) {
+    if (!computed) return "Разбираю разговоры — в затишье, когда никто не говорит";
+    if (tab == TAB_KNOWN) return n == 0 ? "Известного пока нет — отмечайте долгим нажатием в «Словах» и «Фразах»"
+                                        : "Знаю: " + n + " · касание — примеры, долгое — назад в изучение";
+    if (tab == TAB_PHRASES) return n == 0 ? "Повторяющихся фраз пока нет: фраза попадает сюда, когда прозвучала не меньше " + min + " " + plural(min, "раза", "раз", "раз")
+                                          : "Фразы, сказанные не меньше " + min + " " + plural(min, "раза", "раз", "раз") + ": " + n + " · касание — кто и как сказал";
+    return n == 0 ? "Пока нечего показать: нужно, чтобы слово встретилось не меньше " + min + " " + plural(min, "раза", "раз", "раз")
+                  : "Слова и связки от " + min + " " + plural(min, "повтора", "повторов", "повторов") + ": " + n + " · касание — живые примеры, долгое — «знаю»";
+  }
 
   /** Порог «встречалось не меньше N раз» кнопками −/+: от 1 до 10, как у прежнего ползунка. */
   static int stepMin(int cur, int d) { int n = cur + d; return n < 1 || n > 10 ? cur : n; }

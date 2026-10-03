@@ -40,7 +40,9 @@ import org.json.*;
  *  **Живой звук** (`audio`, с 0.29) — имя файла в files/audio: португальская речь собеседника, какой
  *  её слышал распознаватель (ClipCodec). Пишется, только если человек включил «Хранить звук
  *  собеседников»; удаляется вместе с репликой и разговором, как снимок. Имя, а не метка `at`: правка
- *  исходника даёт реплике новую метку, а перенос в другой разговор не должен терять звук.
+ *  исходника даёт реплике новую метку, а перенос в другой разговор не должен терять звук. При звуке может
+ *  быть `cuts` — где реплика делится на предложения, мс от начала звука (Clips.cuts): по ним «Слова» играют
+ *  живой голос одного предложения.
  *
  *  **Стенд** (`stand: 1`, с 0.29) — реплика пришла со стендового прогона (подача записи, комнатный
  *  прогон в молчаливом режиме). Из разговора не удаляется, но «Слова» её не считают: на 02.10 треть
@@ -187,6 +189,15 @@ public class Chats {
   public synchronized File audioOf(int idx) {
     JSONObject x = idx < 0 || idx >= turns.length() ? null : turns.optJSONObject(idx);
     return x == null ? null : Clips.find(audio(), x.optString("audio", ""));
+  }
+
+  /** Где реплика idx текущего разговора делится на предложения (поле `cuts`, мс от начала звука) или null. */
+  public synchronized int[] cutsOf(int idx) {
+    JSONObject x = idx < 0 || idx >= turns.length() ? null : turns.optJSONObject(idx);
+    JSONArray a = x == null ? null : x.optJSONArray("cuts");
+    if (a == null) return null;
+    int[] out = new int[a.length()]; for (int k = 0; k < out.length; k++) out[k] = a.optInt(k);
+    return out;
   }
 
   /** Звук, удалённый вместе с репликой раньше, чем его успели записать (запись идёт в фоне после

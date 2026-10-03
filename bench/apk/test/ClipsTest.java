@@ -80,6 +80,27 @@ public class ClipsTest {
     ok(Clips.resample(tone, 16000, 16000) == tone, "K5 та же частота — без копии");
     eq(Clips.resample(new float[0], 16000, 22050).length, 0, "K5 пусто — пусто");
 
+    // K7 разрез на предложения по времени токенов: речь 0–0,64 с и 1,30–2,0 с, между ними тишина
+    float[] two = new float[32000];
+    for (int k = 0; k < two.length; k++) { double t = k / 16000.0; if (t < 0.64 || t >= 1.30) two[k] = (float) (0.2 * Math.sin(2 * Math.PI * 200 * t)); else two[k] = (float) (0.0005 * Math.sin(k * 1.7)); }
+    String[] tok = {"▁Bom", "▁dia", ".", "▁Vou", "▁te", "▁ver", "."};
+    float[] ts = {0.00f, 0.32f, 0.56f, 1.36f, 1.52f, 1.68f, 1.92f}, du = {0.32f, 0.24f, 0.08f, 0.16f, 0.16f, 0.24f, 0.08f};
+    int[] cu = Clips.cuts(tok, ts, du, two, 16000, 0);
+    ok(cu != null && cu.length == 1 && cu[0] > 640 && cu[0] < 1300, "K7 один разрез — внутри тишины: " + java.util.Arrays.toString(cu));
+    float[] ts2 = new float[ts.length]; for (int k = 0; k < ts.length; k++) ts2[k] = ts[k] + 0.25f;
+    int[] cp = Clips.cuts(tok, ts2, du, two, 16000, 0.25);
+    ok(cp != null && cp.length == 1 && cp[0] > 640 && cp[0] < 1300, "K7 подставленная тишина учтена: " + java.util.Arrays.toString(cp));
+    int[] glued = Clips.cuts(new String[]{"▁Bom", "▁dia.", "▁Vou", "▁te", "▁ver."}, new float[]{0f, 0.32f, 1.36f, 1.52f, 1.68f}, new float[]{0.32f, 0.32f, 0.16f, 0.16f, 0.32f}, two, 16000, 0);
+    ok(glued != null && glued.length == 1, "K7 знак, прилипший к слову, — тоже граница");
+    eq(Clips.cuts(new String[]{"▁Bom", "▁dia", "."}, new float[]{0f, 0.32f, 0.56f}, null, two, 16000, 0).length, 0, "K7 одно предложение — разрезов нет");
+    eq(Clips.cuts(null, null, null, two, 16000, 0), null, "K7 меток нет — null");
+    // K8 отрезок предложения по разрезам; не сходится число — реплика целиком
+    eq(java.util.Arrays.toString(Clips.range(new int[]{1000}, 0, 2, 16000, 32000)), "[0, 16000]", "K8 первое из двух");
+    eq(java.util.Arrays.toString(Clips.range(new int[]{1000}, 1, 2, 48000, 96000)), "[48000, 96000]", "K8 второе, звук 48 кГц");
+    eq(Clips.range(new int[]{1000}, 0, 3, 16000, 32000), null, "K8 разрезов не столько, сколько стыков — целиком");
+    eq(Clips.range(null, 0, 2, 16000, 32000), null, "K8 разрезов нет — целиком");
+    eq(Clips.range(new int[]{100}, 0, 2, 16000, 32000), null, "K8 кусок короче 0,2 с — целиком");
+    eq(Clips.range(new int[]{1000}, 0, 1, 16000, 32000), null, "K8 одно предложение — целиком");
     System.out.println(fails == 0 ? "Clips: " + checks + " проверок, все прошли" : "Clips: провалов " + fails + " из " + checks);
     return fails;
   }

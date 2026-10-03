@@ -34,6 +34,9 @@
 #   Clips      — живой звук реплик: формат по версии Android, имя без затирания соседнего, усиление тихой
 #                записи при проигрывании (сам кодек, ClipCodec, — на телефоне: bench/audio/clip_bench.sh);
 #   Learn      — «Слова»: реплики стенда (поле stand) не считаются;
+#   Cards      — карточки «Слов» и «Фраз»: связка вместо слова, живые примеры от разных людей, перевод
+#                именно своего предложения, фразы разными голосами, свои фразы — по сказанному по-русски;
+#   Practice   — «Скажите сами»: что говорить, какие слова распознаны, вердикт по слову карточки;
 #   BackupRules — резервная копия: в облако Google ничего, на новый телефон всё (манифест и res/xml).
 # Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
@@ -69,7 +72,9 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Feedback.java $A/test/FeedbackTest.java \
   $A/src/dev/agenttranslator/VoiceOut.java $A/test/VoiceOutTest.java \
   $A/src/dev/agenttranslator/Clips.java $A/test/ClipsTest.java \
-  $A/src/dev/agenttranslator/Learn.java $A/test/LearnTest.java $A/test/BackupRulesTest.java
+  $A/src/dev/agenttranslator/Learn.java $A/test/LearnTest.java $A/test/BackupRulesTest.java \
+  $A/src/dev/agenttranslator/Cards.java $A/test/CardsTest.java \
+  $A/src/dev/agenttranslator/Practice.java $A/test/PracticeTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -97,5 +102,7 @@ java -cp "$OUT:$J" dev.agenttranslator.DenoiseGateTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ClipsTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.LearnTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.BackupRulesTest "$A" || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.CardsTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.PracticeTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WienerTest || fail=1
 exit $fail

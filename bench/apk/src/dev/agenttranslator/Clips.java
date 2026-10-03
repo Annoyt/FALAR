@@ -1,7 +1,9 @@
 package dev.agenttranslator;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /** Живой звук реплик: имя файла, формат, громкость и частота при проигрывании. Чтение и запись —
  *  ClipCodec; здесь то, что проверяется на столе без Android (bench/apk/test/ClipsTest.java).
@@ -76,6 +78,43 @@ final class Clips {
     if (lvl <= 1e-6) return 1f;
     double g = Math.min(Math.min(MAX_GAIN, TARGET / lvl), 0.95 / peak);   // уровень не ноль — значит, и пик не ноль
     return (float) Math.max(1, g);
+  }
+
+  /** Конец предложения в токене распознавателя. */
+  static final String ENDS = ".?!…";
+  /** Где резать реплику на предложения, мс от начала звука реплики. Граница — токен, кончающийся знаком конца
+   *  предложения, за которым идёт слово; разрез — середина между концом этого знака (начало + длительность) и
+   *  началом слова, затем — к самому тихому окну 20 мс в пределах ±0,4 с (Voices.snap). Замер на компьютере
+   *  (results/2026-10-03-asr-timestamps.md, tools/asr_timestamps.py — тот же расчёт): там, где текст поделён,
+   *  разрез внутри настоящей паузы в 100 % (107 из 107, комната near-pt — 40 из 40). padSec — тишина, подставленная
+   *  перед распознаванием (TranslatorService.padMs): метки — от начала подставленного. null — меток нет. */
+  static int[] cuts(String[] tok, float[] ts, float[] du, float[] x, int sr, double padSec) {
+    if (tok == null || ts == null || ts.length < tok.length || x == null) return null;
+    List<Integer> out = new ArrayList<>(); int end = -1;
+    for (int k = 0; k < tok.length; k++) {
+      String t = tok[k];
+      boolean wordy = false; for (int c = 0; c < t.length() && !wordy; c++) wordy = Character.isLetterOrDigit(t.charAt(c));
+      if (wordy && end >= 0) {
+        double e1 = ts[end] + (du != null && du.length > end ? du[end] : (end + 1 < ts.length ? ts[end + 1] - ts[end] : 0));
+        double raw = (e1 + ts[k]) / 2 - padSec;
+        double cut = Voices.snap(x, sr, raw, 0.4);
+        out.add((int) Math.round(cut * 1000));
+        end = -1;
+      }
+      String s = t.trim();
+      if (!s.isEmpty() && ENDS.indexOf(s.charAt(s.length() - 1)) >= 0) end = k;
+    }
+    int[] a = new int[out.size()]; for (int k = 0; k < a.length; k++) a[k] = out.get(k);
+    return a;
+  }
+
+  /** Отрезок предложения sent из sents по точкам разреза реплики, в отсчётах rate; null — разреза нет (точек не
+   *  столько, сколько стыков предложений) — тогда играет реплика целиком. */
+  static int[] range(int[] cutsMs, int sent, int sents, int rate, int len) {
+    if (cutsMs == null || sents < 2 || cutsMs.length != sents - 1 || sent < 0 || sent >= sents) return null;
+    int a = sent == 0 ? 0 : (int) ((long) cutsMs[sent - 1] * rate / 1000), b = sent == sents - 1 ? len : (int) ((long) cutsMs[sent] * rate / 1000);
+    a = Math.max(0, Math.min(len, a)); b = Math.max(a, Math.min(len, b));
+    return b - a < rate / 5 ? null : new int[]{a, b};       // короче 0,2 с — что-то не так, играем целиком
   }
 
   /** Частота кусочка — под дорожку озвучки. Дорожка другой частоты пересоздаётся, и недоигранный хвост
