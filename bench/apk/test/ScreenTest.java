@@ -174,6 +174,35 @@ public class ScreenTest {
     eq(Screen.audioLine(true, 21, 1_350_000), "включено · 21 реплика, 1.4 МБ", "A2 двадцать одна реплика");
     eq(Screen.audioLine(true, 12, 400_000), "включено · 12 реплик, 0.4 МБ", "A2 двенадцать реплик");
     eq(Screen.audioLine(false, 3, 90_000), "выключено · хранится с прошлого раза: 3 реплики, 0.1 МБ", "A3 выключили — записанное осталось");
+    // «Слова» шага 2: кто сказал пример, голоса фразы, выделение слова в предложении, подсказка вкладки
+    eq(Screen.exampleWho(true, "2", "Анна"), "Собеседник 2", "B1 голос узнан — номер");
+    eq(Screen.exampleWho(true, "", "Анна"), "голос не определён · Анна", "B1 голос не узнан — с разговором");
+    eq(Screen.exampleWho(true, "", " "), "голос не определён", "B1 разговор без имени");
+    eq(Screen.exampleWho(false, "", "Анна"), "вы сказали", "B1 своя реплика");
+    java.util.Map<String, Integer> vv = new java.util.LinkedHashMap<>(); vv.put("1", 1); vv.put("owner", 3); vv.put("", 2);
+    eq(Screen.voicesLine(vv), "вы ×3 · голос не определён ×2 · Собеседник 1 ×1", "B2 голоса фразы — по убыванию");
+    eq(java.util.Arrays.toString(Screen.highlight("Espera um pouquinho, já volto.", "um pouquinho")), "[7, 19]", "B3 связка выделена без запятой");
+    eq(java.util.Arrays.toString(Screen.highlight("Fala UM POUQUINHO mais", "um pouquinho")), "[5, 17]", "B3 регистр не мешает");
+    eq(java.util.Arrays.toString(Screen.highlight("Vou pra casa.", "para")), "[4, 7]", "B3 «pra» = «para»");
+    eq(Screen.highlight("Só um pouco.", "um pouquinho"), null, "B3 нет в предложении — null");
+    eq(java.util.Arrays.toString(Screen.highlight("— Obrigado!", "obrigado")), "[2, 10]", "B3 знаки по краям не выделяются");
+    eq(Screen.cardsHint(Screen.TAB_WORDS, 0, 3, false), "Разбираю разговоры — в затишье, когда никто не говорит", "B4 ещё не посчитано");
+    eq(Screen.cardsHint(Screen.TAB_WORDS, 40, 3, true), "Слова и связки от 3 повторов: 40 · касание — живые примеры, долгое — «знаю»", "B4 слова");
+    eq(Screen.cardsHint(Screen.TAB_PHRASES, 0, 2, true), "Повторяющихся фраз пока нет: фраза попадает сюда, когда прозвучала не меньше 2 раз", "B4 фраз нет");
+    eq(Screen.cardsHint(Screen.TAB_PHRASES, 5, 2, true), "Фразы, сказанные не меньше 2 раз: 5 · касание — кто и как сказал", "B4 фразы");
+    eq(Screen.cardsHint(Screen.TAB_KNOWN, 6, 3, true), "Знаю: 6 · касание — примеры, долгое — назад в изучение", "B4 знаю");
+    eq(Screen.metricLine(0, 0, 0), "За неделю пока пусто: «Скажите сами» — в карточке слова", "B5 метрика пуста");
+    eq(Screen.metricLine(10, 7, 0), "За неделю: с первой попытки 7 из 10", "B5 только попытки");
+    eq(Screen.metricLine(4, 1, 3), "За неделю: с первой попытки 1 из 4 · сами по-португальски: 3", "B5 и сказанное самим");
+    // B6 повторение: сколько пора и когда следующее (решение владельца 03.10: 1 → 3 → 7 → 21 день)
+    eq(Screen.reviewLine(0, 0, 0), "Отмечайте «знаю» в «Словах» и «Фразах» — известное будет повторяться здесь", "B6 известного нет");
+    eq(Screen.reviewLine(4, 9, 0), "Пора повторить: 4 · на слух или вслух", "B6 пора");
+    eq(Screen.reviewLine(0, 9, 1), "На сегодня всё · следующее завтра", "B6 следующее завтра");
+    eq(Screen.reviewLine(0, 9, 2), "На сегодня всё · следующее послезавтра", "B6 послезавтра");
+    eq(Screen.reviewLine(0, 9, 21), "На сегодня всё · следующее через 21 день", "B6 через 21 день");
+    eq(Screen.reviewLine(0, 9, 3), "На сегодня всё · следующее через 3 дня", "B6 через 3 дня");
+    eq(Screen.reviewNext(true, 7), "получилось · снова через 7 дней", "B6 удача");
+    eq(Screen.reviewNext(false, 1), "не получилось · снова завтра", "B6 промах");
     eq(Screen.audioDropText(3, 90_000), "Уйдёт записанный звук собеседников: 3 реплики, 0.1 МБ. Текст разговоров останется. Вернуть звук будет нельзя.", "A4 вопрос перед удалением");
 
     System.out.println(fails == 0 ? "Screen: " + checks + " проверок, все прошли" : "Screen: провалов " + fails + " из " + checks);

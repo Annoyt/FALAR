@@ -25,10 +25,12 @@ public class Learn {
   /** Слова, помеченные как известные. Отдельный словарь, а не пометка внутри списка изучения:
    *  его надо переживать между запусками и по нему же проводить повторение. */
   public final Set<String> known = new LinkedHashSet<>();
-  /** Память о повторениях: сколько раз вспомнил, сколько забыл, когда спрашивали в последний раз.
-   *  Без неё повторение спрашивало бы случайное слово, а спрашивать надо давно не встречавшееся
-   *  и то, на котором уже спотыкались. */
-  public final Map<String, long[]> stat = new HashMap<>();   // слово -> {помню, забыл, когда}
+  /** Память о повторениях: сколько раз вспомнил, сколько забыл, когда спрашивали в последний раз, ступень
+   *  лесенки интервалов и когда спросить снова (DAYS). История «помню / забыл» не стирается ни промахом, ни
+   *  лесенкой: это накопленное знание о слове. */
+  public final Map<String, long[]> stat = new HashMap<>();   // ключ -> {помню, забыл, когда, ступень, срок}
+  static final int OK = 0, FAIL = 1, LAST = 2, STEP = 3, DUE = 4;
+  static long[] fresh() { return new long[]{0, 0, 0, 0, 0}; }
   /** Перевод отдельного слова. Перевод фразы для заучивания не годится: учат «motorhome — дом
    *  на колёсах», а не «мы решили использовать наклейку». Считается один раз и хранится. */
   public final Map<String, String> wordRu = new HashMap<>();
@@ -38,8 +40,154 @@ public class Learn {
     this.chats = chats;
     knownFile = new File(filesDir, "known_words.json");
     wordsFile = new File(filesDir, "word_ru.json");
+    sentFile = new File(filesDir, "sent_ru.json");
+    practiceFile = new File(filesDir, "practice.json");
     loadStop(new File(modelsDir, "common_words.txt"));
-    loadKnown(); loadWordRu();
+    loadKnown(); loadWordRu(); loadSentRu();
+  }
+
+  // ---- карточки шага 2 (Cards) --------------------------------------------------------------------
+
+  /** Последние посчитанные карточки: считает их фоновый поток в затишье (buildCards из
+   *  TranslatorService.learnIo), экран берёт готовые — даже посреди разговора ничего не пересчитывается. */
+  public volatile Cards.Result cards;
+  long cardsKey = Long.MIN_VALUE; Set<String> cardsKeep;
+  /** Перевод предложения-примера, если перевод реплики не делится на предложения так же
+   *  (Cards.Example.ru == null): переводит фон, ключ — нормализованное предложение. Отдельный файл,
+   *  чтобы не переводить одно и то же при каждом разборе. */
+  public final Map<String, String> sentRu = new HashMap<>();
+  final File sentFile;
+  final Set<String> triedSent = new HashSet<>();
+
+  /** Своя реплика идёт в учёбу только с улучшенным переводом (решение владельца 03.10): сырой машинный
+   *  перевод как образец учит ошибке. */
+  static boolean improved(JSONObject x) {
+    String by = x.optString("by", "");
+    return !x.optString("fixed", "").isEmpty() && (Chats.BY_CLOUD.equals(by) || Chats.BY_LLM.equals(by) || Chats.BY_USER.equals(by));
+  }
+
+  /** Реплики всех разговоров для разбора: без снимков, без стенда, свои — только улучшенные. */
+  List<Cards.Turn> turnsForCards() {
+    List<Cards.Turn> out = new ArrayList<>();
+    for (String[] c : chats.list()) {
+      long id = Long.parseLong(c[0]);
+      JSONObject o = chats.load(id);
+      JSONArray t = o == null ? null : o.optJSONArray("turns");
+      String name = o == null ? "" : o.optString("name", "");
+      for (int k = 0; t != null && k < t.length(); k++) {
+        JSONObject x = t.optJSONObject(k);
+        if (x == null || x.has("photo") || x.optInt("stand", 0) == 1) continue;
+        boolean heard = x.optString("dir", "").startsWith("pt");
+        if (!heard && !improved(x)) continue;
+        String fixed = x.optString("fixed", "");
+        String pt = heard ? x.optString("src", "") : fixed, ru = heard ? (fixed.isEmpty() ? x.optString("dst", "") : fixed) : x.optString("src", "");
+        Cards.Turn ct = new Cards.Turn(id, name, x.optLong("at", 0), heard, pt, ru, x.optString("who", ""), x.optString("audio", ""), x.optString("by", ""));
+        JSONArray cu = x.optJSONArray("cuts");
+        if (cu != null) { ct.cuts = new int[cu.length()]; for (int j = 0; j < cu.length(); j++) ct.cuts[j] = cu.optInt(j); }
+        out.add(ct);
+      }
+    }
+    return out;
+  }
+
+  /** Посчитать карточки, если разговоры или «Знаю» изменились. Тяжело (читает все разговоры: на Redmi 0,5–0,7 с
+   *  на 740 реплик) — только из фонового потока в затишье и без замка Learn: под замком экран, отметивший «знаю»
+   *  или ответивший в повторении, ждал бы конца разбора. */
+  public Cards.Result buildCards() {
+    long fp = chats.fingerprint(); Set<String> keep;
+    synchronized (this) {
+      if (fp == cardsKey && known.equals(cardsKeep) && cards != null) return cards;
+      keep = new HashSet<>(known);
+    }
+    Cards.Result r = Cards.build(turnsForCards(), stop, 2, keep);
+    synchronized (this) { cards = r; cardsKey = fp; cardsKeep = keep; }
+    return r;
+  }
+
+  /** Перевод примера: свой (предложение в предложение) или фоновый; null — ещё не переведён. */
+  public String exampleRu(Cards.Example e) { return e.ru != null ? e.ru : sentRu.get(Phrasebook.norm(e.pt)); }
+
+  /** Перевод карточки: слова и связки — переводом самого слова (word_ru); фразы собеседника — переводом
+   *  примера; свои — тем, что вы сказали по-русски. */
+  public String cardRu(Cards.Card c) {
+    if (c.kind != Cards.PHRASE) return wordRu.get(c.key);
+    for (Cards.Example e : c.ex) { String r = exampleRu(e); if (r != null) return r; }
+    return null;
+  }
+
+  /** Предложения примеров без перевода — фон переведёт их по одному в затишье; не больше limit за раз. */
+  public synchronized List<String> missingSentRu(List<Cards.Card> l, int limit) {
+    List<String> out = new ArrayList<>();
+    for (Cards.Card c : l) for (Cards.Example e : c.ex) {
+      if (out.size() >= limit) return out;
+      String k = Phrasebook.norm(e.pt);
+      if (e.ru == null && !sentRu.containsKey(k) && !triedSent.contains(k) && !out.contains(e.pt)) out.add(e.pt);
+    }
+    return out;
+  }
+  public synchronized void putSentRu(String pt, String ru) {
+    sentRu.put(Phrasebook.norm(pt), ru);
+    try { Chats.write(sentFile, new JSONObject(sentRu).toString()); } catch (Exception ignore) {}
+  }
+  public synchronized void markTriedSent(String pt) { triedSent.add(Phrasebook.norm(pt)); }
+  void loadSentRu() {
+    try {
+      if (!sentFile.exists()) return;
+      JSONObject o = new JSONObject(Chats.read(sentFile));
+      for (Iterator<String> it = o.keys(); it.hasNext(); ) { String k = it.next(); sentRu.put(k, o.optString(k, "")); }
+    } catch (Exception ignore) {}
+  }
+
+  // ---- метрика (решение владельца 03.10, придумана до экрана) --------------------------------------
+
+  /** Помогает ли учёба заговорить — две цифры за неделю: доля слов карточек, распознанных в «Скажите сами»
+   *  с первой попытки за день, и сколько фраз человек сказал по-португальски сам в живом разговоре (свой
+   *  голос, не прочитано с экрана). Хранится только итог: время, ключ, получилось ли — без звука и без
+   *  распознанного текста. Не больше KEEP_EVENTS событий. */
+  static final int KEEP_EVENTS = 2000;
+  static final long DAY = 86_400_000L, WEEK = 7 * DAY;
+  File practiceFile;
+  JSONArray events;
+  synchronized JSONArray events() {
+    if (events != null) return events;
+    events = new JSONArray();
+    try { if (practiceFile != null && practiceFile.exists()) events = new JSONArray(Chats.read(practiceFile)); } catch (Exception ignore) {}
+    return events;
+  }
+  synchronized void addEvent(JSONObject e) {
+    JSONArray a = events(); a.put(e);
+    if (a.length() > KEEP_EVENTS) { JSONArray b = new JSONArray(); for (int k = a.length() - KEEP_EVENTS; k < a.length(); k++) b.put(a.opt(k)); events = a = b; }
+    try { if (practiceFile != null) Chats.write(practiceFile, a.toString()); } catch (Exception ignore) {}
+  }
+  /** Попытка «Скажите сами»; возвращает, первая ли она по этому ключу за день — календарный, по часам телефона,
+   *  как у повторения: при скользящих сутках вчерашняя попытка в 20:00 отнимала у сегодняшней в 19:00 «первую». */
+  public synchronized boolean recordPractice(String key, boolean ok, long now) {
+    long day = dueIn(now, 0, TimeZone.getDefault());
+    boolean first = true; JSONArray a = events();
+    for (int k = 0; k < a.length(); k++) { JSONObject x = a.optJSONObject(k);
+      if (x != null && "try".equals(x.optString("kind")) && key.equals(x.optString("key")) && x.optLong("at") >= day && x.optLong("at") <= now) { first = false; break; } }
+    try { addEvent(new JSONObject().put("kind", "try").put("at", now).put("key", key).put("ok", ok).put("first", first)); } catch (JSONException ignore) {}
+    return first;
+  }
+  /** Сказал по-португальски сам в живом разговоре. */
+  public synchronized void recordSaid(long now) {
+    try { addEvent(new JSONObject().put("kind", "said").put("at", now)); } catch (JSONException ignore) {}
+  }
+  /** За неделю: {первых попыток, из них распознано, сказано самим}. */
+  public synchronized int[] week(long now) {
+    int tries = 0, ok = 0, said = 0; JSONArray a = events();
+    for (int k = 0; k < a.length(); k++) { JSONObject x = a.optJSONObject(k);
+      if (x == null || now - x.optLong("at") > WEEK) continue;
+      if ("said".equals(x.optString("kind"))) said++;
+      else if (x.optBoolean("first")) { tries++; if (x.optBoolean("ok")) ok++; } }
+    return new int[]{tries, ok, said};
+  }
+
+  /** Ключи карточек без перевода (слова и связки) — для фонового перевода (TranslatorService.translateWords). */
+  public synchronized List<String> missingCardRu(List<Cards.Card> l) {
+    List<String> out = new ArrayList<>();
+    for (Cards.Card c : l) if (c.kind != Cards.PHRASE && !wordRu.containsKey(c.key) && !triedRu.contains(c.key)) out.add(c.key);
+    return out;
   }
 
   void loadWordRu() {
@@ -70,7 +218,7 @@ public class Learn {
       String raw = Chats.read(knownFile);
       if (raw.trim().startsWith("[")) {                     // старый формат: просто список слов
         JSONArray a = new JSONArray(raw);
-        for (int k = 0; k < a.length(); k++) { known.add(a.getString(k)); stat.put(a.getString(k), new long[]{0, 0, 0}); }
+        for (int k = 0; k < a.length(); k++) { known.add(a.getString(k)); stat.put(a.getString(k), fresh()); }   // срок 0 — спросить сразу
         saveKnown();
         return;
       }
@@ -78,7 +226,8 @@ public class Learn {
       for (Iterator<String> it = o.keys(); it.hasNext(); ) {
         String w = it.next(); JSONObject x = o.optJSONObject(w);
         known.add(w);
-        stat.put(w, new long[]{x == null ? 0 : x.optLong("ok"), x == null ? 0 : x.optLong("fail"), x == null ? 0 : x.optLong("last")});
+        // step и due — с шага 2 (03.10); у отмеченного раньше их нет: срок 0 — спросить сразу
+        stat.put(w, x == null ? fresh() : new long[]{x.optLong("ok"), x.optLong("fail"), x.optLong("last"), x.optLong("step"), x.optLong("due")});
       }
     } catch (Exception ignore) {}
   }
@@ -86,46 +235,81 @@ public class Learn {
     try {
       JSONObject o = new JSONObject();
       for (String w : known) {
-        long[] st = stat.get(w); if (st == null) st = new long[]{0, 0, 0};
-        o.put(w, new JSONObject().put("ok", st[0]).put("fail", st[1]).put("last", st[2]));
+        long[] st = stat.get(w); if (st == null) st = fresh();
+        o.put(w, new JSONObject().put("ok", st[OK]).put("fail", st[FAIL]).put("last", st[LAST]).put("step", st[STEP]).put("due", st[DUE]));
       }
       Chats.write(knownFile, o.toString());
     } catch (Exception ignore) {}
   }
-  public synchronized void setKnown(String w, boolean yes) {
-    if (yes) { known.add(w); if (!stat.containsKey(w)) stat.put(w, new long[]{0, 0, 0}); }
-    else { known.remove(w); stat.remove(w); }
+  public synchronized void setKnown(String w, boolean yes) { setKnown(w, yes, System.currentTimeMillis()); }
+  /** «Знаю» ставит на лесенку повторения с первой ступени: первый раз спросим завтра. */
+  public synchronized void setKnown(String w, boolean yes, long now) {
+    if (yes) {
+      if (known.add(w) || !stat.containsKey(w)) { long[] st = stat.get(w); if (st == null) st = fresh(); st[STEP] = 0; st[DUE] = dueIn(now, DAYS[0], TimeZone.getDefault()); stat.put(w, st); }
+    } else { known.remove(w); stat.remove(w); }
     saveKnown();
   }
 
-  /** Что спросить следующим: сначала то, на чём спотыкались, при равенстве — давно не спрошенное.
-   *  Слово, которое только что спрашивали, не повторяем сразу. */
-  public synchronized String nextReview(String skip) {
-    String best = null; long bestScore = Long.MIN_VALUE;
-    for (String w : known) {
-      if (w.equals(skip) && known.size() > 1) continue;
-      long[] st = stat.get(w); if (st == null) st = new long[]{0, 0, 0};
-      long age = (System.currentTimeMillis() - st[2]) / 60000;          // минут с прошлого раза
-      long score = st[1] * 2000 - st[0] * 500 + Math.min(age, 100000);  // забытое вперёд, знакомое назад
-      if (score > bestScore) { bestScore = score; best = w; }
-    }
+  // ---- повторение с интервалами (решение владельца 03.10) ------------------------------------------
+
+  /** Лесенка: удача откладывает на 1 → 3 → 7 → 21 день, дальше — раз в 21 день; промах — на завтра и
+   *  лесенка сначала. Дни календарные, по часам телефона: повторили вечером — спросим снова с утра, а не
+   *  ровно через сутки. Отмеченное «знаю» стоит на первой ступени: первый раз — завтра. */
+  static final int[] DAYS = {1, 3, 7, 21};
+  static long dueIn(long now, int days, TimeZone tz) {
+    Calendar c = Calendar.getInstance(tz); c.setTimeInMillis(now);
+    c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0);
+    c.add(Calendar.DAY_OF_MONTH, days);
+    return c.getTimeInMillis();
+  }
+  /** Через сколько календарных дней срок: 0 — сегодня или раньше. */
+  static int daysUntil(long due, long now, TimeZone tz) {
+    long today = dueIn(now, 0, tz);
+    return due <= today ? 0 : (int) Math.round((dueIn(due, 0, tz) - today) / (double) DAY);
+  }
+  /** Ступень и срок после ответа: {ступень, срок}. */
+  static long[] schedule(long step, boolean ok, long now, TimeZone tz) {
+    int s = ok ? (int) Math.min(step + 1, DAYS.length - 1) : 0;
+    return new long[]{s, dueIn(now, DAYS[s], tz)};
+  }
+
+  /** Что пора повторить: известное со сроком не позже now — сначала давно просроченное, при равных — то, на
+   *  чём спотыкались. */
+  public synchronized List<String> due(long now) {
+    List<String> out = new ArrayList<>();
+    for (String w : known) { long[] st = stat.get(w); if (st == null || st[DUE] <= now) out.add(w); }
+    out.sort((a, b) -> {
+      long[] x = stat.get(a), y = stat.get(b);
+      long dx = x == null ? 0 : x[DUE], dy = y == null ? 0 : y[DUE];
+      if (dx != dy) return Long.compare(dx, dy);
+      return Long.compare(y == null ? 0 : y[FAIL], x == null ? 0 : x[FAIL]);
+    });
+    return out;
+  }
+  /** Ближайший срок среди известного, которое ещё не пора повторять; 0 — такого нет. */
+  public synchronized long nextDue(long now) {
+    long best = 0;
+    for (String w : known) { long[] st = stat.get(w); if (st != null && st[DUE] > now && (best == 0 || st[DUE] < best)) best = st[DUE]; }
     return best;
   }
 
-  /** Ответ на повторение. «Забыл» возвращает слово в изучение: оно ещё не выучено. */
-  public synchronized void review(String w, boolean ok) {
-    long[] st = stat.get(w); if (st == null) st = new long[]{0, 0, 0};
-    if (ok) st[0]++; else st[1]++;
-    st[2] = System.currentTimeMillis();
+  /** Ответ на повторение: удача — следующая ступень, промах — завтра и лесенка сначала. Ключ остаётся в
+   *  «Знаю» (решение владельца: «промах возвращает на завтра»; прежде «забыл» убирал слово из известного). */
+  public synchronized void review(String w, boolean ok, long now) {
+    long[] st = stat.get(w); if (st == null) st = fresh();
+    if (ok) st[OK]++; else st[FAIL]++;
+    st[LAST] = now;
+    long[] sc = schedule(st[STEP], ok, now, TimeZone.getDefault());
+    st[STEP] = sc[0]; st[DUE] = sc[1];
     stat.put(w, st);
-    // Историю повторов не стираем: «забыл» возвращает слово в изучение, но сколько раз его
-    // помнили и забывали — это накопленное знание о слове, и оно нужно при следующем заходе.
-    if (!ok) known.remove(w);
     saveKnown();
   }
+  /** Копия памяти о повторениях ключа (OK, FAIL, LAST, STEP, DUE) или null — для экрана. */
+  public synchronized long[] statCopy(String w) { long[] st = stat.get(w); return st == null ? null : st.clone(); }
+  public synchronized long dueOf(String w) { long[] st = stat.get(w); return st == null ? 0 : st[DUE]; }
   public synchronized String statOf(String w) {
     long[] st = stat.get(w);
-    return st == null ? "" : "помню " + st[0] + " · забыл " + st[1];
+    return st == null ? "" : "помню " + st[OK] + " · забыл " + st[FAIL];
   }
 
   /** Служебные слова — верхушка частотности корпуса. Файл уже лежит рядом: он же используется

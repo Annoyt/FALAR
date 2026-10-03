@@ -85,7 +85,7 @@ restore() {
 try: print(' '.join(x['audio'] for x in json.load(sys.stdin).get('turns',[]) if x.get('audio')))
 except Exception: pass")
     for f in $clips; do b=${f%.*}; $ADB shell "rm -f $F/audio/$b.wav $F/audio/$b.ogg $F/audio/$b.m4a $F/audio/$b.wav.part $F/audio/$b.ogg.part $F/audio/$b.m4a.part"; done
-    $ADB shell "rm -f $F/chats/$tid.json"; say "  тестовый разговор удалён вместе со звуком (${clips:+$(echo $clips | wc -w) файлов}${clips:-звука не было})"
+    $ADB shell "rm -f $F/chats/$tid.json"; say "  тестовый разговор удалён вместе со звуком ($([ -n "$clips" ] && echo "файлов: $(echo $clips | wc -w)" || echo "звука не было"))"
   fi
   for f in $wavs; do $ADB shell "rm -f $F/$f"; done
   rm -f "$PEND"; [ -n "$snap" ] && rm -rf "$snap"
