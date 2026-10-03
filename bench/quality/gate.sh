@@ -92,7 +92,7 @@ say "== проверка качества · $(git -C "$R" rev-parse --short HEA
 # ---- что менялось с прошлого выпуска: телефон нужен, только если трогали слушание или модели
 if [ -n "$RELEASE" ]; then
   CH=$(git -C "$R" diff --name-only "$RELEASE"..HEAD) || fail "нет тега $RELEASE"
-  if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(TranslatorService|Engine|DenoiseGate|Gain|Hearing)\.java$|^models/manifest\.json$'; then
+  if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(TranslatorService|Engine|DenoiseGate|Wiener|Gain|Hearing)\.java$|^models/manifest\.json$'; then
     DEVICE=1; say "  с $RELEASE менялось слушание или модели — нужен и этап на телефоне"
   fi
   if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(Ocr|OcrCore|OcrWords|TextRules)\.java$|^data/ocr_words|^models/manifest\.json$'; then
