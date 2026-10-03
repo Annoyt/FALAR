@@ -97,12 +97,14 @@ restore() {
   $ADB shell "rm -f /data/local/tmp/falar_px.sh /data/local/tmp/falar_sw /sdcard/falar-ui.xml $F/replay.wav $F/modtest.jpg $F/ui-*.png"
   ref=$(field разбор < "$d/settings"); cloud=$(sed -n 's/.*облако \([0-9][0-9]*\).*/\1/p' "$d/settings"); rg=$(sed -n 's/.*чтение вслух \([0-9]\).*/\1/p' "$d/settings")
   qual=$(sed -n 's/.*облако точнее \([01]\).*/\1/p' "$d/settings"); l=$(sed -n 's/.*слушаю \([a-z]*\) ·.*/\1/p' "$d/settings")
+  mtq=$(sed -n 's/.*перевод точнее \([01]\).*/\1/p' "$d/settings")
   lst=$(case "$l" in ptru) echo both;; pt|ru) echo $l;; *) echo off;; esac); mods=$(cat "$d/modules")
   wait_idle
   m=$(mark); launch --es settings show; now=$(wl "$m" '🧪 настройки:' 20 | cut -c10-)
   m=$(mark); launch --es modules show; nowmods=$(wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]')
   if [ "$now" != "$(cut -c10- "$d/settings")" ] || [ "$nowmods" != "$mods" ]; then
     launch --es listen $lst --es refineevery $ref --es cloudevery $cloud --es readguard $rg --es cloudprefer $([ "$qual" = 1 ] && echo quality || echo fast) \
+      $([ -n "$mtq" ] && echo "--es mtprefer $([ "$mtq" = 1 ] && echo quality || echo speed)") \
       $([ "$nowmods" != "$mods" ] && [ -n "$mods" ] && echo "--es modules '$mods'"); sleep 4
     m=$(mark); launch --es settings show; now=$(wl "$m" '🧪 настройки:' 20 | cut -c10-)
     [ "$now" = "$(cut -c10- "$d/settings")" ] && say "  настройки и модули — как были: $now" || say "  ВНИМАНИЕ: настройки после возврата «$now», а было «$(cut -c10- "$d/settings")»"
