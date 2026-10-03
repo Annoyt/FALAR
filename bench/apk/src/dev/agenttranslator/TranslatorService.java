@@ -191,6 +191,50 @@ public class TranslatorService extends Service {
   /** Облако — на своём исполнителе: перебор моделей длится до 45 с, и всё это время речь
    *  (worker) и локальный уточнитель (llmWorker) стоять не должны. */
   final ExecutorService cloudWorker = Executors.newSingleThreadExecutor();
+  /** «Хранить звук собеседников»: португальская речь собеседника ложится рядом с репликой (Chats, поле
+   *  `audio`; Clips, ClipCodec), пока жив разговор. По умолчанию выключено — решение владельца 03.10:
+   *  приложение не должно молча копить записи окружающих. */
+  public volatile boolean keepAudio = false;
+  /** Запись кусочков — своим потоком с фоновым приоритетом, после того как реплика уже на экране и
+   *  звучит: перевод её не ждёт («флоу скорости не должен нас покидать», владелец 01.10). Пишется WAV —
+   *  это запись файла без кодека (Clips.EXT, замер results/2026-10-03-clip-codec.md). */
+  final ExecutorService clipIo = Executors.newSingleThreadExecutor(r -> new Thread(() -> {
+    try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); } catch (Throwable ignore) {}
+    r.run(); }, "clips"));
+  /** Фоновая работа «Слов» (перевод слов, дальше — разбор фраз): своим потоком с фоновым приоритетом и
+   *  только в затишье живого пути (quietFor). Владелец 03.10: «отбор фраз в словарь не должен тормозить
+   *  приложение, а проходить фоном, вне времени активной деятельности — главное». Раньше перевод слов
+   *  стоял в одной очереди с живым переводом (worker): открыли «Слова» посреди разговора — и до 200
+   *  переводов слов вставали перед репликой собеседника. */
+  final ExecutorService learnIo = Executors.newSingleThreadExecutor(r -> new Thread(() -> {
+    try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); } catch (Throwable ignore) {}
+    r.run(); }, "learn"));
+  /** Сколько живой путь должен молчать, чтобы фоновая работа «Слов» взяла своё. */
+  static final long QUIET_MS = 3000;
+  /** Когда живой путь (распознавание, перевод реплики) был занят в последний раз — busy("live"). */
+  volatile long liveAt = 0;
+  /** Живой путь свободен уже ms: не держат FALAR, ничего не звучит, не распознаётся и не переводится, и
+   *  слушание ms не слышало речи. */
+  boolean quietFor(long ms) {
+    if (recording || writingSpeech || busyNow.containsKey("live")) return false;
+    return System.currentTimeMillis() - Math.max(liveAt, lastSpeechAt) >= ms;
+  }
+  /** Дождаться затишья; false — служба останавливается. */
+  boolean awaitQuiet(long ms) throws InterruptedException {
+    while (running && !quietFor(ms)) Thread.sleep(250);
+    return running;
+  }
+  /** Реплики, сказанные до этого времени, — стендовые (Chats, поле `stand`): их не учат «Слова». */
+  volatile long standUntil = 0;
+  /** Явный выбор, главнее догадки: TRUE — «stand 1», FALSE — «stand 0» или кнопку нажал человек; null —
+   *  решает автоматика (стендовый вход, молчаливый режим, глухой микрофон). Первый прогон
+   *  test_audio_device.sh 03.10: «stand 0» не перебивал молчаливый режим, и живая реплика ушла в стенд. */
+  volatile Boolean standSet = null;
+  /** Сколько метка стенда держится после последней стендовой команды: стенд, бросивший прогон без
+   *  «stand 0», не должен навсегда пометить живые разговоры. */
+  static final long STAND_MS = 30 * 60_000L;
+  /** Стендовые входы: подача записи, текста, файла вместо микрофона, снимка. */
+  static final String[] STAND_IN = {"feedwav", "feedasr", "feedtext", "testwav", "segwav", "micfile", "photofile", "soak"};
   /** Последняя реплика в маскированном виде — для пина: ключ и перевод со слотами вместо чисел
    *  и имён, как их ищет lookup. */
   volatile String lastMaskedSrc, lastMaskedDst; volatile List<String[]> lastSlots = new ArrayList<>(); volatile long lastAt = 0;
@@ -318,6 +362,14 @@ public class TranslatorService extends Service {
       voiceWhat = Math.max(0, Math.min(3, pr.getInt("voicewhat", VoiceOut.AUTO)));
       refineEvery = pr.getInt("refine_every", 3); cloudEvery = pr.getInt("cloud_every", 0);
       readGuard = pr.getInt("read_guard", 1);
+      keepAudio = pr.getBoolean("keep_audio", false);
+      // Звук без реплики — от разговоров, удалённых мимо приложения (стенд), и от прерванной записи. Уборка
+      // читает разговоры — поэтому в затишье, как вся фоновая работа «Слов» (quietFor).
+      learnIo.submit(() -> { try { if (!awaitQuiet(QUIET_MS)) return; long[] s = chats.sweepAudio(10 * 60_000L), all = chats.audioSize();
+        if (s[0] > 0) log("🎙 убран звук без реплики: " + s[0] + " файлов, " + ModelStore.mb(s[1]) + " МБ");
+        if (keepAudio || all[0] > 0) log("🎙 звук собеседников " + (keepAudio ? "хранится" : "не пишется") + " · сейчас " + all[0] + " реплик, " + ModelStore.mb(all[1]) + " МБ");
+        zipLater();                                   // WAV, не дожатые до остановки, — в ближайшее затишье
+      } catch (Throwable t) { log("🎙 уборка звука: " + t); } });
       restoreContext();
       maybeCheckUpdates();
       heartbeat(); startWarm(); startSay(); watchNetwork();
@@ -353,6 +405,37 @@ public class TranslatorService extends Service {
         upd("установка не прошла — " + installWhy(m)); log("⬆ установка не прошла (" + st + "): " + m); }
       return START_STICKY;
     }
+    if (i != null) standFrom(i);
+    // Стенд: живой звук реплик. keepaudio 1|0 — как переключатель в настройках; playclip last|<номер> —
+    // проиграть звук реплики текущего разговора; audiodrop 1 — «Удалить звук, оставить текст».
+    // Всё, что трогает разговоры, — через worker: на холодном запуске разговоры поднимает boot() в той же
+    // очереди, и команда, проверившая их сразу, молча пропала бы.
+    if (i != null && i.hasExtra("keepaudio")) {
+      String v = i.getStringExtra("keepaudio");
+      // стенд запоминает, чтобы вернуть; через worker — после того, как boot() прочёл настройку
+      if ("show".equals(v)) worker.submit(() -> log("🎙 хранить звук собеседников: " + (keepAudio ? "да" : "нет")));
+      else setKeepAudio("1".equals(v));
+    }
+    if (i != null && i.hasExtra("playclip")) { final String w = i.getStringExtra("playclip");
+      worker.submit(() -> { if (chats != null) playClip("last".equals(w) ? chats.size() - 1 : Integer.parseInt(w)); }); }
+    if (i != null && i.hasExtra("audiodrop")) worker.submit(() -> { if (chats != null) dropAllAudio(); });
+    // Стенд: пометить реплики прежних прогонов (tools/stand_mark.py кладёт в files/ строки «разговор метка»)
+    // или снять все метки, если одна легла на живую реплику.
+    if (i != null && i.hasExtra("standmark")) {
+      final File f = new File(getExternalFilesDir(null), new File(i.getStringExtra("standmark")).getName());
+      worker.submit(() -> { try {
+        if (chats == null) { log("🧪 стенд: разговоры не открыты — пометка не сделана"); return; }
+        Map<Long, Set<Long>> m = new HashMap<>(); int lines = 0;
+        for (String ln : new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8").split("\n")) {
+          String[] p = ln.trim().split("\\s+"); if (p.length != 2) continue;
+          m.computeIfAbsent(Long.parseLong(p[0]), k -> new HashSet<>()).add(Long.parseLong(p[1])); lines++;
+        }
+        int n = chats.markStand(m); f.delete();
+        log("🧪 стенд: помечено реплик прогонов " + n + " из " + lines + " в " + m.size() + " разговорах — «Слова» их не считают");
+      } catch (Throwable t) { log("🧪 стенд: список реплик прогонов не прочёлся — " + t); } });
+    }
+    if (i != null && i.hasExtra("standunmark"))
+      worker.submit(() -> { if (chats != null) log("🧪 стенд: метка прогона снята с " + chats.unmarkStand() + " реплик"); });
     // Стенд: голос в текущий разговор, как фраза кнопкой FALAR, только без распознавания
     // (--es voicewav <wav> --es lang ru|pt), и чей это голос по голосам разговора (--es voiceid <wav>).
     if (i != null && i.hasExtra("voicewav")) { final String wav = i.getStringExtra("voicewav"), lang = "ru".equals(i.getStringExtra("lang")) ? "ru" : "pt";
@@ -988,6 +1071,7 @@ public class TranslatorService extends Service {
   static final String[] BUSY_ORDER = {"load", "live", "refine", "cloud", "models"};
   final Map<String, Object[]> busyNow = new java.util.concurrent.ConcurrentHashMap<>();   // вид → {подпись, сделано, всего}
   void busy(String kind, String what, int done, int total) {
+    if ("live".equals(kind)) liveAt = System.currentTimeMillis();   // для затишья (quietFor): и начало, и конец
     if (what == null) { if (busyNow.remove(kind) == null) return; }
     else busyNow.put(kind, new Object[]{what, done, total});
     // В машинный журнал: по нему видно, сколько длится каждая стадия, и стенд сверяет порядок.
@@ -2287,6 +2371,153 @@ public class TranslatorService extends Service {
     final String tgt = t[0].substring(3), text = t[2];
     worker.submit(() -> { try { speakOut(tgt, text); } catch (Throwable e) { log("🔊 " + e); } });
   }
+
+  /** Метка стенда (Chats, поле `stand`). «stand 1|0» — явный выбор (standSet); стендовые входы (STAND_IN,
+   *  «silent 1», «feedonly 1») возвращают решение автоматике и держат метку STAND_MS; обычный запуск
+   *  человеком снимает всё — как молчаливый режим. */
+  void standFrom(Intent i) {
+    long now = System.currentTimeMillis();
+    if (i.hasExtra("stand")) {
+      boolean on = "1".equals(i.getStringExtra("stand"));
+      standSet = on; standUntil = on ? now + STAND_MS : 0;
+      log(on ? "🧪 стенд: реплики помечаются стендовыми — «Слова» их не считают" : "↺ стенд: реплики живые (stand 0)");
+      return;
+    }
+    boolean in = "1".equals(i.getStringExtra("silent")) || "1".equals(i.getStringExtra("feedonly"));
+    for (String k : STAND_IN) if (i.hasExtra(k)) in = true;
+    boolean human = i.getBooleanExtra("fromUi", false) && !i.hasExtra("silent") && !i.hasExtra("fixdir");
+    if (in) {
+      if (standUntil < now || standSet != null) log("🧪 стенд: реплики помечаются стендовыми — «Слова» их не считают");
+      standSet = null; standUntil = now + STAND_MS;
+    } else if (human && (standUntil != 0 || standSet != null)) { standSet = null; standUntil = 0; log("↺ стенд: реплики снова живые"); }
+  }
+  /** Реплика стендовая: явный выбор; без него — стендовый режим (молчаливый, глухой микрофон) или недавняя
+   *  стендовая команда. */
+  boolean standNow() {
+    Boolean s = standSet; long now = System.currentTimeMillis();
+    if (s != null) return s && now < standUntil;
+    return silent || feedOnly || now < standUntil;
+  }
+
+  /** «Хранить звук собеседников» — из настроек и со стенда. Выключение записанное не трогает:
+   *  удалить его — отдельная кнопка с вопросом. */
+  public void setKeepAudio(boolean on) {
+    keepAudio = on;
+    getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("keep_audio", on).apply();
+    log(on ? "🎙 звук собеседников хранится в разговоре на телефоне, пока разговор не удалён" : "🎙 звук собеседников больше не пишется; записанное осталось");
+  }
+  /** Сколько занимает живой звук: {реплик, байт}. */
+  public long[] audioSize() { Chats c = chats; return c == null ? new long[]{0, 0} : c.audioSize(); }
+  /** «Удалить звук, оставить текст». */
+  public long[] dropAllAudio() {
+    Chats c = chats; if (c == null) return new long[]{0, 0};
+    long[] was = c.dropAllAudio();
+    log("🎙 звук удалён: " + was[0] + " реплик, " + ModelStore.mb(was[1]) + " МБ — текст разговоров на месте");
+    return was;
+  }
+
+  /** Записать звук реплики в фоне: реплика уже в разговоре со ссылкой на файл, а файл появится через
+   *  миллисекунды. Реплику удалили, пока он писался, или нажали «Удалить звук» — файл не остаётся
+   *  (Chats.claimAudio, audioGen). Не вышло — реплика остаётся без звука, недописанное уберёт уборка. */
+  void saveClip(final float[] pcm, final int sr, final File f) {
+    final Chats c = chats; final int gen = c.audioGen;
+    clipIo.submit(() -> {
+      long t = System.nanoTime();
+      try {
+        f.getParentFile().mkdirs();
+        ClipCodec.encode(pcm, sr, f, 0);
+        if (c.audioGen != gen || !c.claimAudio(f.getName())) { f.delete(); log("🎙 звук реплики не сохранён: реплику или звук удалили, пока он писался"); return; }
+        tsv("clip", f.getName(), String.valueOf(f.length()), String.valueOf((System.nanoTime() - t) / 1000000));
+        zipLater();
+      } catch (Throwable e) { new File(f.getPath() + ".part").delete(); log("🎙 звук реплики не записался: " + e); }
+    });
+  }
+
+  /** Сжатие WAV в Opus — в затишье (владелец 03.10: «вав файлы сильно большие, их нужно пережимать перед
+   *  хранением» и «отбор — фоном, вне времени активной деятельности»). WAV — только буфер до ближайшей паузы:
+   *  в затишье он сжимается и удаляется; между кадрами кодека сжатие уступает живому пути (quietFor), и
+   *  заговорили — оно ждёт на границе кадра. Реплика находит сжатый файл по имени без расширения (Clips.find). */
+  final java.util.concurrent.atomic.AtomicBoolean zipQueued = new java.util.concurrent.atomic.AtomicBoolean(false);
+  void zipLater() {
+    if (!Clips.canZip(Build.VERSION.SDK_INT) || chats == null || !zipQueued.compareAndSet(false, true)) return;
+    learnIo.submit(this::zipPending);
+  }
+  void zipPending() {
+    try {
+      while (running) {
+        zipQueued.set(false);                          // WAV, пришедший во время сжатия, поставит задачу снова
+        File[] w = chats.audio().listFiles((d, n) -> n.endsWith(".wav"));
+        if (w == null || w.length == 0) return;
+        Arrays.sort(w, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        int n = 0; long was = 0, now = 0, t = System.nanoTime();
+        for (File f : w) {
+          if (!awaitQuiet(QUIET_MS)) return;
+          long len = f.length(); File z = zipOne(f);
+          if (z != null) { n++; was += len; now += z.length(); }
+        }
+        if (n > 0) log(String.format(Locale.ROOT, "🎙 звук сжат в затишье: %d реплик, %s → %s МБ за %.1f с", n, ModelStore.mb(was), ModelStore.mb(now), (System.nanoTime() - t) / 1e9));
+      }
+    } catch (InterruptedException e) { zipQueued.set(false); }
+  }
+  /** Один WAV → Opus. WAV удалили, пока он сжимался (удалили реплику или весь звук), — сжатое не остаётся. */
+  File zipOne(File wav) {
+    File out = new File(wav.getParentFile(), Clips.base(wav.getName()) + "." + Clips.ZIP_EXT);
+    try {
+      int[] r = new int[1]; float[] x = ClipCodec.readWav(wav, r);
+      long t = System.nanoTime();
+      ClipCodec.encode(x, r[0], out, Clips.ZIP_BITRATE, Clips.ZIP_COMPLEXITY, () -> { if (!awaitQuiet(QUIET_MS)) throw new InterruptedException(); });
+      if (!wav.exists()) { out.delete(); return null; }
+      wav.delete();
+      tsv("clipzip", out.getName(), String.valueOf(x.length), String.valueOf(out.length()), String.valueOf((System.nanoTime() - t) / 1000000));
+      return out;
+    } catch (Throwable e) {
+      new File(out.getPath() + ".part").delete();
+      if (!(e instanceof java.io.InterruptedIOException)) log("🎙 сжатие звука «" + wav.getName() + "»: " + e);
+      return null;
+    }
+  }
+
+  /** Человек нажал FALAR или «Слушать» на экране: дальше речь живая, метка стенда снимается. Иначе
+   *  стенд, бросивший прогон без «stand 0», ещё до 30 минут помечал бы реплики владельца, начавшего
+   *  говорить при уже открытом экране (разбор кода 03.10). */
+  public void humanTouch() {
+    boolean was = standNow();
+    standSet = false; standUntil = 0;
+    if (was) log("↺ стенд: человек у экрана — реплики снова живые");
+  }
+
+  /** «Послушать, как сказали»: живой звук реплики idx текущего разговора — тем же путём, что озвучка.
+   *  Поэтому микрофон на это время глохнет (иначе слушание распознало бы запись как новую реплику), а
+   *  перебивание работает, как на озвучке. Явная просьба: звучит при любом «Что озвучивать». */
+  public void playClip(int idx) {
+    if (chats == null) return;
+    final File f = chats.audioOf(idx); final String[] t = chats.turn(idx);
+    if (f == null || t == null) { hint("🎙 у этой реплики нет записанного звука"); log("🎙 у реплики " + idx + " нет записанного звука"); return; }
+    worker.submit(() -> {
+      try {
+        int[] r = new int[1]; float[] x0 = ClipCodec.decode(f, r);
+        float g = Clips.gain(x0, r[0]);
+        double sec = x0.length / (double) r[0];
+        synchronized (tts) {
+          // Частота — та, на которой дорожка уже играет (или голос озвучки): дорожка другой частоты
+          // пересоздаётся, и недоигранный хвост прежнего звука пропадал (разбор кода 03.10).
+          Engine e = eng; int rate = trackRate > 0 ? trackRate : e != null && voice() ? e.ttsSampleRate("pt") : r[0];
+          float[] x = Clips.resample(x0, r[0], rate);
+          if (g != 1f) for (int k = 0; k < x.length; k++) x[k] *= g;
+          phraseBegin(rate);
+          final boolean dup = btDuplex(); if (!dup) muteUntil = Long.MAX_VALUE;
+          long w0 = System.currentTimeMillis(); boolean cut = false;
+          try { phraseSounds("pt"); writeOut(x, x.length, "pt"); }
+          finally { cut = phraseEnd(); if (!cut) { long until = muteAfter(w0, sec) + pausedMs; playEndMs += pausedMs; if (!dup) muteUntil = until; } }
+          // Хвост записи из комнаты — эхо, а не новая реплика (Heard.echo); перебили — эха уже не будет,
+          // и перебивший, повторив фразу, не должен уйти «эхом» (как в speakTurn).
+          long now = System.currentTimeMillis();
+          spokenPt = t[1]; spokenPtEnd = cut ? now : now + (long) (sec * 1000);
+        }
+        log(String.format(Locale.ROOT, "🎙 звук реплики: %.1f с%s", sec, g > 1.01f ? String.format(Locale.ROOT, " · громче на %.0f дБ", 20 * Math.log10(g)) : ""));
+      } catch (Throwable e) { log("🎙 звук реплики не проигрался: " + e); }
+    });
+  }
   /** Фразы стенда эха: 0 — прежняя, по ней записаны первые замеры; дальше по три на язык, разной длины. */
   static final String[][] AEC_PHRASES = {
     {"pt", "Olha, o carro chegou ontem com um barulho estranho na frente, e quando a gente levantou vimos que a correia dentada estava muito gasta."},
@@ -2440,16 +2671,19 @@ public class TranslatorService extends Service {
     worker.submit(() -> { try { speakOut(lang, w); } catch (Throwable t) { log("🔊 " + t); } });
   }
 
-  /** Перевод отдельных слов для вкладки изучения. Идёт в фоне: на список в двести слов
-   *  это секунды, а держать экран нельзя. */
+  /** Перевод отдельных слов для вкладки изучения. Идёт в фоне: на список в двести слов это секунды, а
+   *  держать экран нельзя. И не в очереди живого перевода: своим потоком (learnIo), каждое слово — в
+   *  затишье живого пути (quietFor) — заговорили, и перевод слов ждёт, пока реплика не переведена. */
   public void translateWords(java.util.List<String> words, Runnable done) {
     if (eng == null || learn == null) { if (done != null) main.post(done); return; }
-    worker.submit(() -> {
+    learnIo.submit(() -> {
       int n = 0;
       for (String w : words) {
-        if (!running) break;
+        try { if (!awaitQuiet(QUIET_MS)) break; } catch (InterruptedException ie) { return; }
+        Engine e = eng; if (e == null) break;
+        if (learn.wordRu.containsKey(w)) continue;  // перевела прежняя очередь, пока эта ждала затишья
         learn.markTriedRu(w);                       // пробовали — второй раз в «недостающие» не попадёт
-        try { String ru = eng.translate("pt2ru", w);
+        try { String ru = e.translate("pt2ru", w);
           // Одиночное слово модель иногда отдаёт с техническим токеном («<unk> Люди») — он
           // ничего не значит для человека и в карточке только мешает.
           if (ru != null) ru = ru.replaceAll("<unk>", " ").replaceAll("\\s+", " ").trim();
@@ -3099,7 +3333,7 @@ public class TranslatorService extends Service {
       busy("live", "распознаю речь…", 0, 0);
       long t0 = System.nanoTime(); String asr = eng.asr(src, fed, sr); long t1 = System.nanoTime();   // sherpa ресемплирует сам
       if (asr.isEmpty()) { log("(тишина / не распознано, " + String.format("%.1f", samples.length / (double) sr) + " с)"); tsvSeg("silence", dir, "", "", "", durMs, (t1 - t0) / 1000000, 0); return; }
-      processText(dir, asr, auto, true, durMs, (t1 - t0) / 1000000, "asr", chatId, who);
+      processText(dir, asr, auto, true, durMs, (t1 - t0) / 1000000, "asr", chatId, who, samples, sr);   // звук — без подставленной тишины
     } catch (Throwable t) { Log.e(TAG, "process", t); log("Ошибка: " + t); tsv("error", dirIn, String.valueOf(t)); }
     finally { busy("live", null, 0, 0); }
   }
@@ -3210,6 +3444,11 @@ public class TranslatorService extends Service {
     processText(dirIn, asrIn, auto, gate, durMs, srcMs, kind, chatId, null);
   }
   void processText(String dirIn, String asrIn, boolean auto, boolean gate, double durMs, long srcMs, String kind, final long chatId, Who whoIn) {
+    processText(dirIn, asrIn, auto, gate, durMs, srcMs, kind, chatId, whoIn, null, 0);
+  }
+  /** pcm, sr — звук, который слышал распознаватель: он ляжет рядом с репликой, если включено
+   *  «Хранить звук собеседников» и речь португальская. */
+  void processText(String dirIn, String asrIn, boolean auto, boolean gate, double durMs, long srcMs, String kind, final long chatId, Who whoIn, final float[] pcm, final int sr) {
     busy("live", "перевожу…", 0, 0);
     try {
       long t1 = System.nanoTime();
@@ -3316,10 +3555,17 @@ public class TranslatorService extends Service {
           durMs > 0 ? String.format(Locale.ROOT, " (аудио %.1f с)", durMs / 1000.0) : "");
       log(line); tsvSeg(kind, dir, asr, mt, tag, durMs, srcMs, (t2 - t1) / 1000000);
       if (chats != null) {
+        // Живой звук — только португальская речь собеседника (решение владельца 03.10): по нему учат
+        // язык, а свою русскую речь человек слышит и так. Имя — до записи в разговор, файл — в фоне после.
+        String clip = keepAudio && pcm != null && dir.startsWith("pt") ? Clips.name(chatId, at, chats.audio()) : null;
+        JSONObject tj = Chats.turn(dir, asr, mt, who, at);
+        if (clip != null) tj.put("audio", clip);
+        if (standNow()) tj.put("stand", 1);
         // Всегда по номеру, снятому до распознавания: разговор могли сменить и во время озвучки выше.
-        boolean ok = chats.addTo(chatId, dir, asr, mt, who, at);
-        if (!ok) {                                  // прежний разговор был пуст и удалён при уходе — реплике негде лечь, кроме текущего
-          chats.add(dir, asr, mt, who, at);
+        boolean ok = chats.addTurn(chatId, tj);
+        if (!ok) chats.add(tj);                     // прежний разговор был пуст и удалён при уходе — реплике негде лечь, кроме текущего
+        if (clip != null) saveClip(pcm, sr, new File(chats.audio(), clip));
+        if (!ok) {
           log("↩ прежний разговор " + chatId + " был пуст и удалён — реплика записана в текущий");
         } else if (chats.current != chatId) {
           log("↩ реплика записана в прежний разговор " + chatId);
@@ -4039,10 +4285,12 @@ public class TranslatorService extends Service {
     running = false; main.removeCallbacks(idleStop);
     if (store != null) store.cancel();
     if (spkTrack != null) spkTrack.release();
-    worker.shutdownNow(); llmWorker.shutdownNow(); cloudWorker.shutdownNow();
-    // Модели освобождаем после того, как рабочие потоки вышли: иначе распознавание, идущее в эту
-    // секунду, обратится к уже освобождённой нативной памяти.
-    try { worker.awaitTermination(3, TimeUnit.SECONDS); } catch (InterruptedException ignore) {}
+    worker.shutdownNow(); llmWorker.shutdownNow(); cloudWorker.shutdownNow(); learnIo.shutdownNow();
+    clipIo.shutdown();   // не shutdownNow: звук реплик, уже стоящий в очереди, дописывается (миллисекунды на кусочек)
+    // Модели освобождаем после того, как рабочие потоки вышли: иначе распознавание или перевод слов,
+    // идущие в эту секунду, обратятся к уже освобождённой нативной памяти.
+    try { worker.awaitTermination(3, TimeUnit.SECONDS); learnIo.awaitTermination(3, TimeUnit.SECONDS); clipIo.awaitTermination(2, TimeUnit.SECONDS); }
+    catch (InterruptedException ignore) {}
     if (llm != null) llm.stop();
     for (int pid : Llm.strays()) android.os.Process.killProcess(pid);
     if (eng != null) eng.release();

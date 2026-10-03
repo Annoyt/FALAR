@@ -30,7 +30,11 @@
 #   Screen     — что показывают экраны 0.26.0: ход перевода и загрузки в реплике, строка под названием,
 #                гаснет ли «Улучшить», «Память разговора», метки модулей, «Облако», подсказка «Слов»;
 #   WhatsNew   — «Что нового» после обновления: пункты всех пропущенных версий, сначала новое; сам
-#                whatsnew.txt — разбирается, пункты короткие, запись для versionCode манифеста есть.
+#                whatsnew.txt — разбирается, пункты короткие, запись для versionCode манифеста есть;
+#   Clips      — живой звук реплик: формат по версии Android, имя без затирания соседнего, усиление тихой
+#                записи при проигрывании (сам кодек, ClipCodec, — на телефоне: bench/audio/clip_bench.sh);
+#   Learn      — «Слова»: реплики стенда (поле stand) не считаются;
+#   BackupRules — резервная копия: в облако Google ничего, на новый телефон всё (манифест и res/xml).
 # Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
 #   bash bench/apk/test.sh
@@ -63,7 +67,9 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/DenoiseGate.java $A/test/DenoiseGateTest.java \
   $A/src/dev/agenttranslator/Wiener.java $A/test/WienerTest.java \
   $A/src/dev/agenttranslator/Feedback.java $A/test/FeedbackTest.java \
-  $A/src/dev/agenttranslator/VoiceOut.java $A/test/VoiceOutTest.java
+  $A/src/dev/agenttranslator/VoiceOut.java $A/test/VoiceOutTest.java \
+  $A/src/dev/agenttranslator/Clips.java $A/test/ClipsTest.java \
+  $A/src/dev/agenttranslator/Learn.java $A/test/LearnTest.java $A/test/BackupRulesTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -88,5 +94,8 @@ java -cp "$OUT:$J" dev.agenttranslator.FeedbackTest "$R" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.VoiceOutTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WhatsNewTest "$A/whatsnew.txt" "$A/AndroidManifest.xml" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.DenoiseGateTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.ClipsTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.LearnTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.BackupRulesTest "$A" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WienerTest || fail=1
 exit $fail

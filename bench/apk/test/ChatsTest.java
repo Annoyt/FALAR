@@ -171,6 +171,83 @@ public class ChatsTest {
     ok(o.voices.isEmpty() && o.size() == 1, "C30 файл до 0.27 открывается, голосов нет");
     eq(o.voices.label(o.all().get(0)[7]), "", "C30 метка «собеседник» прежних версий подписью не становится");
 
+    // живой звук: имя файла в реплике, сам файл в files/audio — уходит вместе с репликой и разговором
+    Chats au = new Chats(tmp());
+    au.audio().mkdirs();
+    ok(au.addTurn(au.current, Chats.turn("pt2ru", "Tudo bem?", "Всё хорошо?", null, 9_000).put("audio", "1_9000.ogg")), "C32 реплика со звуком легла");
+    File fa = new File(au.audio(), "1_9000.ogg"); Files.write(fa.toPath(), new byte[100]);
+    eq(au.all().get(0)[9], "1_9000.ogg", "C32 имя звука — десятое поле ряда");
+    eq(au.audioOf(0), fa, "C32 audioOf находит файл");
+    au.add("pt2ru", "Sim", "Да", null, 9_500);
+    eq(au.audioOf(1), null, "C32 у реплики без звука — null");
+    eq(au.audioOf(7), null, "C32 за пределами — null");
+    ok(au.deleteTurn(0) && !fa.exists(), "C33 удалили реплику — удалился и её звук");
+    au.addTurn(au.current, Chats.turn("pt2ru", "Obrigado", "Спасибо", null, 9_600).put("audio", "1_9600.ogg"));
+    File fb = new File(au.audio(), "1_9600.ogg"); Files.write(fb.toPath(), new byte[50]);
+    long gone = au.current; au.newChat("");
+    ok(au.delete(gone) && !fb.exists(), "C34 удалили разговор — удалился и его звук");
+    // уборка: файл без реплики старше порога уходит; звук реплики и свежая недописанная запись остаются
+    au.addTurn(au.current, Chats.turn("pt2ru", "Bom dia", "Доброе утро", null, 9_700).put("audio", "2_9700.ogg"));
+    File kept = new File(au.audio(), "2_9700.ogg"), orphan = new File(au.audio(), "3_1.ogg"), fresh = new File(au.audio(), "3_2.ogg.part");
+    for (File f : new File[]{kept, orphan, fresh}) Files.write(f.toPath(), new byte[10]);
+    long hourAgo = System.currentTimeMillis() - 3_600_000;
+    orphan.setLastModified(hourAgo); kept.setLastModified(hourAgo);
+    long[] swept = au.sweepAudio(600_000);
+    ok(swept[0] == 1 && swept[1] == 10 && !orphan.exists() && kept.exists() && fresh.exists(), "C35 уборка: сирота ушла, звук реплики и свежий остались");
+    long withClip = au.current; au.newChat("");
+    ok(au.sweepAudio(600_000)[0] == 0 && kept.exists(), "C35 файл, на который ссылается не текущий разговор, не тронут");
+    eq(au.audioSize()[0], 2L, "C35 занято — два файла");
+    // «Удалить звук, оставить текст»
+    long[] dropped = au.dropAllAudio();
+    ok(dropped[0] == 2 && dropped[1] == 20 && au.audioSize()[0] == 0 && !kept.exists(), "C36 весь звук удалён");
+    au.open(withClip);
+    ok(au.size() == 1 && au.all().get(0)[9].isEmpty() && !au.load(withClip).getJSONArray("turns").getJSONObject(0).has("audio"), "C36 реплика на месте, ссылки на звук нет и в файле");
+    // метка стенда: ставится по меткам at в любом разговоре, снимается разом
+    Chats st = new Chats(tmp());
+    st.add("pt2ru", "Sou um turista", "Я турист", null, 11_000);
+    st.add("pt2ru", "Quanto custa?", "Сколько стоит?", null, 12_000);
+    long sid = st.current; st.newChat("");
+    st.add("pt2ru", "Seu relógio está certo", "Ваши часы верны", null, 13_000);
+    Map<Long, Set<Long>> ms = new HashMap<>();
+    ms.put(sid, new HashSet<>(Arrays.asList(11_000L))); ms.put(st.current, new HashSet<>(Arrays.asList(13_000L, 99L)));
+    eq(st.markStand(ms), 2, "C37 помечены две реплики (метки 99 нет)");
+    eq(st.markStand(ms), 0, "C37 повторная пометка ничего не добавляет");
+    JSONArray sl = st.load(sid).getJSONArray("turns");
+    ok(sl.getJSONObject(0).optInt("stand") == 1 && !sl.getJSONObject(1).has("stand"), "C37 метка — только у нужной реплики, и в файле");
+    eq(st.unmarkStand(), 2, "C38 сняты обе метки");
+    ok(!st.load(sid).getJSONArray("turns").getJSONObject(0).has("stand"), "C38 и в файле");
+    // новый разговор не занимает номер существующего: в одну миллисекунду save() затирал чужие реплики
+    Chats q = new Chats(tmp());
+    long t0 = System.currentTimeMillis();
+    for (long k = t0; k < t0 + 200; k++)
+      Files.write(new File(q.dir, k + ".json").toPath(), new JSONObject().put("id", k).put("name", "занят")
+          .put("turns", new JSONArray().put(Chats.turn("pt2ru", "Oi", "Привет", null, 1))).toString().getBytes("UTF-8"));
+    q.newChat("");
+    ok(q.current >= t0 + 200, "C39 номер нового разговора свободен: " + (q.current - t0));
+    eq(q.load(t0 + 1).getJSONArray("turns").length(), 1, "C39 существующий разговор не затёрт");
+
+    // звук пишется в фоне после реплики: реплику удалили раньше, чем он записан, — запись его не оставит
+    Chats w = new Chats(tmp()); w.audio().mkdirs();
+    w.addTurn(w.current, Chats.turn("pt2ru", "Até logo", "До встречи", null, 20_000).put("audio", "9_20000.wav"));
+    w.addTurn(w.current, Chats.turn("pt2ru", "Bom dia", "Доброе утро", null, 21_000).put("audio", "9_21000.wav"));
+    ok(w.deleteTurn(0), "C40 реплика удалена до того, как записан её звук");
+    ok(!w.claimAudio("9_20000.wav"), "C40 запись звука удалённой реплики его не оставит");
+    ok(w.claimAudio("9_20000.wav"), "C40 отказ — один раз, дальше имя снова свободно");
+    ok(w.claimAudio("9_21000.wav"), "C40 звук живой реплики остаётся");
+    // реплика удалена, когда звук уже был, — удаляется сам файл (в любом формате), запись тут ни при чём
+    File done = new File(w.audio(), "9_21000.ogg"); Files.write(done.toPath(), new byte[5]);
+    eq(w.audioOf(0), done, "C41 в реплике .wav, на диске .ogg — звук найден");
+    ok(w.deleteTurn(0) && !done.exists() && w.claimAudio("9_21000.wav"), "C41 удалён файл другого формата; запись не помечена");
+    // «Удалить звук» во время записи: номер поколения растёт — начатая до него запись своё не оставит
+    int g0 = w.audioGen; w.dropAllAudio();
+    eq(w.audioGen, g0 + 1, "C42 «Удалить звук» меняет поколение");
+    // реплику удалили посреди сжатия: на диске WAV и недописанный Opus — уходят оба
+    w.addTurn(w.current, Chats.turn("pt2ru", "Tchau", "Пока", null, 22_000).put("audio", "9_22000.wav"));
+    File raw = new File(w.audio(), "9_22000.wav"), part = new File(w.audio(), "9_22000.ogg.part");
+    Files.write(raw.toPath(), new byte[7]); Files.write(part.toPath(), new byte[3]);
+    eq(w.audioSize()[0], 1L, "C43 WAV и недописанный Opus — одна реплика");
+    ok(w.deleteTurn(w.size() - 1) && !raw.exists() && !part.exists(), "C43 удалены и WAV, и недописанный Opus");
+
     System.out.println(fails == 0 ? "Chats: " + checks + " проверок, все прошли" : "Chats: провалов " + fails + " из " + checks);
     return fails;
   }

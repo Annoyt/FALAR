@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+. В облачную копию Google не уходит ничего: разговоры (текст, отпечатки голосов, живой
+     звук собеседников), выученное, ключи облака — все области исключены. Раздела device-transfer нет,
+     значит, при переносе на новый телефон переезжает всё, как раньше (решение владельца 03.10).
+     Проверка разбора — bench/apk/test/BackupRulesTest.java. -->
+<data-extraction-rules>
+  <cloud-backup>
+    <exclude domain="root" path="."/>
+    <exclude domain="file" path="."/>
+    <exclude domain="database" path="."/>
+    <exclude domain="sharedpref" path="."/>
+    <exclude domain="external" path="."/>
+    <exclude domain="device_root" path="."/>
+    <exclude domain="device_file" path="."/>
+    <exclude domain="device_database" path="."/>
+    <exclude domain="device_sharedpref" path="."/>
+  </cloud-backup>
+</data-extraction-rules>

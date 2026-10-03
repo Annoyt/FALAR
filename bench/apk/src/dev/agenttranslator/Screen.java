@@ -146,6 +146,18 @@ final class Screen {
     int a = Math.abs(n) % 100, b = a % 10;
     return a >= 11 && a <= 14 ? many : b == 1 ? one : b >= 2 && b <= 4 ? few : many;
   }
+  /** Подпись «Хранить звук собеседников»: пишется ли и сколько уже записано. Без слов «запись» и «МБ на
+   *  реплику»: человеку нужно знать, включено ли и сколько места занято. */
+  static String audioLine(boolean on, long n, long bytes) {
+    String size = n + " " + plural((int) Math.min(n, Integer.MAX_VALUE), "реплика", "реплики", "реплик") + ", " + ModelStore.mb(bytes) + " МБ";
+    if (on) return n == 0 ? "включено · пока пусто" : "включено · " + size;
+    return n == 0 ? "выключено" : "выключено · хранится с прошлого раза: " + size;
+  }
+  /** Вопрос перед «Удалить звук, оставить текст»: сколько уйдёт и что останется. */
+  static String audioDropText(long n, long bytes) {
+    return "Уйдёт записанный звук собеседников: " + n + " " + plural((int) Math.min(n, Integer.MAX_VALUE), "реплика", "реплики", "реплик")
+        + ", " + ModelStore.mb(bytes) + " МБ. Текст разговоров останется. Вернуть звук будет нельзя.";
+  }
   /** Строка «Облако» в настройках: сколько ключей и как часто пересмотр. */
   static String cloudRow(int keys, int every) {
     return (keys == 0 ? "ключа нет" : keys + " " + plural(keys, "ключ", "ключа", "ключей"))

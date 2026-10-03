@@ -200,7 +200,9 @@ public class Learn {
       JSONArray t = o.optJSONArray("turns");
       for (int k = 0; t != null && k < t.length(); k++) {
         JSONObject x = t.optJSONObject(k);
-        if (x == null) continue;
+        // Реплики стенда — корпус прогонов, а не речь человека: на 02.10 их была треть, и «Слова» учили
+        // «relógio» и «biscoitos» из замеров (Chats, поле `stand`).
+        if (x == null || x.optInt("stand", 0) == 1) continue;
         boolean srcPt = x.optString("dir", "").startsWith("pt");
         String fixed = x.optString("fixed", "");
         String dst = fixed.isEmpty() ? x.optString("dst", "") : fixed;
