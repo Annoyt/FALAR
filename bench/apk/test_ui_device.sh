@@ -25,6 +25,9 @@
 #      открываются: стенд --es linkdry 1 пишет их в журнал — Telegram на телефоне владельца.
 #   U11 «Что озвучивать»: сегмент «Авто · RU · PT · Оба» в настройках показывает выбор службы и меняет
 #      его; при «PT» русский перевод не звучит (строка реплики «без озвучки»), при «RU» — звучит.
+#   U12 системные полосы (targetSdk 35: окно лежит под ними, Bars.java) — в обеих темах: шапка ниже
+#      строки состояния, а под строкой — слива шапки; кнопки дока, низ панели ☰ и поле «Своё слово»
+#      выше полосы навигации, поле и «+» — над клавиатурой; под навигацией — фон экрана.
 #
 # Разговоры владельца не трогаются: тестовый разговор — файлом с самым свежим временем; выученное,
 # словари, свои слова, пины и ключи облака возвращаются из снимка; разговоры, появившиеся за проверку,
@@ -114,6 +117,19 @@ seek() { local i; dump; has "$@" && return 0
   for i in 1 2 3 4 5; do swipe_up; dump; has "$@" && return 0; done
   for i in 1 2 3 4 5 6 7 8 9 10; do swipe_down; dump; has "$@" && return 0; done; return 1; }
 ime() { sh "dumpsys input_method" | grep -q 'mInputShown=true'; }
+# Системные полосы по dumpsys window, px экрана: «низ строки состояния, верх полосы навигации, верх
+# клавиатуры» (0 — нет или не видна). Android 13 пишет ITYPE_STATUS_BAR, 14+ — statusBars.
+cat > $D/bars.py <<'PY'
+import re, sys
+s = sys.stdin.read()
+def src(names, vis=False):
+    for m in re.finditer(r'InsetsSource [^\n]*?type=(\w+) frame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\][^\n]*?visible=(true|false)', s):
+        if m.group(1) in names and (not vis or m.group(6) == 'true'): return list(map(int, m.groups()[1:5]))
+sb, nb, k = src(('ITYPE_STATUS_BAR', 'statusBars')), src(('ITYPE_NAVIGATION_BAR', 'navigationBars')), src(('ITYPE_IME', 'ime'), True)
+print(sb[3] if sb else 0, nb[1] if nb else 0, k[1] if k and k[3] > k[1] else 0)
+PY
+sysbars() { sh "dumpsys window" | python3 $D/bars.py; }
+low() { at "$@" | cut -d' ' -f4; }               # нижний край вида, px экрана
 # Отрезки хода реплики (ProgressLine — первый ребёнок вида busy) по цвету правого края каждого:
 # пройден — слива (ночью золото), текущий — мята, впереди — цвет рамки.
 cat > $D/segs.py <<'PY'
@@ -293,6 +309,8 @@ say "== U2: панель ☰"
 tapon --desc "Разговоры, слова, настройки"; dump
 chk 'has --text "Новый разговор" --contains && has --text Разговоры && has --text Слова && has --text Настройки' "U2 в панели: «＋ Новый разговор», разговоры, «Слова», «Настройки»"
 chk 'has --text "ТЕСТ интерфейс" --all && [ $(cnt --text "ТЕСТ интерфейс") -ge 2 ]' "U2 тестовый разговор в списке"
+read SB NB _ <<< "$(sysbars)"; ft=$(at --text Falar | cut -d' ' -f2); nl=$(low --text Настройки)
+chk '[ "${SB:-0}" -gt 0 ] && [ "${ft:-0}" -ge "$SB" ] && [ "${nl:-99999}" -le "$NB" ]' "U12 панель ☰ между полосами: «Falar» с ${ft:-—} (строка состояния до $SB), «Настройки» до ${nl:-—} (навигация с $NB)"
 press; dump; chk '! has --text Настройки' "U2 «назад» закрывает панель"
 tapon --desc "Разговоры, слова, настройки"; tapxy $((W - $(dp 20))) $((H / 2)); dump
 chk '! has --text Настройки' "U2 касание мимо панели закрывает её"
@@ -329,7 +347,13 @@ chk 'has --text "Очистить выученное…"' "U3 «⋯» в шап�
 press
 dump; e=$(xy --class android.widget.EditText)
 if [ -n "$e" ]; then
+  read SB NB _ <<< "$(sysbars)"; fl=$(low --class android.widget.EditText)
+  chk '[ "${NB:-0}" -gt 0 ] && [ "${fl:-99999}" -le "$NB" ]' "U12 поле «Своё слово» выше полосы навигации: низ ${fl:-—}, навигация с $NB"
   tapxy $e 1.5; $ADB shell "input text Falarteste"; sleep 1; dump
+  read _ _ KB <<< "$(sysbars)"; fl=$(low --class android.widget.EditText); pl=$(low --desc "Добавить своё слово")
+  if ime && [ "${KB:-0}" -gt 0 ]; then
+    chk '[ "${fl:-99999}" -le "$KB" ] && [ "${pl:-99999}" -le "$KB" ]' "U12 поле и «+» над клавиатурой: низ ${fl:-—} и ${pl:-—}, клавиатура с $KB"
+  else sk "U12 клавиатура не открылась — поле над ней не проверить"; fi
   m=$(mark); tapon --desc "Добавить своё слово"
   l=$(wl "$m" '📝 добавлено: Falarteste' 10); chk '[ -n "$l" ]' "U3 своё слово полем и «+»: ${l:-строки в журнале нет}"
   ime && press
@@ -576,6 +600,32 @@ if big:
 print(' · '.join(out))
 PY
 }
+# Полосы на экране разговора — по дереву и снимку из look(): шапка (подпись названия) ниже строки
+# состояния, кнопки дока выше полосы навигации; под строкой состояния — слива (градиент шапки), под
+# навигацией — фон экрана. Точки строки — средняя треть (по краям часы и значки), навигации — у краёв
+# полосы по бокам от «пилюли» жестов.
+barsck() {
+  python3 - $D/$1.png $1 "$(sysbars)" "$(at --rid hint)" "$(at --desc 'Удерживайте и говорите' --prefix)" \
+    "$(at --desc 'Снимок или набрать фразу')" "$(at --desc 'Обе вместе' --prefix)" <<'PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); day = sys.argv[2] == 'day'; w, h = im.size
+sb, nb, _ = map(int, sys.argv[3].split())
+hb, mic, inp, lis = [list(map(int, a.split()[:4])) if a.strip() else None for a in sys.argv[4:8]]
+if not sb or not nb: print('полосы в dumpsys window НЕ нашлись'); sys.exit()
+out = ['строка до %d, навигация с %d' % (sb, nb)]
+out.append('шапка с %s %s' % (hb[1] if hb else '—', 'ok' if hb and hb[1] >= sb else 'НЕ ниже строки'))
+for name, b in (('кнопка', mic), ('снимок', inp), ('слушать', lis)):
+    out.append('%s до %s %s' % (name, b[3] if b else '—', 'ok' if b and b[3] <= nb else 'НЕ выше навигации'))
+px = [im.getpixel((x, sb // 2)) for x in range(w // 3, 2 * w // 3, 5)]
+plum = sum(1 for r, g, b in px if r >= g + 10 and r >= b and 0.299 * r + 0.587 * g + 0.114 * b < 130) / len(px)
+out.append('под строкой слива %.0f%% %s' % (plum * 100, 'ok' if plum >= 0.6 else 'НЕ слива'))
+px = [im.getpixel((x, y)) for y in (nb + 2, h - 3) for x in list(range(8, w // 3, 5)) + list(range(2 * w // 3, w - 8, 5))]
+bg = sum(1 for p in px if (min(p) >= 235 if day else max(p) <= 45)) / len(px)
+out.append('под навигацией фон %.0f%% %s' % (bg * 100, 'ok' if bg >= 0.9 else 'НЕ ' + ('белый' if day else 'тёмный')))
+print(' · '.join(out))
+PY
+}
 shots() {   # снимки экранов самим приложением: доля светлых или тёмных точек посередине
   local s m out=""
   for s in talk drawer words settings mods cloud log; do
@@ -604,6 +654,8 @@ for t in day night; do
     printf '%s' "$v" | grep -q "НЕ " && { mkdir -p /tmp/falar-ui-fail; cp $D/$t.png /tmp/falar-ui-fail/$t.png; cp $D/ui.xml /tmp/falar-ui-fail/$t.xml
       say "  снимок и дерево экрана при провале: /tmp/falar-ui-fail/$t.* (разговор тестовый)"; }
     chk '! printf "%s" "$v" | grep -q "НЕ "' "U9 тема «$t» на экране: шапка, фон, крупный текст"
+    v=$(barsck $t); say "  $t, полосы: $v"
+    chk '! printf "%s" "$v" | grep -q "НЕ "' "U12 тема «$t»: шапка ниже строки состояния, под строкой — слива; док выше навигации, под ней — фон"
     if [ $t = day ]; then   # смена темы пересоздала экран: состояние службы должно доехать и до нового
       tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5; dump
       st=$(ui texts | sed -n '/^Проверить$\|^Обновить$/{n;p;q}')
