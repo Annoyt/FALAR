@@ -29,7 +29,7 @@ ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
 STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"
-SUITES="ui better scroll-day scroll-night busy memo hearing mic modules whatsnew"
+SUITES="ui better scroll-day scroll-night busy memo hearing mic modules voices whatsnew"
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json models/openrouter.json"
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его

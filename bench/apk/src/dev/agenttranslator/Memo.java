@@ -248,4 +248,69 @@ public class Memo {
     for (String w : y) if (x.contains(w)) common++;
     return common * 100 >= y.size() * 80 && x.size() <= y.size() * 3 / 2;
   }
+
+  // ---- собеседники по голосам (Voices): сколько их, как зовут, о чём говорят
+
+  /** Человек назвался: «меня зовут Анна», «meu nome é Ana», «me chamo João Pedro». Только явные
+   *  обороты и имя с заглавной: «sou a dona», «aqui é o Brasil» именем не становятся — ложное имя
+   *  хуже его отсутствия. Регистр первой буквы оборота — классом, а не флагом: (?i) в Java не
+   *  касается кириллицы, а флаги Unicode на Android (ICU) не все. lang — pt или ru; null — не назвался. */
+  static final java.util.regex.Pattern INTRO_PT = java.util.regex.Pattern.compile(
+      "(?:^|[^\\p{L}])(?:[Mm]eu nome [ée]|[Ee]u me chamo|[Mm]e chamo|[Pp]odem? me chamar de)\\s+(\\p{Lu}[\\p{Ll}'’\\-]+(?:\\s+\\p{Lu}[\\p{Ll}'’\\-]+)?)");
+  static final java.util.regex.Pattern INTRO_RU = java.util.regex.Pattern.compile(
+      "(?:^|[^\\p{L}])(?:[Мм]еня зовут|[Мм]о[её] имя|[Зз]овите меня)\\s+(\\p{Lu}[\\p{Ll}\\-]+(?:\\s+\\p{Lu}[\\p{Ll}\\-]+)?)");
+  public static String intro(String text, String lang) {
+    if (text == null) return null;
+    java.util.regex.Matcher m = ("ru".equals(lang) ? INTRO_RU : INTRO_PT).matcher(text);
+    return m.find() ? m.group(1) : null;
+  }
+
+  /** «Говорят двое» — сколько людей в разговоре по голосам. */
+  public static String count(int n) {
+    switch (n) {
+      case 0: return "";
+      case 1: return "Говорит один человек";
+      case 2: return "Говорят двое";
+      case 3: return "Говорят трое";
+      case 4: return "Говорят четверо";
+      case 5: return "Говорят пятеро";
+      case 6: return "Говорят шестеро";
+      default: return "Говорят " + n + " человек";
+    }
+  }
+  /** Самое длинное, что голос сказал, — по-русски (у португальской реплики — её перевод), до max знаков. */
+  static String longest(List<String[]> rows, String who, int max) {
+    String best = "";
+    for (String[] r : rows) {
+      if (r == null || r.length < 8 || !who.equals(r[7])) continue;
+      String ru = r[0].startsWith("pt") ? r[2] : r[1];
+      if (ru != null && ru.trim().length() > best.length()) best = ru.trim();
+    }
+    return best.isEmpty() ? "" : cut(best, max);
+  }
+  /** Собеседники разговора для «Памяти разговора»: сколько их и строка на каждого — имя или
+   *  «собеседник N», язык, мужчина или женщина (по грамматике его же реплик), о чём говорит. О чём —
+   *  пересказ от пересмотра разговора (Voice.says), а пока его нет — самое длинное, что человек
+   *  сказал, по-русски и в кавычках: его собственные слова, не догадка. Пусто — голосов нет.
+   *  rows — Chats.dialog(): направление, исходник, перевод, …, номер голоса в поле 7. */
+  public static String speakers(List<String[]> rows, Voices vs) {
+    if (vs == null || vs.isEmpty()) return "";
+    List<String[]> rs = rows == null ? new ArrayList<>() : rows;
+    StringBuilder b = new StringBuilder(count(vs.size())).append('.');
+    for (Voices.Voice v : vs.all()) {
+      String w = String.valueOf(v.n);
+      int f = 0, m = 0;
+      for (String[] r : rs) {
+        if (r == null || r.length < 8 || !w.equals(r[7])) continue;
+        int[] c = r[0].startsWith("pt") ? ptSelf(r[1]) : ruSelf(r[1]);
+        if (c[0] > c[1]) f++; else if (c[1] > c[0]) m++;
+      }
+      String g = word(verdict(f, m));
+      b.append("\n• ").append(v.name.isEmpty() ? "Собеседник " + v.n : v.name + " (собеседник " + v.n + ")")
+       .append(" — ").append("ru".equals(v.lang) ? "по-русски" : "по-португальски").append(g.isEmpty() ? "" : ", " + g);
+      String about = !v.says.isEmpty() ? v.says : longest(rs, w, 90);
+      if (!about.isEmpty()) b.append(": ").append(v.says.isEmpty() ? "«" + about + "»" : about);
+    }
+    return b.toString();
+  }
 }

@@ -38,4 +38,10 @@ final class Look {
       okBg = 0xFF16332A; okFg = MINT; waitBg = 0xFF2E2416; waitFg = GOLD; noBg = 0xFF241C2A; noFg = dim; goBg = tint; goFg = 0xFFE8A0BC;
     }
   }
+
+  /** Цвет голоса разговора: у собеседника 1, 2, 3… свой — точкой у реплики и подписью. Шесть цветов
+   *  по кругу, днём тёмные на белом, ночью светлые на тёмном. */
+  static final int[] VOICE_DAY = {PLUM, 0xFF8A6420, 0xFF18775A, 0xFF2F5C9E, 0xFFB04A1C, 0xFF6B4FA0};
+  static final int[] VOICE_NIGHT = {0xFFE8A0BC, GOLD, MINT, 0xFF8EB8F0, 0xFFF0A070, 0xFFB9A0E8};
+  int voice(int n) { int[] p = night ? VOICE_NIGHT : VOICE_DAY; return p[Math.floorMod(n - 1, p.length)]; }
 }

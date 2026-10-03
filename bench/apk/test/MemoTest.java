@@ -214,6 +214,56 @@ public class MemoTest {
     eq(Cloud.Review.parse("- **MEMO:** Мастер (мужчина) чинит кран: 200 реалов\nFIX 1: Olá").memo, "Мастер (мужчина) чинит кран: 200 реалов", "C3 разметка и двоеточие внутри");
     eq(Cloud.Review.parse("FIX 1: Olá").memo, "", "C4 без строки MEMO — пусто");
 
+    // ---- человек назвался: имя у его голоса. Ложное имя хуже промаха — только явные обороты и заглавная
+    eq(Memo.intro("Oi, meu nome é Ana.", "pt"), "Ana", "I1 meu nome é");
+    eq(Memo.intro("Me chamo João Pedro, prazer.", "pt"), "João Pedro", "I1 me chamo — имя из двух слов");
+    eq(Memo.intro("Pode me chamar de Zé.", "pt"), "Zé", "I1 pode me chamar de");
+    eq(Memo.intro("Prazer, eu me chamo Carla", "pt"), "Carla", "I1 eu me chamo");
+    eq(Memo.intro("Meu nome e Beatriz", "pt"), "Beatriz", "I1 без ударения — так пишет распознавание");
+    eq(Memo.intro("Eu sou a dona da loja.", "pt"), null, "I2 «sou a dona» — не имя");
+    eq(Memo.intro("meu nome é ana", "pt"), null, "I2 имя строчными — не уверены");
+    eq(Memo.intro("Qual é o seu nome?", "pt"), null, "I2 вопрос об имени — не имя");
+    eq(Memo.intro("Aqui é o Brasil, meu amigo.", "pt"), null, "I2 «aqui é o» — не представление");
+    eq(Memo.intro("Меня зовут Анна.", "ru"), "Анна", "I3 меня зовут");
+    eq(Memo.intro("Привет, меня зовут Игорь Петрович", "ru"), "Игорь Петрович", "I3 имя и отчество");
+    eq(Memo.intro("Моё имя Олег", "ru"), "Олег", "I3 моё имя");
+    eq(Memo.intro("Как вас зовут?", "ru"), null, "I4 вопрос об имени — не имя");
+    eq(Memo.intro("меня зовут анна", "ru"), null, "I4 имя строчными — не уверены");
+    eq(Memo.intro("Меня зовут Анна.", "pt"), null, "I4 русский оборот в португальской реплике не ищем");
+    eq(Memo.intro(null, "ru"), null, "I4 пусто");
+
+    // ---- сколько людей говорит и что каждый: строки «Памяти разговора»
+    eq(Memo.count(1) + "|" + Memo.count(2) + "|" + Memo.count(3) + "|" + Memo.count(7) + "|" + Memo.count(0),
+       "Говорит один человек|Говорят двое|Говорят трое|Говорят 7 человек|", "K1 число говорящих словами");
+    Voices vs = new Voices();
+    vs.enroll(new float[]{1, 0}, "ru", 0, 1); vs.enroll(new float[]{0, 1}, "pt", 0, 2);
+    List<String[]> rs = rows(new String[]{"ru2pt", "Я понял, спасибо.", "Entendi, obrigado.", "0", "", "", "0", "1", ""},
+        new String[]{"pt2ru", "Obrigada, eu estou cansada.", "Спасибо, я устала.", "1", "", "", "0", "2", ""},
+        new String[]{"pt2ru", "Pode trocar a correia hoje, a garantia é de seis meses.", "Можно поменять ремень сегодня, гарантия полгода.", "2", "", "", "0", "2", ""},
+        new String[]{"pt2ru", "SAÍDA", "Выход", "3", "", "", "0", Voices.OWNER, ""});
+    eq(Memo.speakers(rs, vs), "Говорят двое.\n• Собеседник 1 — по-русски, мужчина: «Я понял, спасибо.»"
+        + "\n• Собеседник 2 — по-португальски, женщина: «Можно поменять ремень сегодня, гарантия полгода.»",
+       "K2 без имён — что сказал каждый: самая длинная его фраза по-русски");
+    vs.name(2, "Ана", "auto"); vs.says(2, "механик, советует поменять ремень сегодня");
+    ok(Memo.speakers(rs, vs).endsWith("\n• Ана (собеседник 2) — по-португальски, женщина: механик, советует поменять ремень сегодня"),
+       "K3 с именем и пересказом — пересказ без кавычек");
+    eq(Memo.speakers(rs, new Voices()), "", "K4 голосов нет — блока нет");
+    String longRu = "Я хотел бы спросить, сколько будет стоить замена ремня, и успеете ли вы сделать это до субботы, потому что я уезжаю";
+    Voices one = new Voices(); one.enroll(new float[]{1, 0}, "ru", 0, 1);
+    String sp = Memo.speakers(rows(new String[]{"ru2pt", longRu, "…", "0", "", "", "0", "1", ""}), one);
+    ok(sp.startsWith("Говорит один человек.\n• Собеседник 1 — по-русски, мужчина: «") && sp.endsWith("…»") && sp.length() < 160,
+       "K5 длинная фраза урезана по слову: " + sp);
+
+    // ---- облако: строки SPEAKER — имя и о чём говорит
+    Cloud.Review sr = Cloud.Review.parse("FIX 1: Olá\nSPEAKER 1: Ана | спрашивает цену\nSPEAKER 2: - | продавец, объясняет условия\n**SPEAKER 3**: Жуан | механик");
+    eq(sr.speakers.size(), 3, "S1 три собеседника");
+    eq(String.join("|", sr.speakers.get(1)) + "/" + String.join("|", sr.speakers.get(2)) + "/" + String.join("|", sr.speakers.get(3)),
+       "Ана|спрашивает цену/|продавец, объясняет условия/Жуан|механик", "S1 имя, «-» — имени нет, разметка снята");
+    eq(Cloud.Review.parse(Cloud.SPEAKER_EXAMPLE[0] + "\n" + Cloud.SPEAKER_EXAMPLE[1]).speakers.size(), 0, "S2 пример из подсказки отброшен");
+    eq(Cloud.Review.parse("SPEAKER 1: Ana | asks about the price").speakers.size(), 0, "S3 пересказ не по-русски отброшен");
+    eq(Cloud.Review.parse("SPEAKER 1: speaker 1 | спрашивает цену").speakers.get(1)[0], "", "S4 «speaker 1» — не имя");
+    eq(Cloud.Review.parse("SPEAKER 2: <name> | <what>").speakers.size(), 0, "S4 эхо шаблона отброшено");
+
     System.out.println(fails == 0 ? "Memo: " + checks + " проверок, все прошли" : "Memo: провалов " + fails + " из " + checks);
     return fails;
   }

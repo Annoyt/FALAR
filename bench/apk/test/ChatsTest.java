@@ -81,6 +81,7 @@ public class ChatsTest {
     Chats r = new Chats(tmp());
     r.setTopic("Аренда"); r.setMemo("Хозяйка (женщина)", Chats.BY_CLOUD);
     r.addTerms(Collections.singletonList(new String[]{"aluguel", "аренда"}), Chats.BY_CLOUD);
+    r.enroll(new float[]{1, 0}, "pt", 1);
     long was = r.current;
     for (int k = 0; k < Chats.KEEP; k++) r.add("pt2ru", "frase " + k, "фраза " + k, null, 10_000 + k);
     eq(r.size(), Chats.KEEP, "C16 ровно потолок");
@@ -91,6 +92,7 @@ public class ChatsTest {
     eq(r.memo + "|" + r.memoBy, "Хозяйка (женщина)|" + Chats.BY_CLOUD, "C17 память перешла в продолжение");
     eq(r.topic, "Аренда", "C17 тема перешла");
     eq(r.terms().size(), 1, "C17 глоссарий перешёл");
+    eq(r.voices.size(), 1, "C17 голоса перешли: те же люди");
     Chats r2 = new Chats(r.dir.getParentFile());
     r2.open(r.current);
     eq(r2.memo + "|" + r2.topic + "|" + r2.terms().size(), "Хозяйка (женщина)|Аренда|1", "C18 в файле продолжения тоже");
@@ -127,6 +129,47 @@ public class ChatsTest {
     File jpg3 = new File(pd, "p3.jpg"); Files.write(jpg3.toPath(), new byte[]{5});
     ph.addTurn(ph.current, Chats.turn("pt2ru", "ENTRADA", "Вход", null, 5_000).put("photo", new JSONObject().put("file", "../p3.jpg")));
     ok(ph.delete(ph.current) && jpg3.exists(), "C25 имя файла с путём не удаляет ничего вне каталога снимков");
+
+    // голоса разговора: в его файле, у каждого разговора свои, номера не переиспользуются
+    Chats g = new Chats(tmp());
+    ok(g.voices.isEmpty() && !g.load(g.current).has("voices"), "C26 голосов нет — и поля в файле нет");
+    Voices.Voice gv = g.enroll(new float[]{1, 0, 0}, "ru", 10);
+    g.add("ru2pt", "Я понял", "Entendi", String.valueOf(gv.n), 1_000);
+    Voices.Voice gw = g.enroll(new float[]{0, 1, 0}, "pt", 20);
+    g.add("pt2ru", "Obrigada", "Спасибо", String.valueOf(gw.n), 2_000);
+    eq(gv.n + "," + gw.n, "1,2", "C26 двое — собеседники 1 и 2");
+    ok(g.nameVoice(2, "Ана", "auto"), "C26 имя голоса");
+    Chats g2 = new Chats(g.dir.getParentFile()); g2.open(g.current);
+    eq(g2.voices.size() + " " + g2.voices.label("2") + " " + g2.voices.get(1).lang, "2 Ана ru", "C26 голоса и имя пережили запись на диск");
+    eq(g2.all().get(1)[7], "2", "C26 у реплики — номер голоса");
+    long gid = g.current; g.newChat("Другой");
+    ok(g.voices.isEmpty(), "C27 новый разговор — без голосов");
+    g.open(gid);
+    eq(g.voices.size(), 2, "C27 вернулись в прежний — голоса его");
+    eq(g.clearVoices(), 2, "C28 забыли голоса — сколько было");
+    ok(!g.load(gid).has("voices"), "C28 из файла они ушли");
+    eq(g.all().get(1)[7], "2", "C28 подписи реплик остались");
+    eq(g.enroll(new float[]{0, 0, 1}, "pt", 30).n, 3, "C28 новый голос — номер после всех, что были в репликах");
+    g.addTurn(g.current, Chats.turn("pt2ru", "SAÍDA", "Выход", Voices.OWNER, 3_000));
+    g.newChat("Третий"); long other = g.current; g.open(gid);   // newChat возвращает тот, из которого ушли
+    ok(g.moveTurn(1, other) && g.moveTurn(1, other), "C29 две реплики перенесены");
+    JSONArray mt = g.load(other).getJSONArray("turns");
+    ok(!mt.getJSONObject(0).has("who"), "C29 номер голоса в чужой разговор не переносится");
+    eq(mt.getJSONObject(1).optString("who"), Voices.OWNER, "C29 владелец телефона — везде владелец");
+    // голос фразы кнопкой ложится в реплику по метке уже после неё — перевод отпечатка не ждёт
+    Chats sw = new Chats(tmp());
+    sw.add("pt2ru", "Bom dia", "Доброе утро", null, 7_000);
+    ok(sw.setWho(7_000, "1") && "1".equals(sw.all().get(0)[7]), "C31 номер голоса лёг в реплику по метке");
+    ok(!sw.setWho(8_000, "1"), "C31 реплики с такой меткой нет — false");
+    Chats sw2 = new Chats(sw.dir.getParentFile()); sw2.open(sw.current);
+    eq(sw2.all().get(0)[7], "1", "C31 и в файле");
+    // старый файл без поля voices читается как раньше
+    Chats o = new Chats(tmp());
+    JSONObject old = new JSONObject().put("id", 42).put("name", "Старый").put("turns", new JSONArray().put(Chats.turn("pt2ru", "Oi", "Привет", "собеседник", 1)));
+    Files.write(new File(o.dir, "42.json").toPath(), old.toString().getBytes("UTF-8"));
+    o.open(42);
+    ok(o.voices.isEmpty() && o.size() == 1, "C30 файл до 0.27 открывается, голосов нет");
+    eq(o.voices.label(o.all().get(0)[7]), "", "C30 метка «собеседник» прежних версий подписью не становится");
 
     System.out.println(fails == 0 ? "Chats: " + checks + " проверок, все прошли" : "Chats: провалов " + fails + " из " + checks);
     return fails;

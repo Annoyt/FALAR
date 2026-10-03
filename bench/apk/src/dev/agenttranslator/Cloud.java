@@ -468,12 +468,15 @@ public class Cloud {
     return sweep(sys, u.toString(), null, false);
   }
 
+  /** Строки SPEAKER из примера подсказки: эхо примера в ответе — не ответ (Review.parse). */
+  static final String[] SPEAKER_EXAMPLE = {"SPEAKER 1: Жоау | механик, советует менять ремень сейчас, гарантия полгода",
+      "SPEAKER 2: - | владелец машины, спрашивает цену и успеют ли к субботе"};
   /** Разметка ответа общая для облака и для локальной инструктивной модели: одна и та же просьба,
    *  один и тот же разбор {@link Review#parse}. */
   public static final String REVIEW_SYS = "You are a professional interpreter between Brazilian Portuguese and Russian. You get a conversation "
         + "transcript produced by speech recognition; it may contain recognition errors. Turns are numbered. Each turn "
         + "takes two lines: first the transcript with its language (PT: Portuguese, RU: Russian, sometimes with the "
-        + "speaker's name), then the current draft translation labelled \"PT draft:\" or \"RU draft:\". The same person "
+        + "speaker in brackets: a name or \"speaker N\", recognised by voice), then the current draft translation labelled \"PT draft:\" or \"RU draft:\". The same person "
         + "may speak several turns in a row; turns do NOT strictly alternate; never invent a dialogue structure that "
         + "is not there.\n"
         + "Reply in exactly this plain-text format, no markdown, no reasoning, no other lines. Example of a complete "
@@ -484,6 +487,7 @@ public class Cloud {
         + "FIX 7: Quando o carro fica pronto?\n"
         + "TERMS: oficina=мастерская; orçamento=смета\n"
         + "NAMES: Auto Center Silva=Ауто Сентер Силва\n"
+        + SPEAKER_EXAMPLE[0] + "\n" + SPEAKER_EXAMPLE[1] + "\n"
         + "Rules: TOPIC is what this conversation is about, 3-7 words in Russian. MEMO is one line in Russian, at most "
         + "300 characters: the key facts of the WHOLE conversation that an interpreter needs later — who the speakers are "
         + "(role; man or woman), where they are, what they agreed on, names and numbers that matter. If \"Memo so far\" is "
@@ -494,7 +498,11 @@ public class Cloud {
         + "domain words or short expressions that matter here, each as "
         + "Portuguese=Russian translation (a Russian word after the equals sign, never a Portuguese synonym); omit the "
         + "line if none. NAMES: proper names of people, places, businesses, dishes, each as Portuguese=Russian "
-        + "transcription; omit the line if none.";
+        + "transcription; omit the line if none. SPEAKER lines: only when turns are labelled \"speaker N\" or with a name; "
+        + "one line per such speaker number: SPEAKER N: the person's name if they said it in the conversation, else -, "
+        + "then |, then what this person wants, asks or tells over the WHOLE conversation, one short line in Russian, "
+        + "at most 80 characters; never guess a name.";
+
 
   /** Разбор целого разговора: тема, память, правки нескольких реплик, пары терминов и имена.
    *  memo — прежняя память разговора: снимок — только хвост разговора в 6000 знаков, и всё, что
@@ -524,6 +532,9 @@ public class Cloud {
     public String topic = "", memo = "";
     public final Map<Integer, String> fixes = new LinkedHashMap<>();
     public final List<String[]> terms = new ArrayList<>(), names = new ArrayList<>();
+    /** Собеседники по номерам голоса: {имя или "", о чём говорит}. */
+    public final Map<Integer, String[]> speakers = new LinkedHashMap<>();
+    static final java.util.regex.Pattern SPK = java.util.regex.Pattern.compile("(?i)^\\W*SPEAKER\\s*#?\\s*(\\d{1,3})\\s*[:\\-–—]\\s*(.+)$");
     static final java.util.regex.Pattern FIX = java.util.regex.Pattern.compile("(?i)^\\W*FIX\\s*#?\\s*(\\d+)\\s*[:\\-–—]\\s*(.+)$");
     public static Review parse(String out) {
       Review r = new Review();
@@ -540,8 +551,23 @@ public class Cloud {
         if (m.find()) { String t = m.group(2).trim().replaceAll("^[\"«]|[\"»]$", ""); if (usable(t)) r.fixes.put(Integer.parseInt(m.group(1)), t); continue; }
         if (up.startsWith("TERMS")) { pairs(after(l), r.terms); continue; }
         if (up.startsWith("NAMES")) { pairs(after(l), r.names); continue; }
+        java.util.regex.Matcher sm = SPK.matcher(l);
+        if (sm.find()) { String[] v = speaker(sm.group(2)); if (v != null) r.speakers.put(Integer.parseInt(sm.group(1)), v); }
       }
       return r;
+    }
+    /** «Ана | спрашивает цену» → {Ана, спрашивает цену}; «- | …» — имени нет. Пересказ — по-русски и
+     *  не из примера подсказки; имя — одно-два слова, не заглушка. */
+    static String[] speaker(String rest) {
+      String[] p = rest.split("\\s*\\|\\s*", 2);
+      String nm = p.length > 1 ? p[0].replaceAll("[\"«»]", "").trim() : "", says = (p.length > 1 ? p[1] : p[0]).replaceAll("^[\"«]|[\"»]$", "").trim();
+      for (String ex : SPEAKER_EXAMPLE) if (ex.endsWith(says)) return null;
+      if (!usable(says) || !says.matches("(?s).*\\p{IsCyrillic}.*")) return null;
+      if (says.length() > 120) { int c = says.lastIndexOf(' ', 120); says = says.substring(0, c > 60 ? c : 120) + "…"; }
+      String low = nm.toLowerCase(Locale.ROOT);
+      if (nm.equals("-") || nm.equals("—") || !usable(nm) || low.startsWith("speaker") || low.startsWith("собеседник") || low.equals("unknown")
+          || low.equals("неизвестно") || nm.length() > 40 || !nm.matches("[\\p{L}][\\p{L}'’.\\- ]*") || nm.split("\\s+").length > 3) nm = "";
+      return new String[]{nm, says};
     }
     static String after(String l) { int c = l.indexOf(':'); return c < 0 ? "" : l.substring(c + 1).trim(); }
     /** «null», «none» и эхо шаблона («<better translation of turn n>») — не ответ. */

@@ -106,8 +106,16 @@ final class Screen {
   /** «Память разговора» — только то, что понятно без знания устройства приложения (владелец 01.10:
    *  «зачем простому пользователю информация, что от облака»): кто говорит, имена, ключевые детали.
    *  names — {португальское, русское}. */
-  static String memoText(String who, List<String[]> names, String memo) {
-    StringBuilder b = new StringBuilder(who == null || who.isEmpty() ? "Кто говорит — пока не ясно." : who);
+  static String memoText(String who, List<String[]> names, String memo) { return memoText(who, "", false, names, memo); }
+  /** С голосами разговора: speakers (Memo.speakers — сколько говорит и строка на каждого) — вместо строки
+   *  «кто говорит». Голосов нет, а модуль «Отпечаток голоса» включён — одна строка, как их завести. */
+  static String memoText(String who, String speakers, boolean speakerModule, List<String[]> names, String memo) {
+    StringBuilder b = new StringBuilder();
+    if (speakers != null && !speakers.isEmpty()) b.append(speakers);
+    else {
+      b.append(who == null || who.isEmpty() ? "Кто говорит — пока не ясно." : who);
+      if (speakerModule) b.append("\nГолосов в разговоре нет: пусть каждый скажет фразу кнопкой FALAR — тогда слушание переводит только их.");
+    }
     if (names != null && !names.isEmpty()) {
       b.append("\nИмена: ");
       for (int k = 0; k < names.size(); k++) {
@@ -118,8 +126,13 @@ final class Screen {
     return b.append("\n\nКлючевые детали").append(memo == null || memo.isEmpty() ? " — пока нет." : ":\n" + memo).toString();
   }
   /** Пункты «ещё…» окна памяти: что есть, то и можно сделать. */
-  static List<String> memoMore(boolean byUser, int names, int terms) {
+  static List<String> memoMore(boolean byUser, int names, int terms) { return memoMore(0, byUser, names, terms); }
+  /** Пункты голосов разговора — первыми: назвать собеседника, забыть голоса (слепок — биометрия, стереть
+   *  его можно всегда). */
+  static final String NAME_VOICE = "назвать собеседника…", FORGET_VOICES = "забыть голоса разговора";
+  static List<String> memoMore(int voices, boolean byUser, int names, int terms) {
     List<String> m = new ArrayList<>();
+    if (voices > 0) { m.add(NAME_VOICE); m.add(FORGET_VOICES + " (" + voices + ")"); }
     if (byUser) m.add("вернуть память автоматике");
     if (names > 0) m.add("добавить имена в свои слова (" + names + ")");
     if (terms > 0) m.add("забыть подсказки разговора (" + terms + ")");
