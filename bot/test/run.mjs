@@ -99,7 +99,7 @@ await handle(grp('/setup', {}, { id: -1007, type: 'supergroup' }));
 eq(calls().map((c) => c.params.text), [F.SETUP_NO_FORUM], 'S2 группа без топиков');
 await handle(grp('/setup@falar_tbot'));
 cs = calls();
-eq(sent(cs, 'createForumTopic').map((c) => c.params.name), ['Переводы', 'Ошибки', 'Идеи', 'Задачи'], 'S3 четыре топика');
+eq(sent(cs, 'createForumTopic').map((c) => c.params.name), ['Переводы', 'Ошибки', 'Идеи', 'Задачи', 'Аналитика'], 'S3 пять топиков');
 ok(/^Готово/.test(sent(cs, 'sendMessage')[0].params.text), 'S3 «Готово»');
 const topic = {};
 for (const k of Object.keys(F.TOPICS)) topic[k] = Number(sdk.rows("SELECT value FROM settings WHERE key = :k", { ':k': 'topic:' + GROUP + ':' + k })[0].value);
@@ -297,6 +297,106 @@ eq(calls().map((c) => c.params.text), [F.OWNER_HINT], 'T6 через полча�
 await handle(dm(ME, '/test'));
 await handle(dm(ME, '/test'));
 eq(calls().map((c) => c.params.text), [F.TEST_ON, F.TEST_OFF], 'T7 повторный /test — выключить');
+
+// ---- сводка скачиваний с GitHub (lib/stats, handlers/scheduled)
+const S = await import('lib/stats');
+const daily = (await import('handlers/scheduled')).default;
+const SAVED_NOW = NOW;
+const at = (d, h, m = 5) => Date.UTC(2026, 9, d, h - S.TZ, m) / 1000;   // d.10.2026 h:m по Алматы
+eq([S.dayOf(at(3, 16)), S.hourOf(at(3, 16)), S.ddmm(at(3, 16))], ['2026-10-03', 16, '03.10'], 'A1 день и час — по Алматы');
+eq(S.dayOf(at(4, 2)), '2026-10-04', 'A1 02:05 по Алматы — уже новый день, хотя по UTC ещё 03.10');
+ok(S.due(at(3, 3), null), 'A2 самый первый снимок — в любой час');
+ok(!S.due(at(3, 20), { day: '2026-10-03' }), 'A2 сегодня уже был — нет');
+ok(!S.due(at(4, 8), { day: '2026-10-03' }), 'A2 новый день, но до 9:00 — рано');
+ok(S.due(at(4, 9), { day: '2026-10-03' }), 'A2 новый день с 9:00 — пора');
+const REL = (tag, date, n, x = {}) => ({ tag_name: tag, published_at: date, draft: false, prerelease: false,
+  assets: [{ name: 'Falar.apk', download_count: n[0] }, { name: 'Falar-slim.apk', download_count: n[1] },
+    { name: 'latest.json', download_count: n[2] }, { name: 'SHA256SUMS.txt', download_count: 7 }], ...x });
+const list1 = [REL('v0.30.0', '2026-10-04T00:00:00Z', [9, 9, 9], { draft: true }),
+  REL('v0.29.1-beta', '2026-10-03T12:00:00Z', [1, 0, 0], { prerelease: true }),
+  REL('v0.29.0', '2026-10-03T08:00:00Z', [2, 0, 1]), REL('v0.28.0', '2026-10-02T07:00:00Z', [3, 1, 5]),
+  { tag_name: 'v0.20.0', published_at: '2026-09-01T00:00:00Z', draft: false, assets: [] }];
+const sn = S.snapshot(list1);
+eq(Object.keys(sn.counts).length, 9, 'A3 три файла с трёх выпусков; черновик и SHA256SUMS не в счёте');
+eq([sn.latest.tag, sn.since], ['v0.29.0', 'v0.28.0'], 'A3 последний — не предварительный; «всего с» — ранний выпуск с файлами');
+eq(S.totals(sn.counts), { 'Falar.apk': 6, 'Falar-slim.apk': 1, 'latest.json': 6 }, 'A4 суммы по файлам');
+eq(S.growth({ 'v1/Falar.apk': 5, 'v2/Falar.apk': 2, 'v1/latest.json': 3 }, { 'v1/Falar.apk': 3, 'v1/latest.json': 4 }),
+  { 'Falar.apk': 4, 'Falar-slim.apk': 0, 'latest.json': 0 }, 'A5 прирост: новый выпуск — с нуля, перезалитый файл — не минус');
+eq([S.period(24 * 3600), S.period(17 * 3600), S.period(49 * 3600), S.period(60)], ['за сутки', 'за 17 ч', 'за 2 сут.', 'за 1 ч'], 'A6 срок словами');
+let txt = S.report(sn, null, at(3, 16));
+eq(txt.split('\n').slice(0, 3), ['📊 GitHub · 03.10 · первая сводка', 'Всего с 0.28.0: APK 6, облегчённый 1, проверок обновлений 6',
+  'Выпуск 0.29.0 от 03.10: APK 2, облегчённый 0'], 'A7 первая сводка: всего и последний выпуск');
+ok(/каждый день около 09:00/.test(txt) && /примерно сколько копий/.test(txt), 'A7 когда дальше и как читать');
+const list2 = [REL('v0.29.0', '2026-10-03T08:00:00Z', [5, 1, 4]), REL('v0.28.0', '2026-10-02T07:00:00Z', [3, 1, 9])];
+txt = S.report(S.snapshot(list2), { at: at(3, 9), counts: sn.counts }, at(4, 9));
+eq(txt.split('\n').slice(0, 3), ['📊 GitHub · 04.10 · за сутки', 'APK скачали: +3 (облегчённый: +1)',
+  'Проверок обновлений: +7 — примерно столько копий Falar было в сети'], 'A8 сводка за сутки');
+txt = S.report(S.snapshot(list2), { at: at(3, 16), counts: sn.counts }, at(4, 9));
+eq([txt.split('\n')[0], txt.split('\n')[2]], ['📊 GitHub · 04.10 · за 17 ч', 'Проверок обновлений: +7'], 'A8 не сутки — срок словами, без «столько копий»');
+eq(S.delayed(at(4, 12), { status: 403, limited: true }, false),
+  '📊 Сводка за 04.10 задерживается: GitHub не отдал счётчики (HTTP 403, лимит запросов без токена). Пробую каждый час.\n' +
+  'Чтобы не зависеть от лимита — токен GitHub только для чтения: bash bot/cf.sh github', 'A9 лимит без токена — почему и как помочь');
+ok(!/cf\.sh/.test(S.delayed(at(4, 12), { status: 502 }, false)), 'A9 502 — без совета про токен');
+ok(/токен GitHub не принят/.test(S.delayed(at(4, 12), { status: 401 }, true)), 'A9 401 — токен не принят');
+eq(S.delayed(at(4, 12), {}, false).split('\n').length, 1, 'A9 нет ответа — одна строка');
+
+// обработчик: GitHub — поддельный fetch, Telegram и база — заглушки
+const fetch0 = globalThis.fetch, gh = [];
+let ghList = list1, ghFail = 0;
+globalThis.fetch = async (url, o) => {
+  gh.push({ url, headers: o.headers });
+  if (ghFail) return { status: ghFail, headers: { get: (h) => (h === 'x-ratelimit-remaining' ? '0' : null) }, json: async () => ({}) };
+  return { status: 200, headers: { get: () => null }, json: async () => ghList };
+};
+const anKey = 'topic:' + GROUP + ':analytics';
+const thread = () => Number(sdk.rows('SELECT value FROM settings WHERE key = :k', { ':k': anKey })[0].value);
+calls();
+await sdk.db.run('DELETE FROM settings WHERE key = :k', { ':k': anKey });
+NOW = at(3, 16); await daily();
+cs = calls();
+eq(sent(cs, 'createForumTopic').map((c) => [c.params.chat_id, c.params.name]), [[GROUP, 'Аналитика']], 'A10 топика нет — бот создаёт «Аналитику» сам');
+const an = thread();
+s = sent(cs, 'sendMessage');
+eq(s.map((c) => [c.params.chat_id, c.params.message_thread_id]), [[GROUP, an]], 'A10 первая сводка — в «Аналитику»');
+ok(s[0].params.text.startsWith('📊 GitHub · 03.10 · первая сводка'), 'A10 текст первой сводки');
+ok(gh.length === 1 && gh[0].url === 'https://api.github.com/repos/Annoyt/FALAR/releases?per_page=100&page=1' &&
+  gh[0].headers['user-agent'] === 'falar-feedback-bot' && !('authorization' in gh[0].headers), 'A10 один запрос: адрес, user-agent, без токена');
+eq(sdk.rows('SELECT day, at FROM stats'), [{ day: '2026-10-03', at: at(3, 16) }], 'A10 снимок дня — в базе');
+gh.length = 0; NOW = at(3, 17); await daily();
+eq([calls().length, gh.length], [0, 0], 'A11 в тот же день — ни GitHub, ни сообщений');
+NOW = at(4, 8); await daily();
+eq([calls().length, gh.length], [0, 0], 'A11 назавтра до 9:00 — рано');
+ghList = list2; NOW = at(4, 9); await daily();
+s = sent(calls(), 'sendMessage');
+eq(s.map((c) => c.params.text.split('\n').slice(0, 2)), [['📊 GitHub · 04.10 · за 17 ч', 'APK скачали: +3 (облегчённый: +1)']], 'A12 назавтра в 9:05 — прирост с 16:05 вчера');
+eq(sdk.rows('SELECT day FROM stats ORDER BY day').map((r) => r.day), ['2026-10-03', '2026-10-04'], 'A12 второй снимок');
+ghFail = 403; NOW = at(5, 9); await daily();
+eq([calls().length, sdk.rows('SELECT count(*) AS n FROM stats')[0].n], [0, 2], 'A13 GitHub отказал в 9:05 — молча и без снимка, попробует через час');
+NOW = at(5, 12); await daily();
+s = sent(calls(), 'sendMessage');
+eq(s.map((c) => c.params.message_thread_id), [an], 'A13 к 12:00 цифр нет — одно сообщение в «Аналитику»');
+ok(/лимит запросов без токена/.test(s[0].params.text) && /cf\.sh github/.test(s[0].params.text), 'A13 почему и как помочь');
+NOW = at(5, 13); await daily();
+eq(calls().length, 0, 'A13 второй раз за день не пишет');
+ghFail = 0; gh.length = 0; NOW = at(5, 14); await daily({ token: 'gh-t' });
+ok(sent(calls(), 'sendMessage').length === 1 && gh[0].headers.authorization === 'Bearer gh-t', 'A14 GitHub ожил — сводка в тот же день; токен — в authorization');
+NOW = at(6, 9);
+sdk.api.fail('sendMessage', 'Bad Request: message thread not found');
+await daily();
+cs = calls();
+eq(cs.map((c) => c.method), ['sendMessage', 'createForumTopic', 'sendMessage'], 'A15 топик удалили — создать заново');
+ok(thread() !== an && cs[2].params.message_thread_id === thread(), 'A15 сводка — в новый топик');
+await sdk.db.run("DELETE FROM settings WHERE key = 'group'");
+NOW = at(7, 9); await daily();
+eq(sent(calls(), 'sendMessage').map((c) => [c.params.chat_id, c.params.message_thread_id ?? null]), [[OWNER, null]], 'A16 группы нет — разработчику в личку');
+await sdk.db.run("INSERT INTO settings (key, value) VALUES ('group', :g)", { ':g': String(GROUP) });
+owner.setOwner(0); gh.length = 0; NOW = at(8, 9); await daily();
+eq([calls().length, gh.length], [0, 0], 'A17 бот не настроен — сводки нет');
+owner.setOwner(OWNER);
+sdk.api.fail('sendMessage', 'Forbidden: bot was kicked from the supergroup chat', 403);
+await daily();
+eq(calls().map((c) => [c.method, c.params.chat_id]), [['sendMessage', GROUP], ['sendMessage', OWNER]], 'A18 в группу не вышло (не топик) — в личку');
+globalThis.fetch = fetch0; NOW = SAVED_NOW;
 
 // ---- прослойка Cloudflare (cf/sdk.js): именованные параметры для D1 и Bot API через fetch
 const cf = await import(pathToFileURL(path.join(ROOT, 'cf/sdk.js')).href);

@@ -38,6 +38,7 @@
 #                именно своего предложения, фразы разными голосами, свои фразы — по сказанному по-русски;
 #   Practice   — «Скажите сами»: что говорить, какие слова распознаны, вердикт по слову карточки;
 #   BackupRules — резервная копия: в облако Google ничего, на новый телефон всё (манифест и res/xml).
+#   Inbox — сказанное во время загрузки на диске: имена, звук туда и обратно, поток до нарезки, что берётся после выгрузки.
 # Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
 #   bash bench/apk/test.sh
@@ -74,7 +75,8 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Clips.java $A/test/ClipsTest.java \
   $A/src/dev/agenttranslator/Learn.java $A/test/LearnTest.java $A/test/BackupRulesTest.java \
   $A/src/dev/agenttranslator/Cards.java $A/test/CardsTest.java \
-  $A/src/dev/agenttranslator/Practice.java $A/test/PracticeTest.java
+  $A/src/dev/agenttranslator/Practice.java $A/test/PracticeTest.java \
+  $A/src/dev/agenttranslator/Inbox.java $A/test/InboxTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -105,4 +107,5 @@ java -cp "$OUT:$J" dev.agenttranslator.BackupRulesTest "$A" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.CardsTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.PracticeTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WienerTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.InboxTest || fail=1
 exit $fail

@@ -4,6 +4,7 @@
 
 import handle from 'handlers/message';
 import handleButton from 'handlers/callback_query';
+import daily from 'handlers/scheduled';
 import { bind } from 'sdk';
 import { setOwner } from 'lib/owner';
 
@@ -25,5 +26,13 @@ export default {
       else if (u && u.callback_query) await handleButton(u.callback_query, { update: u });
     } catch (e) { console.error('handler', (e && e.stack) || e); }
     return new Response('ok\n');
+  },
+  // Раз в час (cron в wrangler.template.jsonc): сводка скачиваний с GitHub — раз в сутки, остальные
+  // запуски только видят, что сегодня она уже есть. GITHUB_TOKEN — необязательный секрет (cf.sh github),
+  // GITHUB_API — другой адрес API для проверок (test/e2e.sh).
+  async scheduled(controller, env) {
+    bind(env); setOwner(env.OWNER);
+    try { await daily({ token: env.GITHUB_TOKEN, base: env.GITHUB_API }); }
+    catch (e) { console.error('scheduled', (e && e.stack) || e); }
   },
 };

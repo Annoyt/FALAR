@@ -5,7 +5,8 @@ import java.util.*;
 /** «Что нового» после обновления (WhatsNew): разбор whatsnew.txt, с какой версии пришли, какие
  *  пункты показать — сначала новое, потом исправления, по всем пропущенным версиям, — и строка
  *  журнала. Плюс сам bench/apk/whatsnew.txt: разбирается, пункты короткие, запись для versionCode
- *  манифеста есть. Запуск: bash bench/apk/test.sh. */
+ *  манифеста есть; и сайт docs/index.html показывает versionName манифеста под кнопкой «Скачать».
+ *  Запуск: bash bench/apk/test.sh. */
 public class WhatsNewTest {
   static int fails = 0, checks = 0;
   static void ok(boolean c, String what) { checks++; if (!c) { fails++; System.out.println("  ПРОВАЛ: " + what); } }
@@ -145,6 +146,12 @@ public class WhatsNewTest {
         for (WhatsNew.Entry e : real) if (e.code == code) got = e.name;
         // Поднятие версии без записи: окно после обновления на неё было бы пустым или чужим.
         eq(got, name, "W8 запись «== " + name + " (" + code + ")» для версии манифеста — «следующая» получает номер при поднятии версии");
+        // Сайт показывает версию под кнопкой «Скачать»: без сверки она отстала бы на первом же выпуске.
+        java.io.File site = new java.io.File(new java.io.File(manifest).getAbsoluteFile().getParentFile().getParentFile().getParentFile(), "docs/index.html");
+        if (site.exists()) {
+          String h = new String(java.nio.file.Files.readAllBytes(site.toPath()), "UTF-8");
+          ok(h.contains("Версия " + name + " ·"), "W9 docs/index.html: под кнопкой «Версия " + name + " · … МБ» — при поднятии версии поправьте строку (и размер APK, если изменился)");
+        }
       }
     } else ok(file == null, "W8 нет файла " + file);
 

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сайт Falar — макет</title>
+<style>
+/* Обзор сайта: сама страница — docs/index.html, здесь она в рамках телефона и компьютера. */
+:root{--plum:#802244;--deep:#3D0C2A;--gold:#E0B878}
+body{margin:0;background:#F4F1F4;color:#1a1420;font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.top{background:linear-gradient(135deg,var(--plum),var(--deep));color:#fff;padding:22px 28px}
+.top h1{margin:0;font-size:24px}
+.top p{margin:6px 0 0;opacity:.8;max-width:900px}
+.row{display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start;padding:28px}
+.f h2{font-size:15px;margin:0 0 10px}
+.f h2 span{font-weight:400;color:#8a8092}
+.phone{width:395px;padding:10px;border-radius:44px;background:#141016;box-shadow:0 18px 50px rgba(40,10,30,.28)}
+.phone iframe{display:block;width:375px;height:812px;border:0;border-radius:34px;background:#fff}
+.desk{width:660px;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(40,10,30,.22),0 0 0 1px #d9d1da;background:#fff}
+.desk .bar{height:26px;background:#e9e4ea;display:flex;align-items:center;gap:6px;padding:0 10px}
+.desk .bar i{width:9px;height:9px;border-radius:50%;background:#cfc6d0}
+.desk .vp{width:660px;height:470px;overflow:hidden}
+.desk iframe{width:1320px;height:940px;border:0;transform:scale(.5);transform-origin:0 0}
+.notes{max-width:1100px;margin:0 28px 40px;background:#fff;border-left:4px solid var(--gold);border-radius:0 14px 14px 0;padding:14px 20px}
+.notes h3{margin:0 0 6px;font-size:16px}
+.notes ul{margin:0;padding-left:20px}
+.notes li{margin:4px 0}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Сайт Falar — макет</h1>
+  <p>Сейчас: кнопка «Скачать» сливается с фоном, как поставить — далеко внизу и текстом, версии не видно.
+     Предлагаю: золотая кнопка, версия, под ней — шаги картинками; остальное — подписями в два-три слова.</p>
+</div>
+<div class="row">
+  <div class="f"><h2>Телефон <span>· весь сайт, листается</span></h2>
+    <div class="phone"><iframe src="../../docs/index.html" title="телефон"></iframe></div></div>
+  <div class="f"><h2>После нажатия «Скачать» <span>· подсказка и следующий шаг</span></h2>
+    <div class="phone"><iframe src="../../docs/index.html#started" title="после нажатия"></iframe></div></div>
+  <div class="f"><h2>Компьютер <span>· рядом с кнопкой — QR: ставить всё равно на телефон</span></h2>
+    <div class="desk"><div class="bar"><i></i><i></i><i></i></div><div class="vp"><iframe src="../../docs/index.html" title="компьютер"></iframe></div></div></div>
+</div>
+<div class="notes">
+  <h3>Что меняется</h3>
+  <ul>
+    <li><b>Кнопка</b> — золотая, видна сразу; под ней версия и размер.</li>
+    <li><b>Как поставить</b> — сразу под кнопкой, пять шагов картинками: на каждой золотая рамка там, куда нажать. Шаг 3 — «неизвестные источники»: запрет → «Настройки» → переключатель → назад.</li>
+    <li><b>Если увидите такое</b> — где люди останавливаются: Play Защита, окно Xiaomi с отсчётом, «Автоблокировка» Samsung — и что там нажать.</li>
+    <li><b>После «Скачать»</b> — страница подсказывает: «Скачивается… шаги установки ниже ↓», следующий шаг подсвечен.</li>
+    <li><b>Что умеет</b> — три картинки вместо четырёх абзацев. <b>Что нужно</b> — четыре значка вместо таблицы. Приватность — одна строка.</li>
+    <li><b>Компьютер</b> — QR рядом с кнопкой: ставить всё равно на телефон.</li>
+    <li><b>Убрано</b>: «Что уходит в интернет», «Чего нет», таблица требований, проверка суммы. Кто ищет — найдёт на GitHub.</li>
+  </ul>
+</div>
+</body>
+</html>

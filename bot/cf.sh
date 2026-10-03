@@ -6,6 +6,7 @@
 #   bash bot/cf.sh owner <id>   ваш Telegram id (бот присылает его на /id) — сразу в секреты Worker
 #   bash bot/cf.sh status       бот и webhook глазами Telegram: адрес, очередь, последняя ошибка
 #   bash bot/cf.sh tail         живой журнал Worker
+#   bash bot/cf.sh github       токен GitHub только для чтения — если сводке скачиваний не хватает лимита без него
 # Секреты — в ~/.config/falar/bot.env (права 600) и в секретах Worker. В репозиторий, в командные строки
 # процессов и в чат не попадают: wrangler получает их через stdin, Bot API — из файла (cf/tg.mjs).
 # wrangler — только свой, из node_modules (версия закреплена в package-lock.json).
@@ -89,6 +90,21 @@ status)
   node cf/tg.mjs getWebhookInfo | grep -E '"(url|pending_update_count|last_error_date|last_error_message|max_connections)"' ;;
 tail)
   $W tail ;;
+github)
+  # Сводка скачиваний (handlers/scheduled) ходит в API GitHub без токена: 60 запросов в час на адрес, а адреса
+  # у Cloudflare общие. Если бот пишет, что лимит кончился, — токен даёт 5000 в час и ничего не разрешает.
+  echo "Токен GitHub только для чтения: github.com/settings/personal-access-tokens/new →"
+  echo "Repository access: «Public repositories», права не нужны → Generate token."
+  read -rsp "Вставьте токен (ввод не виден): " RAW; echo
+  T=$(printf '%s' "$RAW" | grep -oE 'github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}' | head -1); unset RAW
+  [ -n "$T" ] || { echo "Токен не найден во вставленном: нужна строка вида github_pat_… или ghp_…" >&2; exit 1; }
+  setv GITHUB_TOKEN "$T"; unset T
+  if ! lim=$(node cf/gh.mjs); then   # неверный токен не оставляем в файле
+    t=$(mktemp "$ENV.XXXX"); grep -v '^GITHUB_TOKEN=' "$ENV" > "$t" || true; chmod 600 "$t"; mv "$t" "$ENV"
+    echo "GitHub не принял токен — проверьте и повторите." >&2; exit 1
+  fi
+  node cf/secrets.mjs | $W secret bulk > /dev/null && echo "Токен GitHub сохранён и передан боту: $lim запросов в час"
+  ;;
 *)
-  sed -n '2,10p' "$0"; exit 1 ;;
+  sed -n '2,11p' "$0"; exit 1 ;;
 esac

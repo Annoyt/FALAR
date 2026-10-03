@@ -80,6 +80,14 @@ public class Engine {
   public interface Stage { void at(String what); }
   public static volatile Stage stage;
   static void stage(String what) { Stage s = stage; if (s != null) try { s.at(what); } catch (Throwable ignore) {} }
+  /** Распознавание и нарезка готовы, перевод ещё грузится: сервис уже режет и распознаёт то, что сказали
+   *  во время загрузки (владелец 03.10). Отдаётся сам движок — из него берут только распознавание, VAD и
+   *  шумодав, они уже на месте. Статическое поле, как stage: сервис ставит его до конструктора. */
+  public interface Up { void at(Engine e); }
+  public static volatile Up asrUp;
+  /** Голоса грузит сам сервис, после остального (TranslatorService.loadTtsLate): перевод того, что сказали
+   *  во время загрузки, не ждёт озвучки. Конструктор тогда голоса не трогает. */
+  public static volatile boolean ttsLater = false;
 
   public Engine(File modelsDir, Log log) throws Exception {
     this.m = modelsDir; this.log = log;
@@ -109,8 +117,10 @@ public class Engine {
           .setNumThreads(2).setDebug(false).build()).build());
     }
     loadAsrMs = (System.nanoTime() - t) / 1000000; log.log("ASR+VAD загружены за " + loadAsrMs + " мс (" + asrName + (denoiser != null ? ", шумоподавитель есть" : "") + ") · +" + (rssMb() - r0) + " МБ резидентно");
+    Up u = asrUp; if (u != null) try { u.at(this); } catch (Throwable ignore) {}
     stage("mt");
     loadMt();
+    if (ttsLater) return;
     if (withTts) { stage("tts"); loadTts(); } else log.log("TTS не загружается: модуль «Озвучка» выключен");
   }
 

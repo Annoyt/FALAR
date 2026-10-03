@@ -27,7 +27,8 @@ $W d1 execute falar-feedback --local --persist-to "$TMP/state" --config "$CFG" -
   || { echo "таблицы в локальную D1 не легли:"; tail -5 "$TMP/d1.log"; exit 1; }
 node test/fake-telegram.mjs $TG & TPID=$!
 setsid $W dev --local --config "$CFG" --ip 127.0.0.1 --port $WP --persist-to "$TMP/state" --show-interactive-dev-session=false \
-  --var BOT_TOKEN:t0k --var WEBHOOK_SECRET:s3cret --var OWNER:1000 --var TG_API:http://127.0.0.1:$TG > "$TMP/dev.log" 2>&1 & WPID=$!
+  --var BOT_TOKEN:t0k --var WEBHOOK_SECRET:s3cret --var OWNER:1000 --var TG_API:http://127.0.0.1:$TG \
+  --var GITHUB_API:http://127.0.0.1:$TG --test-scheduled > "$TMP/dev.log" 2>&1 & WPID=$!
 for i in $(seq 90); do curl -s -o /dev/null "http://127.0.0.1:$WP/" && break; sleep 1; done
 curl -s -o /dev/null "http://127.0.0.1:$WP/" || { echo "wrangler dev не поднялся:"; tail -20 "$TMP/dev.log"; exit 1; }
 
@@ -71,7 +72,7 @@ chk '[ "$(js "c.filter(x => x.method === \"copyMessage\").map(x => [x.params.cha
 echo "== группа с топиками"
 reset
 post "$(msg 1000 Я -100500 supergroup /setup)" > /dev/null
-chk '[ "$(js "c.filter(x => x.method === \"createForumTopic\").map(x => x.params.name).join(\",\")")" = "Переводы,Ошибки,Идеи,Задачи" ]' "W8 /setup — четыре топика"
+chk '[ "$(js "c.filter(x => x.method === \"createForumTopic\").map(x => x.params.name).join(\",\")")" = "Переводы,Ошибки,Идеи,Задачи,Аналитика" ]' "W8 /setup — пять топиков"
 reset
 post "$(msg 2002 Борис 2002 private "#идея Тёмная тема")" > /dev/null
 t=$(sql "SELECT value FROM settings WHERE key = 'topic:-100500:idea'" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].value)")
@@ -96,4 +97,17 @@ chk '[ "$r" = 200 ] && [ "$(js "c.map(x => x.method).join()")" = "copyMessage,de
 chk '[ "$(js "[c[0].params.message_thread_id, c[0].params.message_id, c[1].params.message_id]")" = "[$bug,$gen,$gen]" ]' "W13 из общего топика ($gen) — в «Ошибки» ($bug)"
 now=$(sql "SELECT msg FROM relays WHERE person = 2004" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].msg)")
 chk '[ "$now" != "$gen" ]' "W13 связь в D1 переехала на новую копию ($now)"
+echo "== сводка скачиваний (по расписанию)"
+curl -s -X POST --data '[{"tag_name":"v0.29.0","published_at":"2026-10-03T08:00:00Z","draft":false,"prerelease":false,"assets":[{"name":"Falar.apk","download_count":2},{"name":"Falar-slim.apk","download_count":0},{"name":"latest.json","download_count":1}]},{"tag_name":"v0.28.0","published_at":"2026-10-02T07:00:00Z","draft":false,"prerelease":false,"assets":[{"name":"Falar.apk","download_count":3},{"name":"latest.json","download_count":5}]}]' "http://127.0.0.1:$TG/gh/releases" > /dev/null
+reset
+sched() { curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$WP/__scheduled?cron=5+*+*+*+*"; }
+r=$(sched); for i in $(seq 20); do [ "$(js "c.length")" != 0 ] && break; sleep 0.3; done
+an=$(sql "SELECT value FROM settings WHERE key = 'topic:-100500:analytics'" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].value)")
+chk '[ "$r" = 200 ] && [ "$(curl -s http://127.0.0.1:$TG/gh/calls | node -e "const c = JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")); console.log(c.map(x => x.url + \" \" + x.ua + \" \" + x.auth).join())")" = "/repos/Annoyt/FALAR/releases?per_page=100&page=1 falar-feedback-bot null" ]' "W14 запуск по расписанию — один запрос к GitHub: адрес, user-agent, без токена"
+chk '[ "$(js "c.map(x => [x.method, x.params.chat_id, x.params.message_thread_id, x.params.text.split(\"\\n\")[0].replace(/ · .*/, \"\")])")" = "[[\"sendMessage\",-100500,$an,\"📊 GitHub\"]]" ]' "W15 сводка — в топик «Аналитика» ($an)"
+chk '[ "$(js "c[0].params.text.split(\"\\n\")[1]")" = "Всего с 0.28.0: APK 5, облегчённый 0, проверок обновлений 6" ]' "W15 счёт по файлам выпусков"
+chk '[ "$(sql "SELECT count(*) AS n FROM stats")" = "[{\"n\":1}]" ]' "W16 снимок дня — в D1"
+reset
+r=$(sched); sleep 1
+chk '[ "$r" = 200 ] && [ "$(js "c.length")" = 0 ] && [ "$(curl -s http://127.0.0.1:$TG/gh/calls | node -e "console.log(JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")).length)")" = 1 ]' "W17 второй запуск в тот же день — ни GitHub, ни сообщений"
 chk '! grep -qE "Uncaught|TypeError|ReferenceError" "$TMP/dev.log"' "W11 в журнале Worker нет необработанных ошибок"
