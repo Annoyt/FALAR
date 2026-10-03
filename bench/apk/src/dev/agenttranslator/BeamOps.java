@@ -1,0 +1,18 @@
+package dev.agenttranslator;
+
+/** Крошечные ONNX-графы для перебора вариантов в переводе (Engine.beamKv): отбор лучших продолжений и
+ *  перестановка прошлого декодера идут в ONNX Runtime, векторно, а не циклом на Java. Замер 03.10: отбор на
+ *  Java (log-softmax по 61 тыс. кусков на каждый черновик на каждом шаге) — 28 мс на фразу на одном ядре ПК,
+ *  перестановка — 5,5 мс (results/2026-10-03-mt-beam.md).
+ *
+ *  select: logits [B,1,V], pad [B,1], neg [B,1], k [1] → ix [B,K] — K лучших кусков строки по логитам (при
+ *  равенстве меньший номер, как argmax), lp [B,K] — их логвероятности; запрещённый кусок (pad ← neg) не выбирается.
+ *  gather: p0..p11 [b,H,T,D], idx [n] → g0..g11 = p_i[idx] по оси 0.
+ *
+ *  Байты собирает и сверяет с numpy tools/mt_beam_ops.py (select: 454 байт, gather: 1344 байт); менять — только им. */
+final class BeamOps {
+  private BeamOps() {}
+  static final String SELECT = "CAgSBWZhbGFyGgExOrEDCioSA2F4MSIIQ29uc3RhbnQqGQoFdmFsdWUqDQgBEAc6AQFCBGF4MXagAQQKGQoGbG9naXRzCgNheDESAXgiB1NxdWVlemUKLwoBeAoDcGFkCgNuZWcSAnhtIg9TY2F0dGVyRWxlbWVudHMqCwoEYXhpcxgBoAECCkMKAnhtCgFrEgR2YWxzEgJpeCIEVG9wSyoLCgRheGlzGAGgAQIqDgoHbGFyZ2VzdBgBoAECKg0KBnNvcnRlZBgBoAECCiIKAnhtEgNsc20iCkxvZ1NvZnRtYXgqCwoEYXhpcxgBoAECCioKA2xzbQoCaXgSAmxwIg5HYXRoZXJFbGVtZW50cyoLCgRheGlzGAGgAQISEWZhbGFyX2JlYW1fc2VsZWN0Wh4KBmxvZ2l0cxIUChIIARIOCgMSAUIKAggBCgMSAVZaFgoDcGFkEg8KDQgHEgkKAxIBQgoCCAFaFgoDbmVnEg8KDQgBEgkKAxIBQgoCCAFaDwoBaxIKCggIBxIECgIIAWIWCgJpeBIQCg4IBxIKCgMSAUIKAxIBS2IWCgJscBIQCg4IARIKCgMSAUIKAxIBS0IECgAQEQ==";
+  static final String GATHER = "CAgSBWZhbGFyGgExOqsKCiIKAnAwCgNpZHgSAmcwIgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnAxCgNpZHgSAmcxIgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnAyCgNpZHgSAmcyIgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnAzCgNpZHgSAmczIgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnA0CgNpZHgSAmc0IgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnA1CgNpZHgSAmc1IgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnA2CgNpZHgSAmc2IgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnA3CgNpZHgSAmc3IgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnA4CgNpZHgSAmc4IgZHYXRoZXIqCwoEYXhpcxgAoAECCiIKAnA5CgNpZHgSAmc5IgZHYXRoZXIqCwoEYXhpcxgAoAECCiQKA3AxMAoDaWR4EgNnMTAiBkdhdGhlcioLCgRheGlzGACgAQIKJAoDcDExCgNpZHgSA2cxMSIGR2F0aGVyKgsKBGF4aXMYAKABAhIRZmFsYXJfYmVhbV9nYXRoZXJaIQoCcDASGwoZCAESFQoDEgFiCgMSAWgKBBICdDAKAxIBZFohCgJwMRIbChkIARIVCgMSAWIKAxIBaAoEEgJ0MQoDEgFkWiEKAnAyEhsKGQgBEhUKAxIBYgoDEgFoCgQSAnQyCgMSAWRaIQoCcDMSGwoZCAESFQoDEgFiCgMSAWgKBBICdDMKAxIBZFohCgJwNBIbChkIARIVCgMSAWIKAxIBaAoEEgJ0NAoDEgFkWiEKAnA1EhsKGQgBEhUKAxIBYgoDEgFoCgQSAnQ1CgMSAWRaIQoCcDYSGwoZCAESFQoDEgFiCgMSAWgKBBICdDYKAxIBZFohCgJwNxIbChkIARIVCgMSAWIKAxIBaAoEEgJ0NwoDEgFkWiEKAnA4EhsKGQgBEhUKAxIBYgoDEgFoCgQSAnQ4CgMSAWRaIQoCcDkSGwoZCAESFQoDEgFiCgMSAWgKBBICdDkKAxIBZFojCgNwMTASHAoaCAESFgoDEgFiCgMSAWgKBRIDdDEwCgMSAWRaIwoDcDExEhwKGggBEhYKAxIBYgoDEgFoCgUSA3QxMQoDEgFkWhIKA2lkeBILCgkIBxIFCgMSAW5iIQoCZzASGwoZCAESFQoDEgFuCgMSAWgKBBICdDAKAxIBZGIhCgJnMRIbChkIARIVCgMSAW4KAxIBaAoEEgJ0MQoDEgFkYiEKAmcyEhsKGQgBEhUKAxIBbgoDEgFoCgQSAnQyCgMSAWRiIQoCZzMSGwoZCAESFQoDEgFuCgMSAWgKBBICdDMKAxIBZGIhCgJnNBIbChkIARIVCgMSAW4KAxIBaAoEEgJ0NAoDEgFkYiEKAmc1EhsKGQgBEhUKAxIBbgoDEgFoCgQSAnQ1CgMSAWRiIQoCZzYSGwoZCAESFQoDEgFuCgMSAWgKBBICdDYKAxIBZGIhCgJnNxIbChkIARIVCgMSAW4KAxIBaAoEEgJ0NwoDEgFkYiEKAmc4EhsKGQgBEhUKAxIBbgoDEgFoCgQSAnQ4CgMSAWRiIQoCZzkSGwoZCAESFQoDEgFuCgMSAWgKBBICdDkKAxIBZGIjCgNnMTASHAoaCAESFgoDEgFuCgMSAWgKBRIDdDEwCgMSAWRiIwoDZzExEhwKGggBEhYKAxIBbgoDEgFoCgUSA3QxMQoDEgFkQgQKABAR";
+  static byte[] bytes(String b64) { return java.util.Base64.getDecoder().decode(b64); }
+}

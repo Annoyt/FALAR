@@ -11,8 +11,9 @@ import org.json.*;
  *
  *   1. ширина 1 — те же куски, что у жадного пути (greedyKv), на каждой фразе, в обоих способах;
  *   2. черновики по одному (Engine.mtBeamSeq): оценка выбранного варианта совпадает с пересчётом по его
- *      кускам (scoreKv) до 1e-6 — если прошлое декодера переставлено не тем черновикам, логвероятности
- *      поедут сразу; перестановка у обоих способов общая;
+ *      кускам (scoreKv, double) до 2·10⁻³: логвероятности луча — из графа отбора во float, и сумма exp по
+ *      61 тыс. кусков во float даёт до 6·10⁻⁴ на фразу. Если прошлое декодера переставлено не тем
+ *      черновикам, оценка поедет на десятые. Перестановка у способов общая;
  *   3. для справки: черновики пакетом — насколько оценка в пакете расходится с пересчётом (int8-квантование
  *      активаций одно на пакет), и как часто луч нашёл вариант не хуже жадного по своей же оценке.
  *
@@ -31,7 +32,7 @@ public class BeamCheck {
     int n = Math.min(limit, items.length()), bad = 0;
     for (int k = 4; k < a.length; k++) for (boolean seq : new boolean[]{true, false}) {
       Engine.mtBeamSeq = seq;
-      int beam = Integer.parseInt(a[k]), same = 0, tfOk = 0, notWorse = 0, sents = 0; double maxDiff = 0, tol = seq ? 1e-6 : 1e-3;
+      int beam = Integer.parseInt(a[k]), same = 0, tfOk = 0, notWorse = 0, sents = 0; double maxDiff = 0, tol = seq ? 2e-3 : 1e-3;
       for (int i = 0; i < n; i++) {
         for (String sent : items.getJSONObject(i).getString(src).split("(?<=[.!?…])\\s+(?=\\S)")) {
           if (sent.trim().isEmpty()) continue;

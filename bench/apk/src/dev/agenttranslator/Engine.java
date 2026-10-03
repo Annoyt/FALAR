@@ -59,9 +59,9 @@ public class Engine {
   public static volatile boolean mtBeamSeq = false;
   /** Потоков ONNX Runtime у сессий перевода. Телефон — 4; замер на столе «как одно ядро» — 1. */
   public static volatile int mtThreads = 4;
-  /** Замер: время в decoder_with_past и число его вызовов (оба пути), оценка последнего луча — для
-   *  сверки с пересчётом по выбранным кускам (bench/quality/BeamCheck.java). */
-  static volatile long mtRunNs, mtSteps;
+  /** Замер: время в decoder_with_past и число его вызовов (оба пути), время графов отбора и перестановки
+   *  луча; оценка последнего луча — для сверки с пересчётом по выбранным кускам (bench/quality/BeamCheck.java). */
+  static volatile long mtRunNs, mtSteps, mtSelNs, mtGatNs;
   double lastBeamSum, lastBeamNorm; boolean lastBeamEos;
 
   /** Резидентная память процесса, МБ: по ней видно, сколько стоит каждая часть при загрузке. */
@@ -333,25 +333,28 @@ public class Engine {
 
   /** Перебор вариантов (луч) на пути из двух сессий. Черновики идут одним пакетом через
    *  decoder_with_past или, при mtBeamSeq, каждый своим вызовом с прошлым из своей строки пакета (та
-   *  же перестановка прошлого, поэтому сверка по одному проверяет и её). На шаге из продолжений всех
-   *  черновиков берутся 2·beam лучших по сумме
-   *  логвероятностей (log-softmax по словарю; <pad> — начало декодера, его не выбираем). Конец фразы
-   *  среди первых beam — готовый вариант с оценкой «сумма / длина^mtLp» (конец фразы входит в длину);
-   *  остальные по порядку — черновики следующего шага, пока их не наберётся beam. Готовых beam —
+   *  же перестановка прошлого, поэтому сверка по одному проверяет и её). Отбор и перестановка — графами
+   *  BeamOps в ONNX Runtime: на шаге у каждого черновика 2·beam лучших кусков с логвероятностями
+   *  (<pad> — начало декодера, его не выбираем), из них по сумме — 2·beam лучших продолжений. Конец
+   *  фразы среди первых beam — готовый вариант с оценкой «сумма / длина^mtLp» (конец фразы входит в
+   *  длину); остальные по порядку — черновики следующего шага, пока их не наберётся beam. Готовых beam —
    *  стоп (как у CTranslate2 с patience 1 и у HF с early_stopping); на maxNew готовыми становятся и
    *  недописанные. Ширина 1 — ровно жадный путь: сверка в bench/quality/BeamCheck.java. */
   List<Long> beamKv(OrtSession enc, OrtSession decP, List<Long> ids, long start, long eos, int maxNew, int beam) throws Exception {
+    beamOps();
     final int S = ids.size(), K = 2 * beam; final boolean seq = mtBeamSeq;
     long[][] in = new long[1][S], mask = new long[1][S];
     for (int k = 0; k < S; k++) { in[0][k] = ids.get(k); mask[0][k] = 1; }
     OnnxTensor tIn = OnnxTensor.createTensor(env, in), tMask = OnnxTensor.createTensor(env, mask), tMaskB = null;
+    OnnxTensor tK = OnnxTensor.createTensor(env, new long[]{K});
+    Map<Integer, OnnxTensor[]> ban = new HashMap<>();   // по размеру пакета: какой кусок запретить (<pad>) и чем (−∞)
     Map<String, OnnxTensor> enc1 = new HashMap<>(), encB = new HashMap<>(), dec = new HashMap<>(); OrtSession.Result er = null;
     try {
       Map<String, OnnxTensor> ei = new HashMap<>(); ei.put("input_ids", tIn); ei.put("attention_mask", tMask);
       er = enc.run(ei);
-      for (int l = 0; l < LAYERS; l++) for (String kv : new String[]{"key", "value"}) {
-        enc1.put("past_key_values." + l + ".encoder." + kv, (OnnxTensor) er.get("present." + l + ".encoder." + kv).get());   // принадлежат er
-        dec.put("past_key_values." + l + ".decoder." + kv, OnnxTensor.createTensor(env, java.nio.FloatBuffer.allocate(0), new long[]{1, HEADS, 0, HEAD_DIM}));
+      for (int i = 0; i < DEC_KEYS.length; i++) {
+        enc1.put(ENC_KEYS[i], (OnnxTensor) er.get(ENC_KEYS[i].replace("past_key_values.", "present.")).get());   // принадлежат er
+        dec.put(DEC_KEYS[i], OnnxTensor.createTensor(env, java.nio.FloatBuffer.allocate(0), new long[]{1, HEADS, 0, HEAD_DIM}));
       }
       List<long[]> seqs = new ArrayList<>(); seqs.add(new long[0]); double[] sc = {0};
       List<long[]> done = new ArrayList<>(); List<double[]> doneSc = new ArrayList<>();   // {сумма, оценка, 1 — с концом фразы}
@@ -365,26 +368,32 @@ public class Engine {
         long[] last = new long[b];
         for (int r = 0; r < b; r++) { long[] q = seqs.get(r); last[r] = q.length == 0 ? start : q[q.length - 1]; }
         if (b > 1 && !seq && encB.isEmpty()) {
-          encB = tile(enc1, b, S);
+          encB = gatherOrt(enc1, ENC_KEYS, new long[b]);   // индексы — нули: b одинаковых строк
           long[][] mb = new long[b][S]; for (long[] row : mb) Arrays.fill(row, 1);
           tMaskB = OnnxTensor.createTensor(env, mb);
         }
-        float[] lg = b == 1 ? stepBatch(decP, dec, enc1, tMask, last)
-            : seq ? stepRows(decP, dec, enc1, tMask, last) : stepBatch(decP, dec, encB, tMaskB, last);
-        int V = lg.length / b, n = 0;
-        for (int r = 0; r < b; r++) {   // по каждому черновику: log-softmax и лучшие продолжения — в общий список
-          int off = r * V; float mx = Float.NEGATIVE_INFINITY;
-          for (int v = 0; v < V; v++) if (lg[off + v] > mx) mx = lg[off + v];
-          double z = 0; float cut = mx - 30;   // e^-30 на 61 тыс. кусков — меньше 1e-8 к сумме
-          for (int v = 0; v < V; v++) if (lg[off + v] > cut) z += Math.exp(lg[off + v] - mx);
-          double base = sc[r] - mx - Math.log(z);
-          for (int v = 0; v < V; v++) {
-            double s = base + lg[off + v];
-            if (v == start || n == K && s <= cs[K - 1]) continue;   // при равенстве — раньше в словаре, как argmax
-            int i = n < K ? n++ : K - 1;
-            for (; i > 0 && cs[i - 1] < s; i--) { cs[i] = cs[i - 1]; cr[i] = cr[i - 1]; ct[i] = ct[i - 1]; }
-            cs[i] = s; cr[i] = r; ct[i] = v;
-          }
+        OnnxTensor lg;
+        if (b > 1 && seq) { float[] a = stepRows(decP, dec, enc1, tMask, last); lg = OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(a), new long[]{b, 1, a.length / b}); }
+        else lg = stepBatchT(decP, dec, b == 1 ? enc1 : encB, b == 1 ? tMask : tMaskB, last);
+        OnnxTensor[] bn = ban.get(b);
+        if (bn == null) {
+          long[][] pad = new long[b][1]; float[][] neg = new float[b][1];
+          for (int r = 0; r < b; r++) { pad[r][0] = start; neg[r][0] = Float.NEGATIVE_INFINITY; }
+          bn = new OnnxTensor[]{OnnxTensor.createTensor(env, pad), OnnxTensor.createTensor(env, neg)}; ban.put(b, bn);
+        }
+        long[][] ix; float[][] lp; long t1 = System.nanoTime();
+        try {
+          Map<String, OnnxTensor> si = new HashMap<>(); si.put("logits", lg); si.put("pad", bn[0]); si.put("neg", bn[1]); si.put("k", tK);
+          try (OrtSession.Result sr = beamSel.run(si)) { ix = (long[][]) sr.get("ix").get().getValue(); lp = (float[][]) sr.get("lp").get().getValue(); }
+        } finally { lg.close(); }
+        mtSelNs += System.nanoTime() - t1;
+        int n = 0;
+        for (int r = 0; r < b; r++) for (int j = 0; j < K; j++) {   // строка — по убыванию: дальше не лучше
+          double s = sc[r] + lp[r][j];
+          if (n == K && s <= cs[K - 1]) break;   // при равенстве — раньше в словаре, как argmax
+          int i = n < K ? n++ : K - 1;
+          for (; i > 0 && cs[i - 1] < s; i--) { cs[i] = cs[i - 1]; cr[i] = cr[i - 1]; ct[i] = ct[i - 1]; }
+          cs[i] = s; cr[i] = r; ct[i] = (int) ix[r][j];
         }
         List<long[]> ns = new ArrayList<>(); double[] nsc = new double[beam]; int[] par = new int[beam];
         for (int i = 0; i < n && ns.size() < beam; i++) {
@@ -405,14 +414,31 @@ public class Engine {
     } finally {
       for (OnnxTensor x : dec.values()) x.close();
       for (OnnxTensor x : encB.values()) x.close();
+      for (OnnxTensor[] x : ban.values()) { x[0].close(); x[1].close(); }
       if (tMaskB != null) tMaskB.close();
-      tIn.close(); tMask.close(); if (er != null) er.close();   // K/V кодировщика на одну строку закрывает свой результат
+      tK.close(); tIn.close(); tMask.close(); if (er != null) er.close();   // K/V кодировщика на одну строку закрывает свой результат
     }
   }
 
-  /** Шаг пакета черновиков: прошлое декодера заменяется новым (старое закрывается), логиты [b, 1, V]
-   *  возвращаются плоским массивом, тензор закрывается сразу. */
-  float[] stepBatch(OrtSession decP, Map<String, OnnxTensor> dec, Map<String, OnnxTensor> encKv, OnnxTensor mask, long[] last) throws Exception {
+  /** Сессии графов BeamOps — при первом луче: жадному пути они не нужны. */
+  OrtSession beamSel, beamGat;
+  synchronized void beamOps() throws OrtException {
+    if (beamSel != null) return;
+    OrtSession.SessionOptions so = new OrtSession.SessionOptions(); so.setIntraOpNumThreads(mtThreads); so.setInterOpNumThreads(1);
+    beamGat = env.createSession(BeamOps.bytes(BeamOps.GATHER), so);
+    beamSel = env.createSession(BeamOps.bytes(BeamOps.SELECT), so);
+  }
+  static final String[] DEC_KEYS = new String[2 * LAYERS], ENC_KEYS = new String[2 * LAYERS];
+  static {
+    for (int l = 0; l < LAYERS; l++) for (int i = 0; i < 2; i++) {
+      String kv = i == 0 ? "key" : "value";
+      DEC_KEYS[2 * l + i] = "past_key_values." + l + ".decoder." + kv; ENC_KEYS[2 * l + i] = "past_key_values." + l + ".encoder." + kv;
+    }
+  }
+
+  /** Шаг пакета черновиков: прошлое декодера заменяется новым (старое закрывается); логиты [b, 1, V] —
+   *  тензором, его закрывает вызывающий. */
+  OnnxTensor stepBatchT(OrtSession decP, Map<String, OnnxTensor> dec, Map<String, OnnxTensor> encKv, OnnxTensor mask, long[] last) throws Exception {
     long[][] t = new long[last.length][1];
     for (int i = 0; i < last.length; i++) t[i][0] = last[i];
     OnnxTensor tok = OnnxTensor.createTensor(env, t);
@@ -422,40 +448,45 @@ public class Engine {
       pr = decP.run(pi);
     } finally { tok.close(); }
     mtRunNs += System.nanoTime() - t0; mtSteps++;
-    for (int l = 0; l < LAYERS; l++) for (String kv : new String[]{"key", "value"}) {
-      String k = "past_key_values." + l + ".decoder." + kv;
-      dec.get(k).close(); dec.put(k, (OnnxTensor) pr.get("present." + l + ".decoder." + kv).get());
-    }
-    OnnxTensor lg = (OnnxTensor) pr.get(0);
+    for (String k : DEC_KEYS) { dec.get(k).close(); dec.put(k, (OnnxTensor) pr.get(k.replace("past_key_values.", "present.")).get()); }
+    return (OnnxTensor) pr.get(0);
+  }
+  /** То же, логиты — плоским массивом. */
+  float[] stepBatch(OrtSession decP, Map<String, OnnxTensor> dec, Map<String, OnnxTensor> encKv, OnnxTensor mask, long[] last) throws Exception {
+    OnnxTensor lg = stepBatchT(decP, dec, encKv, mask, last);
     try { java.nio.FloatBuffer fb = lg.getFloatBuffer(); float[] a = new float[fb.remaining()]; fb.get(a); return a; }
     finally { lg.close(); }
   }
 
-  /** K/V кодировщика на пакет из b одинаковых строк: исходник у всех черновиков один. */
-  Map<String, OnnxTensor> tile(Map<String, OnnxTensor> enc1, int b, int S) throws OrtException {
-    Map<String, OnnxTensor> out = new HashMap<>(); int R = HEADS * S * HEAD_DIM;
-    try {
-      for (Map.Entry<String, OnnxTensor> e : enc1.entrySet()) {
-        float[] a = new float[R]; e.getValue().getFloatBuffer().get(a);
-        float[] z = new float[b * R];
-        for (int j = 0; j < b; j++) System.arraycopy(a, 0, z, j * R, R);
-        out.put(e.getKey(), OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(z), new long[]{b, HEADS, S, HEAD_DIM}));
-      }
-    } catch (OrtException ex) { for (OnnxTensor x : out.values()) x.close(); throw ex; }
-    return out;
-  }
-
   /** Прошлое декодера под новых родителей: строка j нового пакета — строка par[j] прежнего. */
   void reorder(Map<String, OnnxTensor> dec, int[] par, int nb) throws OrtException {
-    long b0 = dec.values().iterator().next().getInfo().getShape()[0];
+    long b0 = dec.get(DEC_KEYS[0]).getInfo().getShape()[0];
     boolean same = nb == b0;
     for (int j = 0; same && j < nb; j++) same = par[j] == j;
     if (same) return;
-    Map<String, OnnxTensor> g = gather(dec, par, nb);
-    for (Map.Entry<String, OnnxTensor> e : dec.entrySet()) { e.getValue().close(); e.setValue(g.get(e.getKey())); }
+    long[] idx = new long[nb]; for (int j = 0; j < nb; j++) idx[j] = par[j];
+    Map<String, OnnxTensor> g = gatherOrt(dec, DEC_KEYS, idx);
+    for (String k : DEC_KEYS) { dec.get(k).close(); dec.put(k, g.get(k)); }
   }
 
-  /** Новые тензоры из строк par[0..nb) каждого тензора пакета [b, H, T, D]; исходные не трогаются. */
+  /** Строки idx каждого из 12 тензоров keys — графом BeamOps.GATHER; новые тензоры отдаются вызывающему
+   *  и закрываются по одному, как прошлое из декодера. */
+  Map<String, OnnxTensor> gatherOrt(Map<String, OnnxTensor> src, String[] keys, long[] idx) throws OrtException {
+    OnnxTensor ti = OnnxTensor.createTensor(env, idx);
+    try {
+      Map<String, OnnxTensor> gi = new HashMap<>(); gi.put("idx", ti);
+      for (int i = 0; i < keys.length; i++) gi.put("p" + i, src.get(keys[i]));
+      long t0 = System.nanoTime();
+      OrtSession.Result gr = beamGat.run(gi);
+      mtGatNs += System.nanoTime() - t0;
+      Map<String, OnnxTensor> out = new HashMap<>();
+      for (int i = 0; i < keys.length; i++) out.put(keys[i], (OnnxTensor) gr.get("g" + i).get());
+      return out;
+    } finally { ti.close(); }
+  }
+
+  /** Новые тензоры из строк par[0..nb) каждого тензора пакета [b, H, T, D] — на Java; исходные не трогаются.
+   *  Только для черновиков по одному (stepRows): строка в отдельный вызов. */
   Map<String, OnnxTensor> gather(Map<String, OnnxTensor> dec, int[] par, int nb) throws OrtException {
     Map<String, OnnxTensor> out = new HashMap<>();
     try {

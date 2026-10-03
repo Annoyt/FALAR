@@ -19,8 +19,8 @@ import org.json.*;
  *
  *  Наборы — как data/test_set.json и data/mt_test/tatoeba.json (ключи pt_to_ru / ru_to_pt). Выход — как
  *  у mt_bench.py: {"summary": {...}, "results": [{set, src, ref, hyp, sec, ms, steps, run_ms[, id, added]}]};
- *  steps — вызовы decoder_with_past, run_ms — время в них. Время в summary — без первых WARM фраз
- *  (разогрев JIT и памяти). */
+ *  steps — вызовы decoder_with_past, run_ms — время в них; sel_ms и gather_ms в summary — графы луча на
+ *  фразу. Время в summary — без первых WARM фраз (разогрев JIT и памяти). */
 public class MtRun {
   static final int WARM = 20;
 
@@ -32,13 +32,13 @@ public class MtRun {
     Engine.mtLp = Double.parseDouble(System.getProperty("falar.lp", "1.0"));
     Engine.mtBeamSeq = Boolean.getBoolean("falar.seq");
     Engine e = Engine.mtOnly(new File(a[0]), s -> System.err.println(s));
-    JSONArray res = new JSONArray(); List<Double> ms = new ArrayList<>(); long steps = 0, runNs = 0;
+    JSONArray res = new JSONArray(); List<Double> ms = new ArrayList<>(); long steps = 0, runNs = 0, selNs = 0, gatNs = 0;
     for (int k = 3; k < a.length; k++) {
       int eq = a[k].lastIndexOf('='); String path = a[k].substring(0, eq), name = a[k].substring(eq + 1);
       JSONArray items = new JSONObject(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8)).getJSONArray(key);
       for (int i = 0; i < items.length(); i++) {
         JSONObject it = items.getJSONObject(i);
-        long s0 = Engine.mtSteps, r0 = Engine.mtRunNs, t0 = System.nanoTime();
+        long s0 = Engine.mtSteps, r0 = Engine.mtRunNs, q0 = Engine.mtSelNs, g0 = Engine.mtGatNs, t0 = System.nanoTime();
         String hyp = e.translate(dir, it.getString(src));
         double sec = (System.nanoTime() - t0) / 1e9; long st = Engine.mtSteps - s0, rn = Engine.mtRunNs - r0;
         JSONObject r = new JSONObject().put("set", name).put("src", it.getString(src)).put("ref", it.getString(tgt))
@@ -46,7 +46,7 @@ public class MtRun {
             .put("steps", st).put("run_ms", Math.round(rn / 1e5) / 10.0);
         if (it.has("pid")) r.put("id", it.get("pid") + "-" + it.get("rid")).put("added", it.getString("added"));
         res.put(r);
-        if (res.length() > WARM) { ms.add(sec * 1000); steps += st; runNs += rn; }
+        if (res.length() > WARM) { ms.add(sec * 1000); steps += st; runNs += rn; selNs += Engine.mtSelNs - q0; gatNs += Engine.mtGatNs - g0; }
         if (res.length() % 200 == 0) System.err.println("  " + dir + ": " + res.length());
       }
     }
@@ -57,6 +57,7 @@ public class MtRun {
         .put("timed", n).put("ms_avg", Math.round(sum / n * 10) / 10.0).put("ms_p50", Math.round(sorted.get(n / 2) * 10) / 10.0)
         .put("ms_p95", Math.round(sorted.get((int) (n * 0.95)) * 10) / 10.0)
         .put("steps_avg", Math.round(steps * 10.0 / n) / 10.0).put("run_share", Math.round(runNs / 1e4 / sum) / 100.0)
+        .put("sel_ms", Math.round(selNs / 1e5 / n) / 10.0).put("gather_ms", Math.round(gatNs / 1e5 / n) / 10.0)
         .put("lat_avg", Math.round(sum / n / 10) / 100.0).put("lat_p50", Math.round(sorted.get(n / 2) / 10) / 100.0)
         .put("lat_p95", Math.round(sorted.get((int) (n * 0.95)) / 10) / 100.0);
     Files.write(Paths.get(a[2]), new JSONObject().put("summary", summary).put("results", res).toString(1)
