@@ -24,6 +24,7 @@ public class TimeRun {
     String dir = a[1], src = dir.substring(0, 2), tgt = dir.substring(3), key = src + "_to_" + tgt;
     String[] vs = a[3].split(","); int limit = Integer.parseInt(a[4]);
     Engine.mtThreads = Integer.getInteger("falar.threads", 4);
+    Engine.mtDirs = new String[]{dir};
     Engine e = Engine.mtOnly(new File(a[0]), s -> System.err.println(s));
     List<String[]> items = new ArrayList<>();   // {набор, исходник, эталон}
     for (int k = 5; k < a.length; k++) {

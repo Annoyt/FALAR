@@ -59,6 +59,9 @@ public class Engine {
   public static volatile boolean mtBeamSeq = false;
   /** Потоков ONNX Runtime у сессий перевода. Телефон — 4; замер на столе «как одно ядро» — 1. */
   public static volatile int mtThreads = 4;
+  /** Какие направления поднимать. Приложению нужны оба; замеру одного направления (MtRun, TimeRun) — одно:
+   *  на телефоне рядом с работающим приложением это вдвое меньше памяти. */
+  public static volatile String[] mtDirs = {"pt2ru", "ru2pt"};
   /** Замер: время в decoder_with_past и число его вызовов (оба пути), время графов отбора и перестановки
    *  луча; оценка последнего луча — для сверки с пересчётом по выбранным кускам (bench/quality/BeamCheck.java). */
   static volatile long mtRunNs, mtSteps, mtSelNs, mtGatNs;
@@ -120,7 +123,7 @@ public class Engine {
     long t = System.nanoTime(), rss0 = rssMb();
     env = OrtEnvironment.getEnvironment();
     boolean legacy = "legacy".equals(mtVariant); int kvDirs = 0;
-    for (String d : new String[]{"pt2ru", "ru2pt"}) {
+    for (String d : mtDirs) {
       File md = new File(m, "mt/" + d), kv = new File(md, "encoder_kv_model.onnx");
       OrtSession.SessionOptions so = new OrtSession.SessionOptions(); so.setIntraOpNumThreads(mtThreads); so.setInterOpNumThreads(1);
       if (kv.exists() && !legacy) { kvDirs++; mt.put(d, new OrtSession[]{env.createSession(kv.getAbsolutePath(), so), env.createSession(p(md, "decoder_with_past_model.onnx"), so)}); }
@@ -129,7 +132,7 @@ public class Engine {
     }
     loadMtMs = (System.nanoTime() - t) / 1000000; long rss1 = rssMb();
     log.log("MT загружен за " + loadMtMs + " мс · +" + (rss1 - rss0) + " МБ резидентно, всего " + rss1 + " МБ · "
-        + (kvDirs == 2 ? "две сессии на направление" : kvDirs == 0 ? "три сессии на направление" : "две сессии в одном направлении, три в другом")
+        + (kvDirs == mtDirs.length ? "две сессии на направление" : kvDirs == 0 ? "три сессии на направление" : "две сессии в одном направлении, три в другом")
         + (legacy ? " (стенд: прежний путь)" : ""));
   }
 
@@ -420,11 +423,13 @@ public class Engine {
     }
   }
 
-  /** Сессии графов BeamOps — при первом луче: жадному пути они не нужны. */
+  /** Сессии графов BeamOps — при первом луче: жадному пути они не нужны. Один поток: графы крошечные, а
+   *  свои пулы по mtThreads на телефоне толкались с пулом декодера на тех же ядрах (ширина 4 с четырьмя
+   *  потоками — ×1,7 к жадному, с одним — ×1,3; Redmi, 03.10). */
   OrtSession beamSel, beamGat;
   synchronized void beamOps() throws OrtException {
     if (beamSel != null) return;
-    OrtSession.SessionOptions so = new OrtSession.SessionOptions(); so.setIntraOpNumThreads(mtThreads); so.setInterOpNumThreads(1);
+    OrtSession.SessionOptions so = new OrtSession.SessionOptions(); so.setIntraOpNumThreads(1); so.setInterOpNumThreads(1);
     beamGat = env.createSession(BeamOps.bytes(BeamOps.GATHER), so);
     beamSel = env.createSession(BeamOps.bytes(BeamOps.SELECT), so);
   }

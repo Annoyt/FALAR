@@ -29,6 +29,7 @@ public class MtRun {
     String dir = a[1], src = dir.substring(0, 2), tgt = dir.substring(3), key = src + "_to_" + tgt;
     Engine.mtBeam = Integer.getInteger("falar.beam", 1);
     Engine.mtThreads = Integer.getInteger("falar.threads", 4);
+    Engine.mtDirs = new String[]{dir};
     Engine.mtLp = Double.parseDouble(System.getProperty("falar.lp", "1.0"));
     Engine.mtBeamSeq = Boolean.getBoolean("falar.seq");
     Engine e = Engine.mtOnly(new File(a[0]), s -> System.err.println(s));
