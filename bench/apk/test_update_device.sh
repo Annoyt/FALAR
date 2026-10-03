@@ -7,7 +7,10 @@
 #
 # Установленная сборка выдаётся за более старую: в описании номер на единицу больше, а файл — тот
 # же самый APK. До системного окна установки доходит только последний сценарий, и его скрипт не
-# подтверждает: нажать «установить» может только человек.
+# подтверждает: нажать «установить» может только человек. Окно закрывается «назад», и отказ
+# возвращается в Falar ответом установщика — весь путь сессии PackageInstaller (U-G).
+# Телефон — рабочий аппарат владельца: начинаем, когда экран включён, впереди Falar или рабочий стол
+# и экрана не касались минуту.
 R=$(cd "$(dirname "$0")/../.." && pwd)
 # Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
 # девять минут касались телефона одновременно).
@@ -24,13 +27,25 @@ say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
-wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
+wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
 stop() { [ -n "$SRV" ] && kill $SRV 2>/dev/null; SRV=""; for p in $(ss -ltnp 2>/dev/null | grep ':8765 ' | grep -o 'pid=[0-9]*' | cut -d= -f2); do kill $p 2>/dev/null; done; sleep 0.3; }
 serve() { stop; (cd "$D" && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &) ; sleep 0.8; }
 trap 'stop; rm -rf $D' EXIT
+focus() { sh "dumpsys window" | grep -m1 mCurrentFocus; }
+free_phone() {
+  local n=0 f a
+  while :; do
+    f=$(focus); a=$(sh "dumpsys power" | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
+    if sh "dumpsys power" | grep -q "mWakefulness=Awake"; then
+      case "$f" in *app.falar*|*com.miui.home*|*launcher*) [ "${a:-0}" -ge 60000 ] && return 0;; esac
+    fi
+    n=$((n+1)); [ $n -eq 1 ] && say "  жду: экран включён, впереди Falar или рабочий стол, минуту без касаний ($f)"; sleep 10
+  done
+}
 
 [ -f "$A/Falar.apk" ] || { say "нет $A/Falar.apk — сначала bench/apk/build.sh"; exit 1; }
 $ADB wait-for-device
+free_phone
 $ADB reverse tcp:8765 tcp:8765 >/dev/null
 cp "$A/Falar.apk" "$D/Falar.apk"
 CODE=$(grep -o 'versionCode="[0-9]*"' "$A/AndroidManifest.xml" | grep -o '[0-9]*')
@@ -83,6 +98,18 @@ l=$(wl "$m" 'сверено, отдаю установщику' 120); say "  $l"
 [ -n "$l" ] && res 0 "U-F скачано, сверено, отдано установщику" || res 1 "U-F"
 say "  дальше окно подтверждения показывает система — нажать «установить» может только человек"
 
-$ADB shell "am start -n $ACT --es updatebase off" >/dev/null 2>&1
+say "== U-G: окно установщика открылось; «назад» — и отказ приходит в Falar"
+inst=""; for i in $(seq 30); do f=$(focus); case "$f" in *packageinstaller*) inst=$f; break;; esac; sleep 1; done
+if [ -n "$inst" ]; then
+  res 0 "U-G окно установки: $(printf '%s' "$inst" | grep -oE '[a-z.]*packageinstaller[^ }]*')"
+  m=$(mark); case "$(focus)" in *packageinstaller*) $ADB shell input keyevent 4;; esac
+  l=$(wl "$m" 'установка не прошла' 20); say "  $l"
+  [ -n "$l" ] && res 0 "U-G отказ дошёл до Falar ответом установщика" || res 1 "U-G ответа установщика об отказе нет"
+else res 1 "U-G окно установки не появилось (впереди: $(focus))"; fi
+
+# Обратно на GitHub и сразу проверка по нему: иначе до завтрашней проверки в настройках висело бы
+# предложение поставить «тест-N».
+m=$(mark); $ADB shell "am start -n $ACT --es updatebase off --es update check" >/dev/null 2>&1
+l=$(wl "$m" 'обновлений нет|Вышла версия|проверка обновления не вышла' 30); say "  после прогона, по GitHub: ${l:-ответа не видно}"
 say ""; say "итог: PASS $pass, FAIL $fail"
 [ $fail -eq 0 ]

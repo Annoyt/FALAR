@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.falar" android:versionCode="36" android:versionName="0.30.0">
-  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="33"/>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.falar" android:versionCode="37" android:versionName="0.31.0">
+  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35"/>
+  <!-- targetSdk 35: Play Protect предупреждает при установке, если он ниже версии Android телефона
+       больше чем на 2 (с 33 — на Android 16). С 35 Android 15+ кладёт окно под системные полосы —
+       отступы в Bars.java; службу с микрофоном Android 14+ пускает только от открытого экрана (TranslatorService.toForeground). -->
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
@@ -17,7 +20,7 @@
        превышают предел копии в 25 МБ. Android 12+ читает data_extraction_rules, 9–11 — backup_rules. -->
   <application android:label="Falar" android:theme="@style/Falar" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:extractNativeLibs="true" android:largeHeap="true" android:usesCleartextTraffic="true"
       android:allowBackup="true" android:dataExtractionRules="@xml/data_extraction_rules" android:fullBackupContent="@xml/backup_rules">
-    <activity android:name="dev.agenttranslator.MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|keyboardHidden">
+    <activity android:name="dev.agenttranslator.MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
     </activity>
     <service android:name="dev.agenttranslator.TranslatorService" android:exported="false" android:foregroundServiceType="microphone"/>
