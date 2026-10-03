@@ -27,7 +27,7 @@ say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
-wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
+wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
 stop() { [ -n "$SRV" ] && kill $SRV 2>/dev/null; SRV=""; for p in $(ss -ltnp 2>/dev/null | grep ':8765 ' | grep -o 'pid=[0-9]*' | cut -d= -f2); do kill $p 2>/dev/null; done; sleep 0.3; }
 serve() { stop; (cd "$D" && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &) ; sleep 0.8; }
 trap 'stop; rm -rf $D' EXIT
@@ -110,6 +110,6 @@ else res 1 "U-G окно установки не появилось (впере�
 # Обратно на GitHub и сразу проверка по нему: иначе до завтрашней проверки в настройках висело бы
 # предложение поставить «тест-N».
 m=$(mark); $ADB shell "am start -n $ACT --es updatebase off --es update check" >/dev/null 2>&1
-l=$(wl "$m" '⬆ ' 30 | tail -1); say "  после прогона: ${l:-проверки по GitHub не видно}"
+l=$(wl "$m" 'обновлений нет|Вышла версия|проверка обновления не вышла' 30); say "  после прогона, по GitHub: ${l:-ответа не видно}"
 say ""; say "итог: PASS $pass, FAIL $fail"
 [ $fail -eq 0 ]

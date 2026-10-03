@@ -28,7 +28,7 @@
 #   U12 системные полосы (targetSdk 35: окно лежит под ними, Bars.java) — в обеих темах: шапка ниже
 #      строки состояния, а под строкой — слива шапки; кнопки дока, низ панели ☰ и поле «Своё слово»
 #      выше полосы навигации, поле и «+» — над клавиатурой; под навигацией — фон экрана; служба с
-#      микрофоном видимая (startForeground).
+#      микрофоном видимая (startForeground); окно снимка — между полосами.
 #
 # Разговоры владельца не трогаются: тестовый разговор — файлом с самым свежим временем; выученное,
 # словари, свои слова, пины и ключи облака возвращаются из снимка; разговоры, появившиеся за проверку,
@@ -671,6 +671,28 @@ for t in day night; do
   else res 1 "U9 стенд --es uitheme не ответил"; fi
 done
 theme system
+# Окно снимка во весь экран — тоже под полосами (Bars): «✕» ниже выреза камеры (на стенде он совпадает со
+# строкой состояния, которую окно прячет), подпись выше полосы навигации. Снимок свой — надпись на белом;
+# реплика ложится в тестовый разговор последней, после U9, чтобы не сбить проверки выше.
+if mod ocr; then
+  python3 - $D/ui_photo.jpg <<'PY'
+import sys
+from PIL import Image, ImageDraw, ImageFont
+im = Image.new("RGB", (1200, 700), "white"); d = ImageDraw.Draw(im)
+f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 96)
+d.text((80, 160), "SAÍDA DE", fill="black", font=f); d.text((80, 320), "EMERGÊNCIA", fill="black", font=f)
+im.save(sys.argv[1], quality=92)
+PY
+  was=$(sh "ls $F/photos/ 2>/dev/null"); $ADB push $D/ui_photo.jpg $F/ui_photo.jpg >/dev/null 2>&1
+  m=$(mark); start --es photopick $F/ui_photo.jpg; l=$(wl "$m" '📷 OCR за' 60); sleep 2.5; dump
+  read SB NB _ <<< "$(sysbars)"; x=$(at --text ✕ | cut -d' ' -f2); tl=$(low --text "касание абзаца" --prefix)
+  if [ -n "$l" ] && [ -n "$x" ]; then
+    chk '[ "$x" -ge "$SB" ] && [ "${tl:-99999}" -le "$NB" ]' "U12 окно снимка между полосами: «✕» с $x (вырез до $SB), подпись до ${tl:-—} (навигация с $NB)"
+    press
+  else res 1 "U12 окно снимка не открылось (${l:-снимок не прочитан})"; fi
+  $ADB shell "rm -f $F/ui_photo.jpg"
+  for f in $(sh "ls $F/photos/ 2>/dev/null"); do printf '%s\n' "$was" | grep -qxF "$f" || $ADB shell "rm -f $F/photos/$f"; done
+else sk "U12 окно снимка: модуль «Чтение снимков» выключен"; fi
 c=$(crashed); chk '[ -z "$c" ]' "U10 за проверку Falar не падал${c:+: $c}"
 [ "$KEEP" = 1 ] && say "  снимки экранов: $SHOTS (в них слова и журнал владельца — не в репозиторий)"
 [ $fail -eq 0 ]   # код выхода — по итогу: без этой строки он был кодом предыдущей (1, когда KEEP не задан)
