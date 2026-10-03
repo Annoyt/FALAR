@@ -4,167 +4,186 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Falar — переводчик разговора без интернета</title>
-<meta name="description" content="Приложение для Android: слушает бразильский португальский и переводит на русский, и обратно. Всё считается на телефоне, без интернета.">
+<meta name="description" content="Приложение для Android: переводит разговор с бразильского португальского на русский и обратно. Всё считает сам телефон, без интернета.">
 <meta property="og:title" content="Falar — переводчик разговора без интернета">
-<meta property="og:description" content="Бразильский португальский и русский. Распознавание, перевод и голос — на самом телефоне.">
+<meta property="og:description" content="Бразильский португальский ⇄ русский. Распознавание, перевод и голос — на самом телефоне.">
 <meta property="og:image" content="img/icon.png">
 <link rel="icon" href="img/icon.png">
 <style>
 /* Одна страница без внешних запросов: ни шрифтов, ни счётчиков, ни библиотек. Открывается
-   с телефона на медленной сети и ничего не рассказывает о том, кто её открыл. */
-:root{
-  --plum:#802244; --deep:#3D0C2A; --gold:#E0B878; --mint:#6FE0BC;
-  --bg:#ffffff; --fg:#1a1420; --dim:#5d5566; --card:#faf7f9; --line:#e6dfe6;
-}
-@media (prefers-color-scheme: dark){
-  :root{ --bg:#15101a; --fg:#f2ecf2; --dim:#a79db0; --card:#1e1725; --line:#332a3a; }
-}
+   с телефона на медленной сети и ничего не рассказывает о том, кто её открыл.
+   Текста — как можно меньше (владелец 03.10: «люди не любят читать»): установка — картинками сразу
+   под кнопкой. Картинки — SVG из design/mockups/landing_pics.py: лёгкие, чёткие на любом экране,
+   одни на все марки телефонов; на кнопках — те слова, что человек увидит (Chromium и AOSP, ru).
+   «Версия …» под кнопкой сверяет с манифестом настольный тест (WhatsNewTest, W9). */
+:root{--plum:#802244;--deep:#3D0C2A;--gold:#E0B878;--mint:#6FE0BC;
+  --bg:#fff;--fg:#1a1420;--dim:#5d5566;--soft:#8b8293;--card:#f7f3f6;--line:#e8e1e8;--blue:#0B57D0}
+@media (prefers-color-scheme:dark){:root{--bg:#15101a;--fg:#f2ecf2;--dim:#b1a7ba;--soft:#857b8f;--card:#1f1826;--line:#342b3c}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--fg);
-  font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
-.wrap{max-width:760px;margin:0 auto;padding:0 20px}
-a{color:var(--plum)}
-@media (prefers-color-scheme: dark){ a{color:var(--gold)} }
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:0 16px}
+a{color:inherit}
+svg{display:block}
 
-/* шапка */
-.hero{background:linear-gradient(135deg,var(--plum),var(--deep));color:#fff;padding:56px 0 48px;text-align:center}
-.hero a{color:#fff}
-.icon{width:112px;height:112px;border-radius:26px;display:block;margin:0 auto 18px;
-  box-shadow:0 10px 30px rgba(0,0,0,.35)}
-h1{font-size:44px;margin:0 0 6px;letter-spacing:-.5px}
-.tagline{font-size:20px;margin:0 auto 4px;max-width:30ch;opacity:.97}
-.sub{font-size:16px;opacity:.72;margin:10px auto 28px;max-width:44ch}
-.btn{display:inline-block;margin:0 0 10px;transition:transform .12s ease}
-.btn img{display:block;width:280px;max-width:80vw;height:auto}
-.btn:hover{transform:translateY(-2px)}
-.under{font-size:15px;opacity:.78;margin:6px 0 0}
-.under a{text-decoration:underline;text-underline-offset:3px}
+/* шапка: кнопка — золотая, чтобы не сливалась со сливовым фоном */
+.hero{background:linear-gradient(150deg,var(--plum),var(--deep));color:#fff;text-align:center;padding:26px 0 24px}
+.hero .wrap{display:grid;gap:0 40px;justify-items:center}
+.icon{width:72px;height:72px;border-radius:18px;display:block;margin:0 auto 10px;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+h1{font-size:36px;line-height:1.05;margin:0;letter-spacing:-.5px}
+.tag{font-size:18px;margin:6px 0 0;opacity:.95}
+.langs{display:inline-flex;align-items:center;gap:8px;margin-top:10px;font-weight:700;font-size:13px;letter-spacing:.6px}
+.langs span{background:rgba(255,255,255,.15);border-radius:11px;padding:2px 10px}
+.dl{display:flex;align-items:center;justify-content:center;gap:10px;margin:20px auto 0;width:100%;max-width:330px;height:58px;
+  border-radius:29px;background:var(--gold);color:var(--deep);font-weight:800;font-size:19px;text-decoration:none;
+  box-shadow:0 8px 22px rgba(0,0,0,.3)}
+.dl:active{transform:translateY(1px)}
+.dl svg{width:24px;height:24px;flex:none}
+.meta{font-size:14px;opacity:.75;margin:9px 0 0}
+.after{display:none;margin:12px auto 0;max-width:330px;background:rgba(255,255,255,.14);border-radius:14px;padding:9px 14px;font-size:15px}
+body.started .after{display:block}
+.qrbox{display:none}
 
-/* тело */
-section{padding:44px 0;border-bottom:1px solid var(--line)}
-section:last-of-type{border-bottom:0}
-h2{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
-h2+.lead{color:var(--dim);margin:0 0 22px}
-.cards{display:grid;gap:14px;grid-template-columns:1fr}
-@media(min-width:620px){ .cards{grid-template-columns:1fr 1fr} }
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px}
-.card h3{margin:0 0 6px;font-size:18px}
-.card p{margin:0;color:var(--dim);font-size:16px}
-ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
-ol.steps li{counter-increment:s;position:relative;padding:0 0 22px 52px}
-ol.steps li:before{content:counter(s);position:absolute;left:0;top:-2px;width:34px;height:34px;
-  border-radius:50%;background:var(--plum);color:#fff;font-weight:700;display:grid;place-items:center}
-ol.steps li b{display:block;margin-bottom:2px}
-ol.steps li span{color:var(--dim)}
-table{border-collapse:collapse;width:100%;font-size:16px}
-td,th{text-align:left;padding:9px 0;border-bottom:1px solid var(--line);vertical-align:top}
-th{width:42%;font-weight:600}
-tr:last-child td,tr:last-child th{border-bottom:0}
-.note{background:var(--card);border-left:3px solid var(--gold);border-radius:0 12px 12px 0;
-  padding:14px 18px;margin:20px 0 0;color:var(--dim);font-size:16px}
-ul.plain{padding-left:22px;margin:0;color:var(--dim)}
-ul.plain li{margin-bottom:8px}
-ul.plain b{color:var(--fg);font-weight:600}
-.qr{display:flex;gap:18px;align-items:center;background:var(--card);border:1px solid var(--line);
-  border-radius:16px;padding:16px 18px;margin-top:22px}
-.qr img{width:104px;height:104px;border-radius:10px;background:#fff;flex:none}
-.qr p{margin:0;color:var(--dim);font-size:16px}
-footer{padding:34px 0 60px;color:var(--dim);font-size:15px;text-align:center}
-footer a{color:var(--dim)}
-code{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:.92em}
+/* шаги */
+section{padding:26px 0 8px}
+h2{font-size:24px;margin:0 0 14px;letter-spacing:-.3px}
+h2 small{font-size:15px;font-weight:400;color:var(--soft);margin-left:6px;letter-spacing:0}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:18px 12px}
+.steps li{position:relative}
+.pic{border-radius:18px;overflow:hidden;background:#EEF0F4;box-shadow:0 0 0 1px var(--line)}
+.pic img{display:block;width:100%;height:auto}
+.n{position:absolute;z-index:2;left:-4px;top:-6px;width:30px;height:30px;border-radius:50%;background:var(--plum);color:#fff;
+  font-weight:800;font-size:16px;display:grid;place-items:center;box-shadow:0 0 0 3px var(--bg)}
+.steps b{display:block;font-size:16px;margin:8px 2px 0;line-height:1.2}
+.steps i{display:block;font-style:normal;font-size:13px;color:var(--soft);margin:2px 2px 0}
+body.started .steps li.next .pic{box-shadow:0 0 0 3px var(--gold)}
+/* шаг из двух экранов — на всю ширину, между картинками стрелка */
+.steps li.wide{grid-column:span 2}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative}
+.arr{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:50%;z-index:1;
+  background:var(--gold);color:var(--deep);font-weight:800;display:grid;place-items:center;box-shadow:0 0 0 3px var(--bg)}
+h3{font-size:17px;margin:26px 0 12px}
+.ifs{display:grid;grid-template-columns:1fr 1fr;gap:16px 12px}
+.ifs figure{margin:0}
+.ifs b{display:block;font-size:16px;margin:8px 2px 0;line-height:1.2}
+.ifs i{display:block;font-style:normal;font-size:13px;color:var(--soft);margin:2px 2px 0}
+
+/* что умеет: три снимка экрана лентой */
+.shots{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 2px 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
+.shots figure{margin:0;flex:none;width:46%;max-width:210px;scroll-snap-align:start}
+.shots img{display:block;width:100%;height:auto;filter:drop-shadow(0 6px 14px rgba(40,10,30,.18))}
+.shots figcaption{font-weight:700;font-size:15px;margin-top:8px;text-align:center}
+
+/* что нужно */
+.needs{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.needs li{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px;font-size:15px;line-height:1.2}
+.needs svg{width:24px;height:24px;flex:none;stroke:var(--plum);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+@media (prefers-color-scheme:dark){.needs svg,.priv svg{stroke:var(--gold)}}
+.priv{display:flex;align-items:center;gap:10px;margin:16px 2px 0;font-size:15px;color:var(--dim)}
+.priv svg{width:22px;height:22px;flex:none;stroke:var(--plum);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+footer{padding:26px 0 44px;text-align:center;color:var(--dim);font-size:15px}
+footer .links{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+footer .links a{display:inline-flex;align-items:center;gap:8px;text-decoration:none;border:1px solid var(--line);border-radius:20px;padding:8px 14px;color:var(--fg);background:var(--card)}
+footer p{margin:14px 0 0}
+footer small{color:var(--soft)}
+
+/* компьютер: QR рядом с кнопкой — ставить всё равно на телефон */
+@media (min-width:820px){
+  .hero{text-align:left;padding:40px 0 36px}
+  .hero .wrap{grid-template-columns:1fr auto;align-items:center;justify-items:start}
+  .icon{margin:0 0 12px}
+  .dl{margin:22px 0 0}
+  .after{margin:12px 0 0}
+  .qrbox{display:flex;flex-direction:column;align-items:center;gap:10px;background:rgba(255,255,255,.1);border-radius:20px;padding:18px 20px;font-size:15px}
+  .qrbox img{width:150px;height:150px;border-radius:12px;background:#fff;padding:6px}
+  .steps{grid-template-columns:repeat(4,1fr);gap:24px 18px}
+  .two{gap:18px}
+  .ifs{grid-template-columns:repeat(4,1fr);gap:24px 18px}
+  .shots{overflow:visible;margin:0;padding:4px 0 10px;justify-content:flex-start}
+  .shots figure{width:220px}
+  .needs{grid-template-columns:repeat(4,1fr)}
+}
 </style>
 </head>
 <body>
 
-<div class="hero">
+<header class="hero">
   <div class="wrap">
-    <img class="icon" src="img/icon.png" alt="">
-    <h1>Falar</h1>
-    <p class="tagline">Разговор на двух языках без интернета</p>
-    <p class="sub">Собеседник говорит по-бразильски, вы слышите русский. Вы отвечаете по-русски,
-      он слышит португальский. Распознавание, перевод и голос считает сам телефон.</p>
-    <a class="btn" href="https://github.com/Annoyt/FALAR/releases/latest/download/Falar.apk">
-      <img src="img/btn-download.png" alt="Скачать APK"></a>
-    <p class="under">83 МБ · Android 9 и новее ·
-      <a href="https://github.com/Annoyt/FALAR/releases/latest">облегчённая сборка и суммы</a></p>
+    <div>
+      <img class="icon" src="img/icon.png" alt="">
+      <h1>Falar</h1>
+      <p class="tag">Переводчик разговора без интернета</p>
+      <div class="langs"><span>PT</span>⇄<span>RU</span></div>
+      <a class="dl" id="dl" href="https://github.com/Annoyt/FALAR/releases/latest/download/Falar.apk">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+        Скачать для Android</a>
+      <p class="meta">Версия 0.30.0 · 83 МБ</p>
+      <p class="after">Скачивается… шаги установки ниже ↓</p>
+    </div>
+    <div class="qrbox"><img src="img/qr.png" alt="">Откройте на телефоне</div>
   </div>
-</div>
+</header>
 
-<div class="wrap">
+<main class="wrap">
 
-<section>
-  <h2>Что он делает</h2>
-  <p class="lead">Одно приложение на телефоне, без учётной записи и без подписки.</p>
-  <div class="cards">
-    <div class="card"><h3>Переводит вживую</h3>
-      <p>От конца фразы до перевода в ухе около секунды. Измерено на телефоне пятилетней давности.</p></div>
-    <div class="card"><h3>Показывает крупно</h3>
-      <p>Когда вы в наушниках, собеседник читает свою сторону с экрана. Под словами — как их прочесть вслух, русскими буквами с ударением.</p></div>
-    <div class="card"><h3>Работает в самолёте</h3>
-      <p>Сеть нужна один раз, чтобы скачать модели. Дальше связь не нужна совсем.</p></div>
-    <div class="card"><h3>Учит вас словам</h3>
-      <p>Слова из ваших же разговоров собираются в раздел «Слова»: что вы уже знаете, что стоит повторить.</p></div>
-  </div>
-</section>
-
-<section>
+<section id="install">
   <h2>Как поставить</h2>
-  <p class="lead">Приложения нет в Google Play, поэтому Android спросит разрешение один раз.</p>
   <ol class="steps">
-    <li><b>Скачайте файл</b><span>Кнопка выше. Браузер предупредит, что такие файлы могут навредить — это обычное предупреждение для всего, что не из магазина.</span></li>
-    <li><b>Откройте скачанный файл</b><span>Android спросит, можно ли этому браузеру ставить приложения. Разрешите, вернитесь и откройте файл ещё раз.</span></li>
-    <li><b>Разрешите микрофон</b><span>Без него слушать нечем. Приложение распознаёт речь всех, кто рядом, поэтому предупредите собеседника.</span></li>
-    <li><b>Дайте скачать модели</b><span>Около 1,6 ГБ, один раз, по Wi-Fi. Можно остановить и продолжить позже с того же места. После этого интернет не нужен.</span></li>
+    <!--STEPS-->
+    <li><span class="n">1</span><div class="pic"><img src="img/step-1.svg" alt="" width="180" height="210"></div><b>Скачайте</b><i>«Все равно скачать»</i></li>
+    <li class="next"><span class="n">2</span><div class="pic"><img src="img/step-2.svg" alt="" width="180" height="210"></div><b>Откройте файл</b><i>«Открыть»</i></li>
+    <li class="wide"><span class="n">3</span><div class="two"><div class="pic"><img src="img/step-3a.svg" alt="" width="180" height="210"></div><span class="arr">→</span><div class="pic"><img src="img/step-3b.svg" alt="" width="180" height="210"></div></div><b>Разрешите установку из неизвестных источников</b><i>«Настройки» → включите → назад</i></li>
+    <li><span class="n">4</span><div class="pic"><img src="img/step-4.svg" alt="" width="180" height="210"></div><b>Установите</b><i>«Установить»</i></li>
+    <li><span class="n">5</span><div class="pic"><img src="img/step-5.svg" alt="" width="180" height="210"></div><b>Модели — по Wi-Fi</b><i>один раз, потом без сети</i></li>
   </ol>
-  <div class="note">Если телефон скажет «Play Protect не проверил это приложение» — так он говорит
-    обо всём, что поставлено мимо магазина. Проверить, что файл не подменили, можно по контрольной
-    сумме на <a href="https://github.com/Annoyt/FALAR/releases/latest">странице релиза</a>.</div>
-  <div class="qr">
-    <img src="img/qr.png" alt="">
-    <p>Читаете с компьютера? Наведите камеру телефона — эта же страница откроется на нём.</p>
+  <h3>Если увидите такое</h3>
+  <div class="ifs">
+    <!--IFS-->
+    <figure><div class="pic"><img src="img/if-protect.svg" alt="" width="180" height="210"></div><b>Play Защита</b><i>проверьте приложение</i></figure>
+    <figure><div class="pic"><img src="img/if-xiaomi.svg" alt="" width="180" height="210"></div><b>Xiaomi</b><i>подождите, отметьте, «OK»</i></figure>
+    <figure><div class="pic"><img src="img/if-samsung.svg" alt="" width="180" height="210"></div><b>Samsung</b><i>выключите «Автоблокировку»</i></figure>
   </div>
 </section>
 
 <section>
-  <h2>Что нужно от телефона</h2>
-  <table>
-    <tr><th>Android</th><td>9 и новее, процессор arm64 (почти все телефоны с 2018 года)</td></tr>
-    <tr><th>Память на диске</th><td>около 1,6 ГБ под обязательные модели, ещё 1,1 ГБ под необязательные</td></tr>
-    <tr><th>Оперативная память</th><td>4 ГБ хватает; от 6 ГБ нужно только для контекстного уточнителя, который можно не ставить</td></tr>
-    <tr><th>Интернет</th><td>один раз, чтобы скачать модели</td></tr>
-    <tr><th>Наушники</th><td>не обязательны, но с ними удобнее: перевод в ухо вам, крупный текст на экране собеседнику</td></tr>
-  </table>
+  <h2>Что умеет</h2>
+  <div class="shots">
+    <figure><img src="img/shot-talk.svg" alt="Экран разговора: фраза собеседника и её перевод" width="300" height="620"><figcaption>Перевод речи</figcaption></figure>
+    <figure><img src="img/shot-photo.svg" alt="Меню на фото, поверх — перевод" width="300" height="620"><figcaption>Перевод фото</figcaption></figure>
+    <figure><img src="img/shot-words.svg" alt="Раздел «Слова»" width="300" height="620"><figcaption>Учит словам</figcaption></figure>
+  </div>
 </section>
 
 <section>
-  <h2>Что уходит в интернет</h2>
-  <p class="lead">Ничего, пока вы сами не включите последний пункт.</p>
-  <ul class="plain">
-    <li><b>Речь и переводы остаются на телефоне.</b> Распознавание, перевод и голос считаются на нём же. Разговоры лежат в памяти приложения и никуда не отправляются.</li>
-    <li><b>Загрузка моделей</b> — обращение к Hugging Face и к релизам проекта при первом запуске. Только скачивание, ничего о вас не передаётся.</li>
-    <li><b>Пересмотр разговора облачной моделью</b> — необязательная возможность. Выключена, пока вы не включите её сами и не подтвердите согласие. Тогда текст разговора уходит выбранной бесплатной модели, чтобы она поправила перевод по смыслу.</li>
+  <ul class="needs">
+    <li><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>Android 9+</li>
+    <li><svg viewBox="0 0 24 24"><path d="M4 7h16v10H4z"/><path d="M8 7v10M12 7v10"/></svg>2–3 ГБ места</li>
+    <li><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8"/></svg>Wi-Fi один раз</li>
+    <li><svg viewBox="0 0 24 24"><path d="M2 16l20-6-20-6 3 6-3 6z"/><path d="M5 10h8"/></svg>Потом без сети</li>
   </ul>
+  <p class="priv"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Речь и переводы остаются на телефоне</p>
 </section>
 
-<section>
-  <h2>Чего нет</h2>
-  <ul class="plain">
-    <li><b>Только Android.</b> На iPhone поставить нельзя: Apple не разрешает ставить приложения мимо своего магазина.</li>
-    <li><b>Только бразильский португальский и русский.</b> Другие языки пока не поддерживаются.</li>
-    <li><b>Это ранняя версия.</b> Перевод ошибается, особенно на именах, числах и на шумной улице.</li>
-    <li><b>Ошибку можно поправить и прислать нам.</b> Своя реплика правится прямо в разговоре, и приложение исправление запомнит. А ещё любой перевод можно отправить: в меню реплики есть «сообщить о переводе», оно откроет готовое сообщение — в Telegram его увидит только разработчик, а на GitHub оно станет открытым обсуждением, и там нужен аккаунт. Ошибку или идею без реплики — из настроек, «Написать разработчику». Мы постараемся исправить это в следующих версиях.</li>
-  </ul>
-</section>
-
-</div>
+</main>
 
 <footer>
-  <p><a href="https://github.com/Annoyt/FALAR">Исходный код на GitHub</a> ·
-     <a href="https://t.me/falar_tbot">Написать в Telegram</a> ·
-     <a href="https://github.com/Annoyt/FALAR/issues/new/choose">Сообщить о проблеме на GitHub</a></p>
-  <p>«Falar» по-португальски значит «говорить».</p>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://t.me/falar_tbot">Написать в Telegram</a>
+      <a href="https://github.com/Annoyt/FALAR">GitHub</a>
+      <a href="https://github.com/Annoyt/FALAR/releases/latest/download/Falar-slim.apk">Облегчённая, 22 МБ</a>
+    </div>
+    <p><small>Ранняя версия — перевод иногда ошибается.<br>«Falar» по-португальски — «говорить».</small></p>
+  </div>
 </footer>
 
+<script>
+// После нажатия «Скачать» страница подсказывает следующий шаг: файл качается, человек остаётся здесь.
+document.getElementById('dl').addEventListener('click', function () {
+  document.body.classList.add('started');
+});
+if (location.hash === '#started') document.body.classList.add('started');
+</script>
 </body>
 </html>
