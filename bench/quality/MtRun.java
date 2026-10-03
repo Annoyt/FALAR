@@ -13,21 +13,24 @@ import org.json.*;
  *    java [-Dfalar.beam=4] [-Dfalar.seq=true] [-Dfalar.threads=1] [-Dfalar.lp=1.0] … dev.agenttranslator.MtRun
  *         <каталог models> <pt2ru|ru2pt> <выход.json> <набор.json>=<имя> …
  *
- *  falar.beam — ширина луча (Engine.mtBeam, по умолчанию 1 — как в приложении), falar.seq — черновики по
+ *  falar.beam — ширина луча (Engine.mtBeam, по умолчанию — как в приложении: 4), falar.seq — черновики по
  *  одному вызову (Engine.mtBeamSeq), falar.threads — потоков
  *  ONNX Runtime (по умолчанию 4, как на телефоне; «как одно ядро» — 1 вместе с taskset -c N).
  *
  *  Наборы — как data/test_set.json и data/mt_test/tatoeba.json (ключи pt_to_ru / ru_to_pt). Выход — как
- *  у mt_bench.py: {"summary": {...}, "results": [{set, src, ref, hyp, sec, ms, steps, run_ms[, id, added]}]};
- *  steps — вызовы decoder_with_past, run_ms — время в них; sel_ms и gather_ms в summary — графы луча на
- *  фразу. Время в summary — без первых WARM фраз (разогрев JIT и памяти). */
+ *  у mt_bench.py: {"summary": {...}, "results": [{set, src, ref, hyp, sec[, id, added]}]}; с falar.rowtime —
+ *  ещё ms, steps (вызовы decoder_with_past) и run_ms (время в них) у каждой фразы. В summary — среднее время,
+ *  p50, p95 без первых WARM фраз (разогрев JIT и памяти), доля декодера, графы луча (sel_ms, gather_ms). */
 public class MtRun {
   static final int WARM = 20;
+  /** Время по каждой фразе — только по просьбе (-Dfalar.rowtime=true): эталон проверки качества в git, а
+   *  время от прогона к прогону разное. */
+  static final boolean ROWTIME = Boolean.getBoolean("falar.rowtime");
 
   public static void main(String[] a) throws Exception {
     if (a.length < 4) { System.err.println("MtRun <models> <pt2ru|ru2pt> <out.json> <set.json>=<name> …"); System.exit(2); }
     String dir = a[1], src = dir.substring(0, 2), tgt = dir.substring(3), key = src + "_to_" + tgt;
-    Engine.mtBeam = Integer.getInteger("falar.beam", 1);
+    Engine.mtBeam = Integer.getInteger("falar.beam", Engine.mtBeam);
     Engine.mtThreads = Integer.getInteger("falar.threads", 4);
     Engine.mtDirs = new String[]{dir};
     Engine.mtLp = Double.parseDouble(System.getProperty("falar.lp", "1.0"));
@@ -43,8 +46,8 @@ public class MtRun {
         String hyp = e.translate(dir, it.getString(src));
         double sec = (System.nanoTime() - t0) / 1e9; long st = Engine.mtSteps - s0, rn = Engine.mtRunNs - r0;
         JSONObject r = new JSONObject().put("set", name).put("src", it.getString(src)).put("ref", it.getString(tgt))
-            .put("hyp", hyp).put("sec", Math.round(sec * 100) / 100.0).put("ms", Math.round(sec * 1e4) / 10.0)
-            .put("steps", st).put("run_ms", Math.round(rn / 1e5) / 10.0);
+            .put("hyp", hyp).put("sec", Math.round(sec * 100) / 100.0);
+        if (ROWTIME) r.put("ms", Math.round(sec * 1e4) / 10.0).put("steps", st).put("run_ms", Math.round(rn / 1e5) / 10.0);
         if (it.has("pid")) r.put("id", it.get("pid") + "-" + it.get("rid")).put("added", it.getString("added"));
         res.put(r);
         if (res.length() > WARM) { ms.add(sec * 1000); steps += st; runNs += rn; selNs += Engine.mtSelNs - q0; gatNs += Engine.mtGatNs - g0; }

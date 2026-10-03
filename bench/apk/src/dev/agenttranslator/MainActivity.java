@@ -21,7 +21,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Крупный текст словами: под каждым словом транскрипция для чтения вслух. */
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
   /** Настройки: строки и сегменты (Rows), переключатели. */
-  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segReadGuard, segMicSrc, segVoiceWhat; Switch tTranslitOther;
+  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segMtPrefer, segReadGuard, segMicSrc, segVoiceWhat; Switch tTranslitOther;
   ListView histList;
   Button bPin, bWord, bBetter, bClear, bKey; View bModels;
   TextView logLast;
@@ -66,7 +66,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Модули: переключатели в «Системе» и на экране первого запуска; контейнеры их настроек. */
   final java.util.Map<String, Switch> modChecks = new java.util.HashMap<>();
   final java.util.Map<String, CheckBox> setupChecks = new java.util.HashMap<>();
-  LinearLayout ttsBox, cloudBox, llmBox, modBox, keysBox, addBox; View grpTr, bKeyHelp; Button bUnused; boolean setupSynced = false;
+  LinearLayout ttsBox, cloudBox, llmBox, modBox, keysBox, addBox; View bKeyHelp; Button bUnused; boolean setupSynced = false;
   Rows.Row rowCloud, rowMods, rowLog, rowRoute; TextView modsSum;
   final java.util.Map<String, ModRow> modRows = new java.util.HashMap<>();
   ModelStore.State mst; boolean micForever, svcStarted; ScrollView bigScroll;
@@ -532,6 +532,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     segRefine.sel(indexOf(new int[]{0, 1, 3, 10}, svc.refineEvery));
     segCloudEvery.sel(indexOf(new int[]{0, 5, 10, 20}, svc.cloudEvery));
     segPrefer.sel(svc.cloudQuality() ? 1 : 0);
+    if (segMtPrefer != null) segMtPrefer.sel(svc.mtQuality() ? 1 : 0);
     refreshCloudRow();
   }
 
@@ -2165,7 +2166,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     r.nav(c2, app.falar.R.drawable.ic_trash, "Удалить звук, оставить текст", null, x -> dropAudioAsk());
 
     // ---- перевод
-    LinearLayout c3 = r.group(v, "Перевод"); grpTr = (View) c3.getTag();
+    LinearLayout c3 = r.group(v, "Перевод");
+    // Быстрее или точнее: «точнее» перебирает четыре варианта фразы и берёт лучший. На Redmi — на 0,04–0,05 с
+    // дольше на фразу, перевод лучше в обе стороны (results/2026-10-03-mt-beam.md). По умолчанию «точнее».
+    r.row(c3, app.falar.R.drawable.ic_tune, "Перевод фраз", "сразу первый вариант или лучший из нескольких", null);
+    LinearLayout s9 = r.sub(c3, true);
+    segMtPrefer = r.seg(s9, new String[]{"Быстрее", "Точнее"}, i -> { if (svc == null) return; svc.setMtQuality(i == 1); refreshIntervals(); });
+    r.caption(s9, "«Точнее» — Falar сравнивает четыре варианта фразы: перевод заметно лучше примерно у каждой десятой, ждать чуть дольше.");
     llmBox = r.part(c3);
     tCtx = r.sw(); tCtx.setEnabled(false);
     r.row(llmBox, app.falar.R.drawable.ic_wand, "Уточнитель в фоне", "переводит заново с учётом разговора", tCtx);
@@ -2977,7 +2984,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     vis(ttsBox, tts);
     // Повторение озвучки не требует: на слух звучит живой голос, вслух говорите вы (без того и другого — пропуск)
     if (revOpen && revCur == null) nextReview();
-    vis(cloudBox, cloud); vis(llmBox, llm); vis(grpTr, cloud || llm);
+    vis(cloudBox, cloud); vis(llmBox, llm);   // группа «Перевод» видна всегда: в ней «быстрее / точнее»
     // Без чтения снимков и облака снимать нечем — кнопка дока только набирает фразу.
     boolean photo = Modules.photo(on);
     if (inputIcon != null) {

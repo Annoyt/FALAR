@@ -353,6 +353,7 @@ public class TranslatorService extends Service {
       if (!new File(models, "silero_vad.onnx").exists()) { status("Нет моделей. Залейте их в\n" + models.getAbsolutePath());
         log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
+      Engine.mtBeam = getSharedPreferences("at", MODE_PRIVATE).getBoolean("mt_quality", true) ? Engine.MT_BEAM_QUALITY : 1;
       Engine.withTts = mod(Modules.TTS);
       readSoundPrefs();
       earlyStart();
@@ -1138,7 +1139,7 @@ public class TranslatorService extends Service {
     // Из настроек, а не из полей: до загрузки движков поля ещё не прочитаны.
     if (i != null && i.hasExtra("settings")) { android.content.SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
       log("🧪 настройки: разбор " + p.getInt("refine_every", 3) + " · облако " + p.getInt("cloud_every", 0) + " · чтение вслух " + p.getInt("read_guard", 1)
-          + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0)
+          + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0) + " · перевод точнее " + (p.getBoolean("mt_quality", true) ? 1 : 0)
           + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))]); }
     if (i != null && i.hasExtra("refineevery")) setRefineEvery(Integer.parseInt(i.getStringExtra("refineevery")));
     if (i != null && i.hasExtra("cloudevery")) setCloudEvery(Integer.parseInt(i.getStringExtra("cloudevery")));
@@ -1150,6 +1151,8 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("memo")) { String m = i.getStringExtra("memo"); setMemoByUser(m == null || "off".equals(m) ? "" : m.replace("\\n", " ")); }
     // Стенд: режим облака и порядок моделей в обоих режимах — с подсчётами, без ключа.
     if (i != null && i.hasExtra("cloudprefer")) setCloudQuality("quality".equals(i.getStringExtra("cloudprefer")));
+    // Стенд: «Перевод: быстрее / точнее» без экрана — «--es mtprefer quality|speed».
+    if (i != null && i.hasExtra("mtprefer")) setMtQuality(!"speed".equals(i.getStringExtra("mtprefer")));
     if (i != null && i.hasExtra("cloudroute") && cloud != null && cloud.ready) {
       boolean was = cloud.preferQuality;
       for (boolean q : new boolean[]{false, true}) {
@@ -2118,6 +2121,15 @@ public class TranslatorService extends Service {
   public void setRefineEvery(int n) {
     refineEvery = Math.max(0, n); getSharedPreferences("at", MODE_PRIVATE).edit().putInt("refine_every", refineEvery).apply();
     log("🧠 разбор контекста: " + (refineEvery == 0 ? "только по кнопке" : "каждые " + refineEvery + " реплик"));
+  }
+  /** «Перевод: быстрее / точнее». Точнее — перебор вариантов (Engine.mtBeam = 4): на Redmi на 0,04–0,05 с
+   *  дольше на фразу, COMET +0,003…0,004 (results/2026-10-03-mt-beam.md); быстрее — первый вариант, как
+   *  в прежних версиях. По умолчанию — точнее (владелец 03.10). Действует со следующего перевода. */
+  public boolean mtQuality() { return Engine.mtBeam > 1; }
+  public void setMtQuality(boolean on) {
+    getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("mt_quality", on).apply();
+    Engine.mtBeam = on ? Engine.MT_BEAM_QUALITY : 1;
+    log("🔤 перевод: " + (on ? "точнее — перебор " + Engine.MT_BEAM_QUALITY + " вариантов" : "быстрее — первый вариант"));
   }
   public boolean cloudQuality() { return cloud != null && cloud.preferQuality; }
   /** «Облако: быстрее / точнее» — порядок, в котором перебираются бесплатные модели (Cloud.score). */
