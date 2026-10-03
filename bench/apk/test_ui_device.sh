@@ -257,7 +257,9 @@ sed 's/^/    /' $D/load
 python3 - $D/load $NLOAD > $D/load.res <<'PY'
 import re, sys
 rows = [l.rstrip('\n').split('\t') for l in open(sys.argv[1], encoding='utf-8') if l.strip()]
-n = int(sys.argv[2]); names = ['распознавание', 'перевод'] + (['озвучка'] if n == 4 else []) + ['словарь и разговоры']
+# Этапы — в порядке службы (TranslatorService.init): озвучка последней с 03.10 — сказанное во время загрузки
+# переводится, не дожидаясь её (Screen.loadExpect, ScreenTest L1).
+n = int(sys.argv[2]); names = ['распознавание', 'перевод', 'словарь и разговоры'] + (['озвучка'] if n == 4 else [])
 bad_cap, stages, etas, bad_seg = [], [], [], []
 for cap, seg in rows:
     m = re.fullmatch(r'Загружаю модели · (.+) · ещё ≈ (\d+) с', cap)
