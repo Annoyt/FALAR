@@ -28,7 +28,8 @@
 #   U12 системные полосы (targetSdk 35: окно лежит под ними, Bars.java) — в обеих темах: шапка ниже
 #      строки состояния, а под строкой — слива шапки; кнопки дока, низ панели ☰ и поле «Своё слово»
 #      выше полосы навигации, поле и «+» — над клавиатурой; под навигацией — фон экрана; служба с
-#      микрофоном видимая (startForeground); окно снимка — между полосами.
+#      микрофоном видимая (startForeground); окно снимка — между полосами; у экрана первого запуска
+#      (снимок uishot setup) под строкой состояния — её цвет.
 #
 # Разговоры владельца не трогаются: тестовый разговор — файлом с самым свежим временем; выученное,
 # словари, свои слова, пины и ключи облака возвращаются из снимка; разговоры, появившиеся за проверку,
@@ -631,20 +632,25 @@ print(' · '.join(out))
 PY
 }
 shots() {   # снимки экранов самим приложением: доля светлых или тёмных точек посередине
-  local s m out=""
-  for s in talk drawer words settings mods cloud log; do
+  local s m out="" sb; read sb _ _ <<< "$(sysbars)"
+  for s in talk drawer words settings mods cloud log setup; do
     $ADB shell "rm -f $F/ui-$1-$s.png"; start --es uishot ui-$1-$s --es uiscreen $s
     local n0=-1 n1 i                          # строку «снимок экрана» uishot пишет на экран, не в журнал — ждём файл
     for i in $(seq 20); do sleep 1; n1=$(sh "stat -c %s $F/ui-$1-$s.png 2>/dev/null"); [ -n "$n1" ] && [ "$n1" = "$n0" ] && break; n0=${n1:--1}; done
     [ -n "$n1" ] || { out="$out $s:нет"; continue; }
     $ADB pull $F/ui-$1-$s.png $D/ >/dev/null 2>&1; $ADB shell "rm -f $F/ui-$1-$s.png"
-    out="$out $(python3 - $D/ui-$1-$s.png $1 $s <<'PY'
+    out="$out $(python3 - $D/ui-$1-$s.png $1 $s ${sb:-0} <<'PY'
 import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert('L'); day = sys.argv[2] == 'day'; w, h = im.size
 x1 = int(w * 0.75) if sys.argv[3] == 'drawer' else w      # у панели — её сторона, справа затемнение
 v = sorted(im.getpixel((x, y)) for x in range(0, x1, 6) for y in range(int(h * 0.2), int(h * 0.8), 6))
 med = v[len(v) // 2]; ok = med > 170 if day else med < 70
+# Экран первого запуска — без шапки: под строкой состояния её цвет (U12), а не начало экрана.
+if sys.argv[3] == 'setup' and int(sys.argv[4]) > 4:
+    rgb = Image.open(sys.argv[1]).convert('RGB'); sb = int(sys.argv[4])
+    px = [rgb.getpixel((x, y)) for x in range(w // 3, 2 * w // 3, 6) for y in range(2, sb - 2, 3)]
+    ok = ok and sum(1 for r, g, b in px if r >= g + 10 and r >= b and 0.299 * r + 0.587 * g + 0.114 * b < 130) / len(px) >= 0.9
 print('%s:%d%s' % (sys.argv[3], med, '' if ok else '!'))
 PY
 )"

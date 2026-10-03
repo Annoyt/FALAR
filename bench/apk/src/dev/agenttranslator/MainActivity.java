@@ -2622,7 +2622,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if ("live".equals(kind)) { liveDemo(ms); return; }
     bMic.demo(kind, ms, () -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
   }
-  /** Стенд: снимок экрана самим приложением (--es uishot <имя> [--es uiscreen talk|drawer|words|settings|mods|cloud|log]).
+  /** Стенд: снимок экрана самим приложением (--es uishot <имя> [--es uiscreen talk|drawer|words|settings|mods|cloud|log|setup]).
+   *  setup — экран первого запуска: шапки у него нет, и под строкой состояния — свой отступ (insets).
    *  Вид раскладывается на размер окна и рисуется в files/<имя>.png. Работает и при погашенном
    *  заблокированном экране, когда системе снимать нечего, а разблокировать чужой телефон нельзя.
    *  Тени и остальное, что рисует только видеокарта, в снимок не попадают. Разговор на снимке —
@@ -2634,8 +2635,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final boolean tmp = !bound;
     if (tmp) bindSvc();
     boolean dr = "drawer".equals(which); final int was = screen;
-    show("words".equals(which) ? 1 : "settings".equals(which) ? 2 : "mods".equals(which) ? 5 : "cloud".equals(which) ? 6 : "log".equals(which) ? 7 : 0);
+    show("words".equals(which) ? 1 : "settings".equals(which) ? 2 : "mods".equals(which) ? 5 : "cloud".equals(which) ? 6 : "log".equals(which) ? 7
+        : "setup".equals(which) ? 4 : 0);
     if (screen == 5) { refreshModules(); refreshModels(); }
+    if (screen == 4) refreshSetup();
     if (screen == 1) refreshWords();
     if (sidePanel != null) {
       sidePanel.animate().cancel(); scrim.animate().cancel();
