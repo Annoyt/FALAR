@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Ночная тема Falar — вслед за системой (решение владельца 01.10). На тёмном слива почти не видна,
-     поэтому переключатели и ползунки золотые. -->
+     поэтому переключатели и ползунки золотые. Как используются цвета полос — в res/values/styles.xml. -->
 <resources>
   <style name="Falar" parent="@android:style/Theme.Material.NoActionBar">
     <item name="android:colorPrimary">#802244</item>

@@ -132,7 +132,11 @@ if [ "${BUILD:-}" = 1 ]; then
 fi
 
 L="$STATE/runs/$(date +%Y%m%d-%H%M%S)"; mkdir -p "$L"
-ls -d "$STATE"/runs/* 2>/dev/null | sort | head -n -5 | xargs -r rm -rf        # хранить пять последних
+# Хранить пять последних прогонов — и только папки прогонов: в runs/ свои журналы кладут и другие скрипты.
+# Прежнее «всё, кроме пяти последних по имени» 03.10 стёрло папку только что начатого прогона (цифры
+# раньше букв), и наборы «прошли», не запустившись, — заодно с чужими журналами.
+ls -d "$STATE"/runs/[0-9]*-[0-9]*/ 2>/dev/null | sort | head -n -5 | xargs -r rm -rf
+[ -d "$L" ] || { say "папки прогона $L нет — не начинаю"; exit 1; }
 T0=$(sh "date '+%m-%d %H:%M:%S.000'")
 say "== снимок перед прогоном"
 snap || exit 1
@@ -159,5 +163,7 @@ printf '%-14s %5s %5s %8s %6s\n' скрипт PASS FAIL пропуск сек
 awk '{printf "%-14s %5s %5s %8s %6s\n", $1, $2, $3, $4, $5}' "$L/summary"
 say "Falar за прогон: ${crash:+упал — $crash}${crash:-не падал}"
 bad=$(awk '$3 != 0 || $2 == "-" {print $1}' "$L/summary" | paste -sd' ' -)
+n=$(printf '%s\n' $SUITES | wc -l); got=$(cat "$L/summary" 2>/dev/null | wc -l)   # итога нет — не «всё прошло»
+[ "$got" -eq "$n" ] || bad="${bad:+$bad · }итог по $got наборам из $n"
 [ -z "$bad" ] && [ -z "$crash" ] && say "ВСЁ ПРОШЛО" || say "НЕ ПРОШЛО: ${bad:-—}${crash:+ · падение Falar}"
 [ -z "$bad" ] && [ -z "$crash" ]

@@ -286,8 +286,27 @@ public class TranslatorService extends Service {
     super.onCreate();
     NotificationManager nm = getSystemService(NotificationManager.class);
     nm.createNotificationChannel(new NotificationChannel(CH, "Переводчик", NotificationManager.IMPORTANCE_LOW));
+    if (toForeground()) init();
+  }
+  /** Служба стала видимой (startForeground) — до этого она не грузит ничего. */
+  boolean fg = false;
+  /** Видимая служба с микрофоном. С targetSdk 34 Android 14+ разрешает её, только пока экран Falar на
+   *  виду (или по исключению системы), а с Android 12 и сам запуск видимой службы из фона: иначе
+   *  startForeground бросает исключение. Так бывает, когда службу поднимает система — START_STICKY
+   *  после падения, ответ установщика после обновления. Слушать из фона она всё равно не смогла бы:
+   *  микрофон в фоне глушится с Android 11. Поэтому не падаем, а ждём, пока Falar откроют (onStartCommand). */
+  boolean toForeground() {
     Notification n = notif("Загрузка моделей…");
-    if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE); else startForeground(NOTIF, n);
+    try {
+      if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE); else startForeground(NOTIF, n);
+      return fg = true;
+    } catch (RuntimeException e) {
+      Log.w(TAG, "startForeground", e);
+      log("⏸ служба из фона не запустилась (" + e.getClass().getSimpleName() + ") — поднимется, когда откроют Falar");
+      return false;
+    }
+  }
+  void init() {
     wl = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AT:pipeline"); wl.acquire();
     modelsDir = new File(getExternalFilesDir(null), "models");
     // Хранилище создаём здесь, а не в фоне: стендовые интенты (models/modelsbase) приходят сразу за onCreate.
@@ -566,6 +585,9 @@ public class TranslatorService extends Service {
 
   @Override public int onStartCommand(Intent i, int flags, int id) {
     if (i != null && ACT_STOP.equals(i.getAction())) { stopSelf(); return START_NOT_STICKY; }
+    // Служба поднята из фона и видимой не стала (toForeground). Этот запуск может быть уже от экрана —
+    // ещё попытка; нет — остановка до следующего открытия Falar.
+    if (!fg) { if (!toForeground()) { stopSelf(id); return START_NOT_STICKY; } init(); }
     // Ответ системного установщика. Первый — просьба показать человеку окно подтверждения:
     // без неё сессия висит, а снаружи выглядит, будто обновление молча не поставилось.
     if (i != null && ACT_INSTALLED.equals(i.getAction())) {

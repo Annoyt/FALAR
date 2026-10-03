@@ -52,6 +52,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   TextView sizeLbl, hintSide, prevPt, prevRu;
   /** Шапка: ☰ или «←», название разговора (строка hint под ним — его состояние), «＋»; полоса хода облака и загрузок. */
   View appBar, rootView; ImageView abNav, abAct; TextView abTitle; ProgressLine abProg;
+  /** Поля окна под системными полосами (Bars.of): слева, сверху, справа, снизу, клавиатура; фон корня
+   *  с полосой под строкой состояния; собственные отступы видов, к которым поля прибавляются. */
+  int[] ins = new int[5]; Bars.Bg barsBg; final java.util.Map<View, int[]> pad0 = new java.util.IdentityHashMap<>();
   /** Док: «Снимок, текст» слева; подпись под ним. */
   View bInput; ImageView inputIcon; TextView inputLbl;
   /** Кто сказал текущую реплику; её действия — или ход её перевода на том же месте. */
@@ -104,7 +107,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // «Слова» и «Настройки» посреди разговора не нужны — они в панели ☰ (решение владельца 01.10).
     // Панель выезжает поверх экрана. Раньше без AndroidX она была колонкой, делила ширину с
     // текстом, и нижние кнопки обрезались: «получ…», «запо…» (стенд, 30.09).
-    FrameLayout top = new FrameLayout(this); top.setBackgroundColor(look.bg);
+    // Окно — под системными полосами (Bars), отступы под них раздаёт insets().
+    boolean e2e = Bars.edgeToEdge(getWindow());
+    android.util.TypedValue sbc = new android.util.TypedValue();
+    barsBg = new Bars.Bg(look.bg, getTheme().resolveAttribute(android.R.attr.statusBarColor, sbc, true) ? sbc.data : Look.DEEP);
+    FrameLayout top = new FrameLayout(this); top.setBackground(barsBg);
     LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
     top.addView(root, new FrameLayout.LayoutParams(-1, -1));
     root.addView(appBar = buildAppBar());
@@ -123,6 +130,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     sidePanel = buildSide(); sidePanel.setVisibility(View.GONE);
     top.addView(sidePanel, new FrameLayout.LayoutParams(dp(318), -1, Gravity.START));
     setContentView(top); rootView = top;
+    if (e2e) Bars.listen(top, p -> { ins = p; insets(); });
     show(0); applySizes();
 
     // Первый запуск: без микрофона или без обязательных моделей — экран с объяснением и кнопками,
@@ -917,6 +925,35 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     refreshAppBar();
   }
 
+  /** Поля окна (Bars) — по видам. Шапка заходит под строку состояния: градиент до верхнего края, как
+   *  на макетах. Низ каждого экрана — над полосой навигации, а его фон — до нижнего края. Экраны с
+   *  полем ввода («Слова», «Облако») над клавиатурой поднимает поле снизу: окно под полосами система
+   *  сама уже не сжимает. Высота, а не отступ, — чтобы прокрутка довела поле с курсором до видимого
+   *  (ScrollView считает видимым и свой нижний отступ). Панель ☰ — от строки состояния до низа, затемнение
+   *  — на всё окно. Экран первого запуска без шапки: сверху свой отступ, под строкой — её цвет (Bars.Bg).
+   *  По бокам (вырез камеры и кнопки навигации в альбомной) — отступ всего окна. */
+  void insets() {
+    int t = ins[1], b = ins[3]; boolean kbd = ins[4] > b;
+    pad(rootView, ins[0], 0, ins[2], 0);
+    pad(appBar, 0, t, 0, 0);
+    for (View s : new View[]{talkView, learnView, sysView, modsView, cloudView, journalView, setupView}) {
+      boolean field = s == learnView || s == cloudView;
+      pad(s, 0, s == setupView ? t : 0, 0, field && kbd ? 0 : b);
+      FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) s.getLayoutParams(); int m = field && kbd ? ins[4] : 0;
+      if (lp.bottomMargin != m) { lp.bottomMargin = m; s.setLayoutParams(lp); }
+    }
+    pad(sidePanel, 0, 0, 0, b);
+    FrameLayout.LayoutParams sp = (FrameLayout.LayoutParams) sidePanel.getLayoutParams();
+    if (sp.topMargin != t) { sp.topMargin = t; sidePanel.setLayoutParams(sp); }
+    barsBg.top = t; barsBg.invalidateSelf();
+  }
+  /** Отступ поверх собственного отступа вида — того, что был до первых полей. */
+  void pad(View v, int l, int t, int r, int b) {
+    int[] p = pad0.get(v);
+    if (p == null) pad0.put(v, p = new int[]{v.getPaddingLeft(), v.getPaddingTop(), v.getPaddingRight(), v.getPaddingBottom()});
+    v.setPadding(p[0] + l, p[1] + t, p[2] + r, p[3] + b);
+  }
+
   /** Панель ☰: «＋ Новый разговор», разговоры (свежие сверху, галочка — перевод улучшен задним
    *  числом), внизу «Слова» и «Настройки». Лежит поверх экрана; касания под неё не проходят. */
   View buildSide() {
@@ -1448,6 +1485,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (bm == null) { onLog("📷 файла снимка нет — осталась только реплика с текстом"); return; }
     final android.app.Dialog d = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
     FrameLayout root = new FrameLayout(this); root.setBackgroundColor(Color.BLACK);
+    // Окно во весь экран Android 15+ тоже кладёт под полосы (Bars): снимок, «✕» и подпись — между ними,
+    // под полосами — чёрное, как было.
+    if (Bars.edgeToEdge(d.getWindow())) Bars.listen(root, q -> root.setPadding(q[0], q[1], q[2], q[3]));
     final PhotoView pv = new PhotoView(this, bm, p.optJSONArray("blocks"));
     root.addView(pv, new FrameLayout.LayoutParams(-1, -1));
     final String tip = "касание абзаца — его текст здесь · удержание — оригинал · щипок — крупнее";
@@ -2582,7 +2622,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if ("live".equals(kind)) { liveDemo(ms); return; }
     bMic.demo(kind, ms, () -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
   }
-  /** Стенд: снимок экрана самим приложением (--es uishot <имя> [--es uiscreen talk|drawer|words|settings|mods|cloud|log]).
+  /** Стенд: снимок экрана самим приложением (--es uishot <имя> [--es uiscreen talk|drawer|words|settings|mods|cloud|log|setup]).
+   *  setup — экран первого запуска: шапки у него нет, и под строкой состояния — свой отступ (insets).
    *  Вид раскладывается на размер окна и рисуется в files/<имя>.png. Работает и при погашенном
    *  заблокированном экране, когда системе снимать нечего, а разблокировать чужой телефон нельзя.
    *  Тени и остальное, что рисует только видеокарта, в снимок не попадают. Разговор на снимке —
@@ -2594,8 +2635,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final boolean tmp = !bound;
     if (tmp) bindSvc();
     boolean dr = "drawer".equals(which); final int was = screen;
-    show("words".equals(which) ? 1 : "settings".equals(which) ? 2 : "mods".equals(which) ? 5 : "cloud".equals(which) ? 6 : "log".equals(which) ? 7 : 0);
+    show("words".equals(which) ? 1 : "settings".equals(which) ? 2 : "mods".equals(which) ? 5 : "cloud".equals(which) ? 6 : "log".equals(which) ? 7
+        : "setup".equals(which) ? 4 : 0);
     if (screen == 5) { refreshModules(); refreshModels(); }
+    if (screen == 4) refreshSetup();
     if (screen == 1) refreshWords();
     if (sidePanel != null) {
       sidePanel.animate().cancel(); scrim.animate().cancel();

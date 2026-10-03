@@ -38,7 +38,10 @@ if not os.path.exists(f): sys.exit(f"нет {f} — шумодав нарезк�
 if os.path.getsize(f) != e["size"] or hashlib.sha256(open(f, "rb").read()).hexdigest() != e["sha256"]: sys.exit(f"{f} разошёлся с манифестом")
 PY
 cp $R/models/denoiser/gtcrn_simple.onnx $OUT/assets/gtcrn_simple.onnx
-aapt2 link -o $OUT/base.apk --manifest $A/AndroidManifest.xml -I "$AJ" --java $OUT/gen -A $OUT/assets --min-sdk-version 28 --target-sdk-version 33 $OUT/res.zip
+# minSdk и targetSdk — только из манифеста: --min-sdk-version/--target-sdk-version у aapt2 лишь подставляют
+# значение, которого в манифесте нет, и здесь стояли прежние 28/33, ничего не меняя (проверено 03.10).
+# tools/android.jar — API 33: так собирается и под targetSdk 35, а то, чего в 33 нет, код берёт числами.
+aapt2 link -o $OUT/base.apk --manifest $A/AndroidManifest.xml -I "$AJ" --java $OUT/gen -A $OUT/assets $OUT/res.zip
 javac --release 11 -nowarn -cp "$AJ:$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/*.java $A/sherpa-java-api/*.java $OUT/gen/app/falar/R.java
 # Код выхода D8 не терять: раньше его вывод шёл через grep с «|| true», и когда 28.09.2026 на
 # сборке упала сама JVM (внутренняя ошибка JIT), скрипт спокойно собрал APK без половины кода —
