@@ -164,7 +164,7 @@ public class ModelStore {
   /** То же, но с сообщением на экране до и после: чтение трёх гигабайт длится секунды, и без
    *  этого кнопка «проверить файлы моделей» выглядит мёртвой — нажал, а в ответ тишина. */
   public Plan verifyNow(String tier) {
-    synchronized (st) { st.phase = CHECK; st.message = "Проверяю файлы моделей, это чтение всего с диска…"; }
+    synchronized (st) { st.phase = CHECK; st.message = L.t("Проверяю файлы моделей, это чтение всего с диска…"); }
     push(true);
     long t = System.nanoTime(), b = hashedBytes;
     Plan p = verify(tier);
@@ -172,8 +172,8 @@ public class ModelStore {
     synchronized (st) {
       st.phase = IDLE;
       st.message = p.need.isEmpty()
-          ? "Проверено: все файлы на месте, " + mb(hashedBytes - b) + " МБ за " + String.format(Locale.ROOT, "%.1f", ms / 1000.0) + " с"
-          : "Проверено: не сошлось или нет " + p.need.size() + " — " + p.need.get(0) + (p.need.size() > 1 ? " и другие" : "");
+          ? L.f("Проверено: все файлы на месте, %s МБ за %.1f с", mb(hashedBytes - b), ms / 1000.0)
+          : L.f("Проверено: не сошлось или нет %d — %s", p.need.size(), p.need.get(0)) + (p.need.size() > 1 ? L.t(" и другие") : "");
     }
     push(true);
     return p;
@@ -418,13 +418,13 @@ public class ModelStore {
 
   void run(List<Item> todo, String tier) {
     long total = 0; for (Item it : todo) total += it.size;
-    synchronized (st) { st.phase = CHECK; st.tier = tier; st.done = 0; st.total = total; st.bps = 0; st.file = ""; st.errors.clear(); st.message = "Проверяю место и файлы"; }
+    synchronized (st) { st.phase = CHECK; st.tier = tier; st.done = 0; st.total = total; st.bps = 0; st.file = ""; st.errors.clear(); st.message = L.t("Проверяю место и файлы"); }
     push(true);
     long have = 0; for (Item it : todo) { File t = it.target(dir); File p = part(t); if (p.isFile()) have += Math.min(p.length(), it.size); }
     long needBytes = total - have; for (Item it : todo) if (it.archive) needBytes += it.size;   // распаковка ≈ ещё столько же
     long free = usable();
     if (free >= 0 && free < needBytes + spareBytes) {
-      synchronized (st) { st.phase = ERROR; st.message = "Мало места: нужно ещё " + mb(needBytes + spareBytes - free) + " МБ"; st.errors.add("место: " + st.message); }
+      synchronized (st) { st.phase = ERROR; st.message = L.f("Мало места: нужно ещё %s МБ", mb(needBytes + spareBytes - free)); st.errors.add(L.f("место: %s", st.message)); }
       log.log("⬇ модели (" + tier + "): " + state().message + " (свободно " + mb(free) + " МБ)");   // на телефоне с 1,9 ГБ свободного это единственный след
       push(true); return;
     }
@@ -436,9 +436,9 @@ public class ModelStore {
     cleanObsolete();
     summarize();
     synchronized (st) {
-      if (cancelled) { st.phase = PAUSED; st.message = "Остановлено: скачано " + mb(st.done) + " из " + mb(st.total) + " МБ, продолжится с этого места"; }
-      else if (st.errors.isEmpty()) { st.phase = DONE; st.message = "Готово: " + ok + " из " + todo.size(); }
-      else { st.phase = ERROR; st.message = "Не скачалось: " + st.errors.size() + " из " + todo.size() + " — " + st.errors.get(0); }
+      if (cancelled) { st.phase = PAUSED; st.message = L.f("Остановлено: скачано %s из %s МБ, продолжится с этого места", mb(st.done), mb(st.total)); }
+      else if (st.errors.isEmpty()) { st.phase = DONE; st.message = L.f("Готово: %d из %d", ok, todo.size()); }
+      else { st.phase = ERROR; st.message = L.f("Не скачалось: %d из %d — %s", st.errors.size(), todo.size(), st.errors.get(0)); }
       st.file = ""; st.bps = 0;
     }
     log.log("⬇ модели (" + tier + "): " + state().message);
@@ -460,7 +460,7 @@ public class ModelStore {
     int backoff = backoffMs;
     while (!got) {
       if (cancelled) return false;
-      if (!net.allowed()) { synchronized (st) { st.phase = WAIT; st.message = "Нет подходящей сети"; st.bps = 0; } push(false); if (!nap(waitMs)) return false; continue; }
+      if (!net.allowed()) { synchronized (st) { st.phase = WAIT; st.message = L.t("Нет подходящей сети"); st.bps = 0; } push(false); if (!nap(waitMs)) return false; continue; }
       String why;
       try {
         int r = once(it, dst, pt, base);
@@ -468,19 +468,19 @@ public class ModelStore {
         if (r == R_FATAL || r == R_CANCEL) return false;
         why = lastWhy;
       } catch (IOException e) { why = e.getClass().getSimpleName() + (e.getMessage() == null ? "" : ": " + e.getMessage()); }
-      synchronized (st) { st.phase = RETRY; st.retryIn = backoff / 1000; st.message = "Связь прервалась (" + why + ") · повтор через " + Math.max(1, backoff / 1000) + " с"; st.bps = 0; }
+      synchronized (st) { st.phase = RETRY; st.retryIn = backoff / 1000; st.message = L.f("Связь прервалась (%s) · повтор через %d с", why, Math.max(1, backoff / 1000)); st.bps = 0; }
       push(true);
       if (!nap(backoff)) return false;
       backoff = Math.min(maxBackoffMs, backoff * 2);
     }
     synchronized (st) { st.done = base + it.size; }
     if (!it.archive) { push(true); return true; }
-    synchronized (st) { st.phase = UNPACK; st.message = "Распаковка " + it.path; }
+    synchronized (st) { st.phase = UNPACK; st.message = L.f("Распаковка %s", it.path); }
     push(true);
     try { unpack(it, dst); }
-    catch (IOException e) { fail(it, "распаковка: " + e.getMessage()); dst.delete(); return false; }
+    catch (IOException e) { fail(it, L.f("распаковка: %s", e.getMessage())); dst.delete(); return false; }
     for (String[] c : it.check)
-      if (!fileOk(new File(dir, c[0]), -1, c[1], 2)) { fail(it, "после распаковки не сошёлся " + c[0]); return false; }
+      if (!fileOk(new File(dir, c[0]), -1, c[1], 2)) { fail(it, L.f("после распаковки не сошёлся %s", c[0])); return false; }
     dst.delete();
     push(true);
     return true;
@@ -516,22 +516,22 @@ public class ModelStore {
         byte[] b = new byte[1 << 16]; int n;
         while ((n = in.read(b)) > 0) {
           out.write(b, 0, n); md.update(b, 0, n); have += n; since += n;
-          if (have > it.size) { lastWhy = "сервер прислал больше, чем в манифесте"; pt.delete(); return R_RETRY; }
+          if (have > it.size) { lastWhy = L.t("сервер прислал больше, чем в манифесте"); pt.delete(); return R_RETRY; }
           if (since >= (1 << 20)) {
             since = 0;
             long now = System.nanoTime();
             synchronized (st) { st.done = base + have; if (now - t0 >= 2_000_000_000L) { st.bps = (have - b0) * 1_000_000_000L / (now - t0); t0 = now; b0 = have; } }
             push(false);
             if (cancelled) return R_CANCEL;
-            if (!net.allowed()) { lastWhy = "сеть пропала"; return R_RETRY; }
+            if (!net.allowed()) { lastWhy = L.t("сеть пропала"); return R_RETRY; }
           }
         }
       } catch (IOException e) { if (cancelled) return R_CANCEL; throw e; }
       finally { c.disconnect(); cur = null; }
-      if (have < it.size) { lastWhy = "обрыв на " + mb(have) + " МБ"; return R_RETRY; }
+      if (have < it.size) { lastWhy = L.f("обрыв на %s МБ", mb(have)); return R_RETRY; }
     }
     String got = hex(md.digest());
-    if (!got.equalsIgnoreCase(it.sha256)) { pt.delete(); fail(it, "хэш не сошёлся"); return R_FATAL; }
+    if (!got.equalsIgnoreCase(it.sha256)) { pt.delete(); fail(it, L.t("хэш не сошёлся")); return R_FATAL; }
     Files.move(pt.toPath(), dst.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     remember(rel(dst), dst.length(), dst.lastModified(), got);
     return R_OK;
@@ -578,9 +578,9 @@ public class ModelStore {
     switch (s.phase) {
       case DOWN: {
         int pct = s.total > 0 ? (int) (s.done * 100 / s.total) : 0;
-        return "Загрузка " + pct + " % · " + mb(s.done) + " из " + mb(s.total) + " МБ" + (s.bps > 0 ? " · " + mb(s.bps) + " МБ/с" : "") + (s.file.isEmpty() ? "" : " · " + s.file);
+        return L.f("Загрузка %d %% · %s из %s МБ", pct, mb(s.done), mb(s.total)) + (s.bps > 0 ? L.f(" · %s МБ/с", mb(s.bps)) : "") + (s.file.isEmpty() ? "" : " · " + s.file);
       }
-      case WAIT: return "Ждём сеть · скачано " + mb(s.done) + " из " + mb(s.total) + " МБ";
+      case WAIT: return L.f("Ждём сеть · скачано %s из %s МБ", mb(s.done), mb(s.total));
       default: return s.message;
     }
   }

@@ -147,17 +147,17 @@ public class Cloud {
 
   /** Убрать один ключ. Рабочим становится следующий; ключей не осталось — облако выключено. */
   public String removeKey(String k) {
-    if (k == null) return "ключа нет";
+    if (k == null) return L.t("ключа нет");
     String id = idOf(k);
     synchronized (io) {
-      if (!keys.remove(k)) return "ключа " + id + " нет";
+      if (!keys.remove(k)) return L.f("ключа %s нет", id);
       keyNote.remove(k);
       key = keys.isEmpty() ? null : keys.get(0);
       if (key == null) models = null;
       ready = key != null && models != null && models.length > 0;
       save();
     }
-    return "ключ " + id + " убран" + (key == null ? " — ключей не осталось, облако выключено" : ", запросы идут с " + keyId());
+    return key == null ? L.f("ключ %s убран — ключей не осталось, облако выключено", id) : L.f("ключ %s убран, запросы идут с %s", id, keyId());
   }
 
   /** OpenRouter не принял рабочий ключ (401, 402): пометить его, отправить в конец списка и взять
@@ -165,7 +165,7 @@ public class Cloud {
   boolean useNextKey(int code) {
     synchronized (io) {
       String bad = key; if (bad == null) return false;
-      keyNote.put(bad, "не принят OpenRouter: HTTP " + code + " · " + new java.text.SimpleDateFormat("HH:mm", Locale.ROOT).format(new Date()));
+      keyNote.put(bad, L.f("не принят OpenRouter: HTTP %d · %s", code, new java.text.SimpleDateFormat("HH:mm", Locale.ROOT).format(new Date())));
       String next = null;
       for (String k : keys) if (!keyNote.containsKey(k)) { next = k; break; }
       if (next == null) return false;
@@ -174,7 +174,7 @@ public class Cloud {
       key = next;
       save();
     }
-    lastError = "ключ не принят (HTTP " + code + "), дальше — с " + keyId();
+    lastError = L.f("ключ не принят (HTTP %d), дальше — с %s", code, keyId());
     return true;
   }
   public int modelCount() { return models == null ? 0 : models.length; }
@@ -302,15 +302,15 @@ public class Cloud {
   public String configure(String newKey) {
     if (newKey == null || newKey.trim().isEmpty()) {
       synchronized (io) { keys.clear(); keyNote.clear(); key = null; models = null; ready = false; save(); }
-      return "ключи убраны";
+      return L.t("ключи убраны");
     }
     String k = newKey.trim();
-    synchronized (io) { if (keys.contains(k)) return "ключ " + idOf(k) + " уже есть — на устройстве ничего не изменилось"; }
+    synchronized (io) { if (keys.contains(k)) return L.f("ключ %s уже есть — на устройстве ничего не изменилось", idOf(k)); }
     List<Found> found = fetchAll(k);                   // сеть — без замка
-    if (found == null) return "ключ не проверен: " + lastError + " — на устройстве ничего не изменилось";
+    if (found == null) return L.f("ключ не проверен: %s — на устройстве ничего не изменилось", lastError);
     List<Found> free = new ArrayList<>();
     for (Found f : found) if (f.id.endsWith(":free") && f.price) free.add(f);
-    if (free.isEmpty()) return "ключ принят, но бесплатных моделей не нашлось — прежние настройки оставлены";
+    if (free.isEmpty()) return L.t("ключ принят, но бесплатных моделей не нашлось — прежние настройки оставлены");
     String was;
     boolean saved;
     boolean spare;
@@ -329,9 +329,9 @@ public class Cloud {
       ready = true;
       saved = save();
     }
-    return (spare ? "ключ " + idOf(k) + " сохранён запасным" : "ключ сохранён") + ", бесплатных моделей: " + free.size() + ", первой пойдёт " + next()
-         + (saved ? "" : " — ВНИМАНИЕ: записать файл не вышло: " + lastError)
-         + (was.isEmpty() || !pick.isEmpty() ? "" : "; закреплённая «" + was + "» из бесплатных пропала, закрепление снято");
+    return (spare ? L.f("ключ %s сохранён запасным", idOf(k)) : L.t("ключ сохранён")) + L.f(", бесплатных моделей: %d, первой пойдёт %s", free.size(), next())
+         + (saved ? "" : L.f(" — ВНИМАНИЕ: записать файл не вышло: %s", lastError))
+         + (was.isEmpty() || !pick.isEmpty() ? "" : L.f("; закреплённая «%s» из бесплатных пропала, закрепление снято", was));
   }
 
   /** Цена и возможности каждой модели. Раньше их спрашивали только при сохранении ключа, а ключ
@@ -431,7 +431,7 @@ public class Cloud {
       }
       j.put("m", mm);
       try (Writer w = new OutputStreamWriter(new FileOutputStream(tmp), "UTF-8")) { w.write(j.toString()); }
-      if (!tmp.renameTo(dst)) { dst.delete(); if (!tmp.renameTo(dst)) { lastError = "не переименовать " + tmp; return false; } }
+      if (!tmp.renameTo(dst)) { dst.delete(); if (!tmp.renameTo(dst)) { lastError = L.f("не переименовать %s", tmp); return false; } }
       return true;
     } catch (Exception e) { lastError = String.valueOf(e); tmp.delete(); return false; }
   }
@@ -439,7 +439,7 @@ public class Cloud {
   /** Короткое название разговора по его содержанию: с кем и о чём. Нужно, чтобы список разговоров
    *  был читаемым — по первой фразе человека не узнать. */
   public String title(String dialogue) {
-    if (!ready) { lastError = "нет ключа OpenRouter"; return null; }
+    if (!ready) { lastError = L.t("нет ключа OpenRouter"); return null; }
     String sys = "You name chat logs. Reply with a title written in RUSSIAN (Cyrillic letters), 2-5 words, "
         + "no quotes, no final period. It must be a name for the conversation, not a sentence from it and not "
         + "a translation of one. If a person's name appears, use it (for example «Разговор с Марией»). "
@@ -457,7 +457,7 @@ public class Cloud {
 
   /** Перевод одной фразы с контекстом диалога. null — не получилось, причина в lastError. */
   public String better(String srcLang, String tgtLang, String text, String context, String terms) {
-    if (!ready) { lastError = "нет ключа OpenRouter"; return null; }
+    if (!ready) { lastError = L.t("нет ключа OpenRouter"); return null; }
     String sys = "You are an interpreter between " + langName(srcLang) + " and " + langName(tgtLang)
         + ". The input is a speech-recognition transcript and may contain recognition errors; fix obvious ones"
         + " from context. Reply with the translation only, no explanations, no quotes.";
@@ -511,7 +511,7 @@ public class Cloud {
    *  Ответ без единой строки TOPIC или FIX считается отказом модели, и перебор идёт дальше:
    *  бесплатные модели отвечают и словом «null», и переводом вместо разметки. */
   public String review(String transcript, String topic, String glossary, String memo) {
-    if (!ready) { lastError = "нет ключа OpenRouter"; return null; }
+    if (!ready) { lastError = L.t("нет ключа OpenRouter"); return null; }
     String sys = REVIEW_SYS;
     StringBuilder u = new StringBuilder();
     if (topic != null && !topic.isEmpty()) u.append("Topic so far: ").append(topic).append('\n');
@@ -599,7 +599,7 @@ public class Cloud {
    *  офлайновый узел, со словарём и своими словами. Идём лишь по тем моделям, которые сами
    *  сообщили, что принимают изображения. */
   public String image(byte[] jpeg) {
-    if (!ready) { lastError = "нет ключа OpenRouter"; return null; }
+    if (!ready) { lastError = L.t("нет ключа OpenRouter"); return null; }
     String sys = "You read text from images. Return every piece of text visible in the image as plain text, "
         + "preserving line order. Do not translate, do not describe the image, do not add commentary, "
         + "do not answer with the word null or with an explanation. If you cannot read the image, reply "
@@ -639,7 +639,7 @@ public class Cloud {
     int tried = 0, net = 0, skipped = 0;
     for (String model : order(needImage)) {
       long left = deadline - System.currentTimeMillis();
-      if (tried > 0 && left < 8000) { lastError = "не успели за отведённое время: " + lastError; break; }
+      if (tried > 0 && left < 8000) { lastError = L.f("не успели за отведённое время: %s", lastError); break; }
       callDeadline = deadline;        // чтение не должно висеть дольше, чем осталось у перебора
       M m = metaOf(model);
       if (!m.priceOk) { skipped++; continue; }          // цена не подтверждена — не отправляем
@@ -660,8 +660,8 @@ public class Cloud {
       if (++tried >= maxTries) break;
     }
     if (tried == 0 && skipped > 0 && lastFail != F_AUTH)
-      lastError = "цена моделей не подтверждена (" + skipped + " шт.) — нужна связь с OpenRouter";
-    else if (tried == 0 && needImage) lastError = "среди бесплатных нет моделей, принимающих изображения";
+      lastError = L.f("цена моделей не подтверждена (%d шт.) — нужна связь с OpenRouter", skipped);
+    else if (tried == 0 && needImage) lastError = L.t("среди бесплатных нет моделей, принимающих изображения");
     return null;
   }
 
@@ -669,7 +669,7 @@ public class Cloud {
     HttpURLConnection c = null;
     long t0 = System.nanoTime();
     M m = metaOf(model);
-    if (!m.priceOk) { lastError = model + ": цена не подтверждена"; lastFail = F_MODEL; return null; }
+    if (!m.priceOk) { lastError = model + L.t(": цена не подтверждена"); lastFail = F_MODEL; return null; }
     try {
       c = (HttpURLConnection) new URL("https://openrouter.ai/api/v1/chat/completions").openConnection();
       c.setRequestMethod("POST");
@@ -703,11 +703,11 @@ public class Cloud {
       }
       // 403 — не ключ: OpenRouter отвечает им за одну модель (политика данных, модерация), и на
       // устройстве такой ответ inkling-small обрывал весь перебор. Ключ и кредит — это 401 и 402.
-      if (code == 401 || code == 402) { lastError = "ключ или кредит: HTTP " + code; lastFail = F_AUTH; lastAuthCode = code; return null; }
+      if (code == 401 || code == 402) { lastError = L.f("ключ или кредит: HTTP %d", code); lastFail = F_AUTH; lastAuthCode = code; return null; }
       if (code == 429) rateLimited = true;
       if (code >= 400) { lastError = model + ": HTTP " + code; return fail(m, imageUrl != null); }
       JSONArray ch = new JSONObject(sb.toString()).optJSONArray("choices");
-      if (ch == null || ch.length() == 0) { lastError = model + ": пустой ответ"; return fail(m, imageUrl != null); }
+      if (ch == null || ch.length() == 0) { lastError = model + L.t(": пустой ответ"); return fail(m, imageUrl != null); }
       JSONObject choice = ch.getJSONObject(0), msg = choice.getJSONObject("message");
       // content: null у рассуждающих моделей значит «все токены ушли на рассуждение» — optString вернул бы
       // строку «null», и на устройстве она выдавалась за ответ. Различаем и пишем причину.

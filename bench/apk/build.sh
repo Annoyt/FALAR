@@ -28,6 +28,8 @@ mkdir -p $OUT/assets && cp $R/models/manifest.json $OUT/assets/models_manifest.j
 cp $R/data/ocr_words_pt.txt.gz $OUT/assets/ocr_words_pt.txt.gz
 # «Что нового» после обновления (WhatsNew): пункты по версиям, окно показывается без сети.
 cp $A/whatsnew.txt $OUT/assets/whatsnew.txt
+# Надписи по-португальски (L, UiLang): русская строка кода — ключ, перевод — после табуляции.
+cp $A/ui_pt.txt $OUT/assets/ui_pt.txt
 # Шумодав нарезки «только при шуме» (DenoiseGate, GTCRN, MIT, 0,5 МБ) — в APK: включён у всех по умолчанию.
 # Файл из зеркала моделей (tools/models_fetch.py), сверяется с models/manifest.json: в APK — ровно проверенное.
 python3 - "$R/models/manifest.json" "$R/models/denoiser/gtcrn_simple.onnx" <<'PY'

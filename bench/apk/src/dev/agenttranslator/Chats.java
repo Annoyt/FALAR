@@ -92,7 +92,7 @@ public class Chats {
     // с тем же именем и пометкой, — данные не теряются, а файл не растёт без предела.
     if (turns.length() >= KEEP) {
       String was = name, m = memo, mb = memoBy, tp = topic; JSONArray tm = terms; Voices vs = voices;
-      newChat(was.isEmpty() ? "" : was + " · продолжение");
+      newChat(was.isEmpty() ? "" : was + L.t(" · продолжение"));
       // Продолжение — тот же разговор: память, тема и глоссарий переходят в него. Иначе на 500-й
       // реплике уточнитель посреди разговора начинал бы с чистого листа.
       memo = m; memoBy = mb; topic = tp; terms = tm; voices = vs;   // и те же люди

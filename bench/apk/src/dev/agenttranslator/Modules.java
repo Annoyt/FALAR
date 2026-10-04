@@ -38,14 +38,14 @@ public final class Modules {
 
   public static String title(String m) {
     switch (m) {
-      case BASE: return "Перевод речи";
-      case TTS: return "🔊 Озвучка перевода";
-      case OCR: return "📷 Чтение снимков";
-      case LLM: return "🧠 Уточнитель перевода";
-      case CLOUD: return "☁ Облако";
-      case SPEAKER: return "🎤 Отпечаток голоса";
-      case DENOISE: return "🔉 Шумоподавление";
-      case CORPUS: return "📚 Корпус фраз";
+      case BASE: return L.t("Перевод речи");
+      case TTS: return L.t("🔊 Озвучка перевода");
+      case OCR: return L.t("📷 Чтение снимков");
+      case LLM: return L.t("🧠 Уточнитель перевода");
+      case CLOUD: return L.t("☁ Облако");
+      case SPEAKER: return L.t("🎤 Отпечаток голоса");
+      case DENOISE: return L.t("🔉 Шумоподавление");
+      case CORPUS: return L.t("📚 Корпус фраз");
       default: return m;
     }
   }
@@ -53,14 +53,14 @@ public final class Modules {
   /** Что даёт модуль и что пропадёт без него — строкой под переключателем. */
   public static String what(String m) {
     switch (m) {
-      case BASE: return "распознавание речи, перевод pt ↔ ru и словарь — обязательно";
-      case TTS: return "перевод звучит голосом — в наушниках или из динамика; без неё — только на экране";
-      case OCR: return "вывеска, меню, скрин: текст читается на телефоне, перевод — поверх фото";
-      case LLM: return "переводит заново с учётом разговора: род, отсылки, термины; нужен сильный телефон";
-      case CLOUD: return "пересмотр разговора бесплатными моделями OpenRouter, названия разговоров; нужен ключ";
-      case SPEAKER: return "слушание переводит только голоса разговора — тех, кто сказал фразу кнопкой FALAR; чужие обрывки вокруг — нет";
-      case DENOISE: return "теряется меньше фраз и в тишине, и в шуме; сильный шумодав включается сам, когда вокруг шумно";
-      case CORPUS: return "190 тыс. готовых пар фраз из Tatoeba: частые фразы переводятся мгновенно";
+      case BASE: return L.t("распознавание речи, перевод pt ↔ ru и словарь — обязательно");
+      case TTS: return L.t("перевод звучит голосом — в наушниках или из динамика; без неё — только на экране");
+      case OCR: return L.t("вывеска, меню, скрин: текст читается на телефоне, перевод — поверх фото");
+      case LLM: return L.t("переводит заново с учётом разговора: род, отсылки, термины; нужен сильный телефон");
+      case CLOUD: return L.t("пересмотр разговора бесплатными моделями OpenRouter, названия разговоров; нужен ключ");
+      case SPEAKER: return L.t("слушание переводит только голоса разговора — тех, кто сказал фразу кнопкой FALAR; чужие обрывки вокруг — нет");
+      case DENOISE: return L.t("теряется меньше фраз и в тишине, и в шуме; сильный шумодав включается сам, когда вокруг шумно");
+      case CORPUS: return L.t("190 тыс. готовых пар фраз из Tatoeba: частые фразы переводятся мгновенно");
       default: return "";
     }
   }

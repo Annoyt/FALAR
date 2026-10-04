@@ -12,7 +12,7 @@ import android.media.AudioDeviceInfo;
 final class VoiceOut {
   static final int AUTO = 0, RU = 1, PT = 2, BOTH = 3;
   /** Подписи сегмента в настройках — коротко, как у «Слушать PT | RU». */
-  static final String[] LABELS = {"Авто", "RU", "PT", "Оба"};
+  static final String[] LABELS = {L.k("Авто"), "RU", "PT", L.k("Оба")};
   /** Значение в настройках и в стенде (--es voicewhat auto|ru|pt|both). */
   static final String[] KEYS = {"auto", "ru", "pt", "both"};
 

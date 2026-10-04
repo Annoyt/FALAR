@@ -39,6 +39,8 @@
 #   Practice   — «Скажите сами»: что говорить, какие слова распознаны, вердикт по слову карточки;
 #   BackupRules — резервная копия: в облако Google ничего, на новый телефон всё (манифест и res/xml).
 #   Inbox — сказанное во время загрузки на диске: имена, звук туда и обратно, поток до нарезки, что берётся после выгрузки.
+#   L — надписи по-португальски: выбор языка, у каждой надписи кода и пункта whatsnew.txt есть перевод в ui_pt.txt,
+#       вставки совпадают, лишних строк нет; в экранах нет русских строк мимо L.
 # Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
 #   bash bench/apk/test.sh
@@ -49,6 +51,7 @@ A=$(cd "$(dirname "$0")" && pwd); R=$A/../..; J=$R/tools/json.jar; AJ=$R/tools/a
 [ -f "$J" ] || curl -sSL -o "$J" https://repo1.maven.org/maven2/org/json/json/20240303/json-20240303.jar
 rm -rf "$OUT"; mkdir -p "$OUT"
 javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
+  $A/src/dev/agenttranslator/L.java $A/test/LTest.java \
   $A/src/dev/agenttranslator/ModelStore.java $A/test/ModelStoreTest.java \
   $A/src/dev/agenttranslator/Heard.java $A/test/HeardTest.java \
   $A/src/dev/agenttranslator/Updates.java $A/test/UpdatesTest.java \
@@ -107,5 +110,6 @@ java -cp "$OUT:$J" dev.agenttranslator.BackupRulesTest "$A" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.CardsTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.PracticeTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WienerTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.LTest "$A" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.InboxTest || fail=1
 exit $fail

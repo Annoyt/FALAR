@@ -1,0 +1,625 @@
+# Надписи Falar по-португальски (бразильский вариант): «русская строка из кода<TAB>перевод».
+# Русская строка — ровно как в L.t("…") / L.f("…") / L.k("…") в коде, вместе со знаками и пробелами
+# по краям; \n — перевод строки. Вставки %s, %d, %.1f — те же и столько же (порядок — %1$s, %2$s).
+# Число со словом (L.n): «фраза|фразы|фраз<TAB>frase|frases» — при 1 первая форма, иначе вторая.
+# Пункты bench/apk/whatsnew.txt — тоже ключи: окно «Что нового» показывает их на языке надписей.
+# Полноту и вставки проверяет настольный тест LTest (bash bench/apk/test.sh).
+# Стиль: как в Android по-бразильски — «Configurações», «Baixar», «Cancelar»; коротко, на «você».
+ · продолжение	 · continuação
+ключа нет	nenhuma chave
+ключа %s нет	a chave %s não existe
+ключ %s убран — ключей не осталось, облако выключено	chave %s removida — não restou nenhuma chave, a nuvem foi desligada
+ключ %s убран, запросы идут с %s	chave %s removida, as solicitações agora usam %s
+не принят OpenRouter: HTTP %d · %s	recusada pelo OpenRouter: HTTP %d · %s
+ключ не принят (HTTP %d), дальше — с %s	chave recusada (HTTP %d), seguindo com %s
+ключи убраны	chaves removidas
+ключ %s уже есть — на устройстве ничего не изменилось	a chave %s já existe — nada mudou no aparelho
+ключ не проверен: %s — на устройстве ничего не изменилось	chave não verificada: %s — nada mudou no aparelho
+ключ принят, но бесплатных моделей не нашлось — прежние настройки оставлены	chave aceita, mas nenhum modelo gratuito foi encontrado — as configurações anteriores foram mantidas
+ключ %s сохранён запасным	chave %s salva como reserva
+ключ сохранён	chave salva
+, бесплатных моделей: %d, первой пойдёт %s	, modelos gratuitos: %d, o primeiro será %s
+ — ВНИМАНИЕ: записать файл не вышло: %s	 — ATENÇÃO: não foi possível gravar o arquivo: %s
+; закреплённая «%s» из бесплатных пропала, закрепление снято	; o modelo fixado «%s» saiu da lista gratuita, a fixação foi removida
+не переименовать %s	não foi possível renomear %s
+нет ключа OpenRouter	sem chave do OpenRouter
+не успели за отведённое время: %s	não deu tempo: %s
+цена моделей не подтверждена (%d шт.) — нужна связь с OpenRouter	preço dos modelos não confirmado (%d) — é preciso conexão com o OpenRouter
+среди бесплатных нет моделей, принимающих изображения	nenhum modelo gratuito aceita imagens
+: цена не подтверждена	: preço não confirmado
+ключ или кредит: HTTP %d	chave ou crédito: HTTP %d
+: пустой ответ	: resposta vazia
+помню %d · забыл %d	lembrei %d · esqueci %d
+Обе вместе — направление по языку каждой реплики. Микрофон открыт, только пока включено.	As duas juntas — a direção vem do idioma de cada fala. O microfone fica aberto só enquanto estiver ligado.
+Микрофон выключен	Microfone desligado
+Pode falar · слушаю оба языка, направление по реплике	Pode falar · ouvindo os dois idiomas, direção pela fala
+Pode falar · слушаю португальский	Pode falar · ouvindo português
+Говорите · слушаю русский	Говорите · ouvindo russo
+поле пустое — сохранённый ключ не тронут; ключ — кнопкой «как получить ключ»	campo vazio — a chave salva não foi alterada; para conseguir uma chave, toque em «Como obter a chave»
+проверяю ключ у OpenRouter…	verificando a chave no OpenRouter…
+Очистить выученное?	Limpar o aprendido?
+Будет удалено %d накопленных фраз и кэш их звука.\n\nЗатравка и пины останутся: их задавали вы. Выученное копится само, и туда попадает всё подряд — включая прогоны замеров, которые портят разбор слов.	Serão apagadas %d frases acumuladas e o cache de áudio delas.\n\nA base inicial e as fixadas ficam: foi você que definiu. O aprendido se acumula sozinho e pega de tudo — inclusive rodadas de teste, que atrapalham a análise de palavras.
+очистить	limpar
+отмена	cancelar
+Новый разговор	Nova conversa
+Снять камерой	Tirar foto
+Из галереи	Da galeria
+Набрать фразу	Digitar frase
+что перевести	o que traduzir
+перевести	traduzir
+Запуск…	Iniciando…
+Очистить выученное…	Limpar o aprendido…
+Разговоры, слова, настройки	Conversas, palavras, configurações
+Назад	Voltar
+Ещё	Mais
+Слова	Palavras
+Настройки	Configurações
+Модули и файлы	Módulos e arquivos
+Облако	Nuvem
+Журнал	Registro
+из ваших разговоров	das suas conversas
+Разговор от %s	Conversa de %s
+владелец телефона · снимок	dono do telefone · foto
+владелец телефона	dono do telefone
+вы · по-португальски	você · em português
+собеседник	interlocutor
+например, Ана	por exemplo, Ana
+говорит по-русски	fala russo
+говорит по-португальски	fala português
+Собеседник %1$d — %2$s. Пустое поле — снова «собеседник %1$d».	Interlocutor %1$d — %2$s. Campo vazio — volta a ser «interlocutor %1$d».
+Как зовут собеседника %d?	Qual é o nome do interlocutor %d?
+сохранить	salvar
+Удалить звук?	Excluir o áudio?
+удалить	excluir
+Отправить разговор в облако?	Enviar a conversa para a nuvem?
+Для пересмотра в бесплатную модель OpenRouter уйдёт разговор целиком — сейчас %d реплик, не больше 6000 знаков с конца, — включая слова собеседника. Это третья сторона. Спрашиваем один раз; отозвать можно, убрав ключ в «Системе».	Para a revisão, a conversa inteira vai para um modelo gratuito do OpenRouter — agora são %d falas, até 6000 caracteres a partir do fim — incluindo as palavras do interlocutor. É um terceiro. Perguntamos só uma vez; para revogar, remova a chave em «Configurações».
+отправлять	enviar
+Память разговора	Memória da conversa
+изменить	editar
+закрыть	fechar
+ещё…	mais…
+ · по-русски	 · em russo
+ · по-португальски	 · em português
+Кого назвать?	Quem nomear?
+Забыть голоса разговора?	Esquecer as vozes da conversa?
+Слепки голосов (%d) удалятся с телефона. Реплики останутся с подписями. Пока каждый снова не скажет фразу кнопкой FALAR, слушание ничего переводить не будет.	As impressões de voz (%d) serão apagadas do telefone. As falas continuam com os nomes. Até cada um dizer de novo uma frase com o botão FALAR, a escuta não vai traduzir nada.
+забыть	esquecer
+Например: хозяйка квартиры Мария (женщина) показывает мне квартиру; договорились о 2500 реалах в месяц	Por exemplo: a dona do apartamento, Maria (mulher), me mostra o apartamento; combinamos 2500 reais por mês
+Кто с кем говорит, где, о чём договорились, имена — с этим перевод точнее. Вписанное вами автоматика не меняет; пустое поле вернёт ей память.	Quem fala com quem, onde, o que foi combinado, nomes — com isso a tradução fica mais precisa. O que você escrever a automação não muda; campo vazio devolve a memória para ela.
+Добавить в свои слова?	Adicionar às suas palavras?
+добавить	adicionar
+не сейчас	agora não
+Показать снимок	Mostrar foto
+Исправить текст	Corrigir texto
+Исправить перевод	Corrigir tradução
+Послушать, как сказали	Ouvir como foi dito
+Произнести ещё раз	Falar de novo
+Сообщить о переводе	Reportar tradução
+Удалить реплику	Excluir fala
+Перенести в другой разговор	Mover para outra conversa
+как надо было перевести	como deveria ser traduzido
+Уйдут эта реплика, ваш вариант, версия приложения и модель телефона; остальной разговор — нет.	Serão enviados esta fala, a sua versão, a versão do app e o modelo do telefone; o resto da conversa, não.
+ Реплика длинная — уйдёт её начало.	 A fala é longa — só o começo será enviado.
+\nTelegram: сообщение увидит только разработчик, ответ придёт туда же.	\nTelegram: só o desenvolvedor verá a mensagem; a resposta chega por lá.
+\nGitHub: открытое обсуждение, видно всем, нужен аккаунт GitHub.	\nGitHub: discussão pública, visível para todos, precisa de conta no GitHub.
+Что-то не работает	Algo não funciona
+Идея или пожелание	Ideia ou sugestão
+Версия приложения и модель телефона подставятся сами.	A versão do app e o modelo do telefone são incluídos automaticamente.
+Написать разработчику	Escrever ao desenvolvedor
+Исправить сказанное	Corrigir o que foi dito
+и запомнить как пин	e fixar esta tradução
+Пин: та же русская фраза дальше переводится этим текстом мгновенно и без сети. Числа и имена в правке должны совпасть с исходником, иначе пин не ляжет, а правка сохранится.	Fixar: a mesma frase em russo passa a ser traduzida com este texto na hora e sem internet. Números e nomes na correção precisam coincidir com o original; senão a fixação não entra, mas a correção fica salva.
+без имени	sem nome
+%s реплик	%s falas
+＋ в новый разговор	＋ para uma nova conversa
+Куда перенести	Mover para onde
+ · pt-BR ⇄ ru без сети	 · pt-BR ⇄ ru sem internet
+＋  Новый разговор	＋  Nova conversa
+Разговоры	Conversas
+новый разговор	nova conversa
+Без имени	Sem nome
+пока пусто	ainda vazia
+Пока пусто	Ainda vazio
+долгое нажатие — переименовать или удалить	toque longo — renomear ou excluir
+Переименовать	Renomear
+Удалить	Excluir
+Название разговора	Nome da conversa
+Удалить разговор?	Excluir a conversa?
+\n\nУдаление окончательное: по разговорам идёт разбор слов для заучивания, и удалённый из него выпадет.	\n\nA exclusão é definitiva: as conversas alimentam a análise de palavras para estudo, e a excluída sai dela.
+продолжаем · перевод улучшен	continuando · tradução melhorada
+продолжаем	continuando
+Улучшить	Melhorar
+Запомнить	Memorizar
+Меню реплики	Menu da fala
+ранее	antes
+Удерживайте и говорите — по-португальски или по-русски	Segure e fale — em português ou em russo
+Снимок, текст	Foto, texto
+Снимок или набрать фразу	Foto ou digitar frase
+Слушать	Ouvir
+под голос	ajusta à voz
+под голос · сейчас %+.0f дБ	ajusta à voz · agora %+.0f dB
+выключено — действует ползунок	desligado — vale o controle deslizante
+Снимок → в облако	Foto → para a nuvem
+Снимок с текстом	Foto com texto
+снять камерой	tirar foto
+из галереи	da galeria
+📷 снимков получено: %d — прочитаю по порядку, как загружусь	📷 fotos recebidas: %d — vou ler na ordem quando terminar de carregar
+📷 снимок получен — прочитаю, как загружусь	📷 foto recebida — vou ler quando terminar de carregar
+Отправить снимок в облако?	Enviar a foto para a nuvem?
+Модели офлайн-чтения ещё не скачаны. 	Os modelos de leitura offline ainda não foram baixados. 
+Снимок (%d КБ) уйдёт бесплатной модели OpenRouter — это третья сторона. Перевод потом считается здесь, на устройстве.	A foto (%d KB) vai para um modelo gratuito do OpenRouter — é um terceiro. A tradução depois é feita aqui, no aparelho.
+отправить	enviar
+касание абзаца — его текст здесь · удержание — оригинал · щипок — крупнее	toque num parágrafo — o texto aparece aqui · segure — original · pinça — ampliar
+(оставлено как есть: не португальский или служебное слово)	(mantido como está: não é português ou é uma palavra funcional)
+Фразы	Frases
+Знаю	Já sei
+встречалось не меньше	apareceu pelo menos
+раз	vezes
+Слова и фразы из ваших разговоров, от частых к редким	Palavras e frases das suas conversas, das frequentes às raras
+Своё слово: отель, улица, имя	Sua palavra: hotel, rua, nome
+Добавить своё слово	Adicionar sua palavra
+Повторение	Revisão
+▶  Начать	▶  Começar
+На слух	De ouvido
+Вслух	Em voz alta
+Ещё раз	De novo
+Показать	Mostrar
+Держите и говорите	Segure e fale
+Не знаю	Não sei
+Понял	Entendi
+Не понял	Não entendi
+Послушать	Ouvir
+Дальше	Próximo
+Говорите…	Fale…
+Закрыть	Fechar
+Ещё раз — держите	De novo — segure
+В этом режиме — всё	Nada mais neste modo
+без звука: нет ни живой записи, ни озвучки — повторите вслух	sem áudio: não há gravação real nem voz — revise em voz alta
+без перевода: повторите на слух или подождите, пока переведётся	sem tradução: revise de ouvido ou espere a tradução
+Ещё %d — %s	Mais %d — %s
+нечего повторять	nada para revisar
+На сегодня всё	Por hoje é só
+Осталось %d	Faltam %d
+вслух	em voz alta
+на слух	de ouvido
+ · ещё %d — %s	 · mais %d — %s
+ · живой голос	 · voz real
+голос приложения	voz do app
+Скажите по-португальски — держите кнопку, пока говорите	Diga em português — segure o botão enquanto fala
+Скажите всю фразу — держите кнопку, пока говорите	Diga a frase inteira — segure o botão enquanto fala
+Не расслышал — держите кнопку, пока говорите	Não ouvi — segure o botão enquanto fala
+услышано: «%s»	ouvido: «%s»
+знаю	já sei
+движок ещё грузится	o motor ainda está carregando
+Слова · %d	Palavras · %d
+Фразы · %d	Frases · %d
+Знаю · %d	Já sei · %d
+Произнести	Pronunciar
+Скажите сами:	Diga você:
+Вы	Você
+Они	Eles
+Примеров в разговорах нет	Sem exemplos nas conversas
+ · играет вся реплика	 · toca a fala inteira
+Голос	Voz
+Озвучка	Narração
+снова учить	estudar de novo
+Что нового в %s ›	Novidades da %s ›
+Проверить	Verificar
+Обновить	Atualizar
+Запуск сервиса…	Iniciando o serviço…
+Язык	Idioma
+Язык интерфейса	Idioma da interface
+надписи Falar; перевод разговора не меняется	textos do Falar; a tradução da conversa não muda
+Как в системе	Do sistema
+Экран разговора	Tela da conversa
+Размер текста	Tamanho do texto
+Транскрипция и у собеседника	Transcrição também nas falas do interlocutor
+русскими буквами под словами его реплик	em letras russas sob as palavras das falas dele
+Пока вы читаете вслух	Enquanto você lê em voz alta
+микрофон молчит, чтобы не перевести вас же	o microfone fica mudo para não traduzir você mesmo
+Пока держу	Segurando
+Пока видно	Visível
+«Пока держу» — пока палец на крупном тексте; «пока видно» — пока видна транскрипция.	«Segurando» — enquanto o dedo está no texto grande; «Visível» — enquanto a transcrição aparece.
+Микрофон и звук	Microfone e som
+Чувствительность — авто	Sensibilidade — automática
+вручную	manual
+Микрофон	Microfone
+Телефона	Do telefone
+Наушников	Do fone
+Микрофон наушников?	Microfone do fone de ouvido?
+Наушники берут звук по профилю гарнитуры, и тогда вывод в них падает до телефонного качества. Годится, если телефон в кармане, а собеседник рядом с вами.	O fone capta o som pelo perfil de headset, e aí o áudio nele cai para qualidade de ligação. Serve se o telefone está no bolso e o interlocutor está ao seu lado.
+включить	ligar
+Пауза до озвучки	Pausa antes da voz
+перевод виден сразу, голос ждёт тишины	a tradução aparece na hora, a voz espera o silêncio
+Что озвучивать	O que narrar
+RU — перевод вам, PT — собеседнику	RU — tradução para você, PT — para o interlocutor
+«Авто»: в наушниках — только русский, через динамик — оба. Португальский в ваших наушниках собеседник не услышит, он читает крупный текст.	«Auto»: no fone de ouvido — só russo; pelo alto-falante — os dois. O interlocutor não ouve o português no seu fone; ele lê o texto grande.
+Хранить звук собеседников	Guardar o áudio dos interlocutores
+Португальская речь собеседника остаётся в разговоре на этом телефоне: реплику можно переслушать из её меню. Удаляется вместе с разговором и в облачную копию не попадает.	A fala em português do interlocutor fica na conversa neste telefone: dá para ouvir de novo pelo menu da fala. É apagada junto com a conversa e não vai para o backup na nuvem.
+Удалить звук, оставить текст	Excluir o áudio, manter o texto
+Перевод	Tradução
+Перевод фраз	Tradução de frases
+сразу первый вариант или лучший из нескольких	a primeira opção na hora ou a melhor entre várias
+Быстрее	Mais rápida
+Точнее	Mais precisa
+«Точнее» — Falar сравнивает четыре варианта фразы: перевод заметно лучше примерно у каждой десятой, ждать чуть дольше.	«Mais precisa» — o Falar compara quatro versões da frase: a tradução fica bem melhor em cerca de uma a cada dez, e a espera é um pouco maior.
+Уточнитель в фоне	Refinador em segundo plano
+переводит заново с учётом разговора	traduz de novo levando em conta a conversa
+Разбор контекста	Análise de contexto
+как часто уточнитель пересматривает реплики	com que frequência o refinador revisa as falas
+По кнопке	No botão
+реплик между разборами	falas entre análises
+Приложение	Aplicativo
+ошибка или идея — в Telegram или на GitHub	erro ou ideia — no Telegram ou no GitHub
+Модули	Módulos
+Стоп	Parar
+Загрузка	Download
+Качать и по мобильной сети	Baixar também pela rede móvel
+иначе — только по Wi-Fi	senão — só pelo Wi-Fi
+Проверить файлы	Verificar arquivos
+Удалить неиспользуемые	Excluir os não usados
+Облегчить перевод	Deixar a tradução mais leve
+Falar ходит только к бесплатным моделям OpenRouter (:free, цена 0 в каждом запросе). Деньги с ключей не списываются.	O Falar usa só os modelos gratuitos do OpenRouter (:free, preço 0 em cada solicitação). Nada é cobrado das chaves.
+Ключи	Chaves
+Добавить ключ	Adicionar chave
+Сохранить	Salvar
+Запрос идёт с первого рабочего ключа; если OpenRouter его не принял — со следующего. Лимит бесплатных запросов OpenRouter считает на аккаунт: второй ключ его не поднимет.	A solicitação usa a primeira chave que funciona; se o OpenRouter não aceitar, usa a próxima. O limite gratuito do OpenRouter é por conta: uma segunda chave não aumenta o limite.
+Как получить ключ	Como obter a chave
+Куда пойдёт запрос	Para onde vai a solicitação
+Модели и маршрут	Modelos e rota
+Пересмотр разговора	Revisão da conversa
+реплик между пересмотрами. Разговор уходит в облако целиком, до 6000 знаков с конца; согласие спрашивается один раз.	falas entre revisões. A conversa vai inteira para a nuvem, até 6000 caracteres a partir do fim; o consentimento é pedido uma vez.
+Облако выбирает	A nuvem escolhe
+«Точнее» — сначала крупные модели: ответ до полуминуты, зато больше правок и деталей в памяти разговора.	«Mais precisa» — primeiro os modelos grandes: resposta em até meio minuto, mas com mais correções e detalhes na memória da conversa.
+Ключ %s	Chave %s
+рабочий · запросы идут с него	em uso · as solicitações vão por ela
+запасной	reserva
+Убрать ключ	Remover chave
+Убрать ключ %s?	Remover a chave %s?
+Запросы пойдут со следующего ключа. Ключ на сайте OpenRouter останется — его можно вставить снова.	As solicitações vão pela próxima chave. A chave continua no site do OpenRouter — dá para colar de novo.
+Облако перестанет работать: «Улучшить» облаком, пересмотр разговора и названия разговоров. Ключ на сайте OpenRouter останется — его можно вставить снова.	A nuvem vai parar de funcionar: «Melhorar» pela nuvem, revisão da conversa e nomes das conversas. A chave continua no site do OpenRouter — dá para colar de novo.
+убрать	remover
+Ключа нет — названия разговоров и «Улучшить» облаком выключены	Sem chave — nomes das conversas e «Melhorar» pela nuvem estão desligados
+Моделей нет — сначала ключ	Sem modelos — primeiro a chave
+Авто → %s	Auto → %s
+Закреплена %s	Fixado: %s
+бесплатных моделей: %d	modelos gratuitos: %d
+ · последней отвечала %s	 · o último a responder foi %s
+1. Зарегистрируйтесь на openrouter.ai — можно через Google.\n2. Откройте «Keys» и нажмите «Create Key». Лимит расходов ключа можно поставить 0,01 $: Falar ходит только к бесплатным моделям, лимит лишь страхует.\n3. Скопируйте ключ (sk-or-…), вставьте в поле и нажмите «сохранить».\n\nБесплатно: до 50 запросов в сутки и 20 в минуту. Один ключ можно дать нескольким людям, но лимит у них общий — вдвоём-втроём его хватает на пересмотр разговоров, но не с запасом.\n\nЕсли один раз пополнить счёт на 10 $ (с комиссией около 11 $), бесплатных запросов станет 1000 в сутки — в 20 раз больше, и насовсем, даже когда деньги на счёте кончатся. Отказов «превышен лимит» станет намного меньше, и облако будет отвечать почти всегда. Деньги Falar при этом не тратит.	1. Cadastre-se em openrouter.ai — dá para entrar com o Google.\n2. Abra «Keys» e toque em «Create Key». Você pode pôr o limite de gastos da chave em 0,01 $: o Falar usa só modelos gratuitos, o limite é apenas uma garantia.\n3. Copie a chave (sk-or-…), cole no campo e toque em «salvar».\n\nGrátis: até 50 solicitações por dia e 20 por minuto. Uma chave pode ser compartilhada com várias pessoas, mas o limite é comum — para duas ou três pessoas dá para revisar conversas, mas sem folga.\n\nSe você colocar 10 $ na conta uma única vez (com a taxa, cerca de 11 $), as solicitações gratuitas passam a 1000 por dia — 20 vezes mais, para sempre, mesmo quando o saldo acabar. As recusas por «limite excedido» ficam bem mais raras e a nuvem responde quase sempre. O Falar não gasta esse dinheiro.
+Ключ OpenRouter	Chave do OpenRouter
+открыть openrouter.ai	abrir openrouter.ai
+моделей нет — сначала сохраните ключ	sem modelos — salve uma chave primeiro
+авто	auto
+принимает картинки	aceita imagens
+текстовая	só texto
+ · отраслевая	 · especializado
+ · ответов %d, отказов %d	 · respostas %d, recusas %d
+%.1f с	%.1f s
+ · закреплена	 · fixado
+Куда пойдёт запрос · точнее	Para onde vai a solicitação · mais precisa
+Куда пойдёт запрос · быстрее	Para onde vai a solicitação · mais rápida
+Пауза до озвучки: нет — говорить сразу	Pausa antes da voz: nenhuma — falar na hora
+Пауза до озвучки: %.2f с тишины	Pausa antes da voz: %.2f s de silêncio
+Нужен доступ к микрофону	É preciso acesso ao microfone
+Новое	Novidades
+Исправлено	Correções
+Что нового в Falar %s	Novidades do Falar %s
+Понятно	Entendi
+Можно говорить — переведу, как загружусь	Pode falar — traduzo quando terminar de carregar
+Удерживайте и говорите — переведу, как загружусь	Segure e fale — traduzo quando terminar de carregar
+Услышано: «%s» — переведу, как загружусь	Ouvido: «%s» — traduzo quando terminar de carregar
+Pode falar · здесь появится перевод	Pode falar · a tradução vai aparecer aqui
+Микрофон выключен — включите «Слушать» или удержание	Microfone desligado — ligue «Ouvir» ou segure o botão
+обновления проверяются раз в сутки	as atualizações são verificadas uma vez por dia
+Вышла Falar %s	Saiu o Falar %s
+Загружаю движки…	Carregando os motores…
+Набрать	Digitar
+Удалить неиспользуемые · %s МБ	Excluir os não usados · %s MB
+Неиспользуемых нет	Nada sem uso
+включено %d из %d	ligados %d de %d
+ · докачивается	 · baixando o resto
+ · все модели установлены	 · todos os modelos instalados
+ · не всё скачано	 · nem tudo foi baixado
+Удалить неиспользуемые модели?	Excluir os modelos não usados?
+частично скачанные	baixados em parte
+Файлы выключенных модулей: %s. Освободится %s МБ. Если модуль потом включить, его файлы скачаются заново.	Arquivos dos módulos desligados: %s. Serão liberados %s MB. Se o módulo for ligado depois, os arquivos dele serão baixados de novo.
+Переводчик разговора: бразильский португальский ↔ русский, без интернета.	Tradutor de conversa: português do Brasil ↔ russo, sem internet.
+Приложение слушает микрофон и распознаёт речь всех, кто рядом, — предупредите собеседника. Распознавание, перевод и голос работают на телефоне: в интернет ничего не уходит, кроме загрузки моделей сейчас и облачного пересмотра, который включается отдельно и с вашего согласия.	O app ouve o microfone e reconhece a fala de todos por perto — avise o interlocutor. Reconhecimento, tradução e voz funcionam no telefone: nada vai para a internet, exceto o download dos modelos agora e a revisão na nuvem, que é ligada à parte e com o seu consentimento.
+1. Микрофон	1. Microfone
+разрешить микрофон	permitir o microfone
+2. Что нужно	2. O que é preciso
+3. Модели	3. Modelos
+качать и по мобильной сети: ВКЛ	baixar também pela rede móvel: SIM
+качать и по мобильной сети: выкл	baixar também pela rede móvel: não
+скачать	baixar
+стоп	parar
+Нужен Wi-Fi без учёта трафика — или включите «качать и по мобильной сети»	É preciso Wi-Fi sem limite de dados — ou ligue «baixar também pela rede móvel»
+✓ разрешён	✓ permitido
+Доступ запрещён — включите микрофон в настройках приложения.	Acesso negado — ligue o microfone nas configurações do app.
+Без микрофона слушать нечем. Разрешение спросит система.	Sem microfone não há o que ouvir. O sistema vai pedir a permissão.
+открыть настройки приложения	abrir as configurações do app
+Модели — после разрешения микрофона: перевод речи и выбранные модули.	Modelos — depois de permitir o microfone: tradução da fala e os módulos escolhidos.
+Проверяю, что уже лежит на телефоне…	Verificando o que já está no telefone…
+✓ модели на месте	✓ modelos no lugar
+Скачать %s МБ: перевод речи и отмеченные модули. Качается с Hugging Face один раз; по умолчанию только по Wi-Fi. Можно остановить и продолжить позже с того же места.	Baixar %s MB: tradução da fala e os módulos marcados. Baixa do Hugging Face uma vez; por padrão só pelo Wi-Fi. Dá para parar e continuar depois do mesmo ponto.
+продолжить	continuar
+скачать %s МБ	baixar %s MB
+Проверяю файлы…	Verificando arquivos…
+Облегчить перевод · %s МБ	Deixar a tradução mais leve · %s MB
+Проверяю…	Verificando…
+Перевод займёт примерно на 500 МБ меньше памяти телефона, а уточнителю чаще хватит места рядом с ним. Скачать %s МБ; после проверки прежние файлы перевода удалятся и освободят около 736 МБ. Новый способ заработает при следующем запуске приложения. Переводы те же почти всегда: на проверке совпали 96 %% фраз.	A tradução vai ocupar cerca de 500 MB a menos de memória, e o refinador vai caber ao lado dela com mais frequência. Baixar %s MB; depois da verificação, os arquivos antigos da tradução serão apagados e liberarão cerca de 736 MB. O novo modo passa a valer na próxima vez que o app abrir. As traduções ficam quase sempre iguais: no teste, 96 %% das frases coincidiram.
+вы	você
+ · уточнено	 · refinado
+по-португальски — %s	em português — %s
+по-русски — %s	em russo — %s
+Кто говорит: %s.	Quem fala: %s.
+женщина	mulher
+мужчина	homem
+мужчина и женщина	homem e mulher
+Говорит один человек	Fala uma pessoa
+Говорят двое	Falam duas pessoas
+Говорят трое	Falam três pessoas
+Говорят четверо	Falam quatro pessoas
+Говорят пятеро	Falam cinco pessoas
+Говорят шестеро	Falam seis pessoas
+Говорят %d человек	Falam %d pessoas
+Собеседник %d	Interlocutor %d
+%s (собеседник %d)	%s (interlocutor %d)
+по-русски	em russo
+по-португальски	em português
+Проверяю файлы моделей, это чтение всего с диска…	Verificando os arquivos dos modelos — isso lê tudo do disco…
+Проверено: все файлы на месте, %s МБ за %.1f с	Verificado: todos os arquivos no lugar, %s MB em %.1f s
+Проверено: не сошлось или нет %d — %s	Verificado: falhou ou falta %d — %s
+ и другие	 e outros
+Проверяю место и файлы	Verificando espaço e arquivos
+Мало места: нужно ещё %s МБ	Pouco espaço: faltam %s MB
+место: %s	espaço: %s
+Остановлено: скачано %s из %s МБ, продолжится с этого места	Parado: baixados %s de %s MB, continua deste ponto
+Готово: %d из %d	Pronto: %d de %d
+Не скачалось: %d из %d — %s	Não baixou: %d de %d — %s
+Нет подходящей сети	Sem rede adequada
+Связь прервалась (%s) · повтор через %d с	A conexão caiu (%s) · nova tentativa em %d s
+Распаковка %s	Descompactando %s
+распаковка: %s	descompactação: %s
+после распаковки не сошёлся %s	não confere depois de descompactar: %s
+сервер прислал больше, чем в манифесте	o servidor mandou mais do que o manifesto
+сеть пропала	a rede caiu
+обрыв на %s МБ	interrompido em %s MB
+хэш не сошёлся	o hash não confere
+Загрузка %d %% · %s из %s МБ	Baixando %d %% · %s de %s MB
+ · %s МБ/с	 · %s MB/s
+Ждём сеть · скачано %s из %s МБ	Esperando rede · baixados %s de %s MB
+Перевод речи	Tradução da fala
+🔊 Озвучка перевода	🔊 Voz da tradução
+📷 Чтение снимков	📷 Leitura de fotos
+🧠 Уточнитель перевода	🧠 Refinador da tradução
+☁ Облако	☁ Nuvem
+🎤 Отпечаток голоса	🎤 Impressão de voz
+🔉 Шумоподавление	🔉 Redução de ruído
+📚 Корпус фраз	📚 Corpus de frases
+распознавание речи, перевод pt ↔ ru и словарь — обязательно	reconhecimento de fala, tradução pt ↔ ru e dicionário — obrigatório
+перевод звучит голосом — в наушниках или из динамика; без неё — только на экране	a tradução é falada em voz — no fone ou no alto-falante; sem isso — só na tela
+вывеска, меню, скрин: текст читается на телефоне, перевод — поверх фото	placa, cardápio, print: o texto é lido no telefone, a tradução aparece sobre a foto
+переводит заново с учётом разговора: род, отсылки, термины; нужен сильный телефон	traduz de novo levando em conta a conversa: gênero, referências, termos; precisa de um telefone potente
+пересмотр разговора бесплатными моделями OpenRouter, названия разговоров; нужен ключ	revisão da conversa por modelos gratuitos do OpenRouter, nomes das conversas; precisa de chave
+слушание переводит только голоса разговора — тех, кто сказал фразу кнопкой FALAR; чужие обрывки вокруг — нет	a escuta traduz só as vozes da conversa — de quem disse uma frase com o botão FALAR; trechos de outras pessoas por perto, não
+теряется меньше фраз и в тишине, и в шуме; сильный шумодав включается сам, когда вокруг шумно	perde menos frases no silêncio e no barulho; a redução forte liga sozinha quando o ambiente está barulhento
+190 тыс. готовых пар фраз из Tatoeba: частые фразы переводятся мгновенно	190 mil pares de frases prontos do Tatoeba: frases comuns são traduzidas na hora
+устаревших выброшено %d · 	descartados por obsoletos %d · 
+словарь %d	dicionário %d
+ + корпус %d	 + corpus %d
+ · пины %d · выучено %d (быстрых %d)	 · fixadas %d · aprendidas %d (rápidas %d)
+%s · %d из %d	%s · %d de %d
+Загружаю модели · %s · ещё ≈ %d с	Carregando modelos · %s · faltam ≈ %d s
+Улучшаю в облаке · ещё ≈ %d с	Melhorando na nuvem · faltam ≈ %d s
+Улучшаю в облаке · дольше обычного · %d с	Melhorando na nuvem · mais demorado que o normal · %d s
+читаете вслух · микрофон не слушает	lendo em voz alta · o microfone não ouve
+транскрипция скрыта · касание вернёт	transcrição oculta · toque para mostrar
+улучшить нельзя: %s	não dá para melhorar: %s
+Кто говорит — пока не ясно.	Quem fala — ainda não está claro.
+\nГолосов в разговоре нет: пусть каждый скажет фразу кнопкой FALAR — тогда слушание переводит только их.	\nSem vozes na conversa: cada pessoa diz uma frase com o botão FALAR — aí a escuta traduz só essas vozes.
+\nИмена: 	\nNomes: 
+\n\nКлючевые детали — пока нет.	\n\nDetalhes-chave — ainda não há.
+\n\nКлючевые детали:\n	\n\nDetalhes-chave:\n
+назвать собеседника…	nomear o interlocutor…
+забыть голоса разговора	esquecer as vozes da conversa
+вернуть память автоматике	devolver a memória para a automação
+добавить имена в свои слова	adicionar os nomes às suas palavras
+забыть подсказки разговора	esquecer as dicas da conversa
+реплика|реплики|реплик	fala|falas
+%d %s, %s МБ	%d %s, %s MB
+включено · пока пусто	ligado · ainda vazio
+включено · %s	ligado · %s
+выключено	desligado
+выключено · хранится с прошлого раза: %s	desligado · guardado da última vez: %s
+Уйдёт записанный звук собеседников: %d %s, %s МБ. Текст разговоров останется. Вернуть звук будет нельзя.	O áudio gravado dos interlocutores será apagado: %d %s, %s MB. O texto das conversas fica. Não será possível recuperar o áudio.
+ключ|ключа|ключей	chave|chaves
+ · пересмотр по кнопке	 · revisão no botão
+ · пересмотр каждые %d реплик	 · revisão a cada %d falas
+нужен ключ	precisa de chave
+ключ есть	chave ok
+ключей: %d	chaves: %d
+выключен · файлы на месте	desligado · arquivos no lugar
+выключен	desligado
+установлено	instalado
+качается	baixando
+ждёт Wi-Fi	esperando Wi-Fi
+в очереди	na fila
+не скачано	não baixado
+при шуме	com barulho
+%d из %d МБ · %d %%	%d de %d MB · %d %%
+%.1f ГБ	%.1f GB
+%.1f МБ	%.1f MB
+%d МБ	%d MB
+Жду Wi-Fi · осталось %s МБ	Esperando Wi-Fi · faltam %s MB
+Качаю · %s из %s МБ	Baixando · %s de %s MB
+Все модели установлены · %d из %d	Todos os modelos instalados · %d de %d
+Обязательных нет: %d из %d · %s МБ	Faltam obrigatórios: %d de %d · %s MB
+Модулям не хватает %s МБ — докачается само	Faltam %s MB para os módulos — vai baixar sozinho
+вы сказали	você disse
+Собеседник %s	Interlocutor %s
+голос не определён	voz não identificada
+голос не определён · %s	voz não identificada · %s
+За неделю пока пусто: «Скажите сами» — в карточке слова	Nada nesta semana ainda: «Diga você» fica no cartão da palavra
+За неделю: с первой попытки %d из %d	Nesta semana: de primeira %d de %d
+ · сами по-португальски: %d	 · você mesmo em português: %d
+Отмечайте «знаю» в «Словах» и «Фразах» — известное будет повторяться здесь	Marque «já sei» em «Palavras» e «Frases» — o que você sabe será revisado aqui
+Пора повторить: %d · на слух или вслух	Hora de revisar: %d · de ouvido ou em voz alta
+На сегодня всё · следующее %s	Por hoje é só · a próxima %s
+завтра	amanhã
+послезавтра	depois de amanhã
+день|дня|дней	dia|dias
+через %d %s	em %d %s
+получилось · снова %s	deu certo · de novo %s
+не получилось · снова %s	não deu certo · de novo %s
+Разбираю разговоры — в затишье, когда никто не говорит	Analisando as conversas — nas pausas, quando ninguém fala
+Известного пока нет — отмечайте долгим нажатием в «Словах» и «Фразах»	Nada marcado como conhecido — marque com um toque longo em «Palavras» e «Frases»
+Знаю: %d · касание — примеры, долгое — назад в изучение	Já sei: %d · toque — exemplos, longo — voltar a estudar
+раза|раз|раз	vez|vezes
+Повторяющихся фраз пока нет: фраза попадает сюда, когда прозвучала не меньше %d %s	Ainda não há frases repetidas: uma frase entra aqui quando foi dita pelo menos %d %s
+Фразы, сказанные не меньше %d %s: %d · касание — кто и как сказал	Frases ditas pelo menos %d %s: %d · toque — quem disse e como
+Пока нечего показать: нужно, чтобы слово встретилось не меньше %d %s	Ainda não há o que mostrar: a palavra precisa aparecer pelo menos %d %s
+повтора|повторов|повторов	repetição|repetições
+Слова и связки от %d %s: %d · касание — живые примеры, долгое — «знаю»	Palavras e expressões com %d %s ou mais: %d · toque — exemplos reais, longo — «já sei»
+Переводчик	Tradutor
+Загрузка моделей…	Carregando modelos…
+Ошибка манифеста моделей: %s	Erro no manifesto dos modelos: %s
+Нужно скачать модели: %d файлов, %s МБ	É preciso baixar os modelos: %d arquivos, %s MB
+Нужно скачать модели (%s МБ)	É preciso baixar os modelos (%s MB)
+Ошибка: %s	Erro: %s
+Нет моделей. Залейте их в\n%s	Sem modelos. Copie-os para\n%s
+распознавание	reconhecimento
+перевод	tradução
+словарь и разговоры	dicionário e conversas
+озвучка	voz
+Готово. ASR %d · MT %d · TTS %d мс · %s	Pronto. ASR %d · MT %d · TTS %d ms · %s
+Готов. %s	Pronto. %s
+ · слушаю	 · ouvindo
+Обновление установлено	Atualização instalada
+установка не прошла — %s	a instalação falhou — %s
+Слушаю…	Ouvindo…
+движок не готов	o motor não está pronto
+улучшаю прошлый разговор	melhorando a conversa anterior
+поднимаю уточнитель…	iniciando o refinador…
+уточняю перевод	refinando a tradução
+уточняю перевод…	refinando a tradução…
+движок ещё загружается	o motor ainda está carregando
+модули «Облако» и «Уточнитель» выключены	os módulos «Nuvem» e «Refinador» estão desligados
+нет ключа OpenRouter, а контекст 🧠 выключен	sem chave do OpenRouter, e o contexto 🧠 está desligado
+контекст 🧠 выключен, а облако — выключенный модуль	o contexto 🧠 está desligado, e a nuvem é um módulo desligado
+нет сети, а контекст 🧠 выключен	sem rede, e o contexto 🧠 está desligado
+облегчаю перевод	deixando a tradução mais leve
+докачиваю модули	baixando o resto dos módulos
+качаю модели	baixando modelos
+Модели скачаны, загружаю движки…	Modelos baixados, carregando os motores…
+Готово. %s	Pronto. %s
+причина не названа	motivo não informado
+это приложение подписано другим ключом, чем выпуск. Поверх него обновление не встанет: снимите приложение и поставьте заново со страницы (разговоры и настройки при этом пропадут)	este app foi assinado com uma chave diferente da versão oficial. A atualização não instala por cima: desinstale o app e instale de novo pela página (as conversas e configurações serão perdidas)
+не хватает места на телефоне	falta espaço no telefone
+установка отменена	instalação cancelada
+в последнем выпуске нет описания версии	a última versão publicada não tem descrição
+GitHub ответил: %s	O GitHub respondeu: %s
+нет связи с github.com	sem conexão com github.com
+GitHub не ответил вовремя	o GitHub não respondeu a tempo
+связь прервалась	a conexão caiu
+не получилось	não deu certo
+нет сети — проверю позже	sem rede — verifico mais tarde
+%s — «Настройки», кнопка обновления	%s — «Configurações», botão de atualização
+установлена последняя версия	a versão mais recente está instalada
+проверить не вышло — %s	não foi possível verificar — %s
+Скачиваю %s…	Baixando %s…
+Скачиваю %s: %d %%	Baixando %s: %d %%
+Файл не сошёлся по контрольной сумме — не ставлю	O arquivo não confere com a soma de verificação — não vou instalar
+Устанавливаю %s…	Instalando %s…
+обновление не скачалось — %s	a atualização não baixou — %s
+нечего уточнять	nada para refinar
+нужно согласие на отправку разговора в облако	é preciso consentimento para enviar a conversa para a nuvem
+пересматриваю разговор в облаке…	revisando a conversa na nuvem…
+улучшить не вышло — лимит запросов на сегодня	não deu para melhorar — limite de solicitações de hoje
+улучшить не вышло — нет связи	não deu para melhorar — sem conexão
+улучшить не вышло	não deu para melhorar
+улучшено · исправлено фраз: %d	melhorado · frases corrigidas: %d
+улучшено · исправлять нечего	melhorado · nada a corrigir
+🎙 у этой реплики нет записанного звука	🎙 esta fala não tem áudio gravado
+распознаю…	reconhecendo…
+🎙 звук этой реплики не сохранён	🎙 o áudio desta fala não foi guardado
+🔇 озвучка выключена — «Настройки» → «Модули»	🔇 a voz está desligada — «Configurações» → «Módulos»
+Микрофон недоступен	Microfone indisponível
+🔇 микрофон заглушён системой (другое приложение перехватило вход)	🔇 o sistema silenciou o microfone (outro app tomou a entrada)
+🎙 микрофон снова наш	🎙 o microfone voltou a ser nosso
+скажите фразу кнопкой FALAR — голос запомнится	diga uma frase com o botão FALAR — a voz será memorizada
+🔇 пропущено: это эхо моей же озвучки — «%s»	🔇 ignorado: é o eco da minha própria voz — «%s»
+🗣 «%s» сказал по-португальски сам — не перевожу, засчитано в «Слова»: «%s»	🗣 «%s» falou português sozinho — não traduzo, contou em «Palavras»: «%s»
+🔇 пропущено: «%s» говорит по-русски, а речь португальская — похоже, читает вслух	🔇 ignorado: «%s» fala russo, mas a fala é em português — parece estar lendo em voz alta
+🔇 пропущено: вы прочли вслух фразу с экрана — «%s»	🔇 ignorado: você leu em voz alta uma frase da tela — «%s»
+читаю снимок…	lendo a foto…
+📷 на снимке не нашлось текста	📷 não foi encontrado texto na foto
+перевожу снимок…	traduzindo a foto…
+распознаю речь…	reconhecendo a fala…
+перевожу…	traduzindo…
+Установлена последняя версия	A versão mais recente está instalada
+Вышла версия %s · %.0f МБ	Saiu a versão %s · %.0f MB
+ · обновление обязательное	 · atualização obrigatória
+Авто	Auto
+Оба	Ambos
+собеседник %d	interlocutor %d
+собеседник %s	interlocutor %s
+Вы обновились с версии %s.	Você atualizou a partir da versão %s.
+Перевод точнее: Falar сравнивает несколько вариантов фразы. «Быстрее» — в настройках.	Tradução mais precisa: o Falar compara várias versões da frase. «Mais rápida» fica nas configurações.
+Говорить, снимать и набирать можно сразу после запуска: Falar переведёт, как только загрузится.	Dá para falar, tirar foto e digitar logo depois de abrir: o Falar traduz assim que terminar de carregar.
+Android 16 больше не предупреждает при установке, что Falar сделан для старой версии Android.	O Android 16 não avisa mais na instalação que o Falar foi feito para uma versão antiga do Android.
+Звук собеседника можно хранить и переслушать в меню реплики. Включается в настройках.	O áudio do interlocutor pode ser guardado e ouvido de novo no menu da fala. Liga nas configurações.
+Разговоры и звук не попадают в облачную копию Google, а на новый телефон переезжают.	Conversas e áudio não vão para o backup do Google na nuvem, mas passam para um telefone novo.
+«Слова» показывают слово в живых фразах: кто его сказал и как переводится именно это предложение.	«Palavras» mostram a palavra em frases reais: quem disse e como esta frase específica é traduzida.
+Фразы, которые вам говорили не раз, собраны во вкладке «Фразы».	As frases que disseram a você mais de uma vez ficam na aba «Frases».
+Фразу из «Слов» можно сказать самим: Falar покажет цветом, какие слова он понял.	Você mesmo pode dizer uma frase de «Palavras»: o Falar mostra em cores quais palavras entendeu.
+Выученное повторяется на слух или вслух: через день, три дня, неделю и три недели.	O que você aprendeu é revisado de ouvido ou em voz alta: depois de um dia, três dias, uma semana e três semanas.
+Каждый собеседник говорит фразу кнопкой FALAR, и слушание переводит только голоса разговора.	Cada interlocutor diz uma frase com o botão FALAR, e a escuta traduz só as vozes da conversa.
+Над репликами подписано, кто говорит: «Собеседник 1», «Собеседник 2» или имя.	Acima das falas aparece quem está falando: «Interlocutor 1», «Interlocutor 2» ou o nome.
+Озвучку из динамика можно перебить: телефон замолкает и слушает. Чужие голоса её не обрывают.	A voz do alto-falante pode ser interrompida: o telefone se cala e ouve. Vozes de outras pessoas não a interrompem.
+Если двое говорят подряд, каждого Falar переводит отдельно.	Se duas pessoas falam em seguida, o Falar traduz cada uma separadamente.
+Короткие фразы озвучиваются сразу, а не вместе со следующей.	Frases curtas são faladas na hora, e não junto com a seguinte.
+После озвучки микрофон включается быстрее, и начало ответа не теряется.	Depois da voz, o microfone liga mais rápido, e o começo da resposta não se perde.
+В тишине теряется меньше фраз: Falar лучше слышит голоса, которые раньше пропускал.	No silêncio, menos frases se perdem: o Falar ouve melhor vozes que antes deixava passar.
+Шумоподавление включается и при негромком шуме, а музыку вокруг не принимает за шум.	A redução de ruído liga também com barulho baixo e não confunde música ao redor com barulho.
+В настройках можно выбрать, какой перевод озвучивать: русский, португальский или оба.	Nas configurações dá para escolher qual tradução falar em voz: russo, português ou ambos.
+В наушниках португальский перевод ваших слов больше не звучит: собеседник читает его на экране.	No fone de ouvido, a tradução em português das suas palavras não toca mais: o interlocutor lê na tela.
+В шумном месте теряется меньше фраз. Шумоподавление включается само, когда вокруг шумно.	Em lugares barulhentos, menos frases se perdem. A redução de ruído liga sozinha quando o ambiente está barulhento.
+После обновления Falar показывает, что изменилось. Это окно можно открыть снова в настройках.	Depois de uma atualização, o Falar mostra o que mudou. Esta janela pode ser aberta de novo nas configurações.
+Об ошибке, плохом переводе или идее можно написать разработчику в Telegram.	Dá para escrever ao desenvolvedor no Telegram sobre um erro, uma tradução ruim ou uma ideia.
+Falar больше не закрывается, если выключить «Слушать» посреди разговора.	O Falar não fecha mais se você desligar «Ouvir» no meio da conversa.
+Настройки сразу показывают, что сейчас включено.	As configurações mostram na hora o que está ligado.
+Новый вид: главные кнопки внизу экрана, а разговоры и настройки — в меню ☰.	Novo visual: os botões principais ficam embaixo, e as conversas e configurações, no menu ☰.
+«Слушать» можно включить для одного языка или сразу для обоих.	«Ouvir» pode ser ligado para um idioma ou para os dois de uma vez.
+Во время перевода видно, что сейчас делает Falar.	Durante a tradução dá para ver o que o Falar está fazendo.
+Ночная тема включается вместе с ночной темой телефона.	O tema escuro liga junto com o tema escuro do telefone.
+Для облака можно добавить несколько ключей.	Dá para adicionar várias chaves para a nuvem.
+Кнопка «Улучшить» гаснет, если фразу уже улучшили.	O botão «Melhorar» se apaga se a frase já foi melhorada.
+Ненужное можно выключить в настройках: озвучку, чтение фото, облако и другое.	O que não for necessário pode ser desligado nas configurações: voz, leitura de fotos, nuvem e outros.
+Текст на фото читается без интернета, а перевод появляется прямо на снимке.	O texto da foto é lido sem internet, e a tradução aparece direto na foto.
+Чеки, этикетки и надписи на бутылках читаются точнее.	Notas fiscais, rótulos e escritos em garrafas são lidos com mais precisão.
+Кнопка удержания больше не мигает в паузах между словами.	O botão de segurar não pisca mais nas pausas entre as palavras.
+Сохранённый ключ облака больше не стирается случайно.	A chave salva da nuvem não é mais apagada por acidente.
+Фото с камеры не остаётся в галерее и не ложится на бок.	A foto da câmera não fica na galeria e não aparece deitada.
+Вывески, написанные заглавными буквами, переводятся правильно.	Placas escritas em maiúsculas são traduzidas corretamente.
+Короткая фраза с удержанием больше не считается шумной.	Uma frase curta dita segurando o botão não é mais considerada barulhenta.
+Крупный текст больше не наезжает на соседние строки.	O texto grande não invade mais as linhas vizinhas.
+Новая круглая кнопка удержания.	Novo botão redondo de segurar.
+Чувствительность микрофона настраивается сама и не искажает звук.	A sensibilidade do microfone se ajusta sozinha e não distorce o som.
+Цвет кнопки показывает, как вас слышно: зелёный — хорошо, красный — тихо или шумно.	A cor do botão mostra como você está sendo ouvido: verde — bem, vermelho — baixo ou com barulho.
+В облаке можно выбрать, что важнее: скорость или точность.	Na nuvem dá para escolher o que é mais importante: velocidade ou precisão.
+Falar помнит, о чём разговор и кто говорит. Посмотреть можно, коснувшись названия.	O Falar lembra do que se trata a conversa e quem fala. Para ver, toque no nome.
+Перевод занимает меньше памяти телефона.	A tradução ocupa menos memória do telefone.
+Видно, что Falar делает сейчас: слушает, переводит или уточняет.	Dá para ver o que o Falar está fazendo: ouvindo, traduzindo ou refinando.
+После перезапуска разговор продолжается с того же места.	Depois de reiniciar, a conversa continua do mesmo ponto.
+Уточнитель теперь работает прямо во время разговора.	O refinador agora trabalha durante a própria conversa.
+Длинный разговор больше не тормозит телефон.	Uma conversa longa não deixa mais o telefone lento.
+Закрытый Falar освобождает память телефона.	O Falar fechado libera a memória do telefone.
+Ваша правка перевода больше не пропадает.	A sua correção da tradução não some mais.
+Слово «sábado» больше не превращается в «São Pedro».	A palavra «sábado» não vira mais «São Pedro».
+Если обновление не устанавливается, Falar объясняет почему.	Se a atualização não instala, o Falar explica o motivo.
+Надпись про обновление и кнопка больше не противоречат друг другу.	O aviso de atualização e o botão não se contradizem mais.
+Уточнение перевода больше не выключается само при каждом запуске.	O refinamento da tradução não desliga mais sozinho a cada abertura.
+Falar обновляется сам: раз в сутки проверяет, не вышла ли новая версия.	O Falar se atualiza sozinho: uma vez por dia verifica se saiu uma versão nova.
+Длинная фраза больше не закрывает кнопки.	Uma frase longa não cobre mais os botões.
+Надписи Falar — и по-португальски: как язык телефона или по выбору в настройках.	Os textos do Falar agora também em português: no idioma do telefone ou à escolha nas configurações.
