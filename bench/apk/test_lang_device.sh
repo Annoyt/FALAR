@@ -7,7 +7,8 @@
 #   N3 «как в системе» — снова язык телефона (на русском телефоне — русские надписи), снимки для сравнения;
 #   N4 выбор после прогона — тот же, что был до него (и при обрыве: cmd locale set-app-locales, без запуска).
 #   bash bench/apk/test_lang_device.sh             # INSTALL=1 — сначала поставить bench/apk/Falar.apk (build.sh)
-# Снимки — /tmp/falar-lang-shots/{pt,ru}-<экран>.png. Телефон — рабочий аппарат владельца: начинаем, когда
+# Снимки — /tmp/falar-lang-shots/{pt,ru}-<экран>.png (на них разговоры владельца: посмотреть и удалить). Телефон —
+# рабочий аппарат владельца: начинаем, когда
 # экран погашен или впереди Falar либо рабочий стол и экрана не касались FREE_S секунд (60).
 R=$(cd "$(dirname "$0")/../.." && pwd); A=$R/bench/apk
 if [ -z "$FALAR_STAND_LOCK" ]; then
@@ -83,7 +84,8 @@ say "== N1 португальский"
 setlang pt && res 0 "N1 системный язык приложения — pt-BR" || res 1 "N1 системный язык приложения — pt-BR ($(applang))"
 
 say "== N2 снимки и подписи по-португальски"
-for s in talk drawer words settings mods cloud setup; do shot pt $s && res 0 "N2 снимок $s" || res 1 "N2 снимок $s"; done
+# Разговор — последним: после установки и смены языка модели ещё грузятся, и на месте кнопок реплики идёт ход загрузки.
+for s in drawer words settings mods cloud setup talk; do shot pt $s && res 0 "N2 снимок $s" || res 1 "N2 снимок $s"; done
 for w in "talk:Ouvir" "talk:Foto, texto" "talk:Melhorar" "drawer:Configurações" "settings:Idioma da interface" "settings:Do sistema" \
          "settings:Tela da conversa" "words:Palavras" "mods:Módulos" "cloud:Chaves"; do
   has "pt-${w%%:*}" "${w#*:}" && res 0 "N2 ${w%%:*}: «${w#*:}»" || res 1 "N2 ${w%%:*}: «${w#*:}»"
@@ -91,9 +93,10 @@ done
 for w in "talk:Слушать" "talk:Улучшить" "settings:Экран разговора" "drawer:Настройки"; do
   has "pt-${w%%:*}" "${w#*:}" && res 1 "N2 ${w%%:*}: русского «${w#*:}» нет" || res 0 "N2 ${w%%:*}: русского «${w#*:}» нет"
 done
-# Русские строки, которые остались на португальских экранах, — списком для глаз (журнал и разговор — не надписи).
-cat $SHOTS/pt-{talk,drawer,words,settings,mods,cloud,setup}.txt 2>/dev/null | grep -E '[А-Яа-яЁё]' | sort | uniq -c | sort -rn | head -25 > $SHOTS/pt-cyrillic.txt
-say "  русское на экранах (сколько раз · строка) — $SHOTS/pt-cyrillic.txt:"; sed 's/^/    /' $SHOTS/pt-cyrillic.txt | head -25
+# Русские строки, оставшиеся на португальских экранах, — файлом для глаз, не в вывод: среди них разговоры
+# владельца (названия, реплики), им не место в журналах прогонов. Надписи там — только нарочно русские.
+cat $SHOTS/pt-{talk,drawer,words,settings,mods,cloud,setup}.txt 2>/dev/null | grep -E '[А-Яа-яЁё]' | sort | uniq -c | sort -rn > $SHOTS/pt-cyrillic.txt
+say "  русских строк на экранах: $(wc -l < $SHOTS/pt-cyrillic.txt) — $SHOTS/pt-cyrillic.txt (там и разговоры владельца — посмотреть и удалить)"
 
 say "== N3 как в системе ($(sh 'getprop persist.sys.locale'))"
 setlang system && res 0 "N3 системный выбор снят" || res 1 "N3 системный выбор снят ($(applang))"
