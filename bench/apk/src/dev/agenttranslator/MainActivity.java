@@ -2683,6 +2683,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       java.io.File f = new java.io.File(getExternalFilesDir(null), (name == null || name.isEmpty() ? "uishot" : name) + ".png");
       try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) { bm.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out); onLog("🧪 снимок экрана: " + f.getName() + " " + w + "×" + h); }
       catch (Exception e) { onLog("🧪 снимок экрана не записан: " + e); }
+      // Подписи того же экрана — рядом файлом <имя>.txt, по строке на вид: их сверяет стенд (test_lang_device.sh)
+      // и за погашенным экраном, где ни журнал «на экране», ни uiautomator не видят остановленный экран.
+      StringBuilder tx = new StringBuilder(); shotTexts(rootView, tx);
+      try { java.nio.file.Files.write(new java.io.File(f.getParentFile(), f.getName().replace(".png", ".txt")).toPath(), tx.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+      catch (Exception e) { onLog("🧪 подписи экрана не записаны: " + e); }
       bm.recycle();
       if (dr) { sidePanel.setVisibility(View.GONE); scrim.setVisibility(View.GONE); }
       if (screen != was) show(was);                // снимок не оставляет экран на чужом разделе
@@ -2731,6 +2736,20 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     texts(rootView, b);
     String line = "🧪 на экране: " + b;   // журнал
     if (svc != null) svc.log(line); else onLog(line);
+  }
+  /** Подписи снимка uiShot: по строке на вид — текст, подсказка поля, описание для TalkBack; по видимости,
+   *  а не isShown (у остановленного экрана он ложен), и строки списков тоже. */
+  static void shotTexts(View v, StringBuilder b) {
+    if (v == null || v.getVisibility() != View.VISIBLE) return;
+    if (v instanceof TextView) {
+      CharSequence t = ((TextView) v).getText();
+      if (t != null && t.length() > 0) b.append(t.toString().replace('\n', ' ')).append('\n');
+      CharSequence h = ((TextView) v).getHint();
+      if (h != null && h.length() > 0) b.append(h.toString().replace('\n', ' ')).append('\n');
+    }
+    CharSequence d = v.getContentDescription();
+    if (d != null && d.length() > 0) b.append(d.toString().replace('\n', ' ')).append('\n');
+    if (v instanceof ViewGroup) { ViewGroup g = (ViewGroup) v; for (int k = 0; k < g.getChildCount(); k++) shotTexts(g.getChildAt(k), b); }
   }
   void texts(View v, StringBuilder b) {
     if (v == null || !v.isShown() || v == logView) return;
@@ -2910,7 +2929,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     String line = "🌐 язык надписей: " + (choice.isEmpty() ? "как в системе (" + UiLang.system(this) + ")" : choice) + " → " + L.lang;   // журнал
     if (svc != null) svc.log(line); else onLog(line);
     if (svc != null) svc.uiLangChanged();
-    if (!bySystem && !was.equals(L.lang)) recreate();
+    // С Android 13 видимый экран пересоздаёт система. Остановленный (за погашенным экраном) она пересоздаст
+    // только при включении, а надписи сервиса сменились бы уже сейчас — его пересоздаём сами.
+    if (!was.equals(L.lang) && (!bySystem || !started)) recreate();
   }
 
   static int themeTest = 0;      // 0 — как система, 1 — день, 2 — ночь
