@@ -156,22 +156,24 @@ def mix(x, noise, level_db):
 VAD = {'kind': 'silero', 'model': os.path.join(MODELS, 'silero_vad.onnx'), 'thr': 0.5, 'model2': None, 'thr2': 0.5, 'music2': False, 'gate2': 0.0}
 
 
-def vad_config(model=None, thr=None):
-    """Детектор речи, как Engine.buildVad: тишина у sherpa почти нулевая (0,05 с), речь от 0,25 с, кусок до 15 с.
-    --vad меняет модель (silero v4 — та, что в приложении; silero v5; TEN VAD), --thr — её порог."""
+def vad_config(model=None, thr=None, minsp=None):
+    """Детектор речи, как Engine.buildVad: тишина у sherpa почти нулевая (0,05 с), речь от minsp с (до 08.10 — 0,25, теперь
+    Engine.vadMinSpeech: 0,064 в тишине, 0,25 при шуме), кусок до 15 с. --vad меняет модель (silero v4 — та, что в
+    приложении; silero v5; TEN VAD), --thr — её порог."""
     model = model or VAD['model']; thr = VAD['thr'] if thr is None else thr
+    minsp = 0.25 if minsp is None else minsp
     if 'ten' in os.path.basename(model):
         return so.VadModelConfig(ten_vad=so.TenVadModelConfig(model=model, threshold=thr, min_silence_duration=0.05,
-                                 min_speech_duration=0.25, window_size=256, max_speech_duration=15), sample_rate=SR, num_threads=1)
+                                 min_speech_duration=minsp, window_size=256, max_speech_duration=15), sample_rate=SR, num_threads=1)
     return so.VadModelConfig(silero_vad=so.SileroVadModelConfig(model=model, threshold=thr, min_silence_duration=0.05,
-                             min_speech_duration=0.25, window_size=FRAME, max_speech_duration=15), sample_rate=SR, num_threads=1)
+                             min_speech_duration=minsp, window_size=FRAME, max_speech_duration=15), sample_rate=SR, num_threads=1)
 
 
 class Vads:
     """Один детектор или объединение двух (--vad2): кадр — речь, если речь сказал хоть один. Второй (TEN VAD)
     принимает мелодию за речь (far-pt, конец: куски вне фраз), поэтому при фоне-музыке он молчит, если music."""
-    def __init__(self):
-        self.v = [so.VoiceActivityDetector(vad_config(), buffer_size_in_seconds=60)]
+    def __init__(self, minsp=None):
+        self.v = [so.VoiceActivityDetector(vad_config(minsp=minsp), buffer_size_in_seconds=60)]
         if VAD['model2']:
             self.v.append(so.VoiceActivityDetector(vad_config(VAD['model2'], VAD['thr2']), buffer_size_in_seconds=60))
 
@@ -248,7 +250,8 @@ class Gate:
         return -1
 
 
-def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=None):
+def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=None, minsp=250, tail=300, carry=True, dead=True,
+            vad_min=None, vad_min_noise=None, minsp_noise=None):
     """TranslatorService.startVad при 0 дБ. variant: raw — silero и порог по исходному; dn — silero, порог и
     его фон по очищенному; dn_sil — silero по очищенному, порог по исходному. Шумодав — потоком, кадр за
     кадром, как в приложении: его выход копится и отдаётся по 512 отсчётов, пока выхода нет — тишина.
@@ -259,8 +262,14 @@ def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=No
 
     Куски — (начало, конец, место нарезки) в отсчётах; плюс счёт: кадров со включённым шумодавом,
     включений, медиана и 90-й процентиль оценки фона."""
-    vad = Vads()
-    F, PRE, TAIL, HANG, MINSP, MAXSP, GATE = 32, 1000 // 32, 300 // 32, 600, 250, 15000, 6.0
+    vad = Vads(vad_min)
+    # minsp — минимум речи после срабатывания детектора, мс (minSpeechMs приложения); tail — хвост после речи, мс;
+    # carry — тишина, отрезанная при закрытии куска, становится подпором следующего (Slicer с 08.10; False — как было
+    # до того: подпор после куска пуст); dead — кадры цифровой тишины (мощность ниже Gain.DEAD) не трогают оценку фона
+    # (тоже с 08.10). Оба по умолчанию как в приложении. vad_min / vad_min_noise — минимум речи silero (с) в тишине и
+    # при включённом шумодаве (детектор пересоздаётся на переключении, как Engine.rebuildVad), minsp_noise — минимум
+    # нарезки при шумодаве; None — одно значение на всё.
+    F, PRE, TAIL, HANG, MINSP, MAXSP, GATE = 32, 1000 // 32, tail // 32, 600, minsp, 15000, 6.0
     pre, seg, out = deque(), [], []
     in_sp, silent, voiced, noise, dnoise = False, 0, 0, 0.0, 0.0
     on = gate is None and variant != 'raw'
@@ -281,6 +290,7 @@ def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=No
             ev = g.step(room)
             if ev > 0: on, dn, buf, switches = True, denoiser(model, att), np.zeros(0, np.float32), switches + 1
             elif ev < 0: on, dn = False, None
+            if ev != 0 and (vad_min is not None or vad_min_noise is not None): vad = Vads(vad_min_noise if on else vad_min)
         dwin = win
         if on:
             buf = np.concatenate([buf, np.asarray(dn.run(np.ascontiguousarray(win), SR).samples, np.float32)])
@@ -298,7 +308,7 @@ def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=No
         while not vad.empty():
             vad.pop()
         if g is not None and track and not sp: g.observe(log_flatness(win))
-        if not sp:
+        if not sp and not (dead and fr * fr < 1e-10):   # dead: цифровая тишина (Gain.DEAD) — не фон комнаты
             if noise == 0: noise = fr
             elif fr < noise: noise = 0.9 * noise + 0.1 * fr
             else: noise = 0.999 * noise + 0.001 * min(fr, 2 * noise)
@@ -323,8 +333,10 @@ def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=No
         if silent * F < HANG and len(seg) * F < MAXSP:
             continue
         keep = len(seg) - max(0, silent - TAIL)
-        if voiced * F >= MINSP and keep > 0:
+        if voiced * F >= (minsp_noise if on and minsp_noise is not None else MINSP) and keep > 0:
             out.append((seg[0] * FRAME, (seg[keep - 1] + 1) * FRAME, (i + 1) * FRAME))
+        if carry:                                         # тишина конца куска — подпор следующего (не больше PRE кадров)
+            pre = deque(seg[len(seg) - min(silent, max(1, PRE)):])
         in_sp, seg, silent, voiced = False, [], 0, 0
     n = len(x) // FRAME
     stat = dict(on_share=round(on_frames / max(1, n), 3), switches=switches,
