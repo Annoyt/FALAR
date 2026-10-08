@@ -255,17 +255,20 @@ public class WordList {
   /** Короткая реплика, по которой доля не считается. Раньше такие выбрасывались целиком, и вместе
    *  с шумом («Mm», «Yeah») терялись самые частые реплики живого разговора — «Sim», «Да»,
    *  «Obrigado», «Сколько?». Вместо длины судим по составу: все слова должны быть словами языка.
-   *  Слова от двух букв, потому что «Oi», «Да», «no» — полноценные слова, а не обрывки. */
+   *  Слова от двух букв, потому что «Oi», «Да», «no» — полноценные слова, а не обрывки.
+   *  Реплика из одних чисел, цен и времени — «Vinte reais», «Cinco», «8:30», «Пять» — тоже ответ: к проверке
+   *  она приходит уже с плейсхолдерами (TextRules.mask), слов в ней не остаётся, и раньше её отбивало как шум. */
   public boolean shortOk(String text, String lang) {
     Set<String> c = common.get(lang);
     if (c == null || c.isEmpty()) return true;           // без словаря не судим, как и looksLike
-    int n = 0;
+    int n = 0, slots = 0;
     for (String w : text.split("[^\\p{L}\\p{N}]+")) {
-      if (w.length() < 2 || w.matches("XQ\\d+")) continue;
+      if (w.matches("XQ\\d+")) { slots++; continue; }
+      if (w.length() < 2) continue;
       n++;
       if (!c.contains(w.toLowerCase(Locale.ROOT).replace('ё', 'е'))) return false;
     }
-    return n > 0;
+    return n > 0 || slots > 0;
   }
 
   public String stats() { return (entries.isEmpty() ? "свои слова: нет" : "свои слова: " + entries.size())

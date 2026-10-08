@@ -69,12 +69,13 @@ final class Practice {
   static Result check(String target, String heard) {
     List<int[]> sp = new ArrayList<>(); List<String> t = new ArrayList<>();
     for (int[] w : words(target)) {
-      String n = Phrasebook.norm(target.substring(w[0], w[1]));
+      // число цифрами — словами, как его говорят («20» → «vinte»): распознаватель пишет сказанное число цифрами
+      String n = Phrasebook.norm(Numbers.ptWords(target.substring(w[0], w[1])));
       if (n.isEmpty()) continue;                         // одиночный знак — не слово
       sp.add(w); t.add(n);
     }
     List<String> h = new ArrayList<>();
-    for (String x : Phrasebook.norm(heard == null ? "" : heard).split(" ")) if (!x.isEmpty()) h.add(x);
+    for (String x : Phrasebook.norm(Numbers.ptWords(heard == null ? "" : heard)).split(" ")) if (!x.isEmpty()) h.add(x);
     // нормализация может развернуть слово в два («pro» → «para o»): сверяем по первому
     String[] a = new String[t.size()]; for (int k = 0; k < a.length; k++) a[k] = t.get(k).split(" ")[0];
     int n = a.length, m = h.size(); int[][] L = new int[n + 1][m + 1];

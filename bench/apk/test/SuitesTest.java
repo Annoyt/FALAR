@@ -35,4 +35,6 @@ public class SuitesTest {
   @Test void cards() { assertEquals(0, CardsTest.run()); }
   @Test void practice() { assertEquals(0, PracticeTest.run()); }
   @Test void inbox() throws Exception { assertEquals(0, InboxTest.run()); }
+  @Test void slicer() { assertEquals(0, SlicerTest.run()); }
+  @Test void numbers() { assertEquals(0, NumbersTest.run()); }
 }

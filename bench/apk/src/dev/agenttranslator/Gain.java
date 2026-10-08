@@ -91,5 +91,22 @@ final class Gain {
   /** Мощность кадра ниже этой (−100 dBFS) — цифровая тишина, не звук комнаты. */
   static final double DEAD = 1e-10;
 
+  /** Перед фразой — её же самые тихие n отсчётов подряд (по кадрам 32 мс), с краями по 8 мс: настоящий звук этой
+   *  комнаты вместо резкого старта, которого модель не любит (удержание без слушания). Фраза короче двух таких
+   *  отрезков — как есть. */
+  static float[] withLead(float[] x, int n) {
+    final int f = 512, k = Math.max(1, n / f), m = x.length / f;
+    if (m < 2 * k) return x;
+    double[] p = new double[m];
+    for (int j = 0; j < m; j++) { double a = 0; for (int i = j * f; i < (j + 1) * f; i++) a += x[i] * (double) x[i]; p[j] = a; }
+    double s = 0; for (int j = 0; j < k; j++) s += p[j];
+    double best = s; int at = 0;
+    for (int j = k; j < m; j++) { s += p[j] - p[j - k]; if (s < best) { best = s; at = j - k + 1; } }
+    int len = k * f; float[] out = new float[len + x.length];
+    System.arraycopy(x, at * f, out, 0, len); System.arraycopy(x, 0, out, len, x.length);
+    int fade = 128; for (int i = 0; i < fade; i++) { out[i] *= i / (float) fade; out[len - 1 - i] *= i / (float) fade; }
+    return out;
+  }
+
   static double db(double x) { return 20 * Math.log10(Math.max(1e-9, x)); }
 }

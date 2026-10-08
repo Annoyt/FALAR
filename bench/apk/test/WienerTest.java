@@ -64,6 +64,13 @@ public class WienerTest {
     d = 0; for (int i = 0; i < y.length; i++) d = Math.max(d, Math.abs(y[i] - y3[i]));
     ok(d < 1e-7, "W6 после сброса — как новый (разница " + d + ")");
 
+    // W7: кусок не кратный шагу (последний кусок перебивания, короткое чтение) — столько же отсчётов на выходе, и хвост
+    // не нули: раньше отсчёты за последним целым шагом молча терялись.
+    Wiener w7 = new Wiener(); runAll(w7, x, 512);
+    float[] odd = new float[400]; System.arraycopy(x, 0, odd, 0, 400); float[] y7 = w7.run(odd);
+    float tail = 0; for (int i = 256; i < 400; i++) tail = Math.max(tail, Math.abs(y7[i]));
+    ok(y7.length == 400 && tail > 0, "W7 кусок в 400 отсчётов: выход 400, хвост не нули (" + tail + ")");
+
     System.out.println(fails == 0 ? "Wiener: " + checks + " проверок, все прошли" : "Wiener: провалов " + fails + " из " + checks);
     return fails;
   }

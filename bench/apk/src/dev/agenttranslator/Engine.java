@@ -25,15 +25,33 @@ public class Engine {
    *  правило применялось дважды и сегмент не закрывался раньше чем через 1,2 с тишины — при
    *  паузах в быстром диалоге (0,8 с) он не закрывался вовсе. */
   public volatile float vadThreshold = 0.5f, vadMinSilence = 0.05f;
-  public Vad buildVad(float threshold, float minSilence) {
+  /** Минимум речи silero: признак «речь» появляется только после стольких секунд речи подряд. Было 0,25 с, и нарезка
+   *  ждала ещё столько же после срабатывания (TranslatorService: minSpeechMs) — вместе полсекунды, однословные ответы
+   *  («Sim», «Não», «Пять») куска не давали (results/2026-10-08-asr-review.md). Статическое поле, как withTts:
+   *  сервис ставит его до конструктора; стенд — --es vadminspeech. */
+  public static final float VAD_MIN_SPEECH_QUIET = 0.064f, VAD_MIN_SPEECH_NOISE = 0.25f;
+  public static volatile float vadMinSpeech = VAD_MIN_SPEECH_QUIET;
+  /** С каким минимумом речи построен нынешний VAD. */
+  public volatile float vadMinSpeechNow = Float.NaN;
+  public Vad buildVad(float threshold, float minSilence) { return buildVad(threshold, minSilence, vadMinSpeech); }
+  public Vad buildVad(float threshold, float minSilence, float minSpeech) {
     SileroVadModelConfig sv = SileroVadModelConfig.builder().setModel(vadModelPath).setThreshold(threshold)
-        .setMinSilenceDuration(minSilence).setMinSpeechDuration(0.25f).setWindowSize(512).setMaxSpeechDuration(15f).build();
+        .setMinSilenceDuration(minSilence).setMinSpeechDuration(minSpeech).setWindowSize(512).setMaxSpeechDuration(15f).build();
+    vadMinSpeechNow = minSpeech;
     return new Vad(VadModelConfig.builder().setSileroVadModelConfig(sv).setSampleRate(16000).setNumThreads(1).setDebug(false).build());
   }
+  /** Стенд. Прежний VAD не освобождается: поток нарезки может быть внутри него на этом кадре, а освобождение
+   *  посреди вызова — падение в нативном коде; несколько мегабайт до конца процесса стенду не страшны. */
   public synchronized void retuneVad(float threshold, float minSilence) {
     vadThreshold = threshold; vadMinSilence = minSilence;
-    Vad old = vad; vad = buildVad(threshold, minSilence);
-    if (old != null) try { old.release(); } catch (Throwable ignore) {}
+    vad = buildVad(threshold, minSilence, Float.isNaN(vadMinSpeechNow) ? vadMinSpeech : vadMinSpeechNow);
+  }
+  /** Минимум речи сменился (тишина ↔ шум, DenoiseGate): VAD строится заново. Звать только из потока нарезки — он
+   *  единственный, кто трогает VAD, поэтому прежний можно отдать сразу. Тот же минимум — ничего не делает. */
+  public void rebuildVad(float minSpeech) {
+    if (vad == null || minSpeech == vadMinSpeechNow) return;
+    Vad old = vad; vad = buildVad(vadThreshold, vadMinSilence, minSpeech);
+    try { old.release(); } catch (Throwable ignore) {}
   }
   static final int LAYERS = 6, HEADS = 16, HEAD_DIM = 64;
   final File m; final Log log;
@@ -233,17 +251,19 @@ public class Engine {
   public Asr asrFull(String lang, float[] s, int sr) {
     OfflineRecognizer off = asrMulti != null ? asrMulti : (lang.equals("pt") ? asrPt : null);
     if (off == null || denoiseOn && denoiser != null) return new Asr(asr(lang, s, sr), null, null, null);
-    OfflineStream st = off.createStream(); st.acceptWaveform(s, sr); off.decode(st);
-    OfflineRecognizerResult r = off.getResult(st); st.release();
-    return new Asr(r.getText().trim(), r.getTokens(), r.getTimestamps(), r.getDurations());
+    OfflineStream st = off.createStream();              // поток освобождается и при исключении (пустой вход его бросает)
+    try { st.acceptWaveform(s, sr); off.decode(st); OfflineRecognizerResult r = off.getResult(st); return new Asr(r.getText().trim(), r.getTokens(), r.getTimestamps(), r.getDurations()); }
+    finally { st.release(); }
   }
   public String asr(String lang, float[] s, int sr) {
     if (denoiseOn && denoiser != null) { float[] c = denoise(s, sr); if (c != null && c.length > 0) { s = c; sr = denoiser.getSampleRate(); } }
     OfflineRecognizer off = asrMulti != null ? asrMulti : (lang.equals("pt") ? asrPt : null);
-    if (off != null) { OfflineStream st = off.createStream(); st.acceptWaveform(s, sr); off.decode(st); String r = off.getResult(st).getText().trim(); st.release(); return r; }
-    OnlineStream st = asrRu.createStream(); st.acceptWaveform(s, sr); st.acceptWaveform(new float[sr / 2], sr); st.inputFinished();
-    while (asrRu.isReady(st)) asrRu.decode(st);
-    String r = asrRu.getResult(st).getText().trim(); st.release(); return r;
+    if (off != null) { OfflineStream st = off.createStream(); try { st.acceptWaveform(s, sr); off.decode(st); return off.getResult(st).getText().trim(); } finally { st.release(); } }
+    OnlineStream st = asrRu.createStream();
+    try { st.acceptWaveform(s, sr); st.acceptWaveform(new float[sr / 2], sr); st.inputFinished();
+      while (asrRu.isReady(st)) asrRu.decode(st);
+      return asrRu.getResult(st).getText().trim(); }
+    finally { st.release(); }
   }
 
   public String translate(String dir, String text) throws Exception {
@@ -572,6 +592,11 @@ public class Engine {
     }
   }
 
-  public GeneratedAudio speak(String lang, String text, OfflineTtsCallback cb) { return (lang.equals("ru") ? ttsRu : ttsPt).generateWithCallback(text, 0, 1.0f, cb); }
+  /** Португальские числа — словами (Numbers): Piper читает «R$» не как «reais», «8:30» — как восемьсот тридцать,
+   *  «2 pessoas» — «dois» вместо «duas»; и голос, и транскрипция на экране говорят одно и то же. */
+  public GeneratedAudio speak(String lang, String text, OfflineTtsCallback cb) {
+    if (lang.equals("pt")) text = Numbers.ptWords(text);
+    return (lang.equals("ru") ? ttsRu : ttsPt).generateWithCallback(text, 0, 1.0f, cb);
+  }
   public int ttsSampleRate(String lang) { return (lang.equals("ru") ? ttsRu : ttsPt).getSampleRate(); }
 }
