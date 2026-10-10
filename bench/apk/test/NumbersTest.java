@@ -68,7 +68,7 @@ public class NumbersTest {
     ok(t.size() == 2 && t.get(0)[0].equals("Bom") && t.get(1)[0].equals("dia!") && t.get(1)[1].equals("dia!"), "N8 без чисел — по слову: " + show(t));
     t = Numbers.tokens("2 pessoas");
     ok(t.size() == 2 && t.get(0)[1].equals("duas"), "N8 род в куске: " + show(t));
-    System.out.println("NumbersTest: " + checks + " проверок, провалов " + fails);
+    System.out.println(fails == 0 ? "NumbersTest: " + checks + " проверок, все прошли" : "NumbersTest: провалов " + fails + " из " + checks);
     return fails;
   }
   static String show(List<String[]> t) { StringBuilder b = new StringBuilder(); for (String[] x : t) b.append('[').append(x[0]).append('|').append(x[1]).append(']'); return b.toString(); }

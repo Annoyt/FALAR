@@ -70,7 +70,7 @@ public class SlicerTest {
     s = new Slicer(); k[0] = 0; run(s, k, 5, false, 0.01); run(s, k, 10, true, 0.1); p = run(s, k, 19, false, 0.01);
     ok(p != null && first(p) == 0 && frames(p) == 5 + 10 + 9, "S6 подпор — сколько есть: " + (p == null ? "null" : first(p) + ", " + frames(p)));
 
-    System.out.println("SlicerTest: " + checks + " проверок, провалов " + fails);
+    System.out.println(fails == 0 ? "SlicerTest: " + checks + " проверок, все прошли" : "SlicerTest: провалов " + fails + " из " + checks);
     return fails;
   }
 
