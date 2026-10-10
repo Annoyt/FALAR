@@ -97,7 +97,7 @@ if [ -n "$RELEASE" ]; then
   # подряд были только подъёмами версии.
   git -C "$R" diff -U0 "$RELEASE"..HEAD -- models/manifest.json | grep -E '^[+-]' \
     | grep -vqE '^(\+\+\+|---) |^[+-] *"app": ' || CH=$(printf '%s\n' "$CH" | grep -vx 'models/manifest.json')
-  if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(TranslatorService|Engine|DenoiseGate|Wiener|Gain|Hearing)\.java$|^models/manifest\.json$'; then
+  if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(TranslatorService|Slicer|Engine|DenoiseGate|Wiener|Gain|Hearing)\.java$|^models/manifest\.json$'; then
     DEVICE=1; say "  с $RELEASE менялось слушание или модели — нужен и этап на телефоне"
   fi
   if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(Ocr|OcrCore|OcrWords|TextRules)\.java$|^data/ocr_words|^models/manifest\.json$'; then
