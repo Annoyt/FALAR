@@ -171,7 +171,8 @@ PY
 chk '[ "${p##* }" = False ]' "TM7 после «не отправлять» переключатель выключен"
 m=$(mark); [ -n "$p" ] && tapxy ${p% *}
 chk '[ -n "$(wl "$m" "📊 статистика разработчику: отправляю раз в сутки" 10)" ]' "TM7 переключатель — согласие «да»"
-seek --text "О приложении" || seek --text "Sobre o app"; tapon --text "О приложении" || tapon --text "Sobre o app"; sleep 1; dump
+seek --text "О приложении" || seek --text "Sobre o app"; tapon --text "О приложении" || tapon --text "Sobre o app"
+for i in 1 2 3 4 5; do dump; has --text "Отказ от ответственности" --contains || has --text "Isenção de responsabilidade" --contains && break; sleep 1; done
 chk '(has --text "Что уходит в интернет" --contains && has --text "Отказ от ответственности" --contains) || has --text "Isenção de responsabilidade" --contains' "TM7 «О приложении»: что уходит в интернет, отказ от ответственности"
 back
 
@@ -199,8 +200,9 @@ tapon --class android.widget.CheckBox; dump
 chk '[ "$(at --rid android:id/button1 | awk "{print \$7}")" = true ]' "TM8 отметили согласие — «отправить» доступна"
 n0=$(ls $D/in/audio-*.json 2>/dev/null | wc -l)
 tapon --rid android:id/button1; waitgot audio 20 $((n0 + 1)); P=$(got audio); sleep 2; dump
-chk '[ -n "$P" ] && [ "$(js $P "b[\"consent\"], b[\"lang\"], b[\"mime\"], b[\"heard\"]")" = "True pt audio/wav Bom dia, tudo bem?" ]' "TM8 на приёмник: согласие, язык, формат, распознанный текст"
-chk '[ -n "$P" ] && [ "$(js $P "len(__import__(\"base64\").b64decode(b[\"audio\"])), 1500 <= b[\"dur_ms\"] <= 2500")" = "$WAVSZ True" ]' "TM8 звук целиком ($WAVSZ байт), длина ~2 с"
+# Falar в тихие минуты сжимает звук реплик WAV → Ogg Opus (Clips.zipLater): уйти может и то, и другое.
+chk '[ -n "$P" ] && [ "$(js $P "b[\"consent\"], b[\"lang\"], b[\"mime\"] in (\"audio/wav\", \"audio/ogg\"), b[\"heard\"]")" = "True pt True Bom dia, tudo bem?" ]' "TM8 на приёмник: согласие, язык, формат ($( [ -n "$P" ] && js $P 'b["mime"]')), распознанный текст"
+chk '[ -n "$P" ] && [ "$(js $P "(lambda a: (a[:4] == b\"RIFF\" and len(a) == $WAVSZ) or (a[:4] == b\"OggS\" and len(a) > 1000))(__import__(\"base64\").b64decode(b[\"audio\"])), 1500 <= b[\"dur_ms\"] <= 2500")" = "True True" ]' "TM8 звук: WAV целиком ($WAVSZ байт) или Ogg после сжатия; длина ~2 с"
 N=$([ -n "$P" ] && js $P 'm["n"]')
 chk 'has --text "Звук отправлен" || has --text "Áudio enviado"' "TM8 человеку: «Звук отправлен»"
 chk 'has --text "$N" --contains' "TM8 и номер записи ($N) — чтобы попросить удалить"
