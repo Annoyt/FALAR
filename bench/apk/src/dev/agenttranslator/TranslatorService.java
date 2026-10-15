@@ -3749,6 +3749,79 @@ public class TranslatorService extends Service {
    *  снимок один узел, а переводит тот же самый, что и речь, со словарём, своими словами и
    *  накоплением слов для изучения. Поэтому облачная модель просится вернуть только текст,
    *  а не перевод: перевод у нас свой и офлайновый. */
+  /** Вид реплики из голосового мессенджера (processText): без озвучки, с пометкой Chats.VOICE. */
+  static final String VOICE_KIND = "голосовое";
+
+  /** Голосовое из мессенджера (VoiceMsg; владелец 15.10). f — копия файла у Falar (ShareActivity, выбор файла,
+   *  стенд --es voicefile), from — пакет, откуда прислали (может быть null). Своим потоком, как снимок: длинное
+   *  голосовое не держит очередь живой речи. Звук — системным кодеком (ClipCodec), 16 кГц; нарезка — своим VAD и
+   *  Slicer, без ворот слушания (голоса разговора, чтение вслух, эхо): говорит человек из мессенджера, его голос
+   *  разговору не знаком. Распознанное — одной репликой собеседника с пометкой 🎙 в открытом разговоре (решение
+   *  владельца 15.10), без озвучки: голосовое читают. Временная копия удаляется. */
+  public void voiceMessage(final File f, final String from) {
+    final long chatId = chats == null ? 0 : chats.current;
+    new Thread(() -> {
+      try {
+        if (eng == null) { log("🎙 голосовое пришло раньше движков — не прочитано"); hint(L.t("🎙 голосовое не прочитано: Falar ещё загружается")); return; }
+        busy("live", L.k("читаю голосовое…"), 0, 0);
+        int[] rate = {16000}; float[] x;
+        try { x = ClipCodec.decode(f, rate, 120_000); }
+        catch (Throwable t) { log("🎙 голосовое не раскрылось (" + f.getName() + "): " + t); hint(L.t("🎙 голосовое не открылось: такой формат звука не поддерживается")); return; }
+        if (rate[0] != 16000) x = Clips.resample(x, rate[0], 16000);
+        final double sec = x.length / 16000.0;
+        if (sec > VoiceMsg.MAX_SECONDS) {
+          log("🎙 голосовое " + VoiceMsg.duration(sec) + " — длиннее " + VoiceMsg.MAX_SECONDS / 60 + " мин, не беру");
+          hint(L.f("🎙 голосовое длиннее %d мин — не беру", VoiceMsg.MAX_SECONDS / 60)); return;
+        }
+        long t0 = System.nanoTime();
+        List<float[]> pieces = sliceVoice(x);
+        List<String> texts = new ArrayList<>(); long asrMs = 0;
+        for (int k = 0; k < pieces.size(); k++) {
+          busy("live", L.k("распознаю голосовое…"), k, pieces.size());
+          Recog h = recog("pt2ru", pieces.get(k), 16000, eng);
+          asrMs += h.ms; texts.add(h.ar.text);
+        }
+        String text = VoiceMsg.join(texts);
+        log("🎙 голосовое " + VoiceMsg.duration(sec) + (from == null ? "" : " из " + from) + ": кусков " + pieces.size()
+            + ", нарезка и распознавание " + (System.nanoTime() - t0) / 1000000 + " мс" + (text.isEmpty() ? " — речи не нашлось" : ""));
+        if (text.isEmpty()) { hint(L.f("🎙 в голосовом (%s) речи не нашлось", VoiceMsg.duration(sec))); return; }
+        // Откуда пришло — ответ («Отправить перевод…») уходит туда же, пока открыт этот разговор.
+        if (from != null) getSharedPreferences("at", MODE_PRIVATE).edit().putString("voice_src_pkg", from).putLong("voice_src_chat", chatId).apply();
+        processText("pt2ru", unshout(text), true, false, sec * 1000, asrMs, VOICE_KIND, chatId, null, x, 16000, null);
+      } catch (Throwable t) { Log.e(TAG, "voicemsg", t); log("🎙 голосовое: ошибка " + t); }
+      finally {
+        busy("live", null, 0, 0);
+        File dir = new File(getCacheDir(), "voice");
+        if (dir.equals(f.getParentFile())) f.delete();     // своя временная копия; файл стенда остаётся
+      }
+    }, "voicemsg").start();
+  }
+  /** Голосовое — на куски речи: свой VAD (Engine.newVad, слушание не трогается) и Slicer с порогами VoiceMsg.
+   *  Кадры — как у слушания, 512 отсчётов (32 мс); после конца — gap(): открытый кусок закрывается тем, что есть. */
+  List<float[]> sliceVoice(float[] x) {
+    List<float[]> out = new ArrayList<>();
+    com.k2fsa.sherpa.onnx.Vad v = eng.newVad(eng.vadThreshold, eng.vadMinSilence, Engine.VAD_MIN_SPEECH_QUIET);
+    try {
+      Slicer s = new Slicer();
+      s.preRollMs = VoiceMsg.PRE_ROLL_MS; s.hangMs = VoiceMsg.HANG_MS; s.tailMs = VoiceMsg.TAIL_MS;
+      s.minSpeechMs = VoiceMsg.MIN_SPEECH_MS; s.maxSpeechMs = VoiceMsg.MAX_SPEECH_MS;
+      Gain.Stats none = new Gain.Stats();
+      for (int o = 0; o + 512 <= x.length; o += 512) {
+        float[] fr = Arrays.copyOfRange(x, o, o + 512);
+        v.acceptWaveform(fr);
+        boolean sp = v.isSpeechDetected();
+        while (!v.empty()) v.pop();                   // внутренняя сборка sherpa не используется, как и в слушании
+        Slicer.Piece pc = s.feed(fr, none, sp, rms(fr, fr.length));
+        if (pc == null) continue;
+        out.add(pc.pcm);
+        if (pc.cut) v.reset();
+      }
+      Slicer.Piece pc = s.gap();
+      if (pc != null) out.add(pc.pcm);
+    } finally { try { v.release(); } catch (Throwable ignore) {} }
+    return out;
+  }
+
   public void photoText(byte[] jpeg, boolean allowCloud) {
     if (jpeg == null || jpeg.length == 0) return;
     // Снимок читается в отдельном потоке, а не в общем рабочем: облачное чтение занимало
@@ -4016,7 +4089,8 @@ public class TranslatorService extends Service {
       // Снимок не озвучивается: его читают глазами (решение владельца 28.09).
       final boolean hp = headphonesOut();
       final boolean soon = !voice() && ttsSoon();
-      if (silent || !here || kind.equals("фото") || !voice() && !soon) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : kind.equals("фото") ? " · снимок, без озвучки" : " · озвучка выключена"; }
+      // Голосовое из мессенджера — тоже: его читают, а вслух оно уже звучало у человека в мессенджере.
+      if (silent || !here || kind.equals("фото") || kind.equals(VOICE_KIND) || !voice() && !soon) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : kind.equals("фото") ? " · снимок, без озвучки" : kind.equals(VOICE_KIND) ? " · голосовое, без озвучки" : " · озвучка выключена"; }
       else if (!VoiceOut.voice(voiceWhat, fTgt, hp)) { first[0] = t2; tag += " · " + VoiceOut.silentWhy(voiceWhat, fTgt, hp); }
       // Пауза до озвучки. Перевод уже готов и уже на экране — ждёт только голос, и ждёт он
       // не таймера, а тишины: пока человек говорит, переводы копятся в очереди и произносятся
@@ -4037,6 +4111,7 @@ public class TranslatorService extends Service {
         // язык, а свою русскую речь человек слышит и так. Имя — до записи в разговор, файл — в фоне после.
         String clip = keepAudio && pcm != null && dir.startsWith("pt") ? Clips.name(chatId, at, chats.audio()) : null;
         JSONObject tj = Chats.turn(dir, asr, mt, who, at);
+        if (kind.equals(VOICE_KIND)) tj.put("voice", Math.round(durMs / 1000));   // длительность, с — пометка 🎙 (Chats.VOICE)
         if (clip != null) {
           tj.put("audio", clip);
           // Разрезы — только если их столько, сколько стыков предложений в итоговом тексте (правки текста после

@@ -98,7 +98,9 @@ final class ClipCodec {
   }
 
   /** Раскрыть файл в моно −1…1; rateOut[0] — частота, на которой он звучит (Opus отдаёт 48 кГц). */
-  static float[] decode(File f, int[] rateOut) throws IOException {
+  static float[] decode(File f, int[] rateOut) throws IOException { return decode(f, rateOut, LIMIT_MS); }
+  /** То же с пределом времени: голосовое из мессенджера бывает и в несколько минут (VoiceMsg). */
+  static float[] decode(File f, int[] rateOut, long limitMs) throws IOException {
     if (f.getName().endsWith(".wav")) return readWav(f, rateOut);
     MediaExtractor ex = new MediaExtractor(); MediaCodec d = null;
     try {
@@ -114,9 +116,9 @@ final class ClipCodec {
       d.configure(fmt, null, null, 0); d.start();
       MediaCodec.BufferInfo bi = new MediaCodec.BufferInfo();
       float[] out = new float[rate * 4]; int n = 0; boolean inDone = false;
-      long until = System.currentTimeMillis() + LIMIT_MS;
+      long until = System.currentTimeMillis() + limitMs;
       while (true) {
-        if (System.currentTimeMillis() > until) throw new IOException("кодек не ответил за " + LIMIT_MS / 1000 + " с");
+        if (System.currentTimeMillis() > until) throw new IOException("кодек не ответил за " + limitMs / 1000 + " с");
         boolean fed = false;
         if (!inDone) {
           int ii = d.dequeueInputBuffer(0);

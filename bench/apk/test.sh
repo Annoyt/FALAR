@@ -42,6 +42,7 @@
 #   Slicer — сборка куска из кадров слушания: подпор, хвост, выдержка, минимум речи; тишина конца — подпор следующего,
 #            разрыв кадров закрывает кусок сейчас, предел длины режет по тихому кадру;
 #   Numbers — португальские числа словами для озвучки и транскрипции: числительные, род, деньги, время, проценты.
+#   VoiceMsg — голосовое из мессенджера: склейка кусков, длительность, файл, отправитель, куда «Отправить перевод…», пометка 🎙;
 #   L — надписи по-португальски: выбор языка, у каждой надписи кода и пункта whatsnew.txt есть перевод в ui_pt.txt,
 #       вставки совпадают, лишних строк нет; в экранах нет русских строк мимо L.
 # Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
@@ -84,7 +85,8 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Practice.java $A/test/PracticeTest.java \
   $A/src/dev/agenttranslator/Inbox.java $A/test/InboxTest.java \
   $A/src/dev/agenttranslator/Slicer.java $A/test/SlicerTest.java \
-  $A/src/dev/agenttranslator/Numbers.java $A/test/NumbersTest.java
+  $A/src/dev/agenttranslator/Numbers.java $A/test/NumbersTest.java \
+  $A/src/dev/agenttranslator/VoiceMsg.java $A/test/VoiceMsgTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -119,4 +121,5 @@ java -cp "$OUT:$J" dev.agenttranslator.LTest "$A" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.InboxTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.SlicerTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.NumbersTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.VoiceMsgTest || fail=1
 exit $fail

@@ -146,6 +146,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       else startSvc();
     }
     checkNews();
+    if (b == null) voiceIntent(getIntent());   // голосовое прислали, пока Falar не был запущен
 
     // «Говорить» принимает любой язык: направление определяется по сказанному.
     // Позицию кнопки ставит удержание, а не нажатость вида: палец, съехавший с кнопки, запись не
@@ -219,11 +220,69 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   /** «Снимок, текст»: камера, галерея или набрать фразу. Без чтения снимков — сразу набор. */
   void inputMenu() {
-    if (svc == null || !Modules.photo(svc.modules)) { typeDialog(); return; }
+    final boolean photo = svc != null && Modules.photo(svc.modules);
+    java.util.List<String> items = new java.util.ArrayList<>();
+    if (photo) { items.add(L.t("Снять камерой")); items.add(L.t("Из галереи")); }
+    items.add(L.t("Набрать фразу")); items.add(L.t("Голосовое или аудиофайл"));
     new android.app.AlertDialog.Builder(this)
-        .setItems(new String[]{L.t("Снять камерой"), L.t("Из галереи"), L.t("Набрать фразу")}, (d, w) -> {
-          if (w == 2) typeDialog(); else { cloudPhoto = false; pickPhoto(w == 0); }
+        .setItems(items.toArray(new String[0]), (d, w) -> {
+          int k = photo ? w : w + 2;
+          if (k <= 1) { cloudPhoto = false; pickPhoto(k == 0); } else if (k == 2) typeDialog(); else pickAudio();
         }).show();
+  }
+  /** Голосовое из файла (Telegram сохраняет в «Загрузки», запись диктофона, файл из облака): тот же путь, что
+   *  «Поделиться» → Falar, только отправителя нет — «Отправить перевод…» откроет общий список. */
+  void pickAudio() {
+    try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).setType("audio/*").addCategory(Intent.CATEGORY_OPENABLE), REQ_AUDIO); }
+    catch (Throwable t) { onLog("🎙 не вышло открыть выбор файла: " + t); }
+  }
+  /** Голосовое от ShareActivity или стенда (--es voicefile <путь>, --es voicefrom <пакет>). Экран пересоздан —
+   *  интент тот же, второй раз его не читаем (extras снимаются). */
+  boolean voiceIntent(Intent i) {
+    if (i == null) return false;
+    if ("1".equals(i.getStringExtra("voicefail"))) {
+      i.removeExtra("voicefail"); setHint(L.t("🎙 голосовое не получено: файл не прочитался")); journal("🎙 голосовое не скопировалось из присланного"); return true;
+    }
+    String p = i.getStringExtra("voicefile"); if (p == null) return false;
+    String from = i.getStringExtra("voicefrom");
+    i.removeExtra("voicefile"); i.removeExtra("voicefrom");
+    voiceArrived(p, from);
+    return true;
+  }
+  /** Распознать голосовое — сразу или, пока движки грузятся, по порядку в onReady (как снимки). */
+  void voiceArrived(String path, String from) {
+    show(0);
+    if (svc == null || svc.eng == null) {
+      pendingVoices.add(new String[]{path, from});
+      setHint(L.t("🎙 голосовое получено — распознаю, как загружусь"));
+      journal("🎙 голосовое получено до загрузки — ждёт движков, в очереди " + pendingVoices.size());
+      return;
+    }
+    setHint(L.t("🎙 голосовое: распознаю…"));
+    svc.voiceMessage(new java.io.File(path), from);
+  }
+  final java.util.ArrayList<String[]> pendingVoices = new java.util.ArrayList<>();
+  static final String ACT_VOICE = "app.falar.VOICE";
+
+  /** «Скопировать перевод» (меню реплики; владелец 15.10 — «скопировать текст и отправить обратно»). */
+  void copyText(String s) {
+    android.content.ClipboardManager cm = getSystemService(android.content.ClipboardManager.class);
+    if (cm == null || s == null) return;
+    cm.setPrimaryClip(android.content.ClipData.newPlainText("Falar", s));
+    setHint(L.t("📋 перевод скопирован"));
+  }
+  /** «Отправить перевод…»: в мессенджер, из которого пришло голосовое этого разговора, — сразу (он сам спросит, в
+   *  какой чат); иначе — общий список приложений. */
+  void shareText(String s) {
+    Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, s);
+    String to = svc == null || svc.chats == null ? null
+        : VoiceMsg.replyTo(prefs.getString("voice_src_pkg", null), prefs.getLong("voice_src_chat", -1), svc.chats.current);
+    if (to != null) {
+      try { startActivity(new Intent(send).setPackage(to)); journal("📤 перевод — в " + to); return; }
+      catch (Throwable t) { journal("📤 " + to + " не открылся (" + t.getClass().getSimpleName() + ") — общий список"); }
+    }
+    try { startActivity(Intent.createChooser(send, L.t("Отправить перевод"))); journal("📤 перевод — через общий список"); }
+    catch (Throwable t) { onLog("📤 отправить не вышло: " + t); }
   }
   void typeDialog() {
     final EditText in = new EditText(this);
@@ -362,7 +421,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final Voices.Voice v = svc == null || svc.chats == null ? null : svc.chats.voices.get(who);
     boolean me = dir.startsWith("ru");
     int color; String text;
-    if (Voices.OWNER.equals(who)) { color = Look.PLUM; text = L.t(last != null && Chats.PHOTO.equals(last[8]) ? "владелец телефона · снимок" : "владелец телефона"); }
+    if (last != null && Chats.VOICE.equals(last[8]) && !who.matches("\\d{1,4}")) { color = Look.GOLD; text = L.t(me ? "голосовое · по-русски" : "голосовое · по-португальски"); }
+    else if (Voices.OWNER.equals(who)) { color = Look.PLUM; text = L.t(last != null && Chats.PHOTO.equals(last[8]) ? "владелец телефона · снимок" : "владелец телефона"); }
     else if (who.matches("\\d{1,4}")) { int n = Integer.parseInt(who); color = look.voice(n); text = cap(svc.chats.voices.label(who)); }
     else { color = me ? Look.PLUM : Look.GOLD; text = L.t(me ? "вы · по-португальски" : "собеседник"); }
     android.graphics.drawable.GradientDrawable dot = round(color, 4, 0);
@@ -651,8 +711,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (svc == null || svc.chats == null) return;
     String[] t = svc.chats.turn(svc.chats.size() - 1);
     if (t == null) { showBig("—", "pt2ru", false); smallRu.setText(""); setWho(null); return; }
-    boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]);
-    showBig((photo ? "📷 " : "") + (srcPt ? t[1] : t[2]), t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : t[1]);
+    boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]), voice = Chats.VOICE.equals(t[8]);
+    showBig((photo ? "📷 " : voice ? "🎙 " : "") + (srcPt ? t[1] : t[2]), t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : t[1]);
     setWho(t[0]);
   }
 
@@ -674,7 +734,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       @Override public View getView(int pos, View cv, ViewGroup parent) {
         String[] t = getItem(pos);
         // Справа — владелец телефона: его русская речь, снимки и набранное; слева — португальская речь.
-        boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]), owner = Voices.OWNER.equals(t[7]) || photo, me = !srcPt || owner;
+        // Голосовое из мессенджера — слева, как речь собеседника, на каком бы языке оно ни было.
+        boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]), voice = Chats.VOICE.equals(t[8]),
+            owner = Voices.OWNER.equals(t[7]) || photo, me = !voice && (!srcPt || owner);
         LinearLayout bub = new LinearLayout(MainActivity.this);
         bub.setOrientation(LinearLayout.VERTICAL); bub.setPadding(dp(12), dp(8), dp(12), dp(9));
         // Кто сказал — подписью цвета его голоса: в разговоре бывает и трое, и по-португальски двое.
@@ -689,7 +751,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         bg.setCornerRadii(me ? new float[]{r, r, s, s, r, r, r, r} : new float[]{s, s, r, r, r, r, r, r});
         bub.setBackground(bg);
         TextView pt = new TextView(MainActivity.this);
-        pt.setText((photo ? "📷 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(look.fg);
+        pt.setText((photo ? "📷 " : voice ? "🎙 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(look.fg);
         pt.setMaxWidth(maxW); if (photo) pt.setMaxLines(3);
         TextView ru = new TextView(MainActivity.this);
         ru.setText((srcPt ? t[2] : t[1]) + ("1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : ""));
@@ -729,6 +791,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (mine) { items.add(L.t("Исправить текст")); items.add(L.t("Исправить перевод")); }
     if (svc.chats.audioOf(idx) != null) items.add(L.t("Послушать, как сказали"));   // живой звук собеседника, если хранится
     if (!photo && svc.mod(Modules.TTS)) items.add(L.t("Произнести ещё раз"));   // снимок не озвучивается; без модуля «Озвучка» — нечем
+    items.add(L.t("Скопировать перевод")); items.add(L.t("Отправить перевод…"));
     items.add(L.t("Сообщить о переводе")); items.add(L.t("Удалить реплику")); items.add(L.t("Перенести в другой разговор"));
     String title = t[1].length() > 40 ? t[1].substring(0, 40) + "…" : t[1];
     new android.app.AlertDialog.Builder(this)
@@ -740,6 +803,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
           else if (it.equals(L.t("Исправить перевод"))) editTranslation(idx, t[1], t[2]);
           else if (it.equals(L.t("Послушать, как сказали"))) svc.playClip(idx);
           else if (it.equals(L.t("Произнести ещё раз"))) svc.sayTurn(idx);
+          else if (it.equals(L.t("Скопировать перевод"))) copyText(t[2]);
+          else if (it.equals(L.t("Отправить перевод…"))) shareText(t[2]);
           else if (it.equals(L.t("Сообщить о переводе"))) reportTurn(t[0], t[1], t[2]);
           else if (it.equals(L.t("Удалить реплику"))) { boolean wasLast = idx == svc.chats.size() - 1; if (svc.dropTurn(idx)) { refreshHist(); refreshChats(); if (wasLast) showLastTurn(); } }
           else moveTurnTo(idx);
@@ -1319,7 +1384,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   }};
   void meter() { if (!meterOn && resumed) { meterOn = true; ui.post(meterTick); } }
 
-  static final int REQ_PHOTO = 7;
+  static final int REQ_PHOTO = 7, REQ_AUDIO = 8;
   android.net.Uri photoUri;
 
   boolean cloudPhoto = false;
@@ -1380,6 +1445,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   @Override protected void onActivityResult(int req, int res, Intent data) {
     super.onActivityResult(req, res, data);
+    if (req == REQ_AUDIO) {
+      if (res != RESULT_OK || data == null || data.getData() == null) return;
+      final android.net.Uri u = data.getData(); final String type = data.getType();
+      new Thread(() -> { final java.io.File f = ShareActivity.copy(this, u, type);
+        runOnUiThread(() -> { if (f == null) setHint(L.t("🎙 файл не прочитался")); else voiceArrived(f.getPath(), null); }); }, "voicecopy").start();
+      return;
+    }
     if (req != REQ_PHOTO) return;
     if (res != RESULT_OK) {                          // пустая запись, заведённая под снимок, в галерее не нужна
       if (res != RESULT_CANCELED) onLog("📷 камера вернула отказ (" + res + ")");
@@ -2947,6 +3019,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     applyOverrideConfiguration(c);
   }
   @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
+    if (voiceIntent(i)) return;
     standStart = i.getAction() == null && i.getExtras() != null && !i.getExtras().isEmpty();
     if (i.hasExtra("uitheme")) {
       String t = i.getStringExtra("uitheme");
@@ -2999,6 +3072,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     setHint(L.f("Услышано: «%s» — переведу, как загружусь", text));
   }
   @Override public void onReady() {
+    if (!pendingVoices.isEmpty() && svc != null && svc.eng != null) {   // голосовые ждали движков — по порядку
+      for (String[] v : pendingVoices) svc.voiceMessage(new java.io.File(v[0]), v[1]);
+      setHint(L.t("🎙 голосовое: распознаю…")); pendingVoices.clear();
+    }
     if (!pendingPhotos.isEmpty() && svc != null && svc.eng != null) {   // снимки ждали движков — теперь читаем, по порядку
       for (int k = 0; k < pendingPhotos.size(); k++) {
         final android.net.Uri u = pendingPhotos.get(k); final boolean c = pendingClouds.get(k);

@@ -35,9 +35,15 @@ public class Engine {
   public volatile float vadMinSpeechNow = Float.NaN;
   public Vad buildVad(float threshold, float minSilence) { return buildVad(threshold, minSilence, vadMinSpeech); }
   public Vad buildVad(float threshold, float minSilence, float minSpeech) {
+    Vad v = newVad(threshold, minSilence, minSpeech);
+    vadMinSpeechNow = minSpeech;
+    return v;
+  }
+  /** Отдельный VAD, не трогающий слушание (vadMinSpeechNow — про его VAD): голосовое из мессенджера режется
+   *  своим экземпляром в своём потоке, а освобождает его тот, кто взял. */
+  public Vad newVad(float threshold, float minSilence, float minSpeech) {
     SileroVadModelConfig sv = SileroVadModelConfig.builder().setModel(vadModelPath).setThreshold(threshold)
         .setMinSilenceDuration(minSilence).setMinSpeechDuration(minSpeech).setWindowSize(512).setMaxSpeechDuration(15f).build();
-    vadMinSpeechNow = minSpeech;
     return new Vad(VadModelConfig.builder().setSileroVadModelConfig(sv).setSampleRate(16000).setNumThreads(1).setDebug(false).build());
   }
   /** Стенд. Прежний VAD не освобождается: поток нарезки может быть внутри него на этом кадре, а освобождение

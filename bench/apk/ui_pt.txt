@@ -629,3 +629,22 @@ Falar обновляется сам: раз в сутки проверяет, н
 Фраза, сказанная сразу после предыдущей, больше не теряет первое слово.	Uma frase dita logo depois da anterior não perde mais a primeira palavra.
 Кнопка FALAR слышит начало фразы лучше: перед ней теперь есть звук комнаты.	O botão FALAR ouve melhor o começo da frase: antes dela agora há o som do ambiente.
 Реплика собеседника, прерванная вашим нажатием FALAR, переводится до вашего ответа, а не после.	A fala do interlocutor interrompida quando você aperta FALAR é traduzida antes da sua resposta, e não depois.
+Голосовое или аудиофайл	Mensagem de voz ou arquivo de áudio
+🎙 голосовое не получено: файл не прочитался	🎙 a mensagem de voz não chegou: não foi possível ler o arquivo
+🎙 голосовое получено — распознаю, как загружусь	🎙 mensagem de voz recebida — reconheço quando terminar de carregar
+🎙 голосовое: распознаю…	🎙 mensagem de voz: reconhecendo…
+📋 перевод скопирован	📋 tradução copiada
+Отправить перевод	Enviar tradução
+голосовое · по-русски	mensagem de voz · em russo
+голосовое · по-португальски	mensagem de voz · em português
+Скопировать перевод	Copiar tradução
+Отправить перевод…	Enviar tradução…
+🎙 файл не прочитался	🎙 não foi possível ler o arquivo
+🎙 голосовое не прочитано: Falar ещё загружается	🎙 a mensagem de voz não foi lida: o Falar ainda está carregando
+читаю голосовое…	lendo a mensagem de voz…
+🎙 голосовое не открылось: такой формат звука не поддерживается	🎙 a mensagem de voz não abriu: este formato de áudio não é compatível
+🎙 голосовое длиннее %d мин — не беру	🎙 mensagem de voz com mais de %d min — não processo
+распознаю голосовое…	reconhecendo a mensagem de voz…
+🎙 в голосовом (%s) речи не нашлось	🎙 não foi encontrada fala na mensagem de voz (%s)
+Голосовое из WhatsApp и других мессенджеров: «Поделиться» → Falar — и оно распознано и переведено.	Mensagem de voz do WhatsApp e de outros apps: «Compartilhar» → Falar — e ela é reconhecida e traduzida.
+Перевод любой реплики можно скопировать или отправить из её меню — например, ответ в WhatsApp.	A tradução de qualquer fala pode ser copiada ou enviada pelo menu dela — por exemplo, uma resposta no WhatsApp.

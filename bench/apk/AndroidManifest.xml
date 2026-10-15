@@ -23,6 +23,23 @@
     <activity android:name="dev.agenttranslator.MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
     </activity>
+    <!-- Голосовое из мессенджера (владелец 15.10): «Поделиться» → Falar и «Открыть с помощью» для аудиофайла.
+         Без своего экрана (прозрачная тема): копирует звук и передаёт его главному экрану в задаче Falar. -->
+    <activity android:name="dev.agenttranslator.ShareActivity" android:exported="true" android:excludeFromRecents="true"
+        android:noHistory="true" android:taskAffinity="" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="android.intent.action.SEND"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="audio/*"/>
+        <data android:mimeType="application/ogg"/>
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:scheme="content"/>
+        <data android:mimeType="audio/*"/>
+      </intent-filter>
+    </activity>
     <service android:name="dev.agenttranslator.TranslatorService" android:exported="false" android:foregroundServiceType="microphone"/>
   </application>
 </manifest>
