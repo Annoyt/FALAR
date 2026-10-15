@@ -2161,11 +2161,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     Rows r = rows;
     LinearLayout v = r.page();
     // Обновление — первой карточкой: магазина нет, и это единственное место, где видно новую версию.
-    updCard = new LinearLayout(this); updCard.setOrientation(LinearLayout.HORIZONTAL); updCard.setGravity(Gravity.CENTER_VERTICAL);
+    // Значок, «Falar X» и «Проверить» — одной строкой вверху карточки (владелец 15.10: «проверить обновления чуть повыше»),
+    // ссылки «Что нового» и «Написать разработчику» — под ней.
+    updCard = new LinearLayout(this); updCard.setOrientation(LinearLayout.HORIZONTAL); updCard.setGravity(Gravity.TOP);
     updCard.setPadding(dp(14), dp(12), dp(12), dp(12));
     ImageView ui = new ImageView(this); ui.setImageDrawable(icon(app.falar.R.drawable.ic_download, look.night ? Look.GOLD : 0xFF9A6B1F));
-    updCard.addView(ui, new LinearLayout.LayoutParams(dp(24), dp(24)));
-    LinearLayout ut = new LinearLayout(this); ut.setOrientation(LinearLayout.VERTICAL); ut.setPadding(dp(14), 0, dp(8), 0);
+    LinearLayout.LayoutParams uip = new LinearLayout.LayoutParams(dp(24), dp(24)); uip.topMargin = dp(8);   // по середине кнопки высотой 40
+    updCard.addView(ui, uip);
+    LinearLayout ut = new LinearLayout(this); ut.setOrientation(LinearLayout.VERTICAL); ut.setPadding(dp(14), dp(9), dp(8), 0);
     updTitle = new TextView(this); updTitle.setTextSize(15.5f); updTitle.setTextColor(look.fg); updTitle.setTypeface(null, Typeface.BOLD); updTitle.setText("Falar");
     updLbl = new TextView(this); updLbl.setTextSize(12.5f); updLbl.setTextColor(look.dim);
     ut.addView(updTitle); ut.addView(updLbl);
@@ -2177,7 +2180,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     ut.setOnClickListener(x -> newsDialog(true));
     // «Написать разработчику» — здесь, под версией и её проверкой (владелец 15.10): об ошибке пишут, глядя на номер
     // версии, а внизу настроек, в «Приложении», кнопку не находили.
-    TextView dev = new TextView(this); dev.setTextSize(12.5f); dev.setTextColor(look.accent); dev.setPadding(0, dp(6), 0, 0);
+    TextView dev = new TextView(this); dev.setTextSize(15); dev.setTypeface(null, Typeface.BOLD); dev.setTextColor(look.accent); dev.setPadding(0, dp(10), 0, dp(2));   // крупнее «Что нового» — владелец 15.10
     dev.setText(L.t("Написать разработчику ›")); dev.setOnClickListener(x -> writeDev()); ut.addView(dev);
     updCard.addView(ut, new LinearLayout.LayoutParams(0, -2, 1f));
     bUpdate = r.button(L.t("Проверить"), false); bUpdateGo = r.button(L.t("Обновить"), true); bUpdateGo.setVisibility(View.GONE);
