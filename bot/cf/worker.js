@@ -5,12 +5,35 @@
 import handle from 'handlers/message';
 import handleButton from 'handlers/callback_query';
 import daily from 'handlers/scheduled';
+import * as telemetry from 'handlers/telemetry';
+import { MAX_PACKET, MAX_AUDIO } from 'lib/telemetry';
 import { bind } from 'sdk';
 import { setOwner } from 'lib/owner';
+
+/** Данные приложения, присланные по согласию человека: /t — статистика, /audio — звук реплики. Заголовок
+ *  X-Falar отсекает случайных сканеров адресов (секретом он не является: он есть в приложении). Ни адрес,
+ *  ни тело запроса в журнал не пишутся. */
+async function fromApp(req, env, path) {
+  const json = (status, body) => Response.json(body, { status });
+  if (req.method !== 'POST') return json(405, { ok: false, error: 'POST' });
+  if (req.headers.get('x-falar') !== '1') return json(403, { ok: false, error: 'не приложение' });
+  const max = path === '/t' ? MAX_PACKET : MAX_AUDIO;
+  if (Number(req.headers.get('content-length') || 0) > max) return json(413, { ok: false, error: 'слишком большое' });
+  const text = await req.text();
+  if (text.length > max) return json(413, { ok: false, error: 'слишком большое' });
+  let raw;
+  try { raw = JSON.parse(text); } catch (e) { return json(400, { ok: false, error: 'не JSON' }); }
+  bind(env); setOwner(env.OWNER);
+  try {
+    const r = path === '/t' ? await telemetry.packet(raw) : await telemetry.audio(raw);
+    return json(r.status, r.body);
+  } catch (e) { console.error('приложение ' + path, (e && e.message) || e); return json(500, { ok: false, error: 'сбой бота' }); }
+}
 
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+    if (url.pathname === '/t' || url.pathname === '/audio') return fromApp(req, env, url.pathname);
     if (url.pathname !== '/telegram') return new Response('Falar: бот обратной связи — https://t.me/falar_tbot\n', { status: 404 });
     if (req.method !== 'POST') return new Response('POST only\n', { status: 405 });
     if (!env.WEBHOOK_SECRET || req.headers.get('X-Telegram-Bot-Api-Secret-Token') !== env.WEBHOOK_SECRET) {

@@ -18,14 +18,27 @@ export function bind(env) {
   D1 = env.DB || null;
 }
 
+/** Тело запроса к Bot API: обычно JSON; есть файл (Blob/File: голос, документ) — multipart, файлы Telegram
+ *  принимает только так. Прочие поля тогда — строками, объекты (reply_markup) — JSON. */
+export function body(params) {
+  if (!Object.values(params).some((v) => v instanceof Blob)) {
+    return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) };
+  }
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(params)) {
+    if (v == null) continue;
+    if (v instanceof Blob) fd.append(k, v, v.name || k);
+    else fd.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+  }
+  return { method: 'POST', body: fd };
+}
+
 /** api.sendMessage({...}) → result; ошибка Telegram → BotApiError с кодом и описанием. */
 export const api = new Proxy({}, {
   get(_, method) {
     if (typeof method !== 'string' || method === 'then') return undefined;   // не «thenable»: await api не зовёт Bot API
     return async (params = {}) => {
-      const r = await fetch(BASE + '/bot' + TOKEN + '/' + method, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params),
-      });
+      const r = await fetch(BASE + '/bot' + TOKEN + '/' + method, body(params));
       let j = null;
       try { j = await r.json(); } catch (e) { /* не JSON — ниже ошибка по статусу */ }
       if (!j) throw new BotApiError(method, r.status, 'HTTP ' + r.status);

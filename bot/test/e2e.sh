@@ -72,7 +72,7 @@ chk '[ "$(js "c.filter(x => x.method === \"copyMessage\").map(x => [x.params.cha
 echo "== группа с топиками"
 reset
 post "$(msg 1000 Я -100500 supergroup /setup)" > /dev/null
-chk '[ "$(js "c.filter(x => x.method === \"createForumTopic\").map(x => x.params.name).join(\",\")")" = "Переводы,Ошибки,Идеи,Задачи,Аналитика" ]' "W8 /setup — пять топиков"
+chk '[ "$(js "c.filter(x => x.method === \"createForumTopic\").map(x => x.params.name).join(\",\")")" = "Переводы,Ошибки,Идеи,Задачи,Аналитика,Телеметрия" ]' "W8 /setup — шесть топиков"
 reset
 post "$(msg 2002 Борис 2002 private "#идея Тёмная тема")" > /dev/null
 t=$(sql "SELECT value FROM settings WHERE key = 'topic:-100500:idea'" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].value)")
@@ -110,4 +110,27 @@ chk '[ "$(sql "SELECT count(*) AS n FROM stats")" = "[{\"n\":1}]" ]' "W16 сни
 reset
 r=$(sched); sleep 1
 chk '[ "$r" = 200 ] && [ "$(js "c.length")" = 0 ] && [ "$(curl -s http://127.0.0.1:$TG/gh/calls | node -e "console.log(JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")).length)")" = 1 ]' "W17 второй запуск в тот же день — ни GitHub, ни сообщений"
+echo "== телеметрия из приложения (по согласию)"
+app() { curl -s -o "$TMP/app.out" -w '%{http_code}' -X POST -H 'content-type: application/json' ${3:+-H "$3"} --data-binary "@$2" "http://127.0.0.1:$WP/$1"; }
+cat > "$TMP/pkt.json" <<'JSON'
+{"v":1,"app":{"name":"0.33.0","code":39,"ui":"ru"},"device":{"maker":"Xiaomi","model":"Redmi Note 12","android":"14","sdk":34},"asr":{"hours":24,"turns":{"pt":3,"ru":1},"empty":1},"crashes":[{"at":1791029124,"kind":"crash","what":"java.lang.IllegalStateException","where":"Chats.add:120","v":"0.33.0"}]}
+JSON
+data=$(sql "SELECT value FROM settings WHERE key = 'topic:-100500:data'" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].value)")
+reset
+chk '[ "$(app t "$TMP/pkt.json")" = 403 ] && [ "$(js "c.length")" = 0 ]' "W18 без заголовка X-Falar — 403, в Telegram ничего"
+chk '[ "$(app t "$TMP/pkt.json" "X-Falar: 1")" = 200 ] && [ "$(cat "$TMP/app.out")" = "{\"ok\":true}" ]' "W19 пакет статистики принят"
+chk '[ "$(js "c.map(x => [x.method, x.params.chat_id, x.params.message_thread_id, x.params.text.split(\"\\n\")[0]])")" = "[[\"sendMessage\",-100500,$data,\"#устройство · Falar 0.33.0 (39) · интерфейс ru\"]]" ]' "W19 сообщение — в «Телеметрию» ($data)"
+chk '[ "$(js "c[0].params.text.includes(\"#сбой · сбой · java.lang.IllegalStateException · Chats.add:120\")")" = true ]' "W19 сбой — строкой #сбой"
+chk '[ "$(sql "SELECT count(*) AS n FROM telemetry")" = "[{\"n\":1}]" ]' "W20 пакет — в D1"
+node -e "process.stdout.write(JSON.stringify({v:1,app:{name:'x',code:1},device:{pad:'x'.repeat(17000)}}))" > "$TMP/big.json"
+chk '[ "$(app t "$TMP/big.json" "X-Falar: 1")" = 413 ]' "W21 больше 16 КБ — 413"
+node -e "process.stdout.write(JSON.stringify({v:1,consent:true,lang:'pt',dur_ms:2500,mime:'audio/ogg',audio:Buffer.from('OggS e2e opus bytes').toString('base64'),heard:'bom dia',said:'bom dia!',app:{name:'0.33.0',code:39},device:{maker:'Xiaomi',model:'Redmi Note 12',android:'14'}}))" > "$TMP/aud.json"
+reset
+r=$(app audio "$TMP/aud.json" "X-Falar: 1"); n=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$TMP/app.out','utf8')).n)")
+chk '[ "$r" = 200 ] && [ "$n" -ge 1 ]' "W22 звук принят, номер записи $n"
+chk '[ "$(js "c.map(x => [x.method, x.params.chat_id, x.params.message_thread_id, x.params.voice.file, x.params.voice.type, x.params.voice.size, x.params.caption.split(\"\\n\")[0]])")" = "[[\"sendVoice\",\"-100500\",\"$data\",\"falar-$n.ogg\",\"audio/ogg\",19,\"#звук · pt · 2,5 с · № $n\"]]" ]' "W22 голос — файлом (multipart) в «Телеметрию»"
+chk '[ "$(sql "SELECT lang, said, substr(file, 1, 2) AS f FROM donations WHERE id = $n")" = "[{\"lang\":\"pt\",\"said\":\"bom dia!\",\"f\":\"fv\"}]" ]' "W23 запись звука — в D1: язык, текст, file_id от Telegram"
+reset
+post "$(msg 1000 Я -100500 supergroup "/del $n")" > /dev/null
+chk '[ "$(js "c.map(x => x.method).join()")" = "deleteMessage,sendMessage" ] && [ "$(sql "SELECT count(*) AS n FROM donations WHERE id = $n")" = "[{\"n\":0}]" ]' "W24 /del $n — звук удалён из топика и из D1"
 chk '! grep -qE "Uncaught|TypeError|ReferenceError" "$TMP/dev.log"' "W11 в журнале Worker нет необработанных ошибок"

@@ -24,8 +24,11 @@ export const api = new Proxy({}, {
       const i = fails.findIndex((f) => f.m === method);
       if (i >= 0) { const f = fails.splice(i, 1)[0]; throw new BotApiError(method, f.code, f.description); }
       if (method === 'createForumTopic') return { message_thread_id: nextId++, name: params.name, icon_color: params.icon_color };
-      if (method === 'setMessageReaction') return true;
-      return { message_id: nextId++, chat: { id: params.chat_id } };
+      if (method === 'setMessageReaction' || method === 'deleteMessage') return true;
+      const m = { message_id: nextId++, chat: { id: params.chat_id } };
+      if (method === 'sendVoice') m.voice = { file_id: 'voice-' + m.message_id };
+      if (method === 'sendDocument') m.document = { file_id: 'doc-' + m.message_id };
+      return m;
     };
   },
 });
