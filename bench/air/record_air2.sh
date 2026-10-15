@@ -106,8 +106,10 @@ OFF=$(for i in 1 2 3 4 5 6 7 8; do a=$(date +%s%3N); d=$(sh "date +%s%3N"); b=$(
 say "  часы телефона: $(echo $OFF | cut -d' ' -f2) мс от ПК (ответ за $(echo $OFF | cut -d' ' -f1) мс)"
 
 mkdir -p "$OUT"; : > "$OUT/player.tsv"
+# Falar уже запущен — модули второй раз о себе не пишут, ждать их строку незачем (16.10 ждали её 3,5 мин впустую).
+up=$(sh "pidof $PKG")
 m=$(mark); $ADB shell "am start -n $ACT" >/dev/null 2>&1
-wl "$m" '🧩 модули:' 150 >/dev/null; sleep 2
+[ -n "$up" ] || wl "$m" '🧩 модули:' 150 >/dev/null; sleep 2
 m=$(mark)
 $ADB shell "am start -n $ACT --es mictest rec_$SEC" >/dev/null 2>&1
 L0=$(wl "$m" '🎤 запись двух каналов: (началась|не создалась)' 30) || { say "запись не началась"; exit 1; }
