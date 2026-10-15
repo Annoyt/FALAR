@@ -92,7 +92,7 @@ public class Chats {
     // с тем же именем и пометкой, — данные не теряются, а файл не растёт без предела.
     if (turns.length() >= KEEP) {
       String was = name, m = memo, mb = memoBy, tp = topic; JSONArray tm = terms; Voices vs = voices;
-      newChat(was.isEmpty() ? "" : was + " · продолжение");
+      newChat(was.isEmpty() ? "" : was + L.t(" · продолжение"));
       // Продолжение — тот же разговор: память, тема и глоссарий переходят в него. Иначе на 500-й
       // реплике уточнитель посреди разговора начинал бы с чистого листа.
       memo = m; memoBy = mb; topic = tp; terms = tm; voices = vs;   // и те же люди
@@ -397,10 +397,13 @@ public class Chats {
                         x.optString("fixed", x.optString("dst", "")), String.valueOf(k),
                         x.optString("fixed", "").isEmpty() ? "" : "1", x.optString("by", ""),
                         String.valueOf(x.optLong("at", 0)), x.optString("who", ""),
-                        x.has("photo") ? PHOTO : "", x.optString("audio", "")};
+                        x.has("photo") ? PHOTO : x.has("voice") ? VOICE : "", x.optString("audio", "")};
   }
   /** Метка реплики со снимком в ряду all() (поле 8). */
   public static final String PHOTO = "📷";
+  /** Метка реплики из голосового мессенджера (поле 8; в JSON — "voice": длительность, с). Голосовое — речь
+   *  собеседника, поэтому в диалоге для уточнителя и облака оно остаётся, в отличие от снимка. */
+  public static final String VOICE = "🎙";
 
   /** Реплики разговора без снимков: сам диалог — для уточнителя, облака и «кто говорит».
    *  Текст вывески не сказан ни одной из сторон, и «obrigada» на ней — не про собеседницу. */

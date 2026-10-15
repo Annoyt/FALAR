@@ -309,7 +309,7 @@ public class Learn {
   public synchronized long dueOf(String w) { long[] st = stat.get(w); return st == null ? 0 : st[DUE]; }
   public synchronized String statOf(String w) {
     long[] st = stat.get(w);
-    return st == null ? "" : "помню " + st[OK] + " · забыл " + st[FAIL];
+    return st == null ? "" : L.f("помню %d · забыл %d", st[OK], st[FAIL]);
   }
 
   /** Служебные слова — верхушка частотности корпуса. Файл уже лежит рядом: он же используется

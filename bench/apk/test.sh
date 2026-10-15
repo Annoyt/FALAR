@@ -42,6 +42,9 @@
 #   Slicer — сборка куска из кадров слушания: подпор, хвост, выдержка, минимум речи; тишина конца — подпор следующего,
 #            разрыв кадров закрывает кусок сейчас, предел длины режет по тихому кадру;
 #   Numbers — португальские числа словами для озвучки и транскрипции: числительные, род, деньги, время, проценты.
+#   VoiceMsg — голосовое из мессенджера: склейка кусков, длительность, файл, отправитель, куда «Отправить перевод…», пометка 🎙;
+#   L — надписи по-португальски: выбор языка, у каждой надписи кода и пункта whatsnew.txt есть перевод в ui_pt.txt,
+#       вставки совпадают, лишних строк нет; в экранах нет русских строк мимо L.
 #   MicPair — два канала записи: копия одного микрофона или два разных, уровни, на сколько позже слышит правый.
 # Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
 # Мутационное тестирование тех же классов — bench/apk/mutate.sh.
@@ -53,6 +56,7 @@ A=$(cd "$(dirname "$0")" && pwd); R=$A/../..; J=$R/tools/json.jar; AJ=$R/tools/a
 [ -f "$J" ] || curl -sSL -o "$J" https://repo1.maven.org/maven2/org/json/json/20240303/json-20240303.jar
 rm -rf "$OUT"; mkdir -p "$OUT"
 javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
+  $A/src/dev/agenttranslator/L.java $A/test/LTest.java \
   $A/src/dev/agenttranslator/ModelStore.java $A/test/ModelStoreTest.java \
   $A/src/dev/agenttranslator/Heard.java $A/test/HeardTest.java \
   $A/src/dev/agenttranslator/Updates.java $A/test/UpdatesTest.java \
@@ -83,6 +87,7 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Inbox.java $A/test/InboxTest.java \
   $A/src/dev/agenttranslator/Slicer.java $A/test/SlicerTest.java \
   $A/src/dev/agenttranslator/Numbers.java $A/test/NumbersTest.java \
+  $A/src/dev/agenttranslator/VoiceMsg.java $A/test/VoiceMsgTest.java \
   $A/src/dev/agenttranslator/MicPair.java $A/test/MicPairTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
@@ -114,8 +119,10 @@ java -cp "$OUT:$J" dev.agenttranslator.BackupRulesTest "$A" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.CardsTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.PracticeTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WienerTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.LTest "$A" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.InboxTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.SlicerTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.NumbersTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.VoiceMsgTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.MicPairTest || fail=1
 exit $fail

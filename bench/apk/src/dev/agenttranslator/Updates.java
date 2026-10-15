@@ -67,9 +67,8 @@ public class Updates {
   /** Строка для человека. Короткая: она же уходит в уведомление. */
   public static String describe(int installed, Info i) {
     if (i == null) return "";
-    if (!newer(installed, i)) return "Установлена последняя версия";
-    return "Вышла версия " + (i.name.isEmpty() ? String.valueOf(i.code) : i.name)
-         + " · " + String.format(java.util.Locale.ROOT, "%.0f", i.size / 1e6) + " МБ"
-         + (required(installed, i) ? " · обновление обязательное" : "");
+    if (!newer(installed, i)) return L.t("Установлена последняя версия");
+    return L.f("Вышла версия %s · %.0f МБ", i.name.isEmpty() ? String.valueOf(i.code) : i.name, i.size / 1e6)
+         + (required(installed, i) ? L.t(" · обновление обязательное") : "");
   }
 }

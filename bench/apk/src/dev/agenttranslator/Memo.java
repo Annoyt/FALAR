@@ -184,7 +184,10 @@ public class Memo {
 
   /** Строка «кто говорит» по репликам разговора. rows — как Chats.all(): {направление, исходник, …}.
    *  Пустая строка — ни по одной стороне признаков нет. */
-  public static String who(List<String[]> rows) {
+  public static String who(List<String[]> rows) { return who(rows, false); }
+  /** ui — для окна «Память разговора», на языке надписей; без ui — по-русски, в память уточнителя:
+   *  подсказка модели остаётся русской при любом языке надписей. */
+  public static String who(List<String[]> rows, boolean ui) {
     int pf = 0, pm = 0, rf = 0, rm = 0;
     if (rows != null) for (String[] r : rows) {
       if (r == null || r.length < 2 || r[0] == null) continue;
@@ -195,12 +198,16 @@ public class Memo {
     }
     String p = word(verdict(pf, pm)), r = word(verdict(rf, rm));
     if (p.isEmpty() && r.isEmpty()) return "";
+    if (ui) {
+      String pp = p.isEmpty() ? "" : L.f("по-португальски — %s", L.t(p)), rr = r.isEmpty() ? "" : L.f("по-русски — %s", L.t(r));
+      return L.f("Кто говорит: %s.", pp.isEmpty() ? rr : rr.isEmpty() ? pp : pp + ", " + rr);
+    }
     StringBuilder b = new StringBuilder("Кто говорит: ");
     if (!p.isEmpty()) b.append("по-португальски — ").append(p);
     if (!r.isEmpty()) b.append(p.isEmpty() ? "" : ", ").append("по-русски — ").append(r);
     return b.append('.').toString();
   }
-  static String word(int v) { return v == F ? "женщина" : v == M ? "мужчина" : v == BOTH ? "мужчина и женщина" : ""; }
+  static String word(int v) { return v == F ? L.k("женщина") : v == M ? L.k("мужчина") : v == BOTH ? L.k("мужчина и женщина") : ""; }
 
   /** Память для фона уточнителя: кто говорит, ключевые детали, тема — строками, не длиннее cap.
    *  Урезаются детали: «кто говорит» короткое и полезнее всего, тема — одна строка. */
@@ -269,13 +276,13 @@ public class Memo {
   public static String count(int n) {
     switch (n) {
       case 0: return "";
-      case 1: return "Говорит один человек";
-      case 2: return "Говорят двое";
-      case 3: return "Говорят трое";
-      case 4: return "Говорят четверо";
-      case 5: return "Говорят пятеро";
-      case 6: return "Говорят шестеро";
-      default: return "Говорят " + n + " человек";
+      case 1: return L.t("Говорит один человек");
+      case 2: return L.t("Говорят двое");
+      case 3: return L.t("Говорят трое");
+      case 4: return L.t("Говорят четверо");
+      case 5: return L.t("Говорят пятеро");
+      case 6: return L.t("Говорят шестеро");
+      default: return L.f("Говорят %d человек", n);
     }
   }
   /** Самое длинное, что голос сказал, — по-русски (у португальской реплики — её перевод), до max знаков. */
@@ -306,8 +313,8 @@ public class Memo {
         if (c[0] > c[1]) f++; else if (c[1] > c[0]) m++;
       }
       String g = word(verdict(f, m));
-      b.append("\n• ").append(v.name.isEmpty() ? "Собеседник " + v.n : v.name + " (собеседник " + v.n + ")")
-       .append(" — ").append("ru".equals(v.lang) ? "по-русски" : "по-португальски").append(g.isEmpty() ? "" : ", " + g);
+      b.append("\n• ").append(v.name.isEmpty() ? L.f("Собеседник %d", v.n) : L.f("%s (собеседник %d)", v.name, v.n))
+       .append(" — ").append(L.t("ru".equals(v.lang) ? "по-русски" : "по-португальски")).append(g.isEmpty() ? "" : ", " + L.t(g));
       String about = !v.says.isEmpty() ? v.says : longest(rs, w, 90);
       if (!about.isEmpty()) b.append(": ").append(v.says.isEmpty() ? "«" + about + "»" : about);
     }

@@ -168,5 +168,5 @@ public class Phrasebook {
       bb.put("RIFF".getBytes()).putInt(36 + s.length * 2).put("WAVE".getBytes()).put("fmt ".getBytes()).putInt(16).putShort((short) 1).putShort((short) 1).putInt(rate).putInt(rate * 2).putShort((short) 2).putShort((short) 16).put("data".getBytes()).putInt(s.length * 2);
       for (float v : s) bb.putShort((short) Math.max(-32768, Math.min(32767, Math.round(v * 32767)))); Files.write(f.toPath(), bb.array()); } catch (Exception e) { e.printStackTrace(); } });
   }
-  public String stats() { return (stale > 0 ? "устаревших выброшено " + stale + " · " : "") + "словарь " + seedCount + (minedCount > 0 ? " + корпус " + minedCount : "") + " · пины " + userCount + " · выучено " + learnedCount + " (быстрых " + fastCount + ")"; }
+  public String stats() { return (stale > 0 ? L.f("устаревших выброшено %d · ", stale) : "") + L.f("словарь %d", seedCount) + (minedCount > 0 ? L.f(" + корпус %d", minedCount) : "") + L.f(" · пины %d · выучено %d (быстрых %d)", userCount, learnedCount, fastCount); }
 }

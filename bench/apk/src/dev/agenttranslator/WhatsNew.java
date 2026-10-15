@@ -106,7 +106,7 @@ public final class WhatsNew {
   public static Notes own(List<Entry> all, int to, String toName) { return notes(all, to - 1, to, toName); }
 
   /** Строка под заголовком окна: с какой версии обновились. Неизвестно — пусто. */
-  public static String since(String fromName) { return fromName == null || fromName.isEmpty() ? "" : "Вы обновились с версии " + fromName + "."; }
+  public static String since(String fromName) { return fromName == null || fromName.isEmpty() ? "" : L.f("Вы обновились с версии %s.", fromName); }
 
   /** Та же сводка одной записью для журнала: «🆕 Обновлено 0.23.1 → 0.27.0», «Новое», «Исправлено». */
   public static String plain(Notes n, String fromName, String toName) {

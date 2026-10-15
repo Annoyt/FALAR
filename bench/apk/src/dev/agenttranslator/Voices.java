@@ -145,13 +145,13 @@ public class Voices {
   }
 
   /** Как голос называть на экране: имя или «собеседник n». */
-  public static String label(Voice v) { return v == null ? "" : !v.name.isEmpty() ? v.name : "собеседник " + v.n; }
+  public static String label(Voice v) { return v == null ? "" : !v.name.isEmpty() ? v.name : L.f("собеседник %d", v.n); }
   /** То же по полю реплики, когда голос уже забыт: номер в реплике остаётся. Владелец — «владелец телефона». */
   public synchronized String label(String who) {
-    if (OWNER.equals(who)) return "владелец телефона";
+    if (OWNER.equals(who)) return L.t("владелец телефона");
     Voice v = get(who);
     if (v != null) return label(v);
-    return who == null || !who.trim().matches("\\d+") ? "" : "собеседник " + who.trim();
+    return who == null || !who.trim().matches("\\d+") ? "" : L.f("собеседник %s", who.trim());
   }
 
   // ---- двое подряд в одном сегменте слушания (results/2026-10-01-voices.md, E4)

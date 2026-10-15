@@ -34,8 +34,10 @@ public class SuitesTest {
   @Test void learn() throws Exception { assertEquals(0, LearnTest.run()); }
   @Test void cards() { assertEquals(0, CardsTest.run()); }
   @Test void practice() { assertEquals(0, PracticeTest.run()); }
+  @Test void l10n() throws Exception { assertEquals(0, LTest.run(System.getProperty("falar.apk", "../../bench/apk"))); }
   @Test void inbox() throws Exception { assertEquals(0, InboxTest.run()); }
   @Test void slicer() { assertEquals(0, SlicerTest.run()); }
   @Test void numbers() { assertEquals(0, NumbersTest.run()); }
+  @Test void voiceMsg() throws Exception { assertEquals(0, VoiceMsgTest.run()); }
   @Test void micPair() { assertEquals(0, MicPairTest.run()); }
 }

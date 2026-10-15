@@ -283,8 +283,9 @@ public class TranslatorService extends Service {
 
   @Override public void onCreate() {
     super.onCreate();
+    UiLang.init(this);   // уведомление, подсказки и ход загрузки — на языке надписей
     NotificationManager nm = getSystemService(NotificationManager.class);
-    nm.createNotificationChannel(new NotificationChannel(CH, "Переводчик", NotificationManager.IMPORTANCE_LOW));
+    nm.createNotificationChannel(new NotificationChannel(CH, L.t("Переводчик"), NotificationManager.IMPORTANCE_LOW));
     if (toForeground()) init();
   }
   /** Служба стала видимой (startForeground) — до этого она не грузит ничего. */
@@ -295,7 +296,7 @@ public class TranslatorService extends Service {
    *  после падения, ответ установщика после обновления. Слушать из фона она всё равно не смогла бы:
    *  микрофон в фоне глушится с Android 11. Поэтому не падаем, а ждём, пока Falar откроют (onStartCommand). */
   boolean toForeground() {
-    Notification n = notif("Загрузка моделей…");
+    Notification n = notif(L.t("Загрузка моделей…"));
     try {
       if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE); else startForeground(NOTIF, n);
       return fg = true;
@@ -310,7 +311,7 @@ public class TranslatorService extends Service {
     modelsDir = new File(getExternalFilesDir(null), "models");
     // Хранилище создаём здесь, а не в фоне: стендовые интенты (models/modelsbase) приходят сразу за onCreate.
     try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
-    catch (Throwable t) { Log.e(TAG, "manifest", t); status("Ошибка манифеста моделей: " + t); return; }
+    catch (Throwable t) { Log.e(TAG, "manifest", t); status(L.f("Ошибка манифеста моделей: %s", t)); return; }
     // Модули: выбор человека; до выбора (новая установка) — по умолчанию под этот телефон.
     SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
     String saved = sp.getString(PREF_MODULES, null);
@@ -358,17 +359,17 @@ public class TranslatorService extends Service {
       if (st.upgrade > 0) log("📦 можно облегчить перевод: скачать " + ModelStore.mb(st.upgradeBytes) + " МБ — «Система» → «облегчить перевод»; до тех пор работает прежний путь");
       if (st.autoMissing > 0) log("📦 модулям не хватает " + ModelStore.mb(st.autoBytes) + " МБ: " + whatFetch(store.autos()) + " — докачается само по разрешённой сети");
       if (!p.need.isEmpty()) {
-        status("Нужно скачать модели: " + p.need.size() + " файлов, " + ModelStore.mb(p.bytes) + " МБ");
-        notify("Нужно скачать модели (" + ModelStore.mb(p.bytes) + " МБ)"); return;
+        status(L.f("Нужно скачать модели: %d файлов, %s МБ", p.need.size(), ModelStore.mb(p.bytes)));
+        notify(L.f("Нужно скачать модели (%s МБ)", ModelStore.mb(p.bytes))); return;
       }
       loadAll();
-    } catch (Throwable t) { Log.e(TAG, "boot", t); status("Ошибка: " + t); }
+    } catch (Throwable t) { Log.e(TAG, "boot", t); status(L.f("Ошибка: %s", t)); }
   }
   void loadAll() {
     final File models = modelsDir;
     if (eng != null) return;
     try {
-      if (!new File(models, "silero_vad.onnx").exists()) { status("Нет моделей. Залейте их в\n" + models.getAbsolutePath());
+      if (!new File(models, "silero_vad.onnx").exists()) { status(L.f("Нет моделей. Залейте их в\n%s", models.getAbsolutePath()));
         log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
       Engine.mtBeam = getSharedPreferences("at", MODE_PRIVATE).getBoolean("mt_quality", true) ? Engine.MT_BEAM_QUALITY : 1;
@@ -381,12 +382,12 @@ public class TranslatorService extends Service {
       // последней (loadTtsLate): перевод сказанного во время загрузки её не ждёт.
       final int nStages = Engine.withTts ? 4 : 3;
       ttsLoading = Engine.withTts; Engine.ttsLater = true;
-      Engine.stage = w -> busy("load", "asr".equals(w) ? "распознавание" : "перевод", "asr".equals(w) ? 0 : 1, nStages);
+      Engine.stage = w -> busy("load", "asr".equals(w) ? L.k("распознавание") : L.k("перевод"), "asr".equals(w) ? 0 : 1, nStages);
       Engine.asrUp = this::asrUp;
       eng = new Engine(models, this::log);
       Engine.stage = null; Engine.asrUp = null;
       final long restFrom = System.nanoTime();
-      busy("load", "словарь и разговоры", 2, nStages);
+      busy("load", L.k("словарь и разговоры"), 2, nStages);
       pb = new Phrasebook(models, mod(Modules.CORPUS));
       spk = new Speaker(models, mod(Modules.SPEAKER)); words = new WordList(models); cloud = new Cloud(models); ocr = new Ocr(models);
       Object[] old = Voices.retireOld(models);
@@ -420,7 +421,7 @@ public class TranslatorService extends Service {
       heartbeat(); startWarm(); startSay(); watchNetwork();
       // Слушание могли включить ещё во время загрузки (earlyStart или кнопкой) — тогда оно уже идёт.
       boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
-      if (!vadMode) { if (lp || lr) setListen(lp, lr); else { log("🎚 микрофон выключен: включите «Слушать PT» или «Слушать RU»"); status("Микрофон выключен"); } }
+      if (!vadMode) { if (lp || lr) setListen(lp, lr); else { log("🎚 микрофон выключен: включите «Слушать PT» или «Слушать RU»"); status(L.t("Микрофон выключен")); } }
       final long rest = (System.nanoTime() - restFrom) / 1000000;
       loading = false;
       tsv("early", "ready", "" + (System.currentTimeMillis() - bootAt));
@@ -429,7 +430,7 @@ public class TranslatorService extends Service {
       // идёт раньше её загрузки, а сам голос его ждёт в очереди озвучки (ttsLoading).
       final long askedTts = System.currentTimeMillis();
       worker.submit(() -> loadTtsLate(rest, nStages, askedTts));
-    } catch (Throwable t) { Log.e(TAG, "init", t); status("Ошибка: " + t); Engine.stage = null; Engine.asrUp = null; loading = false; ttsLoading = false; busy("load", null, 0, 0); }
+    } catch (Throwable t) { Log.e(TAG, "init", t); status(L.f(L.k("Ошибка: %s"), t)); Engine.stage = null; Engine.asrUp = null; loading = false; ttsLoading = false; busy("load", null, 0, 0); }
   }
   /** Озвучка — после остального и после сказанного: фразы в очереди перевода (они встают за этой задачей —
    *  она уходит в конец очереди за ними), фраза, которую ещё говорят, и не нарезанный звук идут вперёд. Иначе
@@ -444,16 +445,16 @@ public class TranslatorService extends Service {
     }
     if (System.currentTimeMillis() - since > 100) tsv("early", "tts_after", "" + (System.currentTimeMillis() - since));
     try {
-      if (mod(Modules.TTS)) { busy("load", "озвучка", nStages - 1, nStages); eng.loadTts(); }
+      if (mod(Modules.TTS)) { busy("load", L.k("озвучка"), nStages - 1, nStages); eng.loadTts(); }
       else log("TTS не загружается: модуль «Озвучка» выключен");
     } catch (Throwable t) { Log.e(TAG, "tts", t); log("TTS: " + t); }
     finally { ttsLoading = false; }
     log("🧩 модули: " + modulesLine());
-    status("Готово. ASR " + eng.loadAsrMs + " · MT " + eng.loadMtMs + " · TTS " + eng.loadTtsMs + " мс · " + pb.stats());
+    status(L.f("Готово. ASR %d · MT %d · TTS %d мс · %s", eng.loadAsrMs, eng.loadMtMs, eng.loadTtsMs, pb.stats()));
     // Сколько шёл каждый этап — для хода загрузки в следующий раз: распознавание, перевод, озвучка, остальное.
     getSharedPreferences("at", MODE_PRIVATE).edit().putString("load_ms", eng.loadAsrMs + "," + eng.loadMtMs + "," + eng.loadTtsMs + "," + restMs).apply();
     busy("load", null, 0, 0);
-    notify("Готов. " + pb.stats());
+    notify(L.f("Готов. %s", pb.stats()));
     maybeAutoUpgrade("");
   }
   /** Настройки звука — до микрофона: слушание открывается раньше моделей, и нарезка того, что сказали во
@@ -578,10 +579,12 @@ public class TranslatorService extends Service {
   Notification notif(String text) {
     PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, TranslatorService.class).setAction(ACT_STOP), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-    return new Notification.Builder(this, CH).setSmallIcon(app.falar.R.drawable.ic_stat_falar).setContentTitle("Falar" + (vadMode ? " · слушаю" : "")).setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text))
-      .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open).addAction(new Notification.Action.Builder(Icon.createWithResource(this, android.R.drawable.ic_media_pause), "Стоп", stop).build()).build();
+    return new Notification.Builder(this, CH).setSmallIcon(app.falar.R.drawable.ic_stat_falar).setContentTitle("Falar" + (vadMode ? L.t(" · слушаю") : "")).setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text))
+      .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open).addAction(new Notification.Action.Builder(Icon.createWithResource(this, android.R.drawable.ic_media_pause), L.t("Стоп"), stop).build()).build();
   }
-  void notify(String text) { getSystemService(NotificationManager.class).notify(NOTIF, notif(text)); }
+  /** Текст уведомления сейчас: при смене языка надписей уведомление перерисовывается (заголовок и «Стоп»). */
+  volatile String lastNotif;
+  void notify(String text) { lastNotif = text; getSystemService(NotificationManager.class).notify(NOTIF, notif(text)); }
 
   @Override public int onStartCommand(Intent i, int flags, int id) {
     if (i != null && ACT_STOP.equals(i.getAction())) { stopSelf(); return START_NOT_STICKY; }
@@ -595,9 +598,9 @@ public class TranslatorService extends Service {
       if (st == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
         Intent ui = i.getParcelableExtra(Intent.EXTRA_INTENT);
         if (ui != null) { ui.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); try { startActivity(ui); } catch (Throwable e) { log("⬆ окно установки не открылось: " + e); } }
-      } else if (st == android.content.pm.PackageInstaller.STATUS_SUCCESS) { upd("Обновление установлено"); log("⬆ обновление установлено"); }
+      } else if (st == android.content.pm.PackageInstaller.STATUS_SUCCESS) { upd(L.t("Обновление установлено")); log("⬆ обновление установлено"); }
       else { String m = i.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
-        upd("установка не прошла — " + installWhy(m)); log("⬆ установка не прошла (" + st + "): " + m); }
+        upd(L.f("установка не прошла — %s", installWhy(m))); log("⬆ установка не прошла (" + st + "): " + m); }
       return START_STICKY;
     }
     if (i != null) standFrom(i);
@@ -1334,7 +1337,7 @@ public class TranslatorService extends Service {
     if (on) listenLiveReset = true;
     if (on && !capturing) { capturing = true; startCapture(); }
     else if (!on) capturing = false;                       // поток сам выйдет и отпустит микрофон
-    notify(on ? "Слушаю…" : "Микрофон выключен"); }
+    notify(L.t(on ? "Слушаю…" : "Микрофон выключен")); }
   /** Последняя секунда слушания (кадры до усиления) — подпор удержания: модели нужен настоящий звук комнаты перед
    *  фразой, а удержание начиналось с нажатия, без него (results/2026-10-08-asr-review.md: на корпусе без подпора
    *  WER 4,0 / 4,0 %, с секундой комнаты 2,5 / 2,2). */
@@ -1854,7 +1857,7 @@ public class TranslatorService extends Service {
     history.clear(); turnNo = 0; resetPassCounters();
     vadReset = true;                                    // сделает поток нарезки перед следующим кадром
     log("＋ новый разговор" + (who == null || who.isEmpty() ? "" : " с «" + who + "»"));
-    status("Новый разговор");
+    status(L.t("Новый разговор"));
     if (left != 0) llmWorker.submit(() -> refineSession(left));
   }
 
@@ -1905,13 +1908,13 @@ public class TranslatorService extends Service {
   /** Добавить ключ OpenRouter: он проверяется у OpenRouter и встаёт запасным, если рабочий ключ уже
    *  есть. Пустая строка убирает все ключи. */
   public String setCloudKey(String k) {
-    if (cloud == null) return "движок не готов";
+    if (cloud == null) return L.t("движок не готов");
     String r = cloud.configure(k);
     log("☁ " + r); return r;
   }
   /** Убрать один ключ — кнопкой у самого ключа в «Облаке». */
   public String removeCloudKey(String k) {
-    if (cloud == null) return "движок не готов";
+    if (cloud == null) return L.t("движок не готов");
     String r = cloud.removeKey(k);
     log("☁ " + r); return r;
   }
@@ -1938,7 +1941,7 @@ public class TranslatorService extends Service {
     String mb = Memo.block(Memo.who(rows), o.optString("memo", ""), o.optString("topic", ""), Memo.CAP);
     if (!mb.isEmpty()) ctx = mb + "\n" + ctx;
     for (int k = 0; k < t.length() && running; k++) {
-      busy("refine", "улучшаю прошлый разговор", k, t.length());
+      busy("refine", L.k("улучшаю прошлый разговор"), k, t.length());
       org.json.JSONObject x = t.optJSONObject(k);
       if (x == null) continue;
       String src = x.optString("src", ""), was = x.optString("dst", ""), dirn = x.optString("dir", "pt2ru");
@@ -1995,7 +1998,7 @@ public class TranslatorService extends Service {
     if (chats == null) return topic.isEmpty() ? "" : "Tema: " + topic;
     return Memo.block(Memo.who(chats.dialog()), chats.memo, topic, Memo.CAP);
   }
-  public String whoLine() { return chats == null ? "" : Memo.who(chats.dialog()); }
+  public String whoLine() { return chats == null ? "" : Memo.who(chats.dialog(), true); }
   /** Кто говорил — для облака: имя голоса и его номер или «speaker N»; без голоса — пусто. */
   String cloudWho(String w) {
     if (Voices.OWNER.equals(w)) return "phone owner";
@@ -2029,7 +2032,7 @@ public class TranslatorService extends Service {
     try {
       // Памяти нет — проход отложен до следующей реплики. Флаг ожидания снимаем, иначе finally
       // перезапускал бы проход по кругу, пока память не освободится.
-      if (llm == null || !llm.ready) busy("refine", "поднимаю уточнитель…", 0, 0);
+      if (llm == null || !llm.ready) busy("refine", L.k("поднимаю уточнитель…"), 0, 0);
       if (!ensureLlm()) { refinePending = false; return; }
       while (refinePending) { refinePending = false;
       Turn[] h; synchronized (history) { h = history.toArray(new Turn[0]); } if (h.length == 0) return;
@@ -2050,32 +2053,32 @@ public class TranslatorService extends Service {
       int changed = 0, pairs = 0; long t0 = System.nanoTime(); int from = Math.max(0, h.length - 8);
       if (hy) {
         int k = 0;
-        for (Turn L : todo) {
-          busy("refine", "уточняю перевод", k++, todo.size());
-          int idx = indexOf(h, L); if (idx < 0) continue;
-          String tgt = L.dir.substring(3);
-          String tm = terms(L.dir, L.asr), tp = memo.isEmpty() ? "" : memo + "\n";
+        for (Turn tn : todo) {
+          busy("refine", L.k("уточняю перевод"), k++, todo.size());
+          int idx = indexOf(h, tn); if (idx < 0) continue;
+          String tgt = tn.dir.substring(3);
+          String tm = terms(tn.dir, tn.asr), tp = memo.isEmpty() ? "" : memo + "\n";
           // Бюджет из окна модели: без него длинные реплики переполняли окно, сервер отказывал,
           // и уточнитель замолкал навсегда. Старое — в памяти разговора, свежее — в пределах бюджета.
-          int budget = Brief.budget(llmCpt, L.asr.length(), tm.length(), tp.length());
-          if (budget < 0) { log("🔁 #" + L.n + " длиннее окна уточнителя (" + L.asr.length() + " знаков) — оставляю перевод как есть"); continue; }
+          int budget = Brief.budget(llmCpt, tn.asr.length(), tm.length(), tp.length());
+          if (budget < 0) { log("🔁 #" + tn.n + " длиннее окна уточнителя (" + tn.asr.length() + " знаков) — оставляю перевод как есть"); continue; }
           List<String> fresh = Brief.fit(backgroundLines(h, idx), Math.min(budget, Brief.FRESH_CHARS));
           String bg = tp + String.join("\n", fresh);
           long t = System.nanoTime();
           try {
-            String out = llm.chat(null, hyPrompt(bg, L.asr, tgt, tm), 200).trim();
+            String out = llm.chat(null, hyPrompt(bg, tn.asr, tgt, tm), 200).trim();
             long ms = (System.nanoTime() - t) / 1000000;
             if (tgt.equals("pt")) out = TextRules.toBrazilian(out);
-            if (applyFix(L, out, Chats.BY_LLM)) { changed++; log("🔁 #" + L.n + " по контексту (" + ms + " мс, фон " + bg.length() + " зн.): " + out); }
-            else log("🔁 #" + L.n + " контекст не изменил перевод (" + ms + " мс, фон " + bg.length() + " зн.)");
+            if (applyFix(tn, out, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту (" + ms + " мс, фон " + bg.length() + " зн.): " + out); }
+            else log("🔁 #" + tn.n + " контекст не изменил перевод (" + ms + " мс, фон " + bg.length() + " зн.)");
           } catch (Exception e) {
             // Одна неудачная реплика не обрывает проход: раньше исключение выбрасывало весь цикл,
             // метка «разобрано до» не сдвигалась, и следующий проход падал на том же месте.
-            log("🔁 #" + L.n + " уточнитель не ответил: " + e.getMessage());
+            log("🔁 #" + tn.n + " уточнитель не ответил: " + e.getMessage());
           }
         }
       } else {
-        busy("refine", "уточняю перевод…", 0, 0);
+        busy("refine", L.k("уточняю перевод…"), 0, 0);
         StringBuilder u = new StringBuilder(); Map<Integer, Turn> byN = new HashMap<>();
         // Та же защита окна для общей модели: реплики с конца, пока влезают в бюджет.
         String had = chats == null ? "" : chats.memo;
@@ -2089,9 +2092,9 @@ public class TranslatorService extends Service {
         long ms = (System.nanoTime() - t) / 1000000;
         Cloud.Review r = Cloud.Review.parse(out);
         for (Map.Entry<Integer, String> e : r.fixes.entrySet()) {
-          Turn L = byN.get(e.getKey()); if (L == null || !todo.contains(L)) continue;
-          String fx = e.getValue(); if (L.dir.endsWith("pt")) fx = TextRules.toBrazilian(fx);
-          if (applyFix(L, fx, Chats.BY_LLM)) { changed++; log("🔁 #" + L.n + " по контексту: " + fx); }
+          Turn tn = byN.get(e.getKey()); if (tn == null || !todo.contains(tn)) continue;
+          String fx = e.getValue(); if (tn.dir.endsWith("pt")) fx = TextRules.toBrazilian(fx);
+          if (applyFix(tn, fx, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту: " + fx); }
         }
         if (chats != null && chats.current == chatId) {
           if (!r.terms.isEmpty()) pairs = chats.addTerms(r.terms, Chats.BY_LLM);
@@ -2117,17 +2120,17 @@ public class TranslatorService extends Service {
 
   /** Правка в реплику (по метке), в рабочую историю и в ярус выученного. false — перевод тот же,
    *  реплика удалена или поправлена человеком. */
-  boolean applyFix(final Turn L, final String out, String by) {
+  boolean applyFix(final Turn tn, final String out, String by) {
     if (out == null || out.isEmpty()) return false;
-    String cur = L.refined != null ? L.refined : L.mt;
+    String cur = tn.refined != null ? tn.refined : tn.mt;
     if (Phrasebook.norm(out).equals(Phrasebook.norm(cur))) return false;
-    if (chats != null && !chats.fixByAt(L.at, out, by)) return false;
-    L.refined = out;
-    int lf = learnFix(L.dir, L.asr, out, by);
+    if (chats != null && !chats.fixByAt(tn.at, out, by)) return false;
+    tn.refined = out;
+    int lf = learnFix(tn.dir, tn.asr, out, by);
     if (lf == 1) log("📖 выученное: перевод заменён (" + by + ")"); else if (lf < 0) log("📖 в выученное не пошла: маска не нашлась в правке");
     final Listener l = listener;
-    boolean last = chats != null && L.at == chats.lastAt();
-    if (last) { if (L.at == lastAt) lastDst = out; if (l != null) main.post(() -> l.onTurn(L.dir, L.asr, out, true)); }
+    boolean last = chats != null && tn.at == chats.lastAt();
+    if (last) { if (tn.at == lastAt) lastDst = out; if (l != null) main.post(() -> l.onTurn(tn.dir, tn.asr, out, true)); }
     else if (l != null) main.post(l::onHistory);
     return true;
   }
@@ -2171,12 +2174,12 @@ public class TranslatorService extends Service {
   /** Что сделает кнопка «Улучшить»: "cloud", "local" или причина, почему ничего. Одна кнопка значит
    *  «улучшить сейчас»: есть ключ и сеть — облако; иначе локальный проход при включённом контексте. */
   public String improveMode() {
-    if (eng == null) return "движок ещё загружается";        // интент со стенда приходит раньше, чем поднялись модели
+    if (eng == null) return L.k("движок ещё загружается");        // интент со стенда приходит раньше, чем поднялись модели
     if (cloudReady() && online()) return "cloud";
     if (contextMode && hasLlm()) return "local";
-    if (!mod(Modules.CLOUD) && !mod(Modules.LLM)) return "модули «Облако» и «Уточнитель» выключены";
-    if (!cloudReady()) return mod(Modules.CLOUD) ? "нет ключа OpenRouter, а контекст 🧠 выключен" : "контекст 🧠 выключен, а облако — выключенный модуль";
-    return "нет сети, а контекст 🧠 выключен";
+    if (!mod(Modules.CLOUD) && !mod(Modules.LLM)) return L.k("модули «Облако» и «Уточнитель» выключены");
+    if (!cloudReady()) return mod(Modules.CLOUD) ? L.k("нет ключа OpenRouter, а контекст 🧠 выключен") : L.k("контекст 🧠 выключен, а облако — выключенный модуль");
+    return L.k("нет сети, а контекст 🧠 выключен");
   }
   /** Последняя реплика уже обработана тем, чем «Улучшить» обработала бы её сейчас, — тогда кнопка
    *  гаснет (владелец 01.10: «надо тушить кнопку улучшить, если данная фраза уже была обработана»).
@@ -2221,7 +2224,7 @@ public class TranslatorService extends Service {
     String m = improveMode();
     if (m.equals("cloud")) { sinceCloud = 0; cloudBackoff = 1; cloudReview(true); }
     else if (m.equals("local")) { sinceLocal = 0; kickLocal(); }
-    else { log("улучшить нельзя: " + m); hint("улучшить нельзя: " + m); }
+    else { log("улучшить нельзя: " + m); hint(L.f("улучшить нельзя: %s", L.t(m))); }
   }
   /** Сеть проверяется здесь, а не неудачным запросом: иначе каждое нажатие в самолёте ждёт таймаут. */
   public boolean online() {
@@ -2256,7 +2259,7 @@ public class TranslatorService extends Service {
    *  завершении — движки, если теперь есть всё обязательное, или подключение необязательного. */
   void onStoreState(ModelStore.State st) {
     Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
-    if (st.busy() && st.total > 0) busy("models", ("upgrade".equals(st.tier) ? "облегчаю перевод" : ModelStore.AUTO.equals(st.tier) ? "докачиваю модули" : "качаю модели") + " · " + (int) (st.done * 100 / st.total) + " %",
+    if (st.busy() && st.total > 0) busy("models", ("upgrade".equals(st.tier) ? L.k("облегчаю перевод") : ModelStore.AUTO.equals(st.tier) ? L.k("докачиваю модули") : L.k("качаю модели")) + " · " + (int) (st.done * 100 / st.total) + " %",
         (int) (st.done * 100 / st.total), 100);
     else if (!st.busy()) busy("models", null, 0, 0);
     long now = System.currentTimeMillis();
@@ -2264,7 +2267,7 @@ public class TranslatorService extends Service {
     if (st.busy() && (phaseChanged || now - lastModelNotif >= 1000)) { lastModelNotif = now; notify(ModelStore.describe(st)); }
     if (phaseChanged && (ModelStore.DONE.equals(st.phase) || ModelStore.ERROR.equals(st.phase) || ModelStore.PAUSED.equals(st.phase))) {
       notify(ModelStore.describe(st));
-      if (eng == null) worker.submit(() -> { if (store.check("core").complete()) { status("Модели скачаны, загружаю движки…"); loadAll(); } else status(st.message); });
+      if (eng == null) worker.submit(() -> { if (store.check("core").complete()) { status(L.t("Модели скачаны, загружаю движки…")); loadAll(); } else status(st.message); });
       else if (ModelStore.DONE.equals(st.phase) && "upgrade".equals(st.tier)) log("📦 перевод станет легче со следующего запуска приложения: память освобождается только вместе с процессом");
       else if (ModelStore.DONE.equals(st.phase) && ModelStore.AUTO.equals(st.tier)) {
         log("📦 модули докачаны: " + modulesLine());
@@ -2349,7 +2352,7 @@ public class TranslatorService extends Service {
       if (words != null && new File(modelsDir, "common_words.txt").exists()) { words.loadCommon(); log("📝 " + words.stats()); }
       if (chats != null) learn = new Learn(chats, modelsDir, getExternalFilesDir(null));
       if (new File(modelsDir, "denoiser").isDirectory() && eng.denoiser == null) log("🔇 шумоподавитель скачан — подключится после перезапуска приложения");
-      status("Готово. " + pb.stats());
+      status(L.f("Готово. %s", pb.stats()));
     } catch (Throwable t) { log("подключение скачанного: " + t); }
   }
   /** Сеть пришла или ушла — кнопка «Улучшить» и причина в подсказке обновляются сразу, а не со следующей
@@ -2390,21 +2393,21 @@ public class TranslatorService extends Service {
    *  частый из них — про подпись — означает тупик: поверх сборки, подписанной другим ключом,
    *  обновление не встанет никогда, сколько ни нажимай. Об этом надо сказать прямо. */
   static String installWhy(String m) {
-    if (m == null) return "причина не названа";
-    if (m.contains("signatures do not match")) return "это приложение подписано другим ключом, чем выпуск. Поверх него обновление не встанет: снимите приложение и поставьте заново со страницы (разговоры и настройки при этом пропадут)";
-    if (m.contains("INSUFFICIENT_STORAGE")) return "не хватает места на телефоне";
-    if (m.contains("ABORTED")) return "установка отменена";
+    if (m == null) return L.t("причина не названа");
+    if (m.contains("signatures do not match")) return L.t("это приложение подписано другим ключом, чем выпуск. Поверх него обновление не встанет: снимите приложение и поставьте заново со страницы (разговоры и настройки при этом пропадут)");
+    if (m.contains("INSUFFICIENT_STORAGE")) return L.t("не хватает места на телефоне");
+    if (m.contains("ABORTED")) return L.t("установка отменена");
     return m;
   }
   static String why(Throwable t) {
     String m = t.getMessage() == null ? "" : t.getMessage();
     if (t instanceof IllegalArgumentException) return m;                 // это уже наш русский текст
-    if (m.contains("HTTP 404")) return "в последнем выпуске нет описания версии";
-    if (m.startsWith("HTTP")) return "GitHub ответил: " + m;
-    if (t instanceof java.net.UnknownHostException) return "нет связи с github.com";
-    if (t instanceof java.net.SocketTimeoutException) return "GitHub не ответил вовремя";
-    if (t instanceof java.io.IOException) return "связь прервалась";
-    return "не получилось";
+    if (m.contains("HTTP 404")) return L.t("в последнем выпуске нет описания версии");
+    if (m.startsWith("HTTP")) return L.f("GitHub ответил: %s", m);
+    if (t instanceof java.net.UnknownHostException) return L.t("нет связи с github.com");
+    if (t instanceof java.net.SocketTimeoutException) return L.t("GitHub не ответил вовремя");
+    if (t instanceof java.io.IOException) return L.t("связь прервалась");
+    return L.t("не получилось");
   }
   void maybeCheckUpdates() {
     long last = getSharedPreferences("at", MODE_PRIVATE).getLong("update_check", 0);
@@ -2418,10 +2421,10 @@ public class TranslatorService extends Service {
    *  бы, что приложение навсегда перестало обновляться, а снаружи это незаметно. */
   public void checkUpdates(final boolean manual) {
     if (updateBusy) return;
-    updateBusy = true; upd("Проверяю…");
+    updateBusy = true; upd(L.t("Проверяю…"));
     new Thread(() -> {
       try {
-        if (!online()) { upd("нет сети — проверю позже"); return; }
+        if (!online()) { upd(L.t("нет сети — проверю позже")); return; }
         String base = updateBase == null || updateBase.isEmpty() ? Updates.LATEST : updateBase;
         Updates.Info i = Updates.parse(get(base), slimBuild());
         getSharedPreferences("at", MODE_PRIVATE).edit().putLong("update_check", System.currentTimeMillis()).apply();
@@ -2431,13 +2434,13 @@ public class TranslatorService extends Service {
           String m = Updates.describe(my, i);
           upd(m + (i.notes.isEmpty() ? "" : "\n" + i.notes));
           log("⬆ " + m + (i.notes.isEmpty() ? "" : " — " + i.notes));
-          notify(m + " — «Система», кнопка обновления");
+          notify(L.f("%s — «Настройки», кнопка обновления", m));
         } else {
-          update = null; upd("установлена последняя версия");
+          update = null; upd(L.t("установлена последняя версия"));
           if (manual) log("⬆ обновлений нет, установлена " + myName());
         }
       } catch (Throwable t) {
-        upd("проверить не вышло — " + why(t));
+        upd(L.f("проверить не вышло — %s", why(t)));
         log("⬆ проверка обновления не вышла: " + t);
       } finally { updDone(); }
     }, "update-check").start();
@@ -2467,7 +2470,7 @@ public class TranslatorService extends Service {
       File f = new File(dir, i.apk);
       try {
         String base = updateBase == null || updateBase.isEmpty() ? Updates.LATEST : updateBase;
-        upd("Скачиваю " + i.name + "…");
+        upd(L.f("Скачиваю %s…", i.name));
         java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
         java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(i.url(base)).openConnection();
         c.setConnectTimeout(15000); c.setReadTimeout(30000); c.setInstanceFollowRedirects(true);
@@ -2479,18 +2482,18 @@ public class TranslatorService extends Service {
             byte[] b = new byte[1 << 16]; int n; long tick = 0;
             while ((n = in.read(b)) > 0) {
               o.write(b, 0, n); md.update(b, 0, n); done += n;
-              if (done - tick > (1 << 21)) { tick = done; upd("Скачиваю " + i.name + ": " + (i.size > 0 ? done * 100 / i.size : 0) + " %"); }
+              if (done - tick > (1 << 21)) { tick = done; upd(L.f("Скачиваю %s: %d %%", i.name, i.size > 0 ? done * 100 / i.size : 0)); }
             }
           }
         } finally { c.disconnect(); }
         if (done != i.size) throw new java.io.IOException("размер не сошёлся: " + done + " вместо " + i.size);
         String got = ModelStore.hex(md.digest());
-        if (!got.equalsIgnoreCase(i.sha256)) { f.delete(); upd("Файл не сошёлся по контрольной сумме — не ставлю"); log("⬆ контрольная сумма обновления не сошлась, файл выброшен"); return; }
-        upd("Устанавливаю " + i.name + "…"); log("⬆ обновление скачано и сверено, отдаю установщику");
+        if (!got.equalsIgnoreCase(i.sha256)) { f.delete(); upd(L.t("Файл не сошёлся по контрольной сумме — не ставлю")); log("⬆ контрольная сумма обновления не сошлась, файл выброшен"); return; }
+        upd(L.f("Устанавливаю %s…", i.name)); log("⬆ обновление скачано и сверено, отдаю установщику");
         install(f);
         f.delete();          // установщик уже скопировал файл в свою сессию: 83 МБ незачем держать
       } catch (Throwable t) {
-        f.delete(); upd("обновление не скачалось — " + why(t)); log("⬆ обновление не скачалось: " + t);
+        f.delete(); upd(L.f("обновление не скачалось — %s", why(t))); log("⬆ обновление не скачалось: " + t);
       } finally { updDone(); }
     }, "update-install").start();
   }
@@ -2518,10 +2521,10 @@ public class TranslatorService extends Service {
    *  применяются правки по меткам `at`, потому что за время запроса реплики могли удалиться. */
   void cloudReview(final boolean manual) {
     if (!cloudReady()) { log(mod(Modules.CLOUD) ? "☁ выключено: нет ключа OpenRouter (models/openrouter.json)" : "☁ модуль «Облако» выключен"); return; }
-    if (chats == null || chats.size() == 0) { log("☁ нечего уточнять"); hint("нечего уточнять"); return; }
-    if (!cloudConsent()) { log("☁ нет согласия на отправку разговора"); hint("нужно согласие на отправку разговора в облако"); return; }
+    if (chats == null || chats.size() == 0) { log("☁ нечего уточнять"); hint(L.t("нечего уточнять")); return; }
+    if (!cloudConsent()) { log("☁ нет согласия на отправку разговора"); hint(L.t("нужно согласие на отправку разговора в облако")); return; }
     if (cloudBusy) { log("☁ запрос уже в работе"); return; }
-    cloudBusy = true; busy("cloud", "пересматриваю разговор в облаке…", 0, 0);   // ход — на экране в реплике, подсказка в шапке его повторяла бы
+    cloudBusy = true; busy("cloud", L.k("пересматриваю разговор в облаке…"), 0, 0);   // ход — на экране в реплике, подсказка в шапке его повторяла бы
     final long chatId = chats.current;
     cloudWorker.submit(() -> {
       try {
@@ -2544,7 +2547,7 @@ public class TranslatorService extends Service {
         if (!trail.isEmpty()) { log("☁ след перебора: " + trail); tsv("cloud_trail", trail); }
         if (out == null) {
           log("☁ не вышло за " + ms + " мс: " + cloud.lastError);
-          hint("улучшить не вышло" + (cloud.rateLimited ? " — лимит запросов на сегодня" : cloud.lastFail == Cloud.F_NET ? " — нет связи" : ""));
+          hint(L.t(cloud.rateLimited ? "улучшить не вышло — лимит запросов на сегодня" : cloud.lastFail == Cloud.F_NET ? "улучшить не вышло — нет связи" : "улучшить не вышло"));
           tsv("cloud_review_fail", "" + rows.size(), "" + chars, "" + ms, cloud.lastError);
           if (!manual && (cloud.rateLimited || cloud.lastFail == Cloud.F_NET)) { cloudBackoff = Math.min(8, cloudBackoff * 2); log("☁ интервал пересмотра удвоен: " + (cloudEvery * cloudBackoff) + " реплик до следующего ручного нажатия"); }
           return;
@@ -2600,7 +2603,7 @@ public class TranslatorService extends Service {
         log(sum); tsv("cloud_review", "" + rows.size(), "" + chars, cloud.lastUsed, "" + ms, "" + fixed, "" + pairs, "" + r.names.size(), r.topic, "" + r.memo.length());
         // На экране — только итог для человека: модель, знаки, пары и память — в журнале (строка выше),
         // а не в шапке, которую видит и собеседник (владелец 01.10).
-        hint(fixed > 0 ? "улучшено · исправлено фраз: " + fixed : "улучшено · исправлять нечего");
+        hint(fixed > 0 ? L.f("улучшено · исправлено фраз: %d", fixed) : L.t("улучшено · исправлять нечего"));
         final String fLastFix = lastFix; final String[] lastRow = all.isEmpty() ? null : all.get(all.size() - 1);
         final Listener l = listener;
         if (l != null) main.post(() -> { l.onHistory(); if (fLastFix != null && lastRow != null) l.onTurn(lastRow[0], lastRow[1], fLastFix, true); if (!r.names.isEmpty()) l.onNames(new ArrayList<>(r.names), manual); });
@@ -2787,7 +2790,7 @@ public class TranslatorService extends Service {
   public void playClip(int idx) {
     if (chats == null) return;
     final File f = chats.audioOf(idx); final String[] t = chats.turn(idx);
-    if (f == null || t == null) { hint("🎙 у этой реплики нет записанного звука"); log("🎙 у реплики " + idx + " нет записанного звука"); return; }
+    if (f == null || t == null) { hint(L.t("🎙 у этой реплики нет записанного звука")); log("🎙 у реплики " + idx + " нет записанного звука"); return; }
     playFile(f, t[1]);
   }
   /** Стенд: одно предложение реплики idx — по её разрезу (Chats.cutsOf, Clips.range), как ▶ у примера. */
@@ -2808,7 +2811,7 @@ public class TranslatorService extends Service {
     pttStart("pt2ru");
   }
   void practiceRun(String target, float[] all, PracticeDone cb) {
-    busy("live", "распознаю…", 0, 0);
+    busy("live", L.k("распознаю…"), 0, 0);
     try {
       Engine e = eng;
       if (e == null || all.length < 16000 / 3) { log("🎙 скажите сами: " + (e == null ? "движок ещё грузится" : "слишком коротко — держите кнопку, пока говорите")); main.post(() -> cb.done(null, all)); return; }
@@ -2829,7 +2832,7 @@ public class TranslatorService extends Service {
    *  нет — реплика целиком. */
   public void playAudio(String name, String pt, int[] cuts, int sent, int sents) {
     Chats c = chats; File f = c == null ? null : Clips.find(c.audio(), name);
-    if (f == null) { hint("🎙 звук этой реплики не сохранён"); return; }
+    if (f == null) { hint(L.t("🎙 звук этой реплики не сохранён")); return; }
     playFile(f, pt, cuts, sent, sents);
   }
   void playFile(final File f, final String pt) { playFile(f, pt, null, 0, 1); }
@@ -3180,7 +3183,7 @@ public class TranslatorService extends Service {
   }
   /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). */
   void speakOut(String tgt, String text) throws Exception {
-    if (!voice()) { hint("🔇 озвучка выключена — «Система» → «Модули»"); return; }
+    if (!voice()) { hint(L.t("🔇 озвучка выключена — «Настройки» → «Модули»")); return; }
     synchronized (tts) {
     if (!voice()) return;
     int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
@@ -3350,7 +3353,7 @@ public class TranslatorService extends Service {
         // Без сброса флага повторный ensureCapture() считал, что захват уже идёт, и удержание
         // молча записывало тишину до конца жизни процесса.
         capturing = false;
-        log("❌ микрофон не инициализировался — захват не запущен"); status("Микрофон недоступен"); return;
+        log("❌ микрофон не инициализировался — захват не запущен"); status(L.t("Микрофон недоступен")); return;
       }
       rec.startRecording(); AudioDeviceInfo routed = rec.getRoutedDevice(); capRouted = routed; log("микрофон: " + (routed == null ? "?" : routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC ? "встроенный" : "тип " + routed.getType()));
       final AudioRecord fr = rec; final int gen = ++capGen;
@@ -3358,7 +3361,7 @@ public class TranslatorService extends Service {
         @Override public void onRecordingConfigChanged(java.util.List<AudioRecordingConfiguration> cfgs) {
           boolean sil = false;
           for (AudioRecordingConfiguration c : cfgs) if (c.getClientAudioSessionId() == fr.getAudioSessionId()) sil = c.isClientSilenced();
-          if (sil != micSilenced) { micSilenced = sil; String m = sil ? "🔇 микрофон заглушён системой (другое приложение перехватило вход)" : "🎙 микрофон снова наш"; log(m); status(m); TranslatorService.this.notify(m); }
+          if (sil != micSilenced) { micSilenced = sil; String m = sil ? L.k("🔇 микрофон заглушён системой (другое приложение перехватило вход)") : L.k("🎙 микрофон снова наш"); log(m); status(L.t(m)); TranslatorService.this.notify(L.t(m)); }
         }
       };
       try { getSystemService(AudioManager.class).registerAudioRecordingCallback(cb, main); } catch (Throwable e) {}
@@ -3661,7 +3664,7 @@ public class TranslatorService extends Service {
   void skipVoice(String kind, String m, double durMs, float score, boolean show) {
     log(m); tsvSeg(kind, "", "", "", Float.isNaN(score) ? "" : String.format(Locale.ROOT, "%.2f", score), durMs, 0, 0);
     long now = System.currentTimeMillis();
-    if (show && now - noVoiceHintAt > 20_000) { noVoiceHintAt = now; hint("скажите фразу кнопкой FALAR — голос запомнится"); }
+    if (show && now - noVoiceHintAt > 20_000) { noVoiceHintAt = now; hint(L.t("скажите фразу кнопкой FALAR — голос запомнится")); }
   }
 
   /** Сегмент двоих по голосам: отпечатки окон (Voices.WIN/HOP) своим потоком, метки, сглаживание, куски;
@@ -3720,7 +3723,7 @@ public class TranslatorService extends Service {
     // Эхо проверяется при любом положении настройки: это не чтение человеком, а собственный
     // голос приложения, и переводить его обратно не нужно никогда.
     if (Heard.echo(asr, spokenPt, System.currentTimeMillis(), spokenPtEnd))
-      return "🔇 пропущено: это эхо моей же озвучки — «" + (spokenPt.length() > 40 ? spokenPt.substring(0, 40) + "…" : spokenPt) + "»";
+      return L.f("🔇 пропущено: это эхо моей же озвучки — «%s»", spokenPt.length() > 40 ? spokenPt.substring(0, 40) + "…" : spokenPt);
     if (readGuard == 0) return null;
     Voices.Voice v = who == null || chats == null ? null : chats.voices.get(who);
     if (v != null && v.ru > 0 && v.pt == 0) {
@@ -3728,13 +3731,13 @@ public class TranslatorService extends Service {
       // 03.10). Переводить её по-прежнему незачем — человек знает, что сказал.
       if (fromScreen(asr) == null) {
         Learn l = learn; if (l != null) l.recordSaid(System.currentTimeMillis());
-        return "🗣 «" + Voices.label(v) + "» сказал по-португальски сам — не перевожу, засчитано в «Слова»: «" + (asr.length() > 40 ? asr.substring(0, 40) + "…" : asr) + "»";
+        return L.f("🗣 «%s» сказал по-португальски сам — не перевожу, засчитано в «Слова»: «%s»", Voices.label(v), asr.length() > 40 ? asr.substring(0, 40) + "…" : asr);
       }
-      return "🔇 пропущено: «" + Voices.label(v) + "» говорит по-русски, а речь португальская — похоже, читает вслух";
+      return L.f("🔇 пропущено: «%s» говорит по-русски, а речь португальская — похоже, читает вслух", Voices.label(v));
     }
     String shown = fromScreen(asr);
     if (shown != null)
-      return "🔇 пропущено: вы прочли вслух фразу с экрана — «" + (shown.length() > 40 ? shown.substring(0, 40) + "…" : shown) + "»";
+      return L.f("🔇 пропущено: вы прочли вслух фразу с экрана — «%s»", shown.length() > 40 ? shown.substring(0, 40) + "…" : shown);
     return null;
   }
   /** Португальские стороны последних реплик — то, что было на экране крупно. */
@@ -3782,7 +3785,7 @@ public class TranslatorService extends Service {
     final long chatId = chats == null ? 0 : chats.current;
     new Thread(() -> {
       long t0 = System.nanoTime();
-      busy("live", "читаю снимок…", 0, 0);
+      busy("live", L.k("читаю снимок…"), 0, 0);
       try {
         PhotoDone d = photoTranslate(jpg);
         if (d == null) { jpg.delete(); return; }
@@ -3822,7 +3825,7 @@ public class TranslatorService extends Service {
     Ocr.Page pg = ocr.read(px, d.w, d.h); px = null; d.pg = pg;
     d.ocrMs = (System.nanoTime() - t0) / 1_000_000;
     if (pg.paras.isEmpty()) {
-      log("📷 текста не нашлось за " + d.ocrMs + " мс (" + d.w + "×" + d.h + "; " + photoHow(pg) + ")"); hint("📷 на снимке не нашлось текста");
+      log("📷 текста не нашлось за " + d.ocrMs + " мс (" + d.w + "×" + d.h + "; " + photoHow(pg) + ")"); hint(L.t("📷 на снимке не нашлось текста"));
       tsv("ocr", "" + d.w, "" + d.h, "" + pg.boxes, "0", "0", "" + pg.loadMs, "" + pg.detMs, "" + pg.recMs, "" + d.ocrMs);
       return null;
     }
@@ -3831,7 +3834,7 @@ public class TranslatorService extends Service {
     List<String> all = new ArrayList<>(); for (OcrCore.Para p : pg.paras) all.add(p.text);
     Set<String> brands = TextRules.brands(all, known);                  // марки по сайту, почте, ®, названию фирмы
     for (int i = 0; i < pg.paras.size(); i++) {
-      busy("live", "перевожу снимок…", i, pg.paras.size());
+      busy("live", L.k("перевожу снимок…"), i, pg.paras.size());
       OcrCore.Para p = pg.paras.get(i);
       List<String[]> fx = new ArrayList<>();
       String text = ow == null ? p.text : ow.fix(p.text, fx, p.table && OcrWords.bare(p.text));   // чек — без знаков над буквами
@@ -3926,6 +3929,81 @@ public class TranslatorService extends Service {
    *  снимок один узел, а переводит тот же самый, что и речь, со словарём, своими словами и
    *  накоплением слов для изучения. Поэтому облачная модель просится вернуть только текст,
    *  а не перевод: перевод у нас свой и офлайновый. */
+  /** Вид реплики из голосового мессенджера (processText): без озвучки, с пометкой Chats.VOICE. */
+  static final String VOICE_KIND = "голосовое";
+
+  /** Голосовое из мессенджера (VoiceMsg; владелец 15.10). f — копия файла у Falar (ShareActivity, выбор файла,
+   *  стенд --es voicefile), from — пакет, откуда прислали (может быть null). Своим потоком, как снимок: длинное
+   *  голосовое не держит очередь живой речи. Звук — системным кодеком (ClipCodec), 16 кГц; нарезка — своим VAD и
+   *  Slicer, без ворот слушания (голоса разговора, чтение вслух, эхо): говорит человек из мессенджера, его голос
+   *  разговору не знаком. Распознанное — одной репликой собеседника с пометкой 🎙 в открытом разговоре (решение
+   *  владельца 15.10), без озвучки: голосовое читают. Временная копия удаляется. */
+  /** Голосовые — по одному и по порядку: прислали несколько — реплики встанут в том же порядке. */
+  final ExecutorService voiceWorker = Executors.newSingleThreadExecutor(r -> new Thread(r, "voicemsg"));
+  public void voiceMessage(final File f, final String from) {
+    final long chatId = chats == null ? 0 : chats.current;
+    voiceWorker.submit(() -> {
+      try {
+        if (eng == null) { log("🎙 голосовое пришло раньше движков — не прочитано"); hint(L.t("🎙 голосовое не прочитано: Falar ещё загружается")); return; }
+        busy("live", L.k("читаю голосовое…"), 0, 0);
+        int[] rate = {16000}; float[] x;
+        try { x = ClipCodec.decode(f, rate, 120_000); }
+        catch (Throwable t) { log("🎙 голосовое не раскрылось (" + f.getName() + "): " + t); hint(L.t("🎙 голосовое не открылось: такой формат звука не поддерживается")); return; }
+        if (rate[0] != 16000) x = Clips.resample(x, rate[0], 16000);
+        final double sec = x.length / 16000.0;
+        if (sec > VoiceMsg.MAX_SECONDS) {
+          log("🎙 голосовое " + VoiceMsg.duration(sec) + " — длиннее " + VoiceMsg.MAX_SECONDS / 60 + " мин, не беру");
+          hint(L.f("🎙 голосовое длиннее %d мин — не беру", VoiceMsg.MAX_SECONDS / 60)); return;
+        }
+        long t0 = System.nanoTime();
+        List<float[]> pieces = sliceVoice(x);
+        List<String> texts = new ArrayList<>(); long asrMs = 0;
+        for (int k = 0; k < pieces.size(); k++) {
+          busy("live", L.k("распознаю голосовое…"), k, pieces.size());
+          Recog h = recog("pt2ru", pieces.get(k), 16000, eng);
+          asrMs += h.ms; texts.add(h.ar.text);
+        }
+        String text = VoiceMsg.join(texts);
+        log("🎙 голосовое " + VoiceMsg.duration(sec) + (from == null ? "" : " из " + from) + ": кусков " + pieces.size()
+            + ", нарезка и распознавание " + (System.nanoTime() - t0) / 1000000 + " мс" + (text.isEmpty() ? " — речи не нашлось" : ""));
+        if (text.isEmpty()) { hint(L.f("🎙 в голосовом (%s) речи не нашлось", VoiceMsg.duration(sec))); return; }
+        // Откуда пришло — ответ («Отправить перевод…») уходит туда же, пока открыт этот разговор.
+        if (from != null) getSharedPreferences("at", MODE_PRIVATE).edit().putString("voice_src_pkg", from).putLong("voice_src_chat", chatId).apply();
+        processText("pt2ru", unshout(text), true, false, sec * 1000, asrMs, VOICE_KIND, chatId, null, x, 16000, null);
+      } catch (Throwable t) { Log.e(TAG, "voicemsg", t); log("🎙 голосовое: ошибка " + t); }
+      finally {
+        busy("live", null, 0, 0);
+        File dir = new File(getCacheDir(), "voice");
+        if (dir.equals(f.getParentFile())) f.delete();     // своя временная копия; файл стенда остаётся
+      }
+    });
+  }
+  /** Голосовое — на куски речи: свой VAD (Engine.newVad, слушание не трогается) и Slicer с порогами VoiceMsg.
+   *  Кадры — как у слушания, 512 отсчётов (32 мс); после конца — gap(): открытый кусок закрывается тем, что есть. */
+  List<float[]> sliceVoice(float[] x) {
+    List<float[]> out = new ArrayList<>();
+    com.k2fsa.sherpa.onnx.Vad v = eng.newVad(eng.vadThreshold, eng.vadMinSilence, Engine.VAD_MIN_SPEECH_QUIET);
+    try {
+      Slicer s = new Slicer();
+      s.preRollMs = VoiceMsg.PRE_ROLL_MS; s.hangMs = VoiceMsg.HANG_MS; s.tailMs = VoiceMsg.TAIL_MS;
+      s.minSpeechMs = VoiceMsg.MIN_SPEECH_MS; s.maxSpeechMs = VoiceMsg.MAX_SPEECH_MS;
+      Gain.Stats none = new Gain.Stats();
+      for (int o = 0; o + 512 <= x.length; o += 512) {
+        float[] fr = Arrays.copyOfRange(x, o, o + 512);
+        v.acceptWaveform(fr);
+        boolean sp = v.isSpeechDetected();
+        while (!v.empty()) v.pop();                   // внутренняя сборка sherpa не используется, как и в слушании
+        Slicer.Piece pc = s.feed(fr, none, sp, rms(fr, fr.length));
+        if (pc == null) continue;
+        out.add(pc.pcm);
+        if (pc.cut) v.reset();
+      }
+      Slicer.Piece pc = s.gap();
+      if (pc != null) out.add(pc.pcm);
+    } finally { try { v.release(); } catch (Throwable ignore) {} }
+    return out;
+  }
+
   public void photoText(byte[] jpeg, boolean allowCloud) {
     if (jpeg == null || jpeg.length == 0) return;
     // Снимок читается в отдельном потоке, а не в общем рабочем: облачное чтение занимало
@@ -3983,7 +4061,7 @@ public class TranslatorService extends Service {
       final long chatId = chats == null ? 0 : chats.current;   // до распознавания: окно ~2 с, за которое разговор успевают сменить
       String dir = dirIn;
       final double durMs = samples.length * 1000.0 / sr;
-      busy("live", "распознаю речь…", 0, 0);
+      busy("live", L.k("распознаю речь…"), 0, 0);
       Recog h = pre != null ? pre : recog(dir, samples, sr, eng);
       String asr = h.ar.text;
       if (asr.isEmpty()) { log("(тишина / не распознано, " + String.format("%.1f", samples.length / (double) sr) + " с)"); tsvSeg("silence", dir, "", "", "", durMs, h.ms, 0); return; }
@@ -4103,7 +4181,7 @@ public class TranslatorService extends Service {
   /** pcm, sr — звук, который слышал распознаватель: он ляжет рядом с репликой, если включено
    *  «Хранить звук собеседников» и речь португальская. */
   void processText(String dirIn, String asrIn, boolean auto, boolean gate, double durMs, long srcMs, String kind, final long chatId, Who whoIn, final float[] pcm, final int sr, final int[] cuts) {
-    busy("live", "перевожу…", 0, 0);
+    busy("live", L.k("перевожу…"), 0, 0);
     try {
       long t1 = System.nanoTime();
       String who = null, spkTag = null;
@@ -4193,7 +4271,8 @@ public class TranslatorService extends Service {
       // Снимок не озвучивается: его читают глазами (решение владельца 28.09).
       final boolean hp = headphonesOut();
       final boolean soon = !voice() && ttsSoon();
-      if (silent || !here || kind.equals("фото") || !voice() && !soon) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : kind.equals("фото") ? " · снимок, без озвучки" : " · озвучка выключена"; }
+      // Голосовое из мессенджера — тоже: его читают, а вслух оно уже звучало у человека в мессенджере.
+      if (silent || !here || kind.equals("фото") || kind.equals(VOICE_KIND) || !voice() && !soon) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : kind.equals("фото") ? " · снимок, без озвучки" : kind.equals(VOICE_KIND) ? " · голосовое, без озвучки" : " · озвучка выключена"; }
       else if (!VoiceOut.voice(voiceWhat, fTgt, hp)) { first[0] = t2; tag += " · " + VoiceOut.silentWhy(voiceWhat, fTgt, hp); }
       // Пауза до озвучки. Перевод уже готов и уже на экране — ждёт только голос, и ждёт он
       // не таймера, а тишины: пока человек говорит, переводы копятся в очереди и произносятся
@@ -4214,6 +4293,7 @@ public class TranslatorService extends Service {
         // язык, а свою русскую речь человек слышит и так. Имя — до записи в разговор, файл — в фоне после.
         String clip = keepAudio && pcm != null && dir.startsWith("pt") ? Clips.name(chatId, at, chats.audio()) : null;
         JSONObject tj = Chats.turn(dir, asr, mt, who, at);
+        if (kind.equals(VOICE_KIND)) tj.put("voice", Math.round(durMs / 1000));   // длительность, с — пометка 🎙 (Chats.VOICE)
         if (clip != null) {
           tj.put("audio", clip);
           // Разрезы — только если их столько, сколько стыков предложений в итоговом тексте (правки текста после
@@ -4875,6 +4955,8 @@ public class TranslatorService extends Service {
   /** Последняя строка состояния — для экрана, подключившегося позже: пересозданный экран (тема системы,
    *  возврат после камеры) иначе показывал «Запуск сервиса…» при работающей службе (test_ui_device.sh U9). */
   volatile String lastStatus;
+  /** Язык надписей сменился: уведомление — на новом языке сразу, остальное — со следующей подсказки. */
+  void uiLangChanged() { if (lastNotif != null) notify(lastNotif); }
   void status(String s) { lastStatus = s; Listener l = listener; if (l != null) main.post(() -> l.onStatus(s)); }
   final java.util.concurrent.ExecutorService fileLog = java.util.concurrent.Executors.newSingleThreadExecutor();
   final java.text.SimpleDateFormat stamp = new java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT);
