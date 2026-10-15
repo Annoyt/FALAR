@@ -36,4 +36,6 @@ public class SuitesTest {
   @Test void practice() { assertEquals(0, PracticeTest.run()); }
   @Test void l10n() throws Exception { assertEquals(0, LTest.run(System.getProperty("falar.apk", "../../bench/apk"))); }
   @Test void inbox() throws Exception { assertEquals(0, InboxTest.run()); }
+  @Test void slicer() { assertEquals(0, SlicerTest.run()); }
+  @Test void numbers() { assertEquals(0, NumbersTest.run()); }
 }

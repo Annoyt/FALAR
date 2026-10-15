@@ -84,7 +84,6 @@ public class TranslatorService extends Service {
   /** Фразы, отданные worker и ещё не разобранные (submitPhrase): озвучка грузится, когда их нет (loadTtsLate). */
   final java.util.concurrent.atomic.AtomicInteger phraseJobs = new java.util.concurrent.atomic.AtomicInteger();
   /** Нарезка посреди фразы: её ещё говорят — озвучка подождёт, пока фразу не переведут. */
-  volatile boolean vadInSpeech = false;
   final Object asrLock = new Object();
   /** «Читаю вслух»: человек держит крупный текст и произносит португальскую фразу сам, по
    *  транскрипции. Микрофон в это время глух — иначе приложение слышит владельца, считает его
@@ -439,7 +438,7 @@ public class TranslatorService extends Service {
    *  фразе до 6,9 с). Ждёт не дольше 10 с: при непрерывной речи голоса всё же поднимутся. Дальше — как было в
    *  конце загрузки: строка модулей (по ней стенд узнаёт, что всё поднялось), «Готово», ход загрузки. */
   void loadTtsLate(long restMs, int nStages, long since) {
-    boolean said = earlyPending.get() > 0 || phraseJobs.get() > 0 || vadInSpeech || capQ.size() > 32;
+    boolean said = earlyPending.get() > 0 || phraseJobs.get() > 0 || slicer.inSpeech || capQ.size() > 32;
     if (said && System.currentTimeMillis() - since < 10_000) {
       try { Thread.sleep(50); } catch (InterruptedException e) { return; }
       worker.submit(() -> loadTtsLate(restMs, nStages, since)); return;
@@ -498,7 +497,7 @@ public class TranslatorService extends Service {
           float[] x = Inbox.readPcm(it.f);
           synchronized (capLock) { for (int o = 0; o + 512 <= x.length; o += 512) capQ.offer(Arrays.copyOfRange(x, o, o + 512)); rawPending = true;
             // хвост тишины: поток оборвался посреди фразы или сразу за ней — без паузы нарезка её не закроет
-            for (int k = 0; k < (hangMs + 300) / FRAME_MS; k++) capQ.offer(new float[512]); }
+            for (int k = 0; k < (slicer.hangMs + 300) / FRAME_MS; k++) capQ.offer(new float[512]); }
           nRaw++;
         } else if (it.kind.equals("text")) {
           final String t = Inbox.readText(it.f); final File f = it.f; nText++;
@@ -507,7 +506,7 @@ public class TranslatorService extends Service {
           final float[] x = Inbox.readPcm(it.f); final String d = it.dir; final boolean ptt = it.kind.equals("ptt"); nSeg++;
           submitHeard(d, x, it.f, h -> { segDb = db(rms(x, x.length)); segNoiseDb = Double.NaN; segAt = 0; segPos = 0;
             if (ptt) process(d, x, 16000, true, voicesOn() ? new Who(spkExec.submit(() -> spk.embed(x, 16000)), false) : null, h);
-            else route(x, h); });
+            else route(x, h, fixedDir, autoLang && fixedDir == null); });
         }
       }
       if (!(lp || lr)) in.dropRaw();
@@ -678,7 +677,7 @@ public class TranslatorService extends Service {
     // от прогона к прогону разный, а проверить надо голос и разрез двоих (--es segwav <wav 16 кГц>).
     if (i != null && i.hasExtra("segwav")) { final String wav = i.getStringExtra("segwav");
       worker.submit(() -> { try { WaveReader wr = new WaveReader(wav); log("▷ стенд: кусок слушания " + new File(wav).getName()
-          + String.format(Locale.ROOT, ", %.1f с", wr.getSamples().length / 16000.0)); route(wr.getSamples()); }
+          + String.format(Locale.ROOT, ", %.1f с", wr.getSamples().length / 16000.0)); route(wr.getSamples(), null, fixedDir, autoLang && fixedDir == null); }
         catch (Throwable t) { log("▷ стенд: кусок не прочёлся — " + t); } }); }
     if (i != null && i.hasExtra("voiceid")) { final String wav = i.getStringExtra("voiceid");
       worker.submit(() -> { try { WaveReader wr = new WaveReader(wav); long t = System.nanoTime();
@@ -872,18 +871,21 @@ public class TranslatorService extends Service {
       if (dumpSegs != null) new File(dumpSegs).mkdirs();
       log("💾 сегменты " + (dumpSegs == null ? "не сохраняются" : "пишутся в " + dumpSegs)); }
     if (i != null && (i.hasExtra("preroll") || i.hasExtra("tail") || i.hasExtra("gate") || i.hasExtra("minspeech") || i.hasExtra("hang"))) {
-      if (i.hasExtra("preroll")) preRollMs = Integer.parseInt(i.getStringExtra("preroll"));
-      if (i.hasExtra("tail")) tailMs = Integer.parseInt(i.getStringExtra("tail"));
+      if (i.hasExtra("preroll")) slicer.preRollMs = Integer.parseInt(i.getStringExtra("preroll"));
+      if (i.hasExtra("tail")) slicer.tailMs = Integer.parseInt(i.getStringExtra("tail"));
       if (i.hasExtra("gate")) gateDb = Double.parseDouble(i.getStringExtra("gate"));
-      if (i.hasExtra("minspeech")) minSpeechMs = Integer.parseInt(i.getStringExtra("minspeech"));
-      if (i.hasExtra("hang")) hangMs = Integer.parseInt(i.getStringExtra("hang"));
-      log("🎚 нарезка: подпор " + preRollMs + " мс · хвост " + tailMs + " мс · порог +" + gateDb + " дБ над фоном · минимум речи " + minSpeechMs + " мс · выдержка " + hangMs + " мс");
-      tsv("segcfg", "" + preRollMs, "" + tailMs, "" + gateDb, "" + minSpeechMs, "" + hangMs);
+      if (i.hasExtra("minspeech")) minSpeechFixed = Integer.parseInt(i.getStringExtra("minspeech"));   // −1 — снова по тишине/шуму
+      if (i.hasExtra("hang")) slicer.hangMs = Integer.parseInt(i.getStringExtra("hang"));
+      String ms = minSpeechFixed >= 0 ? minSpeechFixed + " мс" : MIN_SPEECH_QUIET + " мс в тишине, " + MIN_SPEECH_NOISE + " при шуме";
+      log("🎚 нарезка: подпор " + slicer.preRollMs + " мс · хвост " + slicer.tailMs + " мс · порог +" + gateDb + " дБ над фоном · минимум речи " + ms + " · выдержка " + slicer.hangMs + " мс");
+      tsv("segcfg", "" + slicer.preRollMs, "" + slicer.tailMs, "" + gateDb, "" + minSpeechFixed, "" + slicer.hangMs);
     }
-    if (i != null && (i.hasExtra("vadthr") || i.hasExtra("vadsil"))) {
-      float thr = i.getStringExtra("vadthr") == null ? eng.vadThreshold : Float.parseFloat(i.getStringExtra("vadthr"));
-      float sil = i.getStringExtra("vadsil") == null ? eng.vadMinSilence : Float.parseFloat(i.getStringExtra("vadsil"));
-      if (eng != null) { eng.retuneVad(thr, sil); log("🎚 VAD: порог " + thr + ", тишина " + sil + " с"); }
+    if (i != null && (i.hasExtra("vadthr") || i.hasExtra("vadsil") || i.hasExtra("vadminspeech"))) {
+      Engine e = eng;
+      float thr = i.getStringExtra("vadthr") == null ? (e == null ? 0.5f : e.vadThreshold) : Float.parseFloat(i.getStringExtra("vadthr"));
+      float sil = i.getStringExtra("vadsil") == null ? (e == null ? 0.05f : e.vadMinSilence) : Float.parseFloat(i.getStringExtra("vadsil"));
+      if (i.hasExtra("vadminspeech")) { String v = i.getStringExtra("vadminspeech"); vadMinSpeechFixed = v.isEmpty() || v.equals("auto") ? Float.NaN : Float.parseFloat(v); }   // auto — по тишине/шуму
+      if (e != null) { e.retuneVad(thr, sil); log("🎚 VAD: порог " + thr + ", тишина " + sil + " с, минимум речи " + (Float.isNaN(vadMinSpeechFixed) ? Engine.VAD_MIN_SPEECH_QUIET + " с в тишине, " + Engine.VAD_MIN_SPEECH_NOISE + " при шуме" : vadMinSpeechFixed + " с")); }
     }
     // Стенд: удержание слышит запись вместо микрофона (--es micfile <wav 16 кГц>, пусто — снова
     // микрофон), с начала записи на каждом нажатии. Удержание идёт целиком по-настоящему — касание,
@@ -913,7 +915,7 @@ public class TranslatorService extends Service {
       final int speed = i.getStringExtra("speed") == null ? 1 : Integer.parseInt(i.getStringExtra("speed"));
       new Thread(() -> { try {
         WaveReader wr = new WaveReader(wav); float[] s2 = wr.getSamples();
-        feeding = true; capClear(); noiseRms = 0; vadSamples = 0; listenLiveReset = true; dnReset = true;
+        feeding = true; capClear(); capOffer(GAP); noiseRms = 0; vadSamples = 0; listenLiveReset = true; dnReset = true;   // GAP: кусок и подпор прошлой подачи — не в эту
         log("▷ подаю " + new File(wav).getName() + ": " + String.format(Locale.ROOT, "%.1f", s2.length / 16000.0) + " с, скорость ×" + speed);
         tsv("feed_begin", new File(wav).getName(), "" + s2.length, "" + speed);
         for (int o = 0; o + 512 <= s2.length && running; o += 512) {
@@ -1332,8 +1334,21 @@ public class TranslatorService extends Service {
     if (on && !capturing) { capturing = true; startCapture(); }
     else if (!on) capturing = false;                       // поток сам выйдет и отпустит микрофон
     notify(L.t(on ? "Слушаю…" : "Микрофон выключен")); }
+  /** Последняя секунда слушания (кадры до усиления) — подпор удержания: модели нужен настоящий звук комнаты перед
+   *  фразой, а удержание начиналось с нажатия, без него (results/2026-10-08-asr-review.md: на корпусе без подпора
+   *  WER 4,0 / 4,0 %, с секундой комнаты 2,5 / 2,2). */
+  final ArrayDeque<float[]> ring = new ArrayDeque<>(); volatile long ringAt = 0;
+  void ringPut(float[] c) { synchronized (ring) { ring.addLast(c.clone()); while (ring.size() > 31) ring.removeFirst(); ringAt = System.currentTimeMillis(); } }
+  /** Сколько отсчётов удержания пришло из подпора — они не речь человека. */
+  volatile int pttPreN = 0;
+  /** Озвучка на паузе из-за удержания: с какого момента (0 — не на паузе). */
+  long holdPausedAt = 0;
   public void pttStart(String dir) {
-    synchronized (pttBuf) { pttBuf.clear(); }
+    long now = System.currentTimeMillis();
+    // Подпор — только если микрофон слушал только что; у записи стенда (micfile) подпора нет, она начинается с нуля сама.
+    synchronized (pttBuf) { pttBuf.clear(); pttPreN = 0;
+      if (micFile == null) synchronized (ring) { if (now - ringAt < 2000) for (float[] c : ring) { pttBuf.add(c); pttPreN += c.length; } } }
+    holdPause(now);                                   // озвучка на паузе: иначе в запись попадает голос приложения
     // Фон комнаты от слушания — начало своего фона удержания; у записи стенда фон свой, не комнаты.
     micFilePos = 0; pttRoomDb = micFile != null ? Double.NaN : room();
     pttLive.reset(); pttLive.seed(pttRoomDb); liveQ = -1; liveSpeech = false; levelDb = -120;
@@ -1341,14 +1356,47 @@ public class TranslatorService extends Service {
     // Удержание принимает любой язык: на время записи снимаем закрепление от кнопок.
     pttFixed = fixedDir; pttAuto = autoLang; fixedDir = null; autoLang = true;
     ensureCapture();                                  // удержание само открывает микрофон
-    log("● запись " + dir);
+    log("● запись " + dir + (pttPreN > 0 ? String.format(Locale.ROOT, " · подпор %.1f с из слушания", pttPreN / 16000.0) : ""));
+  }
+  /** Нажали FALAR, пока звучит перевод: дорожка на паузу (владелец 08.10: «озвучку на паузу надо»). */
+  void holdPause(long now) {
+    AudioTrack tr = track;
+    if (tr == null || !(writingSpeech || now < playEndMs)) return;
+    try { tr.pause(); } catch (Throwable e) { return; }
+    holdPausedAt = now;
+    tsHold = tsD; tsD = Double.NaN; phraseFrame0 = Math.max(phraseFrame0, lastFt);   // как у паузы перебивания: метки дорожки на паузе стоят
+    log("🔊 озвучка на паузе: нажата FALAR");
+  }
+  /** Отпустили FALAR. Говорили — недоигранное вон, как при подтверждённом перебивании: собеседник уже слушает ответ;
+   *  только тыкнули — озвучка продолжается с того же места. */
+  void holdRelease(boolean spoke) {
+    if (holdPausedAt == 0) return;
+    long now = System.currentTimeMillis(), d = now - holdPausedAt; holdPausedAt = 0;
+    AudioTrack tr = track;
+    if (spoke) {
+      bargeStop = true;
+      try { if (tr != null) { tr.pause(); tr.flush(); } } catch (Throwable e) {}
+      muteUntil = now; playEndMs = now; spokenPtEnd = Math.min(spokenPtEnd, now);
+      bargeExec.submit(() -> { synchronized (tts) { if (bargeStop && !writingSpeech) hush(); } });
+      log("🔊 озвучка снята: сказали фразу кнопкой");
+    } else {
+      try { if (tr != null) tr.play(); } catch (Throwable e) {}
+      if (writingSpeech) pausedMs += d; else { playEndMs += d; if (muteUntil != Long.MAX_VALUE && muteUntil > now - d) muteUntil += d; }
+      log(String.format(Locale.ROOT, "🔊 озвучка продолжается после паузы %d мс", d));
+    }
   }
   public void pttStop() {
     recording = false;
     fixedDir = pttFixed; autoLang = pttAuto;          // вернуть режим, заданный кнопками
     if (!micWanted()) stopCapture();                  // отпустили — микрофон снова закрыт
-    final float[] all; synchronized (pttBuf) { int n = 0; for (float[] c : pttBuf) n += c.length; all = new float[n]; int o = 0; for (float[] c : pttBuf) { System.arraycopy(c, 0, all, o, c.length); o += c.length; } }
+    final float[] raw; synchronized (pttBuf) { int n = 0; for (float[] c : pttBuf) n += c.length; raw = new float[n]; int o = 0; for (float[] c : pttBuf) { System.arraycopy(c, 0, raw, o, c.length); o += c.length; } }
     final String d = pttDir;
+    final int held = raw.length - pttPreN;            // без подпора из слушания
+    holdRelease(held >= 8000);                        // полсекунды — говорили; меньше — тык
+    if (held < 1600) { log("● отпустили сразу — записи нет"); return; }   // пустой звук ронял распознаватель исключением
+    // Подпора из слушания не было (микрофон открылся по нажатию): перед фразой — её же самые тихие 300 мс, настоящий
+    // звук этой комнаты вместо резкого старта (на корпусе: 4,0 / 4,0 → 3,0 / 2,7 %; секунда слушания даёт 2,5 / 2,2).
+    final float[] all = pttPreN > 0 ? raw : Gain.withLead(raw, 16000 * 3 / 10);
     // Чувствительность с ограничителем — на всю фразу разом, тем же Gain, что у прослушивания;
     // в авто — ровно столько, чтобы речь этой фразы легла на TARGET_DB.
     final Gain g = new Gain(16000); g.limit = limiterOn; final double bg = pttRoomDb;
@@ -3069,6 +3117,9 @@ public class TranslatorService extends Service {
   /** Граница в очереди: кадры до неё — поток, записанный до нарезки (Inbox raw). Нарезка, дойдя до неё, удаляет
    *  его файлы. Пустой кадр — потребители, кроме нарезки, его просто пропускают. */
   static final float[] RAW_END = new float[0];
+  /** Разрыв кадров слушания (удержание, озвучка глушит микрофон, чтение вслух, подача, микрофон отпущен): нарезка
+   *  закрывает открытый кусок сейчас и начинает подпор заново — звук за разрывом не продолжение. */
+  static final float[] GAP = new float[0];
   final Object capLock = new Object();
   /** В очереди есть поток прошлого запуска (earlyStart): границу RAW_END ставить, даже если свой не писался. */
   boolean rawPending = false;
@@ -3077,7 +3128,7 @@ public class TranslatorService extends Service {
     synchronized (capLock) {
       if (capQ.size() >= capCap()) return false;
       Inbox in = inbox;
-      if (in != null && engAsr == null && loading) in.raw(f, System.currentTimeMillis());   // до нарезки — и на диск
+      if (in != null && engAsr == null && loading && f.length > 0) in.raw(f, System.currentTimeMillis());   // до нарезки — и на диск (границы не звук)
       return capQ.offer(f);
     }
   }
@@ -3092,6 +3143,9 @@ public class TranslatorService extends Service {
     }
   }
   volatile long samplesRead = 0, captureStart = 0, framesDropped = 0;
+  /** Номер запуска захвата: поток с устаревшим номером выходит, даже если capturing снова true (быстрое повторное
+   *  нажатие запускало второй поток рядом с первым, и удержание получало кадры от обоих). */
+  volatile int capGen = 0;
 
   /** Нужен ли микрофон сейчас: включено прослушивание или идёт удержание. */
   public boolean micWanted() { return listenPt || listenRu || recording; }
@@ -3122,20 +3176,22 @@ public class TranslatorService extends Service {
         log("❌ микрофон не инициализировался — захват не запущен"); status(L.t("Микрофон недоступен")); return;
       }
       rec.startRecording(); AudioDeviceInfo routed = rec.getRoutedDevice(); capRouted = routed; log("микрофон: " + (routed == null ? "?" : routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC ? "встроенный" : "тип " + routed.getType()));
-      final AudioRecord fr = rec;
-      try { getSystemService(AudioManager.class).registerAudioRecordingCallback(new AudioManager.AudioRecordingCallback() {
+      final AudioRecord fr = rec; final int gen = ++capGen;
+      final AudioManager.AudioRecordingCallback cb = new AudioManager.AudioRecordingCallback() {
         @Override public void onRecordingConfigChanged(java.util.List<AudioRecordingConfiguration> cfgs) {
           boolean sil = false;
           for (AudioRecordingConfiguration c : cfgs) if (c.getClientAudioSessionId() == fr.getAudioSessionId()) sil = c.isClientSilenced();
           if (sil != micSilenced) { micSilenced = sil; String m = sil ? L.k("🔇 микрофон заглушён системой (другое приложение перехватило вход)") : L.k("🎙 микрофон снова наш"); log(m); status(L.t(m)); TranslatorService.this.notify(L.t(m)); }
         }
-      }, main); } catch (Throwable e) {}
+      };
+      try { getSystemService(AudioManager.class).registerAudioRecordingCallback(cb, main); } catch (Throwable e) {}
       float[] win = new float[512];
       // Во время загрузки в очереди — накопленное до микрофона (поток прошлого запуска, подача стенда): его не трогаем.
       if (!loading && !feeding) capClear();
       samplesRead = 0; captureStart = System.currentTimeMillis(); framesDropped = 0;
       startVad();
-      while (running && capturing) {
+      boolean wasGiving = false;                     // отдавал ли прошлый кадр нарезке: на переходе — разрыв (GAP)
+      while (running && capturing && gen == capGen) {
         int n = rec.read(win, 0, 512, AudioRecord.READ_BLOCKING);
         if (n < 0) {                                   // иначе вечный busy-loop на ядре при ERROR_DEAD_OBJECT
           log("❌ чтение микрофона вернуло " + n + " — пересоздаю AudioRecord");
@@ -3154,6 +3210,12 @@ public class TranslatorService extends Service {
             String dst = getExternalFilesDir(null).getAbsolutePath() + "/raw.wav";   // только files/: подкаталог от adb приложению не читается
             try { new DenoisedAudio(all, 16000).save(dst); log("💾 сырой поток сохранён: " + dst); tsv("raw_end", dst, "" + all.length); } catch (Throwable e) { log("💾 " + e); } }
         }
+        // Кадры слушания кончились (удержание, озвучка глушит микрофон, чтение вслух, подача записи): нарезке —
+        // разрыв, чтобы открытый кусок закрылся сейчас, а не когда кадры пойдут снова. Иначе недоговорённая реплика
+        // собеседника замирала на время удержания и переводилась после ответа ей.
+        boolean giving = !recording && vadMode && !feeding && !feedOnly && (eng != null || loading) && !readingAloud && System.currentTimeMillis() > muteUntil;
+        if (!giving && wasGiving) capOffer(GAP);
+        wasGiving = giving;
         // Удержание копит звук как есть: чувствительность с ограничителем ставится на всю фразу
         // при отпускании (pttStop). Полосе на экране — уровень кадра с учётом усиления.
         if (recording) { float[] mf = micFile;
@@ -3175,13 +3237,18 @@ public class TranslatorService extends Service {
           // Перебивание смотрит каждый кадр слушания, и заглушённый тоже: по нему видно человека поверх озвучки.
           // true — кадр уже отдан нарезке вместе с подпором.
           boolean taken = bargeOn && eng != null && bargeFrame(rec, win, n);
-          if (!taken && System.currentTimeMillis() > muteUntil)
-            if (!capOffer(n == win.length ? win.clone() : Arrays.copyOf(win, n))) framesDropped++;
+          if (!taken && giving) {
+            float[] c = n == win.length ? win.clone() : Arrays.copyOf(win, n);
+            if (!capOffer(c)) framesDropped++;
+            ringPut(c);                                // последняя секунда слушания — подпор удержания
+          }
           // Нарезки ещё нет (грузится распознавание) — уровень для кнопки «Слушать» считаем здесь: видно, что слышим.
           if (engAsr == null) { levelDb = (float) Math.max(Math.min(0, db(rms(win, n)) + micGain()), levelDb - 1.5); levelAt = System.currentTimeMillis(); }
         }
       }
+      if (wasGiving) capOffer(GAP);
       rec.stop(); rec.release(); capRouted = null;
+      try { getSystemService(AudioManager.class).unregisterAudioRecordingCallback(cb); } catch (Throwable e) {}
       log("🎙 микрофон отпущен");
     }, "capture"); capThread.start();
   }
@@ -3212,18 +3279,24 @@ public class TranslatorService extends Service {
    *  склеиваются. Здесь: подпор начала из кольцевого буфера, хвост после конца речи и
    *  энергетический порог над измеренным фоном — кадр считается речью, только если Silero сказал
    *  «речь» И он громче фона на gateDb. */
-  static final int FRAME_MS = 32;                       // 512 отсчётов при 16 кГц
-  volatile int preRollMs = 1000, tailMs = 300, minSpeechMs = 250, maxSpeechMs = 15000, hangMs = 600;
+  static final int FRAME_MS = Slicer.FRAME_MS;          // 512 отсчётов при 16 кГц
+  /** Сборка куска — Slicer (подпор, хвост, выдержка, минимум речи, предел длины); его настройки меняет стенд. */
+  final Slicer slicer = new Slicer();
+  /** Минимум речи после срабатывания детектора, мс: в тишине и при включённом шумодаве нарезки. Минимум считался
+   *  дважды — 0,25 с у silero и ещё 250 мс здесь, — и однословные ответы («Não», «Claro», «Нет») куска не давали.
+   *  Перебор на записях (results/2026-10-08-asr-review.md): в тишине silero 0,064 с + 150 мс отдаёт их распознаванию
+   *  без потерь по WER, в шуме то же стоит 4–6 п.п. от лишних разрезов — там остаются прежние 0,25 с + 250 мс.
+   *  Решает DenoiseGate, как и шумодав. Стенд (--es minspeech, --es vadminspeech) ставит одно значение на всё. */
+  static final int MIN_SPEECH_QUIET = 150, MIN_SPEECH_NOISE = 250;
+  volatile int minSpeechFixed = -1; volatile float vadMinSpeechFixed = Float.NaN;
   volatile double gateDb = 6;
 
   void startVad() {
     if (vadThread != null && vadThread.isAlive()) return;
     vadThread = new Thread(() -> {
-      ArrayDeque<float[]> pre = new ArrayDeque<>();
-      List<float[]> seg = new ArrayList<>();
-      // Счётчики входа по кадрам — рядом с самими кадрами: после усиления исходного звука уже нет.
-      ArrayDeque<Gain.Stats> preSt = new ArrayDeque<>(); List<Gain.Stats> segSt = new ArrayList<>();
-      boolean inSpeech = false; int silent = 0, voiced = 0;
+      // Сборка куска — slicer (Slicer): подпор, хвост, выдержка, минимум речи, предел длины; счётчики входа по
+      // кадрам — рядом с самими кадрами, после усиления исходного звука уже нет.
+      slicer.reset();
       // Шумодав нарезки: свой выход копится и отдаётся кадрами по 512; включает его DenoiseGate.
       OnlineSpeechDenoiser dn = null; String dnMode = "raw"; float[] dnBuf = new float[4096]; int dnLen = 0;
       double dnNoise = 0; long dnNs = 0, dnCpu = 0, dnFrames = 0, dnAll = 0; DenoiseGate gate = new DenoiseGate(); boolean musicNoted = false;
@@ -3239,7 +3312,12 @@ public class TranslatorService extends Service {
         float[] win;
         try { win = capQ.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException e) { return; }
         if (win == null) continue;
-        if (win == RAW_END) { Inbox in = inbox; int n = in == null ? 0 : in.dropRaw(); tsv("early", "raw_end", "" + (System.currentTimeMillis() - bootAt), "" + n); continue; }
+        if (win == RAW_END) { if (slicer.inSpeech) rawDropPending = true; else dropRawNow(); continue; }   // посреди фразы файл ещё нужен: выгрузка потеряла бы её целиком
+        if (win == GAP) {                                 // кадры кончились: открытый кусок — сейчас, подпор — с чистого листа
+          Slicer.Piece pc = slicer.gap(); en.vad.reset();
+          if (pc != null) emit(pc);
+          listenLive.reset(); continue;
+        }
         vadSamples += win.length;
         Gain.Stats fs = new Gain.Stats();
         // Оценка фона — после усиления. Сменилось усиление (авто после фразы) — сдвигаем и её:
@@ -3302,7 +3380,9 @@ public class TranslatorService extends Service {
           dnNs += System.nanoTime() - t0; dnCpu += android.os.Debug.threadCpuTimeNanos() - c0; dnFrames++;
         }
         dnCostMode = dnMode; dnCostNs = dnNs; dnCostCpu = dnCpu; dnCostFrames = dnFrames; dnCostAll = dnAll;
-        if (vadReset) { vadReset = false; en.vad.reset(); if (dn != null) { dn.reset(); dnLen = 0; dnNoise = 0; } }
+        // Слушание включили заново: оценка фона — с чистого листа (прежняя могла остаться от другой комнаты или от
+        // кадров нулей и поднимается по 0,3 дБ/с), кусок и подпор — тоже.
+        if (vadReset) { vadReset = false; en.vad.reset(); slicer.reset(); noiseRms = 0; dnNoise = 0; if (dn != null) { dn.reset(); dnLen = 0; } }
         float[] vin = eff.equals("raw") ? win : dwin;
         if (dnMode.equals("auto") && vadDnLevel == 3) {   // фильтр идёт всегда — его оценка шума не должна отставать
           long c0 = android.os.Debug.threadCpuTimeNanos();
@@ -3310,6 +3390,10 @@ public class TranslatorService extends Service {
           qCpu += android.os.Debug.threadCpuTimeNanos() - c0; qFrames++; qCostCpu = qCpu; qCostFrames = qFrames;
           if (!gate.on() && !gate.music()) vin = q;
         }
+        // Минимум речи — по тишине или шуму (DenoiseGate): silero перестраивается только на переключении.
+        boolean noisy = dnMode.equals("auto") && gate.on();
+        slicer.minSpeechMs = minSpeechFixed >= 0 ? minSpeechFixed : noisy ? MIN_SPEECH_NOISE : MIN_SPEECH_QUIET;
+        en.rebuildVad(!Float.isNaN(vadMinSpeechFixed) ? vadMinSpeechFixed : noisy ? Engine.VAD_MIN_SPEECH_NOISE : Engine.VAD_MIN_SPEECH_QUIET);
         en.vad.acceptWaveform(vin);
         boolean sp = en.vad.isSpeechDetected();
         while (!en.vad.empty()) en.vad.pop();          // внутренняя сборка sherpa не используется
@@ -3320,7 +3404,10 @@ public class TranslatorService extends Service {
         // Несимметрично: вниз быстро, вверх еле-еле. Симметричное усреднение ползло только вверх —
         // при плотном диалоге пауз почти нет, оценка фона набирала саму речь (−44 → −31 dBFS),
         // порог считался от неё и начинал резать речь: до распознавания доходило 20% фраз.
-        if (!sp) {
+        // Кадр цифровой тишины (микрофон ещё не проснулся, заглушён системой, подвод тишины за потоком с диска) —
+        // не фон комнаты: он ронял оценку на 26 дБ за 28 кадров, а поднимается она 90 с (Gain и Hearing такие кадры
+        // не считают давно).
+        if (!sp && frame * frame >= Gain.DEAD) {
           if (noiseRms == 0) noiseRms = frame;
           else if (frame < noiseRms) noiseRms = 0.9 * noiseRms + 0.1 * frame;
           else noiseRms = 0.999 * noiseRms + 0.001 * Math.min(frame, 2 * noiseRms);
@@ -3334,43 +3421,40 @@ public class TranslatorService extends Service {
         }
         boolean speech = sp && loud;
         if (speech) lastSpeechAt = System.currentTimeMillis();   // отсюда отсчитывается пауза до озвучки
-
-        if (!inSpeech) {
-          pre.addLast(win); preSt.addLast(fs);
-          while (pre.size() > Math.max(1, preRollMs / FRAME_MS)) { pre.removeFirst(); preSt.removeFirst(); }
-          if (speech) { inSpeech = true; vadInSpeech = true; seg.clear(); seg.addAll(pre); pre.clear(); segSt.clear(); segSt.addAll(preSt); preSt.clear(); voiced = 1; silent = 0; }
-          continue;
+        Slicer.Piece pc = slicer.feed(win, fs, speech, frame);
+        if (pc == null) continue;
+        if (pc.cut) en.vad.reset();                       // предел длины: у silero свой счёт 15 с — чтобы он не поднял порог посреди продолжения
+        emit(pc);
+        if (!slicer.inSpeech) {
+          listenLive.reset();                             // цвет полоски — по каждой фразе, как её итог
+          if (rawDropPending) dropRawNow();
         }
-        seg.add(win); segSt.add(fs);
-        if (speech) { voiced++; silent = 0; } else silent++;
-        boolean quiet = silent * FRAME_MS >= hangMs;      // выдержка только здесь, у sherpa её нет
-        boolean tooLong = seg.size() * FRAME_MS >= maxSpeechMs;
-        if (!quiet && !tooLong) continue;
-
-        int keep = seg.size() - Math.max(0, silent - tailMs / FRAME_MS);   // хвост оставляем, лишнюю тишину режем
-        if (voiced * FRAME_MS >= minSpeechMs && keep > 0) {
-          int n = 0; for (int k = 0; k < keep; k++) n += seg.get(k).length;
-          final float[] out = new float[n]; int o = 0;
-          for (int k = 0; k < keep; k++) { float[] c = seg.get(k); System.arraycopy(c, 0, out, o, c.length); o += c.length; }
-          final double nz = noiseRms; final long at = System.currentTimeMillis();
-          if (dumpSegs != null) try { new DenoisedAudio(out, 16000).save(new File(dumpSegs, "seg_" + at + ".wav").getAbsolutePath()); } catch (Throwable e) {}
-          final long pos = vadSamples; final Gain.Stats st = new Gain.Stats(); final double gdb = gainListen.db;
-          for (int k = 0; k < keep; k++) st.add(segSt.get(k));
-          // Авто сдвигается здесь, в момент нарезки, а не в очереди распознавания: иначе следующая
-          // фраза шла бы ещё со старым усилением, а при подаче записи ×4 — несколько фраз.
-          final double[] sf = Gain.speechFloor(out);
-          if (autoOn() && !Double.isNaN(sf[0])) { autoDb += AUTO_STEP * (clampAuto(TARGET_DB - (sf[0] - gdb)) - autoDb); saveAuto(); }
-          if (isEarly()) {                                  // перевода ещё нет: распознаётся сейчас, остальное — за загрузкой
-            final String d0 = fixedDir != null ? fixedDir : "pt2ru";
-            final Inbox in = inbox; final File saved = in == null ? null : in.put("seg", at, d0, out);
-            submitHeard(d0, out, saved, h -> { segNoiseDb = nz == 0 ? Double.NaN : db(nz); segDb = db(rms(out, out.length)); segAt = at; segPos = pos; hear(sf, st, gdb); route(out, h); });
-          } else
-          submitPhrase(() -> { segNoiseDb = nz == 0 ? Double.NaN : db(nz); segDb = db(rms(out, out.length)); segAt = at; segPos = pos; hear(sf, st, gdb); route(out); });
-        }
-        inSpeech = false; vadInSpeech = false; seg.clear(); segSt.clear(); silent = 0; voiced = 0;
-        listenLive.reset();                               // цвет полоски — по каждой фразе, как её итог
       }
     }, "vad"); vadThread.start();
+  }
+  /** Поток до нарезки дочитан (RAW_END), но пришёл посреди фразы: файлы удаляются, когда она закроется. */
+  boolean rawDropPending = false;
+  void dropRawNow() { rawDropPending = false; Inbox in = inbox; int n = in == null ? 0 : in.dropRaw(); tsv("early", "raw_end", "" + (System.currentTimeMillis() - bootAt), "" + n); }
+
+  /** Закрытый кусок — в очередь распознавания: как слышно, шаг авто-чувствительности, во время загрузки — на диск и в early. */
+  void emit(Slicer.Piece pc) {
+    final float[] out = pc.pcm; final Gain.Stats st = pc.st;
+    final double nz = noiseRms; final long at = System.currentTimeMillis();
+    if (dumpSegs != null) try { new DenoisedAudio(out, 16000).save(new File(dumpSegs, "seg_" + at + ".wav").getAbsolutePath()); } catch (Throwable e) {}
+    final long pos = vadSamples; final double gdb = gainListen.db;
+    // Авто сдвигается здесь, в момент нарезки, а не в очереди распознавания: иначе следующая
+    // фраза шла бы ещё со старым усилением, а при подаче записи ×4 — несколько фраз.
+    final double[] sf = Gain.speechFloor(out);
+    if (autoOn() && !Double.isNaN(sf[0])) { autoDb += AUTO_STEP * (clampAuto(TARGET_DB - (sf[0] - gdb)) - autoDb); saveAuto(); }
+    // Режим кнопок — на момент нарезки, а не когда очередь дойдёт до куска: удержание на своё время снимает
+    // закрепление, и кусок, ждавший в очереди, шёл бы с чужим направлением («Да» при «слушать только RU» — в pt2ru).
+    final String fd = fixedDir; final boolean au = autoLang && fd == null;
+    if (isEarly()) {                                  // перевода ещё нет: распознаётся сейчас, остальное — за загрузкой
+      final String d0 = fd != null ? fd : "pt2ru";
+      final Inbox in = inbox; final File saved = in == null ? null : in.put("seg", at, d0, out);
+      submitHeard(d0, out, saved, h -> { segNoiseDb = nz == 0 ? Double.NaN : db(nz); segDb = db(rms(out, out.length)); segAt = at; segPos = pos; hear(sf, st, gdb); route(out, h, fd, au); });
+    } else
+    submitPhrase(() -> { segNoiseDb = nz == 0 ? Double.NaN : db(nz); segDb = db(rms(out, out.length)); segAt = at; segPos = pos; hear(sf, st, gdb); route(out, null, fd, au); });
   }
 
   /** Слушание: чей это голос. С отпечатком голоса переводятся только голоса разговора — те, кто
@@ -3379,10 +3463,10 @@ public class TranslatorService extends Service {
    *  разговоре ещё нет — ждём первой фразы кнопкой. Направление — из языка голоса, если оно не
    *  закреплено кнопками; ясный по тексту язык его поправит (translateOnce).
    *  Без отпечатка (модуль выключен или модели нет) — как раньше: переводится всё, что слышно. */
-  void route(float[] seg) { route(seg, null); }
-  /** pre — распознано заранее, во время загрузки (submitHeard): голос разговора решается здесь, уже с отпечатком. */
-  void route(float[] seg, Recog pre) {
-    String dir = fixedDir != null ? fixedDir : "pt2ru";
+  /** pre — распознано заранее, во время загрузки (submitHeard): голос разговора решается здесь, уже с отпечатком.
+   *  fixed и auto — режим кнопок на момент нарезки (emit), не на момент запуска задачи. */
+  void route(float[] seg, Recog pre, String fixed, boolean auto) {
+    String dir = fixed != null ? fixed : "pt2ru";
     Who w = null;
     if (voicesOn()) {
       double ms = seg.length / 16.0;
@@ -3392,7 +3476,7 @@ public class TranslatorService extends Service {
       final Speaker sp = spk;
       w = new Who(spkExec.submit(() -> sp.embed(seg, 16000)), true, seg);
     }
-    process(dir, seg, 16000, autoLang && fixedDir == null, w, pre);
+    process(dir, seg, 16000, auto, w, pre);
   }
   /** Сегмент не переведён из-за голоса: в журнал и в at.tsv; на экран — только «голосов нет»
    *  (иначе слушание в новом разговоре выглядит сломанным), а не каждый чужой обрывок. */
@@ -4054,7 +4138,8 @@ public class TranslatorService extends Service {
           long t0 = System.currentTimeMillis();
           // Ждём тишины, а не таймера: пока человек говорит, ждём дальше. Предел на всякий
           // случай есть — иначе при непрерывном шуме перевод не прозвучит никогда.
-          while (running && holdMs > 0 && System.currentTimeMillis() - lastSpeechAt < holdMs
+          // Удержание — тоже «человек говорит»: нарезка в это время кадров не видит и lastSpeechAt не двигает.
+          while (running && (holdMs > 0 && System.currentTimeMillis() - lastSpeechAt < holdMs || recording)
                  && System.currentTimeMillis() - t0 < 20000) Thread.sleep(80);
           long waited = System.currentTimeMillis() - t0;
           // Пока реплика ждала тишины, уточнитель мог её поправить — произносим свежий вариант.
@@ -4686,15 +4771,17 @@ public class TranslatorService extends Service {
   /** Когда поднят уточнитель и когда был прошлый критический сигнал — монотонное время, мс. */
   volatile long llmLoadedAt = 0, lastCritical = 0;
   @Override public void onDestroy() {
-    running = false; main.removeCallbacks(idleStop);
+    running = false; capturing = false; main.removeCallbacks(idleStop);
     if (store != null) store.cancel();
     if (spkTrack != null) spkTrack.release();
     worker.shutdownNow(); early.shutdownNow(); llmWorker.shutdownNow(); cloudWorker.shutdownNow(); learnIo.shutdownNow();
     clipIo.shutdown();   // не shutdownNow: звук реплик, уже стоящий в очереди, дописывается (миллисекунды на кусочек)
     // Модели освобождаем после того, как рабочие потоки вышли: иначе распознавание или перевод слов,
-    // идущие в эту секунду, обратятся к уже освобождённой нативной памяти.
-    try { worker.awaitTermination(3, TimeUnit.SECONDS); learnIo.awaitTermination(3, TimeUnit.SECONDS); clipIo.awaitTermination(2, TimeUnit.SECONDS); }
+    // идущие в эту секунду, обратятся к уже освобождённой нативной памяти. Нарезка трогает VAD и шумодав
+    // на каждом кадре, early распознаёт — их тоже ждём («Стоп» во время слушания падал в нативном коде).
+    try { worker.awaitTermination(3, TimeUnit.SECONDS); early.awaitTermination(2, TimeUnit.SECONDS); learnIo.awaitTermination(3, TimeUnit.SECONDS); clipIo.awaitTermination(2, TimeUnit.SECONDS); }
     catch (InterruptedException ignore) {}
+    for (Thread t : new Thread[]{vadThread, capThread}) if (t != null) try { t.join(1500); } catch (InterruptedException ignore) {}
     if (llm != null) llm.stop();
     for (int pid : Llm.strays()) android.os.Process.killProcess(pid);
     if (eng != null) eng.release();

@@ -432,10 +432,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       t.setTextColor(look.fg); t.setLineSpacing(0, 1.05f); t.setText(pt);
       bigBox.addView(t); return;
     }
-    for (String w : pt.trim().split("\\s+")) {
+    // Число остаётся цифрами, а под ним — как его сказать: «R$ 20,50» → «ви́нчи хеа́йс и синкуэ́нта сента́вус»
+    // (Numbers; владелец 08.10: писать можно цифрами, проговаривать и давать транскрипцию буквами).
+    for (String[] tk : Numbers.tokens(pt.trim())) {
       LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
-      TextView t = new TextView(this); t.setTextSize(szPt); t.setTypeface(null, Typeface.BOLD); t.setTextColor(look.fg); t.setText(w);
-      TextView c = new TextView(this); c.setTextSize(Math.max(9, szPt * 0.45f)); c.setTextColor(look.soft); c.setText(Translit.say(w));
+      TextView t = new TextView(this); t.setTextSize(szPt); t.setTypeface(null, Typeface.BOLD); t.setTextColor(look.fg); t.setText(tk[0]);
+      StringBuilder say = new StringBuilder();
+      for (String w : tk[1].split("\\s+")) { if (say.length() > 0) say.append(' '); say.append(Translit.say(w)); }
+      TextView c = new TextView(this); c.setTextSize(Math.max(9, szPt * 0.45f)); c.setTextColor(look.soft); c.setText(say.toString());
       col.addView(t); col.addView(c); bigBox.addView(col);
     }
   }

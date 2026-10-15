@@ -39,6 +39,9 @@
 #   Practice   — «Скажите сами»: что говорить, какие слова распознаны, вердикт по слову карточки;
 #   BackupRules — резервная копия: в облако Google ничего, на новый телефон всё (манифест и res/xml).
 #   Inbox — сказанное во время загрузки на диске: имена, звук туда и обратно, поток до нарезки, что берётся после выгрузки.
+#   Slicer — сборка куска из кадров слушания: подпор, хвост, выдержка, минимум речи; тишина конца — подпор следующего,
+#            разрыв кадров закрывает кусок сейчас, предел длины режет по тихому кадру;
+#   Numbers — португальские числа словами для озвучки и транскрипции: числительные, род, деньги, время, проценты.
 #   L — надписи по-португальски: выбор языка, у каждой надписи кода и пункта whatsnew.txt есть перевод в ui_pt.txt,
 #       вставки совпадают, лишних строк нет; в экранах нет русских строк мимо L.
 # Сами экраны (касания, цвета, раскладка) — на телефоне: bench/apk/test_ui_device.sh и соседние.
@@ -79,7 +82,9 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Learn.java $A/test/LearnTest.java $A/test/BackupRulesTest.java \
   $A/src/dev/agenttranslator/Cards.java $A/test/CardsTest.java \
   $A/src/dev/agenttranslator/Practice.java $A/test/PracticeTest.java \
-  $A/src/dev/agenttranslator/Inbox.java $A/test/InboxTest.java
+  $A/src/dev/agenttranslator/Inbox.java $A/test/InboxTest.java \
+  $A/src/dev/agenttranslator/Slicer.java $A/test/SlicerTest.java \
+  $A/src/dev/agenttranslator/Numbers.java $A/test/NumbersTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -112,4 +117,6 @@ java -cp "$OUT:$J" dev.agenttranslator.PracticeTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WienerTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.LTest "$A" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.InboxTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.SlicerTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.NumbersTest || fail=1
 exit $fail

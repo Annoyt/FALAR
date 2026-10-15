@@ -623,3 +623,9 @@ Falar помнит, о чём разговор и кто говорит. Пос�
 Falar обновляется сам: раз в сутки проверяет, не вышла ли новая версия.	O Falar se atualiza sozinho: uma vez por dia verifica se saiu uma versão nova.
 Длинная фраза больше не закрывает кнопки.	Uma frase longa não cobre mais os botões.
 Надписи Falar — и по-португальски: как язык телефона или по выбору в настройках.	Os textos do Falar agora também em português: no idioma do telefone ou à escolha nas configurações.
+Короткие ответы — «Não», «Claro», «Нет» — доходят до перевода, как и ответ числом или ценой.	Respostas curtas — «Não», «Claro», «Нет» — chegam à tradução, assim como uma resposta com número ou preço.
+Числа озвучиваются и читаются словами: «R$ 20,50» звучит как «vinte reais e cinquenta centavos».	Os números são falados e lidos por extenso: «R$ 20,50» soa como «vinte reais e cinquenta centavos».
+Нажали FALAR, пока звучит перевод, — озвучка замолкает.	Se você apertar FALAR enquanto a tradução está tocando, a voz para.
+Фраза, сказанная сразу после предыдущей, больше не теряет первое слово.	Uma frase dita logo depois da anterior não perde mais a primeira palavra.
+Кнопка FALAR слышит начало фразы лучше: перед ней теперь есть звук комнаты.	O botão FALAR ouve melhor o começo da frase: antes dela agora há o som do ambiente.
+Реплика собеседника, прерванная вашим нажатием FALAR, переводится до вашего ответа, а не после.	A fala do interlocutor interrompida quando você aperta FALAR é traduzida antes da sua resposta, e não depois.

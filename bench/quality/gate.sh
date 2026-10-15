@@ -97,7 +97,7 @@ if [ -n "$RELEASE" ]; then
   # подряд были только подъёмами версии.
   git -C "$R" diff -U0 "$RELEASE"..HEAD -- models/manifest.json | grep -E '^[+-]' \
     | grep -vqE '^(\+\+\+|---) |^[+-] *"app": ' || CH=$(printf '%s\n' "$CH" | grep -vx 'models/manifest.json')
-  if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(TranslatorService|Engine|DenoiseGate|Wiener|Gain|Hearing)\.java$|^models/manifest\.json$'; then
+  if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(TranslatorService|Slicer|Engine|DenoiseGate|Wiener|Gain|Hearing)\.java$|^models/manifest\.json$'; then
     DEVICE=1; say "  с $RELEASE менялось слушание или модели — нужен и этап на телефоне"
   fi
   if printf '%s\n' "$CH" | grep -qE '^bench/apk/src/dev/agenttranslator/(Ocr|OcrCore|OcrWords|TextRules)\.java$|^data/ocr_words|^models/manifest\.json$'; then
@@ -177,7 +177,8 @@ if [ $DEVICE = 1 ]; then
     say "  телефон не подключён: полный путь распознавания не проверен"
     if [ -n "$RELEASE" ]; then
       printf 'выпустить без проверки на телефоне? [y/N] ' > /dev/tty; read -r ans < /dev/tty
-      [ "$ans" = y ] || { say "остановлено: подключите телефон и повторите"; exit 1; }
+      # «н» — та же клавиша в русской раскладке: 10.10 при выпуске 0.32.0 так и ответили.
+      case "$ans" in y|Y|н|Н) ;; *) say "остановлено: подключите телефон и повторите"; exit 1;; esac
     fi
   else
     for r in $RECS; do [ -f "$R/bench/air/rec/$r/room.wav" ] || fail "нет записи комнаты bench/air/rec/$r (они личные и в git не лежат)"; done
@@ -216,7 +217,8 @@ if [ $OCRDEV = 1 ]; then
     say "  телефон не подключён: чтение снимков на телефоне не проверено"
     if [ -n "$RELEASE" ]; then
       printf 'выпустить без проверки чтения снимков на телефоне? [y/N] ' > /dev/tty; read -r ans < /dev/tty
-      [ "$ans" = y ] || { say "остановлено: подключите телефон и повторите"; exit 1; }
+      # «н» — та же клавиша в русской раскладке: 10.10 при выпуске 0.32.0 так и ответили.
+      case "$ans" in y|Y|н|Н) ;; *) say "остановлено: подключите телефон и повторите"; exit 1;; esac
     fi
   else
     t=$(date +%s)

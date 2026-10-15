@@ -98,6 +98,18 @@ public class GainTest {
     new Gain(16000).apply(both, both.length, all);
     ok(s1.n == all.n && s1.over == all.over && s1.peak == all.peak, "G7 сумма по кускам равна счёту по целому");
 
+    // G9: подпор удержания — самые тихие 300 мс самой фразы перед ней: 2 с шума −50 dBFS, в середине секунда речи,
+    // с 1,5 с — тихий участок −70 dBFS; впереди должен оказаться именно он.
+    java.util.Random rn9 = new java.util.Random(7); float[] ph9 = new float[32000];
+    for (int k = 0; k < ph9.length; k++) ph9[k] = (float) (rn9.nextGaussian() * (k >= 24000 && k < 30000 ? 3e-4 : 3e-3));
+    float[] sp9 = sine(300, 0.1, 16000); System.arraycopy(sp9, 0, ph9, 8000, 16000);
+    float[] led = Gain.withLead(ph9, 4800); int lead = 9 * 512;
+    ok(led.length == ph9.length + lead, "G9 впереди 9 кадров: " + (led.length - ph9.length));
+    double rl = 0; for (int k = 0; k < lead; k++) rl += led[k] * (double) led[k]; rl = 10 * Math.log10(rl / lead);
+    ok(rl < -65 && rl > -80, "G9 подпор — тихий участок: " + String.format(java.util.Locale.ROOT, "%.0f dBFS", rl));
+    ok(java.util.Arrays.equals(java.util.Arrays.copyOfRange(led, lead, led.length), ph9), "G9 сама фраза не тронута");
+    ok(Gain.withLead(sine(300, 0.1, 4000), 4800) .length == 4000, "G9 короткая фраза — как есть");
+
     System.out.println(fails == 0 ? "Gain: " + checks + " проверок, все прошли" : "Gain: провалов " + fails + " из " + checks);
     return fails;
   }

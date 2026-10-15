@@ -65,6 +65,11 @@ public class WordListTest {
     ok(!w.apply("Loja na Rua Augusta, 1500", "pt", "ru", new ArrayList<>(), new ArrayList<>(), true).masked.contains("Augusta"), "W8 снимок: точное имя находится");
     ok(w.apply("Fica perto do Capocapana Palace", "pt", "ru", new ArrayList<>(), new ArrayList<>(), true).masked.contains("Palace"), "W8 снимок: искажённое — не ищется");
 
+    // ответ одним числом, ценой или временем приходит к проверке плейсхолдером без единого слова — это ответ, не шум
+    for (String[] c : new String[][]{{"Vinte reais.", "pt"}, {"Cinco.", "pt"}, {"8:30.", "pt"}, {"R$ 20,50", "pt"}, {"Двести рублей.", "ru"}, {"Пять.", "ru"}, {"В 8:30.", "ru"}})
+      ok(w.shortOk(TextRules.mask(c[0], c[1]).text, c[1]), "W9 ответ-число проходит: " + c[0] + " → " + TextRules.mask(c[0], c[1]).text);
+    ok(!w.shortOk(TextRules.mask("Yeah.", "pt").text, "pt") && !w.shortOk(TextRules.mask("Mm.", "ru").text, "ru"), "W9 междометия по-прежнему отбиваются");
+
     System.out.println(fails == 0 ? "WordList: " + checks + " проверок, все прошли" : "WordList: провалов " + fails + " из " + checks);
     return fails;
   }

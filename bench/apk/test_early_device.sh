@@ -145,7 +145,9 @@ def wr(name, parts):
 three = [["tat_1063144", "tat_1113220", "tat_1179406"], ["tat_1035724", "tat_1063173", "tat_1172131"],
          ["tat_1063245", "tat_1112641", "tat_1146068"], ["tat_1325544", "tat_1061222", "tat_1102494"]]
 m = {f"three{k + 1}": wr(f"early_three{k + 1}", [0.5, t[0], 1.8, t[1], 2.0, t[2], 2.0]) for k, t in enumerate(three)}
-m["one_asr"] = wr("early_one_asr", [0.2, "tat_1323002", 4.0])        # E6: разные фразы — одна и та же второй раз «прочитана с экрана»
+# E6: разные фразы — одна и та же второй раз «прочитана с экрана». Не tat_1323002 («Esperei por dez minutos»): телефон
+# стабильно пишет «Esperi por 10 minutos» — 2 слова из 4 при пороге 0,6, и переведённая один раз фраза считалась провалом (08.10).
+m["one_asr"] = wr("early_one_asr", [0.2, "tat_972806", 4.0])
 m["one_heard"] = wr("early_one_heard", [0.2, "tat_1403886", 4.0])
 m["hold"] = wr("early_hold", [0.1, "tat_2440707", 0.3])
 json.dump(m, open(f"{D}/phrases.json", "w", encoding="utf-8"), ensure_ascii=False)

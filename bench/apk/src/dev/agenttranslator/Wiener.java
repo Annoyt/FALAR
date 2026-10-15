@@ -26,8 +26,13 @@ public final class Wiener {
   final double[] noise = new double[K], sm = new double[K], prev = new double[K];
   boolean started;
 
-  /** Очередные отсчёты (кратно 256) — столько же очищенных, с задержкой на 256. */
+  /** Очередные отсчёты — столько же очищенных, с задержкой на 256. Хвост короче шага (последний кусок перебивания,
+   *  короткое чтение микрофона) дополняется нулями до шага: раньше он молча терялся, а на выходе были нули. */
   public float[] run(float[] x) {
+    if (x.length % H == 0) return hops(x);
+    return java.util.Arrays.copyOf(hops(java.util.Arrays.copyOf(x, (x.length / H + 1) * H)), x.length);
+  }
+  float[] hops(float[] x) {
     float[] y = new float[x.length];
     for (int j = 0; j + H <= x.length; j += H) {
       System.arraycopy(in, H, in, 0, N - H);
