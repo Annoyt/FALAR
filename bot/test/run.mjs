@@ -404,7 +404,8 @@ const tele = await import('handlers/telemetry');
 const PKT = { v: 1, app: { name: '0.33.0', code: 39, slim: false, ui: 'ru', modules: ['tts', 'denoise'] },
   device: { maker: 'Xiaomi', model: 'Redmi Note 12', android: '14', sdk: 34, ram_gb: 6, soc: 'SM6225', fx: { ns: true, agc: false } },
   asr: { hours: 24, turns: { pt: 30, ru: 12 }, empty: 4, hold: 12, listen: 30, noise: [0, 5, 20, 12, 5], denoise: 6, wiener: 20,
-    music: 1, mic: { builtin: 40, bt: 2 }, rtf_ms: 380, load_ms: 9800, edits: 2, edit_chars: 14, edit_total: 230, foreign: 3, novo: 7 },
+    music: 1, mic: { builtin: 40, bt: 2 }, rtf_ms: 380, load_ms: 9800, edits: 2, edit_chars: 14, edit_total: 230, foreign: 3, novo: 7,
+    skips: { lang: 1, late: 2 }, gain_db: 4.5, clip: 1 },
   crashes: [{ at: at(15, 20, 31), kind: 'oom', what: 'java.lang.OutOfMemoryError', where: 'Engine.loadMt:412', v: '0.32.0' }] };
 let tp = T.packet(PKT);
 eq([tp.app.code, tp.asr.noise.length, tp.crashes.length], [39, 5, 1], 'T1 пакет принят как есть');
@@ -426,6 +427,7 @@ ok(txt.includes('#распознавание за 24 ч: фраз 42 (pt 30, ru 
 ok(txt.includes('фон, dBFS: <−60 0 · −60…−54 5 · −54…−48 20 · −48…−42 12 · ≥−42 5'), 'T3 ступени фона');
 ok(txt.includes('микрофон: встроенный 40, гарнитура 2') && txt.includes('1 с речи — 0,38 с, загрузка моделей 9,8 с'), 'T3 микрофон и скорость');
 ok(txt.includes('правок 2 (6 % знаков), чужой голос отброшен 3') && txt.includes('ещё: novo=7'), 'T3 правки; незнакомое поле — как есть');
+ok(txt.includes('пропущено: не тот язык 1, голос не успел 2') && txt.includes('усиление в среднем +4,5 дБ, со срезанным звуком 1'), 'T3 пропуски, усиление, срез — словами');
 ok(/#сбой · нехватка памяти · java\.lang\.OutOfMemoryError · Engine\.loadMt:412 · 0\.32\.0 · 15\.10 20:31/.test(txt), 'T3 сбой одной строкой');
 ok(T.packetText(T.packet({ v: 1, app: { name: '1', code: 1 }, device: {} })).startsWith('#устройство · Falar 1 (1)\nтелефон без имени'), 'T3 пустое устройство');
 
@@ -476,6 +478,8 @@ const row = sdk.rows('SELECT lang, dur_ms, heard, said, app, chat, msg, file FRO
 eq([row.lang, row.dur_ms, row.said, row.app, row.chat, row.file], ['pt', 3240, 'bom dia, tudo bem?', '0.33.0', GROUP, 'voice-' + row.msg], 'T10 запись: что сказано и где звук');
 res = await tele.audio({ ...AUD, mime: 'audio/wav' });
 ok(res.status === 200 && sent(calls(), 'sendDocument')[0].params.document.name.endsWith('.wav'), 'T11 WAV — документом');
+res = await tele.audio({ ...AUD, mime: 'audio/mp4' });
+ok(res.status === 200 && sent(calls(), 'sendDocument')[0].params.document.name.endsWith('.m4a'), 'T11 m4a (Android 9) — документом');
 eq((await tele.audio({ ...AUD, consent: false })).status, 400, 'T12 без согласия — 400');
 sdk.api.fail('sendVoice', 'Bad Request: wrong file', 400); sdk.api.fail('sendVoice', 'Bad Request: wrong file', 400);
 const before = sdk.rows('SELECT count(*) AS n FROM donations')[0].n;

@@ -5,7 +5,7 @@
 // разговора и номера установки в нём нет, адрес бот не пишет. Звук — отдельно и только по кнопке
 // человека («Отправить звук разработчику»), с его текстом и согласием.
 
-export const MAX_PACKET = 16 * 1024, MAX_AUDIO = 1536 * 1024;   // байт тела запроса (звук — в base64)
+export const MAX_PACKET = 16 * 1024, MAX_AUDIO = 4 * 1024 * 1024;   // байт тела запроса (звук — в base64: минута WAV 16 кГц — 2,6 МБ)
 // За сутки разработчика в Telegram уходит не больше: дальше пакеты — только в базу, звук — отказ.
 // Адрес бота есть в приложении, и без предела чужой скрипт засыпал бы топик.
 export const POSTS_PER_DAY = 300, AUDIO_PER_DAY = 50;
@@ -63,8 +63,9 @@ const pct = (a, b) => (b > 0 ? Math.round((100 * a) / b) + ' %' : '—');
 const num = (x) => (typeof x === 'number' ? String(x).replace('.', ',') : String(x));
 const pairs = (o) => Object.entries(o || {}).map(([k, v]) => k + ' ' + num(v)).join(', ');
 const MIC = { builtin: 'встроенный', wired: 'проводной', bt: 'гарнитура', usb: 'USB', other: 'другой' };
+const SKIP = { lang: 'не тот язык', short: 'короткие', read: 'прочитано с экрана', novoice: 'без голоса разговора', late: 'голос не успел' };
 const KNOWN = new Set(['hours', 'turns', 'empty', 'hold', 'listen', 'noise', 'denoise', 'wiener', 'music', 'mic',
-  'rtf_ms', 'load_ms', 'edits', 'edit_chars', 'edit_total', 'foreign']);
+  'rtf_ms', 'load_ms', 'edits', 'edit_chars', 'edit_total', 'foreign', 'skips', 'gain_db', 'clip']);
 
 /** Строка устройства: «Xiaomi Redmi Note 12 · Android 14 · 6 ГБ · SM6225 · прошивка …». */
 export function deviceLine(d) {
@@ -92,6 +93,10 @@ export function asrLines(a) {
     a.music !== undefined && 'музыка ' + a.music].filter(Boolean);
   if (gate.length) out.push('нарезка: ' + gate.join(', '));
   if (obj(a.mic)) out.push('микрофон: ' + Object.entries(a.mic).map(([k, v]) => (MIC[k] || k) + ' ' + v).join(', '));
+  if (obj(a.skips)) out.push('пропущено: ' + Object.entries(a.skips).map(([k, v]) => (SKIP[k] || k) + ' ' + v).join(', '));
+  const level = [a.gain_db !== undefined && 'усиление в среднем ' + (a.gain_db > 0 ? '+' : '') + num(a.gain_db) + ' дБ',
+    a.clip !== undefined && 'со срезанным звуком ' + a.clip].filter(Boolean);
+  if (level.length) out.push(level.join(', '));
   const speed = [a.rtf_ms !== undefined && '1 с речи — ' + num(Math.round(a.rtf_ms) / 1000) + ' с',
     a.load_ms !== undefined && 'загрузка моделей ' + num(Math.round(a.load_ms / 100) / 10) + ' с'].filter(Boolean);
   if (speed.length) out.push(speed.join(', '));
@@ -130,14 +135,14 @@ export function packetText(p) {
 }
 
 const LANGS = ['pt', 'ru'];
-const MIME = { 'audio/ogg': '.ogg', 'audio/wav': '.wav' };
+const MIME = { 'audio/ogg': '.ogg', 'audio/wav': '.wav', 'audio/mp4': '.m4a' };
 
 /** Присланный звук → {lang, durMs, heard, said, mime, ext, b64, app, device}; без согласия или не тот — ошибка. */
 export function audio(raw) {
   if (!obj(raw) || raw.v !== 1) throw new Error('нужен v: 1');
   if (raw.consent !== true) throw new Error('нет согласия');
   if (!LANGS.includes(raw.lang)) throw new Error('язык — pt или ru');
-  if (!MIME[raw.mime]) throw new Error('звук — audio/ogg или audio/wav');
+  if (!MIME[raw.mime]) throw new Error('звук — audio/ogg, audio/wav или audio/mp4');
   const dur = Number(raw.dur_ms);
   if (!(dur >= 300 && dur <= 60000)) throw new Error('длина — от 0,3 до 60 с');
   const text = (s) => (typeof s === 'string' ? s.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ').trim().slice(0, 1000) : '');
