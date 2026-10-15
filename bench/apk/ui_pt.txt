@@ -323,7 +323,7 @@ Pode falar · здесь появится перевод	Pode falar · a traduç
 частично скачанные	baixados em parte
 Файлы выключенных модулей: %s. Освободится %s МБ. Если модуль потом включить, его файлы скачаются заново.	Arquivos dos módulos desligados: %s. Serão liberados %s MB. Se o módulo for ligado depois, os arquivos dele serão baixados de novo.
 Переводчик разговора: бразильский португальский ↔ русский, без интернета.	Tradutor de conversa: português do Brasil ↔ russo, sem internet.
-Приложение слушает микрофон и распознаёт речь всех, кто рядом, — предупредите собеседника. Распознавание, перевод и голос работают на телефоне: в интернет ничего не уходит, кроме загрузки моделей сейчас и облачного пересмотра, который включается отдельно и с вашего согласия.	O app ouve o microfone e reconhece a fala de todos por perto — avise o interlocutor. Reconhecimento, tradução e voz funcionam no telefone: nada vai para a internet, exceto o download dos modelos agora e a revisão na nuvem, que é ligada à parte e com o seu consentimento.
+Приложение слушает микрофон и распознаёт речь всех, кто рядом, — предупредите собеседника. Распознавание, перевод и голос работают на телефоне: в интернет ничего не уходит, кроме загрузки моделей сейчас, облачного пересмотра и статистики для разработчика — их включают отдельно и только с вашего согласия.	O app ouve o microfone e reconhece a fala de todos por perto — avise o interlocutor. Reconhecimento, tradução e voz funcionam no telefone: nada vai para a internet, exceto o download dos modelos agora, a revisão na nuvem e as estatísticas para o desenvolvedor — que são ligadas à parte e só com o seu consentimento.
 1. Микрофон	1. Microfone
 разрешить микрофон	permitir o microfone
 2. Что нужно	2. O que é preciso
@@ -649,3 +649,42 @@ Falar обновляется сам: раз в сутки проверяет, н
 Перевод любой реплики можно скопировать или отправить из её меню — например, ответ в WhatsApp.	A tradução de qualquer fala pode ser copiada ou enviada pelo menu dela — por exemplo, uma resposta no WhatsApp.
 Написать разработчику ›	Escrever ao desenvolvedor ›
 «Написать разработчику» — в настройках сразу под версией: об ошибке или идее в пару касаний.	«Escrever ao desenvolvedor» fica nas configurações, logo abaixo da versão: erro ou ideia em poucos toques.
+
+# Телеметрия по согласию и «О приложении» (владелец 15.10)
+Статистика для разработчика	Estatísticas para o desenvolvedor
+анонимно: телефон, Android, как распознаётся речь — без звука и текстов	anônimas: telefone, Android, como a fala é reconhecida — sem áudio nem textos
+О приложении	Sobre o app
+что отправляет Falar, отказ от ответственности	o que o Falar envia, isenção de responsabilidade
+Помочь сделать Falar лучше?	Ajudar a melhorar o Falar?
+Раз в сутки Falar может отправлять разработчику анонимную статистику: модель телефона и версию Android, сколько фраз распозналось и сколько нет, фон вокруг, какой микрофон, скорость работы и сбои. Звук, тексты разговоров и номер телефона не уходят. Передумаете — переключатель «Статистика для разработчика» в настройках.	Uma vez por dia, o Falar pode enviar ao desenvolvedor estatísticas anônimas: modelo do telefone e versão do Android, quantas frases foram reconhecidas e quantas não, o ruído ao redor, qual microfone, a velocidade e as falhas. Áudio, textos das conversas e número de telefone não são enviados. Se mudar de ideia, use a opção «Estatísticas para o desenvolvedor» nas Configurações.
+не отправлять	não enviar
+подробнее	saiba mais
+Falar %s — переводчик разговора между бразильским португальским и русским. Распознавание речи, перевод и озвучка работают на телефоне, без интернета.	Falar %s — tradutor de conversas entre português do Brasil e russo. Reconhecimento de fala, tradução e voz funcionam no telefone, sem internet.
+Что уходит в интернет	O que vai para a internet
+• Загрузка моделей и проверка обновлений — с GitHub и Hugging Face.	• Download dos modelos e verificação de atualizações — do GitHub e do Hugging Face.
+• Облачный пересмотр — только с вашим ключом OpenRouter и после вашего согласия.	• Revisão na nuvem — só com a sua chave do OpenRouter e depois do seu consentimento.
+• Статистика для разработчика — только если вы согласились: раз в сутки модель телефона, версия Android, сколько фраз распознано и сколько нет, фон вокруг, микрофон, скорость и сбои. Звук, тексты и номер телефона не уходят.	• Estatísticas para o desenvolvedor — só se você concordou: uma vez por dia, o modelo do telefone, a versão do Android, quantas frases foram reconhecidas e quantas não, o ruído ao redor, o microfone, a velocidade e as falhas. Áudio, textos e número de telefone não são enviados.
+• Звук реплики — только когда вы сами нажмёте «Отправить звук разработчику» и отметите, что человек на записи согласен. Запись получит номер: напишите его в Telegram @falar_tbot, и её удалят.	• Áudio de uma fala — só quando você mesmo tocar em «Enviar áudio ao desenvolvedor» e marcar que a pessoa na gravação concorda. A gravação recebe um número: envie-o no Telegram para @falar_tbot e ela será excluída.
+Отказ от ответственности	Isenção de responsabilidade
+Falar переводит автоматически и может ошибаться — в словах, числах, именах и смысле. Не полагайтесь на него там, где ошибка опасна или дорога: у врача, в суде, в полиции, в банке, при подписании документов и в экстренных случаях — там нужен живой переводчик.	O Falar traduz automaticamente e pode errar — em palavras, números, nomes e no sentido. Não dependa dele quando um erro for perigoso ou caro: no médico, no tribunal, na polícia, no banco, ao assinar documentos e em emergências — nesses casos, é preciso um intérprete humano.
+Приложение предоставляется как есть, без каких-либо гарантий. Разработчик не отвечает за последствия использования перевода и за решения, принятые на его основе.	O app é fornecido como está, sem garantias de qualquer tipo. O desenvolvedor não se responsabiliza pelas consequências do uso da tradução nem pelas decisões tomadas com base nela.
+Предупреждайте собеседника, что разговор переводит приложение. Храните и отправляйте звук собеседника только с его согласия.	Avise o interlocutor de que a conversa está sendo traduzida por um app. Guarde e envie o áudio do interlocutor só com o consentimento dele.
+Связь	Contato
+Ошибки и идеи — «Написать разработчику» в настройках или Telegram @falar_tbot. Исходный код — github.com/Annoyt/FALAR.	Erros e ideias — «Escrever ao desenvolvedor» nas Configurações ou no Telegram @falar_tbot. Código-fonte — github.com/Annoyt/FALAR.
+Отправить звук разработчику	Enviar áudio ao desenvolvedor
+Запись этой реплики и её текст уйдут разработчику в Telegram, чтобы улучшить распознавание. Поправьте текст, если распознано неверно:	A gravação desta fala e o texto dela irão para o desenvolvedor no Telegram, para melhorar o reconhecimento. Corrija o texto se ele foi reconhecido errado:
+Человек на записи согласен, чтобы её отправили	A pessoa na gravação concorda com o envio
+Запись получит номер: чтобы её удалили, напишите его в Telegram @falar_tbot.	A gravação recebe um número: para excluí-la, envie-o no Telegram para @falar_tbot.
+Отправляю…	Enviando…
+Звук отправлен	Áudio enviado
+Не получилось отправить	Não foi possível enviar
+Спасибо! Номер записи: %d. Чтобы её удалили, напишите этот номер в Telegram @falar_tbot.	Obrigado! Número da gravação: %d. Para excluí-la, envie este número no Telegram para @falar_tbot.
+у этой реплики нет звука	esta fala não tem áudio
+запись слишком длинная	a gravação é longa demais
+бот не дал номер записи	o bot não retornou o número da gravação
+на сегодня записей хватит — попробуйте завтра	já chega de gravações por hoje — tente amanhã
+бот не принял запись	o bot não aceitou a gravação
+нет связи — попробуйте позже	sem conexão — tente mais tarde
+Можно помогать улучшать Falar: анонимная статистика для разработчика — только с вашего согласия.	Você pode ajudar a melhorar o Falar: estatísticas anônimas para o desenvolvedor — só com o seu consentimento.
+Звук отдельной реплики можно отправить разработчику — чтобы распознавание стало лучше.	O áudio de uma fala pode ser enviado ao desenvolvedor — para melhorar o reconhecimento.
+В настройках — «О приложении»: что отправляет Falar и отказ от ответственности.	Nas Configurações — «Sobre o app»: o que o Falar envia e a isenção de responsabilidade.
