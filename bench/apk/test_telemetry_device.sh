@@ -171,7 +171,11 @@ PY
 chk '[ "${p##* }" = False ]' "TM7 после «не отправлять» переключатель выключен"
 m=$(mark); [ -n "$p" ] && tapxy ${p% *}
 chk '[ -n "$(wl "$m" "📊 статистика разработчику: отправляю раз в сутки" 10)" ]' "TM7 переключатель — согласие «да»"
-seek --text "О приложении" || seek --text "Sobre o app"; tapon --text "О приложении" || tapon --text "Sobre o app"
+seek --text "О приложении" || seek --text "Sobre o app"
+# Последняя строка списка бывает у самого края, под полосой навигации: касание туда уходит мимо (16.10 — дважды).
+y=$(at --text "О приложении" | awk '{print $6}'); [ -z "$y" ] && y=$(at --text "Sobre o app" | awk '{print $6}')
+[ -n "$y" ] && [ "$y" -gt $((H * 8 / 10)) ] && { swipe $((H * 7 / 10)) $((H * 4 / 10)); dump; }
+tapon --text "О приложении" || tapon --text "Sobre o app"
 for i in 1 2 3 4 5; do dump; has --text "Отказ от ответственности" --contains || has --text "Isenção de responsabilidade" --contains && break; sleep 1; done
 chk '(has --text "Что уходит в интернет" --contains && has --text "Отказ от ответственности" --contains) || has --text "Isenção de responsabilidade" --contains' "TM7 «О приложении»: что уходит в интернет, отказ от ответственности"
 back
