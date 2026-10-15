@@ -27,11 +27,15 @@
          Без своего экрана (прозрачная тема): копирует звук и передаёт его главному экрану в задаче Falar. -->
     <activity android:name="dev.agenttranslator.ShareActivity" android:exported="true" android:excludeFromRecents="true"
         android:noHistory="true" android:taskAffinity="" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <!-- Голосовые (WhatsApp, Telegram: Ogg Opus) и «кружочки» Telegram и видеосообщения WhatsApp (MP4 — берётся его
+           звук); несколько сразу — по порядку. -->
       <intent-filter>
         <action android:name="android.intent.action.SEND"/>
+        <action android:name="android.intent.action.SEND_MULTIPLE"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <data android:mimeType="audio/*"/>
         <data android:mimeType="application/ogg"/>
+        <data android:mimeType="video/*"/>
       </intent-filter>
       <intent-filter>
         <action android:name="android.intent.action.VIEW"/>

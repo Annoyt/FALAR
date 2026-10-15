@@ -10,24 +10,36 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 /** Голосовое пришло из другого приложения: «Поделиться» → Falar (WhatsApp, Telegram…) или «Открыть с помощью»
- *  для аудиофайла. Без своего экрана: копирует звук к себе (право читать чужой файл живёт, пока жив этот
+ *  для аудиофайла. Несколько сразу (выделили несколько голосовых) — все, по порядку; видеосообщение («кружочек»
+ *  Telegram) — его звук. Без своего экрана: копирует звук к себе (право читать чужой файл живёт, пока жив этот
  *  экран) и передаёт копию главному экрану Falar — в его собственной задаче, а не внутри мессенджера, где
  *  открылась бы вторая копия всего приложения. Кто прислал — по referrer (VoiceMsg.fromReferrer). */
 public class ShareActivity extends Activity {
+  static final java.util.concurrent.atomic.AtomicInteger SEQ = new java.util.concurrent.atomic.AtomicInteger();
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
     final Intent in = getIntent();
-    final Uri u = Intent.ACTION_SEND.equals(in.getAction()) ? (Uri) in.getParcelableExtra(Intent.EXTRA_STREAM) : in.getData();
+    final java.util.ArrayList<Uri> us = new java.util.ArrayList<>();
+    if (Intent.ACTION_SEND_MULTIPLE.equals(in.getAction())) {
+      java.util.ArrayList<Uri> l = in.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+      if (l != null) for (Uri x : l) if (x != null) us.add(x);
+    } else {
+      Uri u = Intent.ACTION_SEND.equals(in.getAction()) ? (Uri) in.getParcelableExtra(Intent.EXTRA_STREAM) : in.getData();
+      if (u != null) us.add(u);
+    }
     final String type = in.getType();
     final Uri ref = getReferrer();
     final String from = VoiceMsg.fromReferrer(ref == null ? null : ref.toString());
-    if (u == null) { finish(); return; }
+    if (us.isEmpty()) { finish(); return; }
     new Thread(() -> {
-      File f = copy(this, u, type);
+      java.util.ArrayList<String> paths = new java.util.ArrayList<>(); int failed = 0;
+      for (Uri u : us) { File f = copy(this, u, us.size() == 1 ? type : null); if (f != null) paths.add(f.getPath()); else failed++; }
+      final int bad = failed;
       runOnUiThread(() -> {
         Intent go = new Intent(this, MainActivity.class).setAction(MainActivity.ACT_VOICE)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        if (f != null) go.putExtra("voicefile", f.getPath()); else go.putExtra("voicefail", "1");
+        if (!paths.isEmpty()) go.putExtra("voicefiles", paths.toArray(new String[0]));
+        if (bad > 0) go.putExtra("voicefail", String.valueOf(bad));
         if (from != null) go.putExtra("voicefrom", from);
         startActivity(go);
         finish();
@@ -44,7 +56,7 @@ public class ShareActivity extends Activity {
       if (cur != null && cur.moveToFirst()) name = cur.getString(0);
     } catch (Throwable ignore) {}
     if (type == null) try { type = c.getContentResolver().getType(u); } catch (Throwable ignore) {}
-    File f = new File(dir, "voice-" + System.currentTimeMillis() + VoiceMsg.ext(type, name));
+    File f = new File(dir, "voice-" + System.currentTimeMillis() + "-" + SEQ.incrementAndGet() + VoiceMsg.ext(type, name));   // несколько за миллисекунду — не затереть
     try (InputStream is = c.getContentResolver().openInputStream(u); OutputStream os = new java.io.FileOutputStream(f)) {
       if (is == null) return null;
       byte[] buf = new byte[1 << 16]; long n = 0; int r;

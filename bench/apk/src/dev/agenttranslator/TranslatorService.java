@@ -3758,9 +3758,11 @@ public class TranslatorService extends Service {
    *  Slicer, без ворот слушания (голоса разговора, чтение вслух, эхо): говорит человек из мессенджера, его голос
    *  разговору не знаком. Распознанное — одной репликой собеседника с пометкой 🎙 в открытом разговоре (решение
    *  владельца 15.10), без озвучки: голосовое читают. Временная копия удаляется. */
+  /** Голосовые — по одному и по порядку: прислали несколько — реплики встанут в том же порядке. */
+  final ExecutorService voiceWorker = Executors.newSingleThreadExecutor(r -> new Thread(r, "voicemsg"));
   public void voiceMessage(final File f, final String from) {
     final long chatId = chats == null ? 0 : chats.current;
-    new Thread(() -> {
+    voiceWorker.submit(() -> {
       try {
         if (eng == null) { log("🎙 голосовое пришло раньше движков — не прочитано"); hint(L.t("🎙 голосовое не прочитано: Falar ещё загружается")); return; }
         busy("live", L.k("читаю голосовое…"), 0, 0);
@@ -3794,7 +3796,7 @@ public class TranslatorService extends Service {
         File dir = new File(getCacheDir(), "voice");
         if (dir.equals(f.getParentFile())) f.delete();     // своя временная копия; файл стенда остаётся
       }
-    }, "voicemsg").start();
+    });
   }
   /** Голосовое — на куски речи: свой VAD (Engine.newVad, слушание не трогается) и Slicer с порогами VoiceMsg.
    *  Кадры — как у слушания, 512 отсчётов (32 мс); после конца — gap(): открытый кусок закрывается тем, что есть. */

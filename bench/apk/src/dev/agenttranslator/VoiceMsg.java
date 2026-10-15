@@ -56,6 +56,7 @@ final class VoiceMsg {
     String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
     if (m.contains("wav")) return ".wav";
     if (m.contains("mpeg") || m.contains("mp3")) return ".mp3";
+    if (m.startsWith("video/")) return m.contains("webm") ? ".webm" : m.contains("3gp") ? ".3gp" : ".mp4";   // «кружочек» — его звук
     if (m.contains("mp4") || m.contains("m4a") || m.contains("aac")) return ".m4a";
     if (m.contains("amr")) return ".amr";
     if (m.contains("webm")) return ".webm";

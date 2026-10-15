@@ -646,5 +646,5 @@ Falar обновляется сам: раз в сутки проверяет, н
 🎙 голосовое длиннее %d мин — не беру	🎙 mensagem de voz com mais de %d min — não processo
 распознаю голосовое…	reconhecendo a mensagem de voz…
 🎙 в голосовом (%s) речи не нашлось	🎙 não foi encontrada fala na mensagem de voz (%s)
-Голосовое из WhatsApp и других мессенджеров: «Поделиться» → Falar — и оно распознано и переведено.	Mensagem de voz do WhatsApp e de outros apps: «Compartilhar» → Falar — e ela é reconhecida e traduzida.
+Голосовые и «кружочки» из WhatsApp и Telegram: «Поделиться» → Falar — распознаёт и переводит.	Mensagens de voz e de vídeo do WhatsApp e do Telegram: «Compartilhar» → Falar — reconhece e traduz.
 Перевод любой реплики можно скопировать или отправить из её меню — например, ответ в WhatsApp.	A tradução de qualquer fala pode ser copiada ou enviada pelo menu dela — por exemplo, uma resposta no WhatsApp.

@@ -26,6 +26,7 @@ public class VoiceMsgTest {
     eq(VoiceMsg.ext("audio/mpeg", ""), ".mp3", "V3 mp3"); eq(VoiceMsg.ext("audio/mp4", null), ".m4a", "V3 m4a");
     eq(VoiceMsg.ext("audio/x-wav", "запись"), ".wav", "V3 wav по типу: имя без расширения");
     eq(VoiceMsg.ext("audio/amr", null), ".amr", "V3 amr");
+    eq(VoiceMsg.ext("video/mp4", null), ".mp4", "V3 «кружочек» Telegram — mp4, из него берётся звук");
     eq(VoiceMsg.ext(null, null), ".ogg", "V3 ничего не известно — Ogg (кодек всё равно смотрит в содержимое)");
     eq(VoiceMsg.ext("audio/ogg", "voice.message.from.friend"), ".ogg", "V3 «расширение» длиннее 4 знаков — не расширение");
     // V4 отправитель

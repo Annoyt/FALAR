@@ -240,13 +240,16 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  интент тот же, второй раз его не читаем (extras снимаются). */
   boolean voiceIntent(Intent i) {
     if (i == null) return false;
-    if ("1".equals(i.getStringExtra("voicefail"))) {
-      i.removeExtra("voicefail"); setHint(L.t("🎙 голосовое не получено: файл не прочитался")); journal("🎙 голосовое не скопировалось из присланного"); return true;
-    }
-    String p = i.getStringExtra("voicefile"); if (p == null) return false;
+    String fail = i.getStringExtra("voicefail"), p = i.getStringExtra("voicefile"); String[] ps = i.getStringArrayExtra("voicefiles");
+    if (fail == null && p == null && ps == null) return false;
     String from = i.getStringExtra("voicefrom");
-    i.removeExtra("voicefile"); i.removeExtra("voicefrom");
-    voiceArrived(p, from);
+    i.removeExtra("voicefail"); i.removeExtra("voicefile"); i.removeExtra("voicefiles"); i.removeExtra("voicefrom");
+    if (p != null) voiceArrived(p, from);
+    if (ps != null) for (String x : ps) voiceArrived(x, from);
+    if (fail != null) {
+      journal("🎙 голосовое не скопировалось из присланного: " + fail);
+      if (p == null && ps == null) setHint(L.t("🎙 голосовое не получено: файл не прочитался"));
+    }
     return true;
   }
   /** Распознать голосовое — сразу или, пока движки грузятся, по порядку в onReady (как снимки). */
