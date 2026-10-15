@@ -992,6 +992,10 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("bargedump")) { bargeDump = Integer.parseInt(i.getStringExtra("bargedump")); log("🗣 стенд: запишу совмещение на концах " + bargeDump + " фраз"); }
     if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
       new Thread(() -> { try { aecStand(cfgs); } catch (Throwable t) { log("🔁 эхо-стенд: ошибка — " + t); } }, "aec").start(); }
+    // Стенд: микрофоны (--es mictest mic_st_48,vr_mo_16_bottom,…) — какие микрофоны отдаёт Android и как на два канала
+    // записи приходит звук своего динамика (micStand; разбор — tools/mic_probe.py). Слушание на время стенда выключается.
+    if (i != null && i.hasExtra("mictest")) { final String cfgs = i.getStringExtra("mictest");
+      new Thread(() -> { try { micStand(cfgs); } catch (Throwable t) { log("🎤 стенд микрофонов: ошибка — " + t); } }, "mictest").start(); }
     if (i != null && i.hasExtra("devtest") && !voice()) log("🔇 devtest: озвучка выключена или голосов нет");
     else if (i != null && i.hasExtra("devtest")) {
       new Thread(() -> { try {
@@ -2976,6 +2980,182 @@ public class TranslatorService extends Service {
     }
     java.nio.file.Files.write(new File(dir, "aec.json").toPath(), meta.toString(1).getBytes("UTF-8"));
     log("🔁 эхо-стенд: готово");
+  }
+  /** Стенд микрофонов — шаг 1 проверки второго микрофона (владелец 15.10: «можно ли использовать второй микрофон для
+   *  улучшения качества звука», «микрофон надо как-то автоопределять»): сколько микрофонов знает Android и что сообщает о
+   *  каждом (AudioManager.getMicrophones — расположение, каналы; производители заполняют это по-разному), и как на два
+   *  канала записи приходит шум своего динамика — по нему микрофоны различаются и без сведений системы (MicPair).
+   *  Конфигурация — источник_каналы_частота[_микрофон]: vr — VOICE_RECOGNITION, как у слушания; mic — MIC; cam — CAMCORDER;
+   *  unp — UNPROCESSED; mo / st — один или два канала; 16 / 48 — кГц; bottom / back — микрофон с этим адресом
+   *  (setPreferredDevice). В каждой: 0,8 с фона, затем динамик играет шум обоими каналами, только левым и только правым,
+   *  по 0,3 с через 0,8 с. Записи — files/mic_<конфигурация>.wav (16 бит), сводка — files/mic.json. */
+  static final java.util.regex.Pattern MIC_CFG = java.util.regex.Pattern.compile("(vr|mic|cam|unp)_(mo|st)_(16|48)(?:_([a-z]+))?");
+  static final double MIC_REC_S = 4.0, MIC_PLAY_AT_S = 0.8, MIC_BURST_S = 0.3, MIC_STEP_S = 0.8;
+
+  /** Шум для динамика, стерео: обоими каналами, только левым, только правым — по MIC_BURST_S через MIC_STEP_S, края 10 мс. */
+  static float[] micStimulus(int rate) {
+    int step = (int) (MIC_STEP_S * rate), len = (int) (MIC_BURST_S * rate), fade = rate / 100;
+    float[] x = new float[2 * (2 * step + len + rate / 2)];
+    Random r = new Random(20261015);
+    for (int k = 0; k < 3; k++)
+      for (int i = 0; i < len; i++) {
+        double w = Math.min(1.0, Math.min(i, len - 1 - i) / (double) fade);
+        float v = (float) ((r.nextFloat() - 0.5) * (0.5 - 0.5 * Math.cos(Math.PI * w)));
+        int t = k * step + i;
+        if (k != 2) x[2 * t] = v;
+        if (k != 1) x[2 * t + 1] = v;
+      }
+    return x;
+  }
+
+  static JSONObject micJson(MicrophoneInfo m) throws JSONException {
+    JSONObject o = new JSONObject().put("id", m.getId()).put("desc", m.getDescription()).put("type", m.getType())
+        .put("address", m.getAddress()).put("location", m.getLocation()).put("group", m.getGroup())
+        .put("index", m.getIndexInTheGroup()).put("directionality", m.getDirectionality());
+    MicrophoneInfo.Coordinate3F p = m.getPosition();
+    if (p != null && p.x > -Float.MAX_VALUE) o.put("pos", new JSONArray().put((double) p.x).put((double) p.y).put((double) p.z));
+    p = m.getOrientation();
+    if (p != null && p.x > -Float.MAX_VALUE) o.put("orient", new JSONArray().put((double) p.x).put((double) p.y).put((double) p.z));
+    if (m.getSensitivity() > -Float.MAX_VALUE) o.put("sens_dbfs", (double) m.getSensitivity());
+    JSONArray cm = new JSONArray();
+    try { for (android.util.Pair<Integer, Integer> c : m.getChannelMapping()) cm.put(new JSONArray().put(c.first).put(c.second)); } catch (Throwable ignore) {}
+    return o.put("channels", cm);
+  }
+
+  static String micName(MicrophoneInfo m) { return m.getAddress() == null || m.getAddress().isEmpty() ? m.getDescription() : m.getAddress(); }
+
+  static void saveWav16(File f, short[] x, int n, int ch, int rate) throws java.io.IOException {
+    java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(44 + 2 * n).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+    b.put("RIFF".getBytes()).putInt(36 + 2 * n).put("WAVE".getBytes()).put("fmt ".getBytes()).putInt(16).putShort((short) 1)
+     .putShort((short) ch).putInt(rate).putInt(rate * ch * 2).putShort((short) (ch * 2)).putShort((short) 16)
+     .put("data".getBytes()).putInt(2 * n);
+    for (int i = 0; i < n; i++) b.putShort(x[i]);
+    java.nio.file.Files.write(f.toPath(), b.array());
+  }
+
+  void micStand(String cfgs) throws Exception {
+    if (listenPt || listenRu) setListen(false, false);
+    Thread.sleep(800);
+    File dir = getExternalFilesDir(null);
+    AudioManager am = getSystemService(AudioManager.class);
+    JSONObject meta = new JSONObject().put("volume", am.getStreamVolume(AudioManager.STREAM_MUSIC))
+        .put("volume_max", am.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
+        .put("unprocessed", String.valueOf(am.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED)))
+        .put("model", Build.MODEL).put("device", Build.DEVICE).put("sdk", Build.VERSION.SDK_INT);
+    JSONArray mics = new JSONArray(); StringBuilder ms = new StringBuilder();
+    try {
+      for (MicrophoneInfo mi : am.getMicrophones()) {
+        JSONObject o = micJson(mi); mics.put(o);
+        ms.append(ms.length() > 0 ? ", " : "").append(micName(mi)).append(o.has("pos") ? " " + o.getJSONArray("pos") : " (где — не сказано)");
+      }
+    } catch (Throwable t) { meta.put("mics_error", String.valueOf(t)); }
+    meta.put("mics", mics);
+    JSONArray ins = new JSONArray();
+    for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_INPUTS)) {
+      JSONArray cc = new JSONArray(); for (int c : d.getChannelCounts()) cc.put(c);
+      JSONArray sr = new JSONArray(); for (int q : d.getSampleRates()) sr.put(q);
+      ins.put(new JSONObject().put("id", d.getId()).put("type", d.getType()).put("address", d.getAddress())
+          .put("name", String.valueOf(d.getProductName())).put("channels", cc).put("rates", sr));
+    }
+    meta.put("inputs", ins);
+    boolean speaker = true;
+    for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+      int t = d.getType();
+      if (t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_WIRED_HEADSET
+          || t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == AudioDeviceInfo.TYPE_USB_HEADSET) speaker = false;
+    }
+    meta.put("speaker", speaker);
+    log("🎤 стенд микрофонов: Android знает микрофонов " + mics.length() + (ms.length() > 0 ? " (" + ms + ")" : "") + " · входов " + ins.length()
+        + " · громкость " + am.getStreamVolume(AudioManager.STREAM_MUSIC) + "/" + am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        + (speaker ? "" : " · звук идёт не в динамик — шум не играю, только фон"));
+    String[] names = {"фон", "обоими", "левым", "правым"};
+    for (String cfg : cfgs.split(",")) {
+      cfg = cfg.trim(); if (cfg.isEmpty()) continue;
+      java.util.regex.Matcher m = MIC_CFG.matcher(cfg);
+      if (!m.matches()) { log("🎤 " + cfg + ": не понимаю — нужно источник_каналы_частота[_микрофон], например mic_st_48"); continue; }
+      String s = m.group(1), want = m.group(4); boolean st = m.group(2).equals("st"); int rate = Integer.parseInt(m.group(3)) * 1000;
+      int src = s.equals("vr") ? MediaRecorder.AudioSource.VOICE_RECOGNITION : s.equals("mic") ? MediaRecorder.AudioSource.MIC
+          : s.equals("cam") ? MediaRecorder.AudioSource.CAMCORDER : MediaRecorder.AudioSource.UNPROCESSED;
+      int mask = st ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO;
+      int min = AudioRecord.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_16BIT);
+      AudioRecord made;
+      try {
+        made = new AudioRecord.Builder().setAudioSource(src)
+            .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(mask).build())
+            .setBufferSizeInBytes(Math.max(min, rate * 2 * 2)).build();
+      } catch (Throwable t) { log("🎤 " + cfg + ": запись не создалась — " + t.getMessage()); meta.put(cfg, new JSONObject().put("error", String.valueOf(t))); continue; }
+      final AudioRecord rec = made;
+      if (rec.getState() != AudioRecord.STATE_INITIALIZED) { log("🎤 " + cfg + ": запись не создалась"); rec.release(); meta.put(cfg, new JSONObject().put("error", "not initialized")); continue; }
+      String pref = "";
+      if (want != null) {
+        AudioDeviceInfo dev = null;
+        for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_INPUTS)) if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC && want.equals(d.getAddress())) dev = d;
+        pref = dev == null ? "нет микрофона " + want : rec.setPreferredDevice(dev) ? want : "не выбрался " + want;
+      }
+      final int ch = rec.getChannelCount(), rr = rec.getSampleRate();
+      final short[] buf = new short[(int) (MIC_REC_S * rr) * ch];
+      final int[] got = {0};
+      rec.startRecording();
+      Thread rt = new Thread(() -> {
+        while (got[0] < buf.length) { int n = rec.read(buf, got[0], Math.min(1024 * ch, buf.length - got[0]), AudioRecord.READ_BLOCKING); if (n <= 0) break; got[0] += n; }
+      }, "micrec");
+      rt.start();
+      Thread.sleep((long) (MIC_PLAY_AT_S * 1000));
+      JSONArray act = new JSONArray(); StringBuilder as = new StringBuilder();
+      try { for (MicrophoneInfo mi : rec.getActiveMicrophones()) { act.put(micJson(mi)); as.append(as.length() > 0 ? ", " : "").append(micName(mi)); } }
+      catch (Throwable t) { as.append("ошибка ").append(t.getMessage()); }
+      AudioDeviceInfo routed = rec.getRoutedDevice();
+      int playAt = got[0] / ch; String out = "—";
+      if (speaker) {
+        float[] stim = micStimulus(48000);
+        AudioTrack tr = new AudioTrack.Builder()
+            .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+            .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(48000).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+            .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(stim.length * 4).build();
+        tr.write(stim, 0, stim.length, AudioTrack.WRITE_BLOCKING);
+        playAt = got[0] / ch; tr.play();
+        Thread.sleep(300);
+        AudioDeviceInfo od = tr.getRoutedDevice(); out = od == null ? "?" : od.getType() + " " + od.getAddress();
+        rt.join((long) (MIC_REC_S * 1000) + 3000);
+        tr.stop(); tr.release();
+      } else rt.join((long) (MIC_REC_S * 1000) + 3000);
+      rec.stop(); rec.release();
+      int frames = got[0] / ch;
+      saveWav16(new File(dir, "mic_" + cfg + ".wav"), buf, frames * ch, ch, rr);
+      // Отрезки: фон до шума и три вставки шума — самое громкое окно 0,2 с в 0,6 с от начала вставки по часам записи
+      // (задержку вывода заранее не знаем).
+      int win = (int) (0.2 * rr), stepW = rr / 100, maxLag = (int) Math.round(rr * 0.001);
+      int[][] seg = new int[4][];
+      seg[0] = new int[]{(int) (0.1 * rr), Math.min(playAt, (int) (0.7 * rr))};
+      for (int k = 0; k < 3; k++) {
+        int a0 = Math.min(frames, playAt + (int) (k * MIC_STEP_S * rr)), a1 = Math.min(frames, a0 + (int) (0.6 * rr));
+        int at = MicPair.loudest(buf, ch, a0, a1, win, stepW); seg[k + 1] = new int[]{at, Math.min(frames, at + win)};
+      }
+      JSONObject res = new JSONObject().put("source", s).put("channels", ch).put("rate", rr).put("preferred", pref).put("frames", frames)
+          .put("play_frame", playAt).put("routed", routed == null ? "?" : routed.getType() + " " + routed.getAddress()).put("out", out).put("active", act);
+      StringBuilder line = new StringBuilder("🎤 " + cfg + ": " + ch + " кан., " + rr + " Гц" + (pref.isEmpty() ? "" : " · микрофон " + pref)
+          + " · пишут: " + (as.length() > 0 ? as : "не сказано"));
+      JSONArray segs = new JSONArray();
+      for (int k = 0; k < 4 && (k == 0 || speaker); k++) {
+        JSONObject o = new JSONObject().put("name", names[k]).put("from", seg[k][0]).put("to", seg[k][1]);
+        if (ch == 2) {
+          MicPair.Stats q = MicPair.stats(buf, seg[k][0], seg[k][1], maxLag);
+          o.put("db_l", q.dbL).put("db_r", q.dbR).put("same", q.same).put("lag", q.lag).put("peak", q.peak);
+          line.append(String.format(Locale.ROOT, " · %s: L %.1f R %.1f", names[k], q.dbL, q.dbR));
+          line.append(k == 0 ? String.format(Locale.ROOT, " (одинаковых отсчётов %.0f %%)", 100 * q.same)
+              : String.format(Locale.ROOT, ", R позже на %+.2f мс, пик %.2f", q.lag * 1000.0 / rr, q.peak));
+        } else {
+          double lv = MicPair.db(buf, ch, 0, seg[k][0], seg[k][1]);
+          o.put("db", lv); line.append(String.format(Locale.ROOT, " · %s %.1f", names[k], lv));
+        }
+        segs.put(o);
+      }
+      meta.put(cfg, res.put("segments", segs));
+      log(line.toString());
+      Thread.sleep(500);
+    }
+    java.nio.file.Files.write(new File(dir, "mic.json").toPath(), meta.toString(1).getBytes("UTF-8"));
+    log("🎤 стенд микрофонов: готово");
   }
   /** Озвучка сама, без отдельной просьбы (после «Улучшить» и правки перевода) — по выбору «Что
    *  озвучивать». «Произнести ещё раз» и слова — явная просьба, они звучат всегда (speakOut). */

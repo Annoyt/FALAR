@@ -37,4 +37,5 @@ public class SuitesTest {
   @Test void inbox() throws Exception { assertEquals(0, InboxTest.run()); }
   @Test void slicer() { assertEquals(0, SlicerTest.run()); }
   @Test void numbers() { assertEquals(0, NumbersTest.run()); }
+  @Test void micPair() { assertEquals(0, MicPairTest.run()); }
 }
