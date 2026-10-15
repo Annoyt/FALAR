@@ -188,7 +188,9 @@ PY
 WAVSZ=$(stat -c %s $D/a.wav)
 $ADB shell "am force-stop $PKG"; sleep 1
 $ADB push $D/t.json $F/chats/$TID.json >/dev/null 2>&1; $ADB shell "mkdir -p $F/audio"; $ADB push $D/a.wav $F/audio/${TID}_$((TID + 1000)).wav >/dev/null 2>&1
-launch --es telemetrybase $BASE; sleep 4
+launch --es telemetrybase $BASE
+# После перезапуска Falar ~10 с грузит модели: «⋯» у реплики появляется после загрузки (16.10 через 4 с её ещё не было).
+for i in $(seq 20); do sleep 2; dump; has --desc "Меню реплики" && break; done
 tapon --desc "Меню реплики"; sleep 1; dump
 chk 'has --text "Отправить звук разработчику" || has --text "Enviar áudio ao desenvolvedor"' "TM8 в меню реплики со звуком — «Отправить звук разработчику»"
 tapon --text "Отправить звук разработчику" || tapon --text "Enviar áudio ao desenvolvedor"; sleep 1; dump
