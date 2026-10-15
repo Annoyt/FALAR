@@ -3036,7 +3036,48 @@ public class TranslatorService extends Service {
     java.nio.file.Files.write(f.toPath(), b.array());
   }
 
+  /** Долгая запись двух каналов — комната для шага 2 (bench/air/record_air2.sh): VOICE_RECOGNITION, стерео, 16 кГц, как
+   *  слушание, sec секунд прямо в files/mic_rec.wav (заголовок — в конце). Начало — по часам телефона в журнале: по нему
+   *  ПК находит, где в записи фразы, которые он играл. --es mictest stop — закончить раньше. */
+  static final java.util.regex.Pattern MIC_REC = java.util.regex.Pattern.compile("rec_(\\d+)");
+  volatile boolean micStop;
+
+  void micRecord(int sec) throws Exception {
+    micStop = false;
+    File f = new File(getExternalFilesDir(null), "mic_rec.wav");
+    int rate = 16000, mask = AudioFormat.CHANNEL_IN_STEREO;
+    int min = AudioRecord.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_16BIT);
+    AudioRecord rec = new AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+        .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(mask).build())
+        .setBufferSizeInBytes(Math.max(min, rate * 2 * 2)).build();
+    if (rec.getState() != AudioRecord.STATE_INITIALIZED) { log("🎤 запись двух каналов: не создалась"); rec.release(); return; }
+    int ch = rec.getChannelCount();
+    long total = (long) sec * rate * ch, got = 0;
+    short[] b = new short[1024 * ch];
+    java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(b.length * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+    try (java.io.RandomAccessFile out = new java.io.RandomAccessFile(f, "rw")) {
+      out.setLength(0); out.write(new byte[44]);
+      rec.startRecording();
+      log("🎤 запись двух каналов: началась · " + System.currentTimeMillis() + " · " + sec + " с · " + ch + " кан. · " + rec.getSampleRate() + " Гц");
+      while (got < total && !micStop) {
+        int n = rec.read(b, 0, (int) Math.min(b.length, total - got), AudioRecord.READ_BLOCKING);
+        if (n <= 0) break;
+        bb.clear(); for (int i = 0; i < n; i++) bb.putShort(b[i]);
+        out.write(bb.array(), 0, 2 * n); got += n;
+      }
+      rec.stop();
+      int data = (int) (2 * got);
+      java.nio.ByteBuffer h = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+      h.put("RIFF".getBytes()).putInt(36 + data).put("WAVE".getBytes()).put("fmt ".getBytes()).putInt(16).putShort((short) 1)
+       .putShort((short) ch).putInt(rate).putInt(rate * ch * 2).putShort((short) (ch * 2)).putShort((short) 16)
+       .put("data".getBytes()).putInt(data);
+      out.seek(0); out.write(h.array());
+    } finally { rec.release(); }
+    log(String.format(Locale.ROOT, "🎤 запись двух каналов: готово · %.1f с%s", got / (double) ch / rate, micStop ? " · остановлена раньше" : ""));
+  }
+
   void micStand(String cfgs) throws Exception {
+    if ("stop".equals(cfgs)) { micStop = true; return; }
     if (listenPt || listenRu) setListen(false, false);
     Thread.sleep(800);
     File dir = getExternalFilesDir(null);
@@ -3074,6 +3115,8 @@ public class TranslatorService extends Service {
     String[] names = {"фон", "обоими", "левым", "правым"};
     for (String cfg : cfgs.split(",")) {
       cfg = cfg.trim(); if (cfg.isEmpty()) continue;
+      java.util.regex.Matcher mr = MIC_REC.matcher(cfg);
+      if (mr.matches()) { micRecord(Integer.parseInt(mr.group(1))); continue; }
       java.util.regex.Matcher m = MIC_CFG.matcher(cfg);
       if (!m.matches()) { log("🎤 " + cfg + ": не понимаю — нужно источник_каналы_частота[_микрофон], например mic_st_48"); continue; }
       String s = m.group(1), want = m.group(4); boolean st = m.group(2).equals("st"); int rate = Integer.parseInt(m.group(3)) * 1000;
