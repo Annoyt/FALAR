@@ -3,13 +3,14 @@
 # микрофона (стенд --es mictest rec_<сек>: VOICE_RECOGNITION, стерео, 16 кГц, как у слушания), фразы корпуса играют
 # колонки ПК. Один проход — один язык и одна расстановка; разбор потом на ПК, без телефона (шаг 3).
 #
-#   bash bench/air/record_air2.sh --label laptop-near --lang pt [--gap 3000] [--vol 0.6] [--norm -20] [--n 0]
+#   bash bench/air/record_air2.sh --label laptop-near --lang pt [--gap 3000] [--vol 1.0] [--norm -20] [--n 0]
 #   SER=192.168.0.175:37419 bash bench/air/record_air2.sh …     # Redmi по беспроводной отладке; INSTALL=1 — поставить сборку
 #
 # Кладётся в bench/air/rec/st-<label>-<lang>/ (bench/air/rec не в git: в записи весь звук комнаты): room2.wav — два
 # канала, player.tsv — какая фраза и когда играла (часы ПК, мс), rec.txt — расстановка, громкость, сдвиг часов телефона.
 # Нормировка — как у playDir приложения: RMS фразы к --norm dBFS. Громкость колонок в системе не трогается: --vol —
-# громкость только этого проигрывания (pw-play). --n N — первые N фраз (проба уровня).
+# громкость только этого проигрывания (pw-play): 16.10 при 0,6 фразы у телефона рядом с ноутбуком тонули в шуме его
+# вентилятора (речь не видна над фоном −33 dBFS), при 1,0 — речь −15…−21 dBFS над фоном −36. --n N — первые N фраз.
 #
 # Телефон должен лежать: экран погашен или впереди Falar/рабочий стол, минуту не трогали, слушание выключено. Пока
 # идёт проход, телефон не трогать — запись сырая, но человек у телефона попадёт в неё.
@@ -17,7 +18,7 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=${SER:-${ANDROID_SERIAL:-f6lnlrorgi59xwge}}; ADB="$R/tools/platform-tools/adb -s $SER"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
-LABEL=""; LANG_=""; GAP=3000; VOL=0.6; NORM=-20; N=0
+LABEL=""; LANG_=""; GAP=3000; VOL=1.0; NORM=-20; N=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --label) LABEL=$2; shift 2;; --lang) LANG_=$2; shift 2;; --gap) GAP=$2; shift 2;;
