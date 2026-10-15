@@ -242,8 +242,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (i == null) return false;
     String fail = i.getStringExtra("voicefail"), p = i.getStringExtra("voicefile"); String[] ps = i.getStringArrayExtra("voicefiles");
     if (fail == null && p == null && ps == null) return false;
-    String from = i.getStringExtra("voicefrom");
-    i.removeExtra("voicefail"); i.removeExtra("voicefile"); i.removeExtra("voicefiles"); i.removeExtra("voicefrom");
+    String from = i.getStringExtra("voicefrom"), how = i.getStringExtra("voicehow");
+    i.removeExtra("voicefail"); i.removeExtra("voicefile"); i.removeExtra("voicefiles"); i.removeExtra("voicefrom"); i.removeExtra("voicehow");
+    if (how != null) journal("🎙 прислано: " + how + " → отвечать в " + (from == null ? "общий список" : from));
     if (p != null) voiceArrived(p, from);
     if (ps != null) for (String x : ps) voiceArrived(x, from);
     if (fail != null) {
@@ -2174,6 +2175,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     String myVer; try { myVer = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { myVer = ""; }
     news.setText(L.f("Что нового в %s ›", myVer)); ut.addView(news);
     ut.setOnClickListener(x -> newsDialog(true));
+    // «Написать разработчику» — здесь, под версией и её проверкой (владелец 15.10): об ошибке пишут, глядя на номер
+    // версии, а внизу настроек, в «Приложении», кнопку не находили.
+    TextView dev = new TextView(this); dev.setTextSize(12.5f); dev.setTextColor(look.accent); dev.setPadding(0, dp(6), 0, 0);
+    dev.setText(L.t("Написать разработчику ›")); dev.setOnClickListener(x -> writeDev()); ut.addView(dev);
     updCard.addView(ut, new LinearLayout.LayoutParams(0, -2, 1f));
     bUpdate = r.button(L.t("Проверить"), false); bUpdateGo = r.button(L.t("Обновить"), true); bUpdateGo.setVisibility(View.GONE);
     updCard.addView(bUpdate, new LinearLayout.LayoutParams(-2, dp(40))); updCard.addView(bUpdateGo, new LinearLayout.LayoutParams(-2, dp(40)));
@@ -2323,7 +2328,6 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     rowMods = r.nav(c4, app.falar.R.drawable.ic_scan, L.t("Модули и файлы"), "", x -> { show(5); refreshModules(); refreshModels(); });
     rowLog = r.nav(c4, app.falar.R.drawable.ic_list, L.t("Журнал"), "", x -> show(7));
     logLast = rowLog.sub; logLast.setVisibility(View.VISIBLE); logLast.setSingleLine(true); logLast.setEllipsize(android.text.TextUtils.TruncateAt.END);
-    r.nav(c4, app.falar.R.drawable.ic_pencil, L.t("Написать разработчику"), L.t("ошибка или идея — в Telegram или на GitHub"), x -> writeDev());
 
     ScrollView outer = new ScrollView(this); outer.setBackgroundColor(look.page); outer.addView(v);
     return outer;

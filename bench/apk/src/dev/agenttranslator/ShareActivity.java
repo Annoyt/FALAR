@@ -29,7 +29,11 @@ public class ShareActivity extends Activity {
     }
     final String type = in.getType();
     final Uri ref = getReferrer();
-    final String from = VoiceMsg.fromReferrer(ref == null ? null : ref.toString());
+    String f0 = VoiceMsg.fromReferrer(ref == null ? null : ref.toString());
+    // Системный список «Поделиться» отправителя не передаёт — тогда по хозяину файла (VoiceMsg.fromAuthority).
+    if (!VoiceMsg.messenger(f0) && !us.isEmpty()) { String a = VoiceMsg.fromAuthority(us.get(0).getAuthority()); if (a != null) f0 = a; }
+    final String from = f0;
+    final String how = "referrer " + (ref == null ? "нет" : ref) + ", файл от " + (us.isEmpty() ? "?" : us.get(0).getAuthority()) + ", тип " + type;
     if (us.isEmpty()) { finish(); return; }
     new Thread(() -> {
       java.util.ArrayList<String> paths = new java.util.ArrayList<>(); int failed = 0;
@@ -41,6 +45,7 @@ public class ShareActivity extends Activity {
         if (!paths.isEmpty()) go.putExtra("voicefiles", paths.toArray(new String[0]));
         if (bad > 0) go.putExtra("voicefail", String.valueOf(bad));
         if (from != null) go.putExtra("voicefrom", from);
+        go.putExtra("voicehow", how);            // откуда и как пришло — строкой в журнал (без содержимого)
         startActivity(go);
         finish();
       });

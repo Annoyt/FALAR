@@ -35,6 +35,14 @@ public class VoiceMsgTest {
     eq(VoiceMsg.fromReferrer("https://example.com"), null, "V4 не приложение");
     eq(VoiceMsg.fromReferrer(null), null, "V4 нет referrer");
     eq(VoiceMsg.fromReferrer("android-app://evil;rm -rf"), null, "V4 мусор вместо имени пакета");
+    // V4б отправитель по хозяину файла — когда referrer пуст
+    eq(VoiceMsg.fromAuthority("com.whatsapp.provider.media"), "com.whatsapp", "V4б WhatsApp по хозяину файла");
+    eq(VoiceMsg.fromAuthority("com.whatsapp.w4b.provider.media"), "com.whatsapp.w4b", "V4б WhatsApp Business — не WhatsApp");
+    eq(VoiceMsg.fromAuthority("org.telegram.messenger.provider"), "org.telegram.messenger", "V4б Telegram");
+    eq(VoiceMsg.fromAuthority("org.telegram.messenger.web.provider"), "org.telegram.messenger.web", "V4б Telegram с сайта — свой пакет");
+    eq(VoiceMsg.fromAuthority("com.android.providers.media.documents"), null, "V4б «Файлы» — не мессенджер");
+    eq(VoiceMsg.fromAuthority("com.whatsappx.provider"), null, "V4б похожее имя — не WhatsApp");
+    eq(VoiceMsg.fromAuthority(null), null, "V4б хозяина нет");
     // V5 куда отправить перевод
     eq(VoiceMsg.replyTo("com.whatsapp", 7, 7), "com.whatsapp", "V5 голосовое этого разговора пришло из WhatsApp — туда");
     eq(VoiceMsg.replyTo("com.whatsapp", 7, 8), null, "V5 другой разговор — общий список");

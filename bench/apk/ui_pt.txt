@@ -250,7 +250,6 @@ RU — перевод вам, PT — собеседнику	RU — tradução pa
 По кнопке	No botão
 реплик между разборами	falas entre análises
 Приложение	Aplicativo
-ошибка или идея — в Telegram или на GitHub	erro ou ideia — no Telegram ou no GitHub
 Модули	Módulos
 Стоп	Parar
 Загрузка	Download
@@ -648,3 +647,5 @@ Falar обновляется сам: раз в сутки проверяет, н
 🎙 в голосовом (%s) речи не нашлось	🎙 não foi encontrada fala na mensagem de voz (%s)
 Голосовые и «кружочки» из WhatsApp и Telegram: «Поделиться» → Falar — распознаёт и переводит.	Mensagens de voz e de vídeo do WhatsApp e do Telegram: «Compartilhar» → Falar — reconhece e traduz.
 Перевод любой реплики можно скопировать или отправить из её меню — например, ответ в WhatsApp.	A tradução de qualquer fala pode ser copiada ou enviada pelo menu dela — por exemplo, uma resposta no WhatsApp.
+Написать разработчику ›	Escrever ao desenvolvedor ›
+«Написать разработчику» — в настройках сразу под версией: об ошибке или идее в пару касаний.	«Escrever ao desenvolvedor» fica nas configurações, logo abaixo da versão: erro ou ideia em poucos toques.

@@ -71,6 +71,18 @@ final class VoiceMsg {
     return p.matches("[A-Za-z][\\w]*(\\.[A-Za-z][\\w]*)+") ? p : null;
   }
 
+  /** Пакет по хозяину content-URI присланного файла: «com.whatsapp.provider.media» → «com.whatsapp»,
+   *  «org.telegram.messenger.provider» → «org.telegram.messenger». Нужен, когда referrer пуст: «Поделиться» через
+   *  системный список referrer не передаёт (Redmi, 15.10 — пять голосовых из мессенджера пришли без отправителя).
+   *  Длинные имена — первыми: «com.whatsapp.w4b…» — это WhatsApp Business, а не WhatsApp. */
+  static String fromAuthority(String authority) {
+    if (authority == null) return null;
+    String best = null;
+    for (String m : MESSENGERS)
+      if ((authority.equals(m) || authority.startsWith(m + ".")) && (best == null || m.length() > best.length())) best = m;
+    return best;
+  }
+
   static boolean messenger(String pkg) {
     if (pkg == null) return false;
     for (String m : MESSENGERS) if (m.equals(pkg)) return true;
