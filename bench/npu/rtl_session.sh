@@ -21,10 +21,10 @@ ENC="batch_size=1,encoder_sequence_length=32"
 $RUN model $M/mt/pt2ru/decoder_with_past_model.onnx dec_int8.onnx
 $RUN model $F/mt_decoder_with_past_model_fp16io.onnx dec_fp16.onnx
 for t in 4 1; do $RUN bench /data/local/tmp/falar-npu/dec_int8.onnx $DEC 30 cpu $t; done
-$RUN bench /data/local/tmp/falar-npu/dec_fp16.onnx $DEC 30 npu 1 "$id" /data/local/tmp/falar-npu/dec_fp16.onnx
+$RUN bench /data/local/tmp/falar-npu/dec_fp16.onnx $DEC 30 npu 1 "${SOCID:-}"
 $RUN model $M/mt/pt2ru/encoder_kv_model.onnx enc_int8.onnx
 $RUN model $F/mt_encoder_model_fp16.onnx enc_fp16.onnx
 for t in 4 1; do $RUN bench /data/local/tmp/falar-npu/enc_int8.onnx $ENC 30 cpu $t; done
-$RUN bench /data/local/tmp/falar-npu/enc_fp16.onnx $ENC 30 npu 1 "$id"
+$RUN bench /data/local/tmp/falar-npu/enc_fp16.onnx $ENC 30 npu 1 "${SOCID:-}"
 $RUN clean
 echo "== $(date +%T) готово"
