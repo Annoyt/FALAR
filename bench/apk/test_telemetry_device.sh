@@ -133,6 +133,9 @@ T0=$(sh "date '+%m-%d %H:%M:%S.000'")                 # дальше Falar па�
 chk '[ -n "$P" ] && [ "$(js $P "([c[\"what\"] for c in b.get(\"crashes\", []) if c.get(\"kind\") == \"crash\"] or [\"нет\"])[-1]")" = java.lang.IllegalStateException ]' "TM4 сбой в пакете: тип исключения"
 chk '[ -n "$P" ] && js $P "[c[\"where\"] for c in b.get(\"crashes\", [])][-1]" | grep -q "TranslatorService" && ! grep -q "проверка сбоя" $P' "TM4 место — кадры приложения, текста ошибки нет"
 
+# Дальше — экран: запертый телефон дал бы каскад провалов, лучше сказать причину сразу.
+unlocked() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys trust" | grep -m1 -q "deviceLocked=0"; }
+if ! unlocked; then res 1 "TM5–TM8 экран заперт или погас — экранную часть не проверить (держите телефон разблокированным)"; exit 0; fi
 say "== TM5–TM6: разовое окно согласия и «О приложении»"
 m=$(mark); launch --es telemetry ask; wl "$m" '📊 статистика разработчику: спрошу' 10 >/dev/null
 $ADB shell "am force-stop $PKG"; sleep 1; launch; sleep 4; dump
