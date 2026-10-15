@@ -18,6 +18,9 @@ ADB=${ADB:-$R/tools/platform-tools/adb}
 A=$R/bench/apk; PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
 D=$(mktemp -d /tmp/falar-tele.XXXX); mkdir -p $D/in; TID=$(date +%s%3N); PORT=${PORT:-8767}; BASE=http://127.0.0.1:$PORT
+# Сколько секунд без касаний значит «телефон положили». У Redmi владельца экран гаснет через 60 с — тогда
+# обёртка прогона ждёт сама и держит экран «пробуждением», а сюда передаёт FREE_S=0.
+FREE_S=${FREE_S:-60}
 pass=0; fail=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
@@ -36,9 +39,9 @@ free_phone() {
   while :; do
     f=$(focus); a=$(sh "dumpsys power" | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
     if sh "dumpsys power" | grep -q "mWakefulness=Awake"; then
-      case "$f" in *$PKG*|*com.miui.home*|*launcher*) [ "${a:-0}" -ge 60000 ] && return 0;; esac
+      case "$f" in *$PKG*|*com.miui.home*|*launcher*) [ "${a:-0}" -ge $((FREE_S * 1000)) ] && return 0;; esac
     fi
-    n=$((n+1)); [ $n -eq 1 ] && say "  жду: экран включён, впереди Falar или рабочий стол, минуту без касаний ($f)"; sleep 10
+    n=$((n+1)); [ $n -eq 1 ] && say "  жду: экран включён, впереди Falar или рабочий стол, ${FREE_S} с без касаний ($f)"; sleep 5
   done
 }
 launch() { local n=0; until idle; do n=$((n+1)); [ $n -eq 1 ] && say "  (запуск ждёт свободный телефон: $(focus))"; sleep 5; done; $ADB shell "am start -n $ACT $*" >/dev/null 2>&1; }
