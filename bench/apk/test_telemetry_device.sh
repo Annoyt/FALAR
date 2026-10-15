@@ -107,7 +107,8 @@ ORIG=$(printf '%s' "$l" | sed -n 's/.*согласие «\([^»]*\)».*/\1/p'); 
 say "== телефон: $MODEL, Android sdk $SDK, Falar $VER ($CODE); согласие владельца — «$ORIG»"
 
 say "== TM1–TM3: пакет статистики"
-m=$(mark); launch --es telemetry yes; chk '[ -n "$(wl "$m" "📊 статистика разработчику: отправляю раз в сутки" 10)" ]' "TM1 согласие «да» (стенд)"
+# Приёмник — с первого же «да»: на холодном старте служба шлёт пакет сама (через 15 с), и он не должен уйти в бота.
+m=$(mark); launch --es telemetrybase $BASE --es telemetry yes; chk '[ -n "$(wl "$m" "📊 статистика разработчику: отправляю раз в сутки" 10)" ]' "TM1 согласие «да» (стенд)"
 m=$(mark); launch --es telemetrybase $BASE --es telemetry now
 l=$(wl "$m" '📊 статистик(а ушла|у отправить не вышло)' 30); waitgot t 10 1; P=$(got t)
 chk '[ -n "$P" ] && printf "%s" "$l" | grep -q "ушла разработчику"' "TM2 пакет ушёл на приёмник (${l##*📊 })"

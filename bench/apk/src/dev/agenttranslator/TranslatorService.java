@@ -422,7 +422,9 @@ public class TranslatorService extends Service {
       } catch (Throwable t) { log("🎙 уборка звука: " + t); } });
       restoreContext();
       maybeCheckUpdates();
-      maybeSendTelemetry(false);
+      // Статистика — через 15 с: команды стенда (--es telemetrybase) успевают прийти раньше, и сеть не мешает
+      // загрузке моделей.
+      main.postDelayed(() -> maybeSendTelemetry(false), 15000);
       heartbeat(); startWarm(); startSay(); watchNetwork();
       // Слушание могли включить ещё во время загрузки (earlyStart или кнопкой) — тогда оно уже идёт.
       boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
@@ -2441,7 +2443,7 @@ public class TranslatorService extends Service {
     SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
     boolean was = Telemetry.YES.equals(p.getString("telemetry", Telemetry.ASK)), yes = Telemetry.YES.equals(v);
     SharedPreferences.Editor e = p.edit().putString("telemetry", v);
-    if (yes && !was) { tele.take(System.currentTimeMillis()); e.putLong("tele_exit_at", System.currentTimeMillis()).putLong("tele_sent", 0); }
+    if (yes && !was) { tele.take(System.currentTimeMillis()); e.putLong("tele_exit_at", System.currentTimeMillis()); }   // tele_sent не трогаем: в первый раз он и так 0
     if (!yes) { tele.take(System.currentTimeMillis()); File[] fs = teleDir().listFiles(); if (fs != null) for (File f : fs) f.delete(); }
     e.putString("tele_counters", tele.save()).apply();
     Telemetry.collect = yes;
