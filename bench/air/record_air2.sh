@@ -37,12 +37,17 @@ mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
 wl() { local i l; for i in $(seq "$3"); do l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
 focus() { sh "dumpsys window" | grep -m1 mCurrentFocus; }
 asleep() { sh "dumpsys power" | grep -qE 'mWakefulness=(Asleep|Dozing)'; }
+# Связь по беспроводной отладке рвётся (10.10 и 15.10: после установки телефон ушёл с новой парой адрес:порт), а пустой
+# ответ adb в арифметике оболочки — ошибка: всё, что считается из ответа телефона, — с проверкой на число.
+num() { case "$1" in ''|*[!0-9]*) return 1;; esac; }
 free1() {
-  local a quiet listening
+  local a now mt listening
+  [ "$($ADB get-state 2>/dev/null)" = device ] || return 1
   a=$(sh "dumpsys power" | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
-  quiet=$(( $(sh "date +%s") - $(sh "stat -c %Y $LOG 2>/dev/null || echo 0") ))
+  now=$(sh "date +%s"); mt=$(sh "stat -c %Y $LOG 2>/dev/null || echo 0")
+  num "$now" && num "$mt" || return 1
   listening=$(sh "grep -E '▶ слушаю|⏹ не слушаю' $LOG | tail -1" | grep -c '▶ слушаю')
-  [ "$listening" = 0 ] && [ "$quiet" -ge 60 ] && { asleep || { case "$(focus)" in *$PKG*|*com.miui.home*|*launcher*) true;; *) false;; esac && [ "${a:-0}" -ge 60000 ]; }; }
+  [ "$listening" = 0 ] && [ $((now - mt)) -ge 60 ] && { asleep || { case "$(focus)" in *$PKG*|*com.miui.home*|*launcher*) true;; *) false;; esac && [ "${a:-0}" -ge 60000 ]; }; }
 }
 
 if [ -z "$FALAR_STAND_LOCK" ]; then
@@ -59,7 +64,11 @@ if [ "${INSTALL:-0}" = 1 ]; then
 fi
 inst=$(sh "sha256sum \$(pm path $PKG | head -1 | cut -d: -f2)" | cut -d' ' -f1); mine=$(sha256sum "$R/bench/apk/Falar.apk" 2>/dev/null | cut -d' ' -f1)
 [ "$inst" = "$mine" ] || { say "на телефоне другая сборка (${inst:0:12}…, эта ${mine:0:12}…) — не начинаю; INSTALL=1 поставит эту"; exit 1; }
-n=0; until free1; do n=$((n+1)); [ $n -eq 1 ] && say "  жду, пока телефон лежит: экран погашен или впереди Falar, минуту не трогали ($(focus | sed 's/.*{//; s/}.*//'))"; sleep 15; done
+n=0; until free1; do
+  n=$((n+1)); [ $n -eq 1 ] && say "  жду, пока телефон лежит: экран погашен или впереди Falar, минуту не трогали ($(focus | sed 's/.*{//; s/}.*//'))"
+  [ "$($ADB get-state 2>/dev/null)" = device ] || { say "  телефон пропал со связи ($SER) — не начинаю"; exit 1; }
+  sleep 15
+done
 
 # Фразы — нормированные копии во временном каталоге; длительности — для длины записи.
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
@@ -91,7 +100,8 @@ SEC=$("$PY" -c "import sys; d=[float(l.split('\t')[2]) for l in open('$TMP/list.
 say "== $LABEL-$LANG_: $NF фраз, запись $SEC с, пауза $GAP мс, уровень $NORM dBFS, громкость проигрывания $VOL (системная $(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{print $2}'))"
 
 # Сдвиг часов телефона относительно ПК: лучший из пяти замеров по самому короткому ответу.
-OFF=$(for i in 1 2 3 4 5; do a=$(date +%s%3N); d=$(sh "date +%s%3N"); b=$(date +%s%3N); echo "$((b - a)) $(( d - (a + b) / 2 ))"; done | sort -n | head -1)
+OFF=$(for i in 1 2 3 4 5 6 7 8; do a=$(date +%s%3N); d=$(sh "date +%s%3N"); b=$(date +%s%3N); num "$d" && echo "$((b - a)) $(( d - (a + b) / 2 ))"; done | sort -n | head -1)
+[ -n "$OFF" ] || { say "часы телефона не прочлись — связи нет"; exit 1; }
 say "  часы телефона: $(echo $OFF | cut -d' ' -f2) мс от ПК (ответ за $(echo $OFF | cut -d' ' -f1) мс)"
 
 mkdir -p "$OUT"; : > "$OUT/player.tsv"
