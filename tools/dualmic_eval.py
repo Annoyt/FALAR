@@ -63,7 +63,10 @@ def segs_texts(x, variant, asr, cache):
     L, Rc = x[:, 0], x[:, 1]
     mean = (L + Rc) / 2
     base = {'L': L, 'R': Rc}.get(variant, mean)
-    segs, _ = vde.segment(base, 'dn_sil', 'gtcrn', 0.0, -48.0, True, vde.Wiener(), **APP)
+    if variant in ('best', 'das') and 'mean' in cache:          # нарезка та же, что у mean, — не повторяем
+        segs = [tuple(s) for s in cache['mean']['segs']]
+    else:
+        segs, _ = vde.segment(base, 'dn_sil', 'gtcrn', 0.0, -48.0, True, vde.Wiener(), **APP)
     if variant in ('mean', 'L', 'R'):
         texts = [asr(base[a:b]) for a, b, _ in segs]
     elif variant == 'best':
