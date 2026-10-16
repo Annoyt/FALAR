@@ -4,7 +4,10 @@
 #   bash bench/quality/gate.sh                     # на ПК: перевод и распознавание
 #   bash bench/quality/gate.sh --device            # плюс полный путь распознавания на телефоне
 #   bash bench/quality/gate.sh --ocr-device        # плюс чтение снимков на телефоне (test_ocr_device.sh O2)
-#   bash bench/quality/gate.sh --accept [--device] # прогнать и принять за эталон — закоммитить с правкой
+#   bash bench/quality/gate.sh --accept [--device] # прогнать и принять за эталон всё — закоммитить с правкой
+#   bash bench/quality/gate.sh --accept-better     # принять за эталон только улучшения («лучше»), если нигде
+#                                                  # не «хуже» (владелец 16.10: эталон — каждый раз, когда
+#                                                  # стало лучше, и только тогда); с правкой — закоммитить
 #   bash bench/quality/gate.sh --release v0.27.0   # из tools/release.sh: ПК всегда; телефон — если с
 #                                                  # прошлого выпуска менялось распознавание
 #
@@ -53,9 +56,9 @@ PY=$(pick .venv)/bin/python; CPY=$(pick .venv-comet)/bin/python; ADB=${ADB:-$(pi
 MODELS=$R/models; for m in mt asr_multi ocr; do [ -d "$MODELS/$m" ] || MODELS=$MAIN/models; done; export FALAR_MODELS=$MODELS
 COMET_CKPT=$(pick models/comet/wmt22-comet-da/checkpoints/model.ckpt)
 RECS=${RECS:-near-pt near-ru far-pt noisy-pt}
-DEVICE=0; OCRDEV=0; ACCEPT=0; RELEASE=
+DEVICE=0; OCRDEV=0; ACCEPT=0; ACCEPT_BETTER=0; RELEASE=
 while [ $# -gt 0 ]; do
-  case "$1" in --device) DEVICE=1; shift;; --ocr-device) OCRDEV=1; shift;; --accept) ACCEPT=1; shift;; --release) RELEASE=$2; shift 2;;
+  case "$1" in --device) DEVICE=1; shift;; --ocr-device) OCRDEV=1; shift;; --accept) ACCEPT=1; shift;; --accept-better) ACCEPT_BETTER=1; shift;; --release) RELEASE=$2; shift 2;;
     *) echo "не знаю ключ: $1"; exit 2;; esac
 done
 say() { printf '%s\n' "$*" | tee -a "$RUN/gate.log"; }
@@ -247,7 +250,8 @@ fi
 
 # ---- вердикт
 say ""
-$PY "$Q/verdict.py" --base "$BASE" --device-base "$DBASE" --run "$RUN" --stages "$STAGES" --report "$RUN/report.md" | tee -a "$RUN/gate.log"
+$PY "$Q/verdict.py" --base "$BASE" --device-base "$DBASE" --run "$RUN" --stages "$STAGES" --report "$RUN/report.md" \
+  $([ $ACCEPT_BETTER = 1 ] && [ $ACCEPT = 0 ] && echo --accept-better) | tee -a "$RUN/gate.log"
 V=${PIPESTATUS[0]}
 say "всего: $(since $t0) · журнал: $RUN/gate.log"
 if [ $ACCEPT = 1 ]; then

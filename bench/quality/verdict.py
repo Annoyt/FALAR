@@ -18,12 +18,21 @@
 (test_ocr_device.sh O2). В файлах — только числа и хэш прочитанного, текста нет.
 
     python3 bench/quality/verdict.py --base bench/quality/baseline --run <каталог прогона> [--report файл.md]
+                                     [--accept-better]
+
+--accept-better — принять за эталон только улучшения (владелец 16.10: «каждый раз, если получили результаты
+лучше, вводить поправку к эталонам — только если добились улучшений»). Если где-то «хуже» — эталон не
+трогается вовсе. Иначе части с вердиктом «лучше» переходят в эталон, остальные остаются прежними: перевод —
+файл направления, чтение снимков — файл целиком, распознавание — по языку (строки и сводка только этого
+языка, у телефона — его записи). Без этого эталон отстаёт, и проверка ловит только падение ниже старого
+уровня: правка, отнявшая часть выигрыша, прошла бы как «не хуже».
 
 Код выхода: 0 — не хуже, 1 — хуже, 2 — нечего сравнивать.
 """
 import argparse
 import json
 import os
+import shutil
 import sys
 
 R = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,6 +45,8 @@ OCR_SAME_FLOOR = 28    # телефон на тех же пикселях, чт�
 P = 0.05
 N_BOOT = 1000
 DIRS = {"pt2ru": "pt → ru", "ru2pt": "ru → pt"}
+# Вердикты по частям — для --accept-better: (вид, эталон, прогон, язык или None, вердикт, подпись).
+PARTS = []
 
 
 def dec(x, f=".2f"):
@@ -83,6 +94,7 @@ def mt(base_dir, run_dir, out):
             continue
         rows = mt_metrics.compare(bp, cp)
         v = judge(rows, "tatoeba")
+        PARTS.append(("file", bp, cp, None, v, f"перевод {name}"))
         worst |= v == "хуже"
         out.append(f"- перевод {name}: **{v}** — изменилось {len(changed)} переводов из {len(pairs)}")
         for set_name, x in rows.items():
@@ -137,6 +149,7 @@ def asr(base_dir, run_dir, out, kind="pc", device_base=""):
         x = wer_compare(pairs)
         v = "хуже" if x["delta"] >= TH["WER"] and x["p"] < P else \
             "лучше" if x["delta"] <= -TH["WER"] and x["p"] < P else "изменилось, но не хуже"
+        PARTS.append(("asr", bp, cp, lang, v, f"распознавание {lang}, {label}"))
         worst |= v == "хуже"
         out.append(f"- распознавание {lang}, {label}{where}: **{v}** — изменилось {len(changed)} фраз из {len(pairs)}; "
                    f"WER {dec(x['A'])} → {dec(x['B'])} % (Δ {dec(x['delta'], '+.2f')} п. п., 95 % [{dec(x['ci95'][0], '+.2f')}; "
@@ -202,10 +215,57 @@ def ocr(base_dir, run_dir, out, kind="pc", device_base=""):
                 if same < OCR_SAME_FLOOR:
                     v, line = "хуже", line + f" (нужно не меньше {OCR_SAME_FLOOR})"
     worst = v == "хуже"
+    PARTS.append(("file", bp, cp, None, v, f"чтение снимков, {label}"))
     out.append(f"- чтение снимков, {label}: **{v}** — {line}")
     for b, c in sorted(changed, key=lambda bc: bc[1]["hit"] - bc[0]["hit"])[:5]:
         out.append(f"    - {c['id']}: слов {b['hit']} → {c['hit']} из {c['n']}, правок на знак {b['ed']} → {c['ed']}")
     return worst
+
+
+def dump_like(path, obj):
+    """Записать JSON с тем же отступом, что был у файла: иначе дифф эталона в git — весь файл."""
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else "{\n"
+    second = text.split("\n", 2)[1] if text.startswith("{\n") else ""
+    indent = (len(second) - len(second.lstrip(" "))) or 1
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=indent)
+
+
+def merge_asr(bp, cp, langs):
+    """Эталон распознавания, в котором строки и сводка языков langs — из прогона, остальное — прежнее. Сводка
+    ПК — по языку (\"pt\", \"ru\"), телефона — по записям (\"near-pt\" …): запись относится к языку своих строк."""
+    B, C = load(bp), load(cp)
+    res = [r for r in B["results"] if r["lang"] not in langs] + [r for r in C["results"] if r["lang"] in langs]
+    rec_lang = {r["rec"]: r["lang"] for r in C["results"] if r.get("rec")}
+    summ = dict(B.get("summary", {}))
+    for k, v in C.get("summary", {}).items():
+        if k in langs or rec_lang.get(k) in langs:
+            summ[k] = v
+    new = dict(B); new["summary"] = summ; new["results"] = res
+    dump_like(bp, new)
+
+
+def accept_better(worst):
+    """Части с вердиктом «лучше» — в эталон, если нигде не «хуже». Возвращает строки для отчёта."""
+    better = [x for x in PARTS if x[4] == "лучше"]
+    if not better:
+        return ["эталон не менялся: улучшений нет"]
+    if worst:
+        return ["эталон не тронут: есть «хуже» — сначала исправить (улучшения: "
+                + ", ".join(x[5] for x in better) + ")"]
+    done, by_file = [], {}
+    for kind, bp, cp, lang, v, label in better:
+        by_file.setdefault((kind, bp, cp), []).append((lang, label))
+    for (kind, bp, cp), items in by_file.items():
+        if kind == "asr":
+            merge_asr(bp, cp, {lang for lang, _ in items})
+        else:
+            shutil.copyfile(cp, bp)
+        done += [label for _, label in items]
+    return ["эталон обновлён — только улучшения: " + ", ".join(done)
+            + (" · bench/quality/baseline закоммитьте вместе с правкой" if any(
+                os.path.abspath(bp).startswith(os.path.abspath(os.path.join(R, "bench", "quality")))
+                for _, bp, _ in by_file) else "")]
 
 
 def main():
@@ -215,6 +275,7 @@ def main():
     ap.add_argument("--device-base", default="", help="эталон телефона — вне git (записи комнаты личные)")
     ap.add_argument("--stages", default="mt asr", help="mt asr device ocr ocr-device — какие этапы сравнивать")
     ap.add_argument("--report", default="")
+    ap.add_argument("--accept-better", action="store_true", help="принять за эталон только улучшения (см. выше)")
     a = ap.parse_args()
     out, worst = [], False
     if "mt" in a.stages:
@@ -234,6 +295,10 @@ def main():
     text = "\n".join(out)
     print(text)
     print("\nИТОГ: " + ("ХУЖЕ эталона — см. выше" if worst else "не хуже эталона"))
+    if a.accept_better:
+        acc = accept_better(worst)
+        print("\n".join(acc))
+        text += "\n\n" + "\n".join(acc)
     if a.report:
         with open(a.report, "w", encoding="utf-8") as f:
             f.write(text + "\n")
