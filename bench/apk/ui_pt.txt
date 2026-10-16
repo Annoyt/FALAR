@@ -688,3 +688,4 @@ Falar переводит автоматически и может ошибать
 Можно помогать улучшать Falar: анонимная статистика для разработчика — только с вашего согласия.	Você pode ajudar a melhorar o Falar: estatísticas anônimas para o desenvolvedor — só com o seu consentimento.
 Звук отдельной реплики можно отправить разработчику — чтобы распознавание стало лучше.	O áudio de uma fala pode ser enviado ao desenvolvedor — para melhorar o reconhecimento.
 В настройках — «О приложении»: что отправляет Falar и отказ от ответственности.	Nas Configurações — «Sobre o app»: o que o Falar envia e a isenção de responsabilidade.
+На телефонах с двумя микрофонами Falar слушает обоими и точнее узнаёт речь.	Em celulares com dois microfones, o Falar ouve pelos dois e reconhece a fala melhor.
