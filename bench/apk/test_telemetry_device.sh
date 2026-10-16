@@ -21,10 +21,11 @@ D=$(mktemp -d /tmp/falar-tele.XXXX); mkdir -p $D/in; TID=$(date +%s%3N); PORT=${
 # Сколько секунд без касаний значит «телефон положили». У Redmi владельца экран гаснет через 60 с — тогда
 # обёртка прогона ждёт сама и держит экран «пробуждением», а сюда передаёт FREE_S=0.
 FREE_S=${FREE_S:-60}
-pass=0; fail=0
+pass=0; fail=0; skip=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
 chk() { if eval "$1"; then res 0 "$2"; else res 1 "$2"; fi; }
+sk() { skip=$((skip+1)); say "ПРОПУСК $1"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
 wl() { local i; for i in $(seq "$3"); do local l; l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
@@ -34,9 +35,12 @@ idle() {
   case "$(focus)" in *$PKG*|*com.miui.home*|*launcher*) return 0;; esac; return 1
 }
 front() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && focus | grep -q "$PKG/"; }
+# Свободен: экран погашен (как phone_idle проверки качества — TM1–TM4 экрана не требуют) или впереди Falar либо
+# рабочий стол и FREE_S секунд без касаний. Прогон без владельца (test_all) так не зависает на погашенном экране.
 free_phone() {
   local n=0 f a
   while :; do
+    sh "dumpsys power" | grep -qE "mWakefulness=(Asleep|Dozing)" && return 0
     f=$(focus); a=$(sh "dumpsys power" | sed -n 's/.*lastUserActivityTime=[0-9]* (\([0-9]*\) ms ago).*/\1/p' | head -1)
     if sh "dumpsys power" | grep -q "mWakefulness=Awake"; then
       case "$f" in *$PKG*|*com.miui.home*|*launcher*) [ "${a:-0}" -ge $((FREE_S * 1000)) ] && return 0;; esac
@@ -94,7 +98,7 @@ restore() {
   fi
   say "  текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
   rm -rf "$D"
-  say; say "итог: PASS $pass, FAIL $fail"
+  say; say "итог: PASS $pass, FAIL $fail, пропущено $skip"
 }
 trap restore EXIT
 
@@ -135,7 +139,7 @@ chk '[ -n "$P" ] && js $P "[c[\"where\"] for c in b.get(\"crashes\", [])][-1]" |
 
 # Дальше — экран: запертый телефон дал бы каскад провалов, лучше сказать причину сразу.
 unlocked() { sh "dumpsys power" | grep -q "mWakefulness=Awake" && sh "dumpsys trust" | grep -m1 -q "deviceLocked=0"; }
-if ! unlocked; then res 1 "TM5–TM8 экран заперт или погас — экранную часть не проверить (держите телефон разблокированным)"; exit 0; fi
+if ! unlocked; then sk "TM5–TM8 экран заперт или погас — окно согласия, настройки и звук реплики не проверены (нужен разблокированный телефон)"; exit 0; fi
 say "== TM5–TM6: разовое окно согласия и «О приложении»"
 m=$(mark); launch --es telemetry ask; wl "$m" '📊 статистика разработчику: спрошу' 10 >/dev/null
 $ADB shell "am force-stop $PKG"; sleep 1; launch; sleep 4; dump
