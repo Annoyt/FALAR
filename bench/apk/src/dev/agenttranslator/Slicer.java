@@ -33,7 +33,10 @@ final class Slicer {
    *  отрезан по пределу длины (тогда silero стоит сбросить: у него свой счёт длины). */
   static final class Piece {
     final float[] pcm; final Gain.Stats st; final int voicedMs; final boolean cut;
-    Piece(float[] pcm, Gain.Stats st, int voicedMs, boolean cut) { this.pcm = pcm; this.st = st; this.voicedMs = voicedMs; this.cut = cut; }
+    /** Сами кадры куска, по порядку (те же объекты, что пришли в feed): по ним находятся L и R кадров
+     *  (MicPair.Side), когда слушание пишет два микрофона. */
+    final float[][] src;
+    Piece(float[] pcm, Gain.Stats st, int voicedMs, boolean cut, float[][] src) { this.pcm = pcm; this.st = st; this.voicedMs = voicedMs; this.cut = cut; this.src = src; }
   }
 
   final ArrayDeque<float[]> pre = new ArrayDeque<>(); final ArrayDeque<Gain.Stats> preSt = new ArrayDeque<>(); final ArrayDeque<Double> preLvl = new ArrayDeque<>();
@@ -105,8 +108,8 @@ final class Slicer {
   Piece piece(int n, boolean cut) {
     if (voiced * FRAME_MS < minSpeechMs || n <= 0) return null;
     int len = 0; for (int k = 0; k < n; k++) len += seg.get(k).length;
-    float[] out = new float[len]; int o = 0; Gain.Stats st = new Gain.Stats();
-    for (int k = 0; k < n; k++) { float[] c = seg.get(k); System.arraycopy(c, 0, out, o, c.length); o += c.length; st.add(segSt.get(k)); }
-    return new Piece(out, st, voiced * FRAME_MS, cut);
+    float[] out = new float[len]; int o = 0; Gain.Stats st = new Gain.Stats(); float[][] src = new float[n][];
+    for (int k = 0; k < n; k++) { float[] c = seg.get(k); System.arraycopy(c, 0, out, o, c.length); o += c.length; st.add(segSt.get(k)); src[k] = c; }
+    return new Piece(out, st, voiced * FRAME_MS, cut, src);
   }
 }

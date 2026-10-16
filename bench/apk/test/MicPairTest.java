@@ -1,5 +1,6 @@
 package dev.agenttranslator;
 
+import java.util.Arrays;
 import java.util.Random;
 
 /** Два канала записи (MicPair): копия одного микрофона или два разных, уровни, задержка правого канала относительно
@@ -67,6 +68,56 @@ public class MicPairTest {
     // M8: моно — уровень канала 0 при одном канале.
     short[] mono = new short[n]; for (int i = 0; i < n; i++) mono[i] = (short) Math.round(a[i] * 0.1 * 32767);
     ok(Math.abs(MicPair.db(mono, 1, 0, 0, n) - 20 * Math.log10(0.1)) < 0.2, "M8 уровень моно −20 dBFS: " + MicPair.db(mono, 1, 0, 0, n));
+
+    // M9: GCC-PHAT — задержка правого по шуму с гулом: гул на 300 Гц в обоих каналах одинаков (как вентилятор), голос —
+    // шум, на правом на 7 отсчётов позже; простая корреляция тянет к нулю, PHAT — нет.
+    int m = 32000; double[] v = noise(m, 4), hum = new double[m];
+    for (int i = 0; i < m; i++) hum[i] = 3 * Math.sin(2 * Math.PI * 300 * i / 16000.0);
+    float[] fl = new float[m], fr = new float[m];
+    for (int i = 0; i < m; i++) { fl[i] = (float) (0.05 * (v[i] + hum[i])); int j = i - 7; fr[i] = (float) (0.05 * ((j >= 0 ? v[j] : 0) + hum[i])); }
+    ok(MicPair.gccPhat(fl, fr, 0, m, 16) == 7, "M9 GCC-PHAT: +7 под гулом: " + MicPair.gccPhat(fl, fr, 0, m, 16));
+    ok(MicPair.gccPhat(fr, fl, 0, m, 16) == -7, "M9 каналы наоборот — −7: " + MicPair.gccPhat(fr, fl, 0, m, 16));
+    ok(MicPair.gccPhat(fl, fr, 0, 30, 16) == 0, "M9 отрезок короче 64 — ноль");
+
+    // M10: задержка куска — по громкому отрезку: тихий шум с задержкой −3, громкий голос с задержкой +5 посередине.
+    int q2 = 16000 * 6; double[] w1 = noise(q2, 5), w2 = noise(q2, 6);
+    float[] gl = new float[q2], gr = new float[q2];
+    for (int i = 0; i < q2; i++) {
+      boolean loud = i >= 16000 * 2 && i < 16000 * 4;
+      int j = i - (loud ? 5 : -3);
+      double src = loud ? 0.3 * w1[i] : 0.01 * w2[i], srcR = j >= 0 && j < q2 ? (loud ? 0.3 * w1[j] : 0.01 * w2[j]) : 0;
+      gl[i] = (float) src; gr[i] = (float) srcR;
+    }
+    ok(MicPair.delay(gl, gr, 16000) == 5, "M10 задержка куска — по громкому отрезку: " + MicPair.delay(gl, gr, 16000));
+    float[] sl = Arrays.copyOf(gl, 16000), sr = Arrays.copyOf(gr, 16000);
+    ok(MicPair.delay(sl, sr, 16000) == -3, "M10 короткий кусок — целиком: " + MicPair.delay(sl, sr, 16000));
+
+    // M11: выровненная сумма — правый сдвинут на k: сумма совпадает с удвоенным левым, за краем — половина.
+    float[] al = {1, 2, 3, 4, 5}, ar2 = {0, 0, 1, 2, 3};
+    float[] sum = MicPair.aligned(al, ar2, 2);
+    ok(sum[0] == 1 && sum[1] == 2 && sum[2] == 3 && sum[3] == 2 && sum[4] == 2.5f, "M11 (L[t] + R[t+2]) / 2: " + Arrays.toString(sum));
+    ok(MicPair.aligned(al, ar2, 0)[2] == 2f && MicPair.aligned(al, ar2, -1)[0] == 0.5f, "M11 без сдвига и с отрицательным");
+
+    // M12: Side — кадры по самому объекту, вытеснение старых, нет кадра — null.
+    MicPair.Side side = new MicPair.Side(3);
+    float[] a1 = {1, 1}, a2 = {2, 2}, a3 = {3, 3}, a4 = {4, 4};
+    side.put(a1, new float[]{1, 0}, new float[]{0, 1}); side.put(a2, new float[]{2, 0}, new float[]{0, 2}); side.put(a3, new float[]{3, 0}, new float[]{0, 3});
+    float[][] got = side.piece(new float[][]{a2, a3});
+    ok(got != null && Arrays.equals(got[0], new float[]{2, 0, 3, 0}) && Arrays.equals(got[1], new float[]{0, 2, 0, 3}), "M12 L и R куска по кадрам");
+    ok(side.piece(new float[][]{new float[]{2, 2}}) == null, "M12 равный по содержимому, но другой кадр — не найден");
+    side.put(a4, new float[]{4, 0}, new float[]{0, 4});
+    ok(side.size() == 3 && side.piece(new float[][]{a1}) == null && side.piece(new float[][]{a4}) != null, "M12 старый кадр вытеснен");
+    ok(side.piece(new float[][]{a3, new float[]{9}}) == null && side.piece(null) == null, "M12 хоть одного кадра нет — null");
+
+    // M13: Detect — копия одного микрофона, два разных, мало отсчётов; гул в обоих не делает их «одним».
+    MicPair.Detect d1 = new MicPair.Detect(16000); float[] cp = new float[512];
+    for (int k = 0; k < 40; k++) { for (int i = 0; i < 512; i++) cp[i] = (float) (0.01 * v[k * 512 + i]); d1.add(cp, cp, 512); }
+    ok(Boolean.FALSE.equals(d1.verdict()) && d1.sameShare() == 1.0, "M13 копия: " + d1.verdict() + ", " + d1.sameShare());
+    MicPair.Detect d2 = new MicPair.Detect(16000); float[] x1 = new float[512], x2 = new float[512];
+    for (int k = 0; k < 40; k++) { for (int i = 0; i < 512; i++) { int t = k * 512 + i; x1[i] = (float) (0.01 * (v[t] + hum[t])); x2[i] = (float) (0.01 * (w2[t] + hum[t])); } d2.add(x1, x2, 512); }
+    ok(Boolean.TRUE.equals(d2.verdict()), "M13 два микрофона под общим гулом: корр " + d2.corr());
+    MicPair.Detect d3 = new MicPair.Detect(16000); d3.add(x1, x2, 512);
+    ok(d3.verdict() == null, "M13 мало отсчётов — решения нет");
 
     System.out.println(fails == 0 ? "MicPairTest: " + checks + " проверок, все прошли" : "MicPairTest: провалов " + fails + " из " + checks);
     return fails;

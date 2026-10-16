@@ -8,7 +8,8 @@
   mean — (L + R) / 2: так телефон отдаёт приложению моно сейчас (results/2026-10-15-dual-mic.md);
   L, R — один микрофон: и нарезка, и распознавание по нему;
   best — нарезка по mean, распознаётся тот канал, где у куска лучше отношение к своему фону;
-  das  — нарезка по mean, распознаётся сумма каналов, выровненная по задержке этого куска (GCC-PHAT, ±1 мс).
+  das  — нарезка по mean, распознаётся сумма каналов, выровненная по задержке этого куска (GCC-PHAT, ±1 мс);
+  das2 — то же, но как в приложении (MicPair.delay): задержка по самым громким 2 с куска, целая, без долей.
 Счёт — как vad_denoise_eval.score: кусок относится к фразе, в чьё окно попал его конец; окна фраз — где файл фразы
 нашёлся в записи взаимной корреляцией (tools/air2_check.find). Сравнение с mean — парный бутстрэп по фразам.
 
@@ -57,13 +58,41 @@ def background(ch):
     return float(np.median(np.sort(e)[: len(e) // 3]))
 
 
+def gcc_int(l, r, max_lag=16):
+    """MicPair.gccPhat: целая задержка R относительно L, первый максимум в ±max_lag."""
+    n = len(l)
+    if n < 64:
+        return 0
+    N = 1 << int(np.ceil(np.log2(max(2, 2 * n - 1))))
+    A = np.fft.rfft(l - l.mean(), N); B = np.fft.rfft(r - r.mean(), N)
+    g = np.conj(A) * B
+    m = np.abs(g)
+    g = np.where(m < 1e-20, 0, g / np.maximum(m, 1e-300))
+    cc = np.fft.irfft(g, N)
+    vals = np.array([cc[k % N] for k in range(-max_lag, max_lag + 1)])
+    return int(np.argmax(vals)) - max_lag
+
+
+def app_delay(L, R, rate=SR, win_s=2.0, step_s=0.25):
+    """MicPair.delay: по самому громкому отрезку 2 с суммы каналов (весь кусок, если он короче полутора окон)."""
+    win, n, frm = int(win_s * rate), min(len(L), len(R)), 0
+    if n > win * 3 // 2:
+        step, best = max(1, int(step_s * rate)), -1.0
+        for s in range(0, n - win + 1, step):
+            e = float(np.sum((L[s:s + win] + R[s:s + win]) ** 2))
+            if e > best:
+                best, frm = e, s
+        return gcc_int(L[frm:frm + win], R[frm:frm + win])
+    return gcc_int(L[:n], R[:n])
+
+
 def segs_texts(x, variant, asr, cache):
     if variant in cache:
         return [tuple(s) for s in cache[variant]['segs']], cache[variant]['texts']
     L, Rc = x[:, 0], x[:, 1]
     mean = (L + Rc) / 2
     base = {'L': L, 'R': Rc}.get(variant, mean)
-    if variant in ('best', 'das') and 'mean' in cache:          # нарезка та же, что у mean, — не повторяем
+    if variant in ('best', 'das', 'das2') and 'mean' in cache:          # нарезка та же, что у mean, — не повторяем
         segs = [tuple(s) for s in cache['mean']['segs']]
     else:
         segs, _ = vde.segment(base, 'dn_sil', 'gtcrn', 0.0, -48.0, True, vde.Wiener(), **APP)
@@ -80,6 +109,13 @@ def segs_texts(x, variant, asr, cache):
         for a, b, _ in segs:
             d_ms, _ = a2.gcc_phat(L[a:b].astype(np.float64), Rc[a:b].astype(np.float64), SR)
             k = int(round(d_ms * SR / 1000))      # R позже L на k отсчётов — берём R на k позже
+            rr = np.zeros(b - a, np.float32); s0, s1 = max(a + k, 0), min(b + k, len(Rc))
+            rr[s0 - a - k:s1 - a - k] = Rc[s0:s1]
+            texts.append(asr((L[a:b] + rr) / 2))
+    elif variant == 'das2':                       # как в приложении: MicPair.delay (громкие 2 с, целая задержка) и aligned
+        texts = []
+        for a, b, _ in segs:
+            k = app_delay(L[a:b].astype(np.float64), Rc[a:b].astype(np.float64))
             rr = np.zeros(b - a, np.float32); s0, s1 = max(a + k, 0), min(b + k, len(Rc))
             rr[s0 - a - k:s1 - a - k] = Rc[s0:s1]
             texts.append(asr((L[a:b] + rr) / 2))

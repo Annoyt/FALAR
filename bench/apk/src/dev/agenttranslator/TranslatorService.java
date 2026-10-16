@@ -465,6 +465,7 @@ public class TranslatorService extends Service {
     autoDb = clampAuto(pr.getFloat("micautodb", 0));
     log("🎚 чувствительность: " + (micAuto ? String.format(Locale.ROOT, "авто, сейчас %+.1f дБ", autoDb) : "вручную, " + micGainDb + " дБ"));
     micSource = pr.getString("micsrc", "builtin");
+    dualMode = pr.getString("dualmic", "auto");
     holdMs = pr.getInt("hold", 1500);
     bargeOn = pr.getBoolean("barge", true); bargeOffMs = pr.getFloat("barge_off", Float.NaN);
     voiceWhat = Math.max(0, Math.min(3, pr.getInt("voicewhat", VoiceOut.AUTO)));
@@ -538,9 +539,9 @@ public class TranslatorService extends Service {
    *  по времени токенов (Clips.cuts): по ним «Слова» играют живой звук одного предложения; метки — от
    *  начала подставленной тишины. Распознавание — по одному: early и worker могут сойтись на стыке загрузки. */
   Recog recog(String dir, float[] samples, int sr, Engine en) {
-    float[] fed = samples;
-    if (padMs > 0) { int pad = padMs * sr / 1000; fed = new float[pad + samples.length];
-      System.arraycopy(samples, 0, fed, pad, samples.length); }
+    float[] use = asrFor(samples), fed = use;           // два микрофона: выровненная сумма той же длины (dualAsr)
+    if (padMs > 0) { int pad = padMs * sr / 1000; fed = new float[pad + use.length];
+      System.arraycopy(use, 0, fed, pad, use.length); }
     long t0 = System.nanoTime(); Engine.Asr ar;
     synchronized (asrLock) { ar = en.asrFull(dir.substring(0, 2), fed, sr); }   // sherpa ресемплирует сам
     long ms = (System.nanoTime() - t0) / 1000000;
@@ -914,12 +915,22 @@ public class TranslatorService extends Service {
       final String wav = i.getStringExtra("feedwav");
       final int speed = i.getStringExtra("speed") == null ? 1 : Integer.parseInt(i.getStringExtra("speed"));
       new Thread(() -> { try {
-        WaveReader wr = new WaveReader(wav); float[] s2 = wr.getSamples();
+        // Стереозапись комнаты (bench/air/record_air2.sh): в нарезку — среднее каналов, как отдаёт телефон, L и R — в side,
+        // как у живого захвата в два канала; «два ли микрофона» решается по первым 2 с подачи. --es dualmic off — только среднее.
+        int[] wr8 = new int[1]; float[][] chs = MicPair.readWav(new File(wav), wr8);
+        final boolean fst = chs != null && chs.length == 2;
+        float[] s2;
+        if (fst) {
+          s2 = new float[chs[0].length]; for (int k = 0; k < s2.length; k++) s2[k] = (chs[0][k] + chs[1][k]) * 0.5f;
+          if ("off".equals(dualMode)) dualMic = Boolean.FALSE;
+          else { MicPair.Detect d = new MicPair.Detect(2 * 16000); d.add(chs[0], chs[1], chs[0].length); dualVerdict(Boolean.TRUE.equals(d.verdict()), d); }
+        } else { WaveReader wr = new WaveReader(wav); s2 = wr.getSamples(); }
         feeding = true; capClear(); capOffer(GAP); noiseRms = 0; vadSamples = 0; listenLiveReset = true; dnReset = true;   // GAP: кусок и подпор прошлой подачи — не в эту
-        log("▷ подаю " + new File(wav).getName() + ": " + String.format(Locale.ROOT, "%.1f", s2.length / 16000.0) + " с, скорость ×" + speed);
+        log("▷ подаю " + new File(wav).getName() + ": " + String.format(Locale.ROOT, "%.1f", s2.length / 16000.0) + " с, скорость ×" + speed + (fst ? ", два канала" : ""));
         tsv("feed_begin", new File(wav).getName(), "" + s2.length, "" + speed);
         for (int o = 0; o + 512 <= s2.length && running; o += 512) {
           float[] fr = Arrays.copyOfRange(s2, o, o + 512);
+          if (fst && !"off".equals(dualMode)) side.put(fr, Arrays.copyOfRange(chs[0], o, o + 512), Arrays.copyOfRange(chs[1], o, o + 512));
           while (running && !capOffer(fr)) Thread.sleep(5);     // темп — свой, как у микрофона: и во время загрузки
           if (speed > 0) Thread.sleep(32 / speed);
         }
@@ -1111,6 +1122,13 @@ public class TranslatorService extends Service {
       log("🎙 источник входа: " + micSource + " — перезапускаю захват");
       restartCapture();
     }
+    if (i != null && i.hasExtra("dualmic")) {
+      String v = i.getStringExtra("dualmic");
+      if (v.equals("auto") || v.equals("on") || v.equals("off")) {
+        dualMode = v; getSharedPreferences("at", MODE_PRIVATE).edit().putString("dualmic", v).apply();
+        log("🎙 стенд: два микрофона — " + v + " · перезапускаю захват"); restartCapture();
+      }
+    }
     if (i != null && i.hasExtra("autolang")) { autoLang = "1".equals(i.getStringExtra("autolang")); log("🌐 направление " + (autoLang ? "по языку реплики" : "закреплено")); }
     if (i != null && (i.hasExtra("gain") || i.hasExtra("micgain") || i.hasExtra("split"))) {
       if (i.hasExtra("gain")) outGainDb = Double.parseDouble(i.getStringExtra("gain"));
@@ -1171,7 +1189,7 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("settings")) { android.content.SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
       log("🧪 настройки: разбор " + p.getInt("refine_every", 3) + " · облако " + p.getInt("cloud_every", 0) + " · чтение вслух " + p.getInt("read_guard", 1)
           + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0) + " · перевод точнее " + (p.getBoolean("mt_quality", true) ? 1 : 0)
-          + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))]); }
+          + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))] + " · два микрофона " + p.getString("dualmic", "auto")); }
     if (i != null && i.hasExtra("refineevery")) setRefineEvery(Integer.parseInt(i.getStringExtra("refineevery")));
     if (i != null && i.hasExtra("cloudevery")) setCloudEvery(Integer.parseInt(i.getStringExtra("cloudevery")));
     if (i != null && i.hasExtra("consent")) { getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("cloud_consent", "1".equals(i.getStringExtra("consent"))).apply(); log("☁ согласие на отправку разговора: " + cloudConsent()); }
@@ -3378,15 +3396,37 @@ public class TranslatorService extends Service {
     try { Thread.sleep(350); } catch (InterruptedException e) {}
     capturing = true; startCapture(); }
 
+  /** Запись слушания: VOICE_RECOGNITION, 16 кГц, float; stereo — два канала (не вышло — объект не инициализирован
+   *  или исключение: тогда моно). */
+  AudioRecord buildRec(boolean stereo) {
+    int mask = stereo ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO;
+    int min = AudioRecord.getMinBufferSize(16000, mask, AudioFormat.ENCODING_PCM_FLOAT);
+    AudioRecord.Builder rb = new AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+      .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(16000).setChannelMask(mask).build())
+      .setBufferSizeInBytes(Math.max(min, 16000 * 4 * 8 * (stereo ? 2 : 1)));   // 8 с вместо 1 с
+    if (Build.VERSION.SDK_INT >= 30) try { rb.setPrivacySensitive(true); } catch (Throwable e) {}   // §7: вход не попадает другим приложениям
+    if (!stereo) return rb.build();
+    try { return rb.build(); } catch (Throwable e) { log("🎙 два канала: " + e.getMessage()); return buildRec(false); }
+  }
+
+  /** Решение «два микрофона или один» по первым секундам захвата или подачи (MicPair.Detect) — в журнал. */
+  void dualVerdict(boolean two, MicPair.Detect d) {
+    boolean force = "on".equals(dualMode);
+    dualMic = two || force;
+    log(String.format(Locale.ROOT, "%s (одинаковых отсчётов %.0f %%, связь каналов %.2f)%s",
+        two ? "🎙 два микрофона: да — распознаю их сумму, выровненную по каждой фразе" : "🎙 микрофон один: каналы совпадают",
+        100 * d.sameShare(), d.corr(), two ? "" : force ? " — стенд велел складывать всё равно" : " — распознаю как раньше"));
+    tsv("dualmic_detect", two ? "two" : "one", String.format(Locale.ROOT, "%.3f", d.sameShare()), String.format(Locale.ROOT, "%.3f", d.corr()));
+  }
+
   void startCapture() {
     capThread = new Thread(() -> {
       android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
-      int min = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT);
-      AudioRecord.Builder rb = new AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-        .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(16000).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
-        .setBufferSizeInBytes(Math.max(min, 16000 * 4 * 8));   // 8 с вместо 1 с
-      if (Build.VERSION.SDK_INT >= 30) try { rb.setPrivacySensitive(true); } catch (Throwable e) {}   // §7: вход не попадает другим приложениям
-      AudioRecord rec = rb.build();
+      // Два микрофона (MicPair, 16.10): телефон и так слушает обоими, но отдаёт приложению их среднее; в два канала —
+      // каждый отдельно. Гарнитура по SCO — один микрофон. Два канала не открылись — один, как было.
+      boolean wantSt = !"off".equals(dualMode) && !"headset".equals(micSource);
+      AudioRecord rec = buildRec(wantSt);
+      if (wantSt && rec.getState() != AudioRecord.STATE_INITIALIZED) { rec.release(); log("🎙 два канала не открылись — слушаю одним"); rec = buildRec(false); }
       // Источник входа выбирается в настройках. Встроенный по умолчанию не случайно: микрофон
       // наушников работает по SCO, и тогда вывод в них падает до телефонного качества (§7).
       int want = "headset".equals(micSource) ? AudioDeviceInfo.TYPE_BLUETOOTH_SCO : AudioDeviceInfo.TYPE_BUILTIN_MIC;
@@ -3409,13 +3449,25 @@ public class TranslatorService extends Service {
       };
       try { getSystemService(AudioManager.class).registerAudioRecordingCallback(cb, main); } catch (Throwable e) {}
       float[] win = new float[512];
+      final boolean st = rec.getChannelCount() == 2; final float[] stBuf = st ? new float[1024] : null;
+      MicPair.Detect det = st ? new MicPair.Detect(2 * 16000) : null;
+      dualMic = st ? null : Boolean.FALSE;
       // Во время загрузки в очереди — накопленное до микрофона (поток прошлого запуска, подача стенда): его не трогаем.
       if (!loading && !feeding) capClear();
       samplesRead = 0; captureStart = System.currentTimeMillis(); framesDropped = 0;
       startVad();
       boolean wasGiving = false;                     // отдавал ли прошлый кадр нарезке: на переходе — разрыв (GAP)
       while (running && capturing && gen == capGen) {
-        int n = rec.read(win, 0, 512, AudioRecord.READ_BLOCKING);
+        int n; float[] lf = null, rf = null;
+        if (st) {                                      // два канала: в очередь — среднее (как отдавал телефон), L и R — в side
+          int got2 = rec.read(stBuf, 0, 1024, AudioRecord.READ_BLOCKING);
+          n = got2 < 0 ? got2 : got2 / 2;
+          if (n > 0) {
+            lf = new float[n]; rf = new float[n];
+            for (int k = 0; k < n; k++) { lf[k] = stBuf[2 * k]; rf[k] = stBuf[2 * k + 1]; win[k] = (lf[k] + rf[k]) * 0.5f; }
+            if (det != null) { det.add(lf, rf, n); Boolean v = det.verdict(); if (v != null) { dualVerdict(v, det); det = null; } }
+          }
+        } else n = rec.read(win, 0, 512, AudioRecord.READ_BLOCKING);
         if (n < 0) {                                   // иначе вечный busy-loop на ядре при ERROR_DEAD_OBJECT
           log("❌ чтение микрофона вернуло " + n + " — пересоздаю AudioRecord");
           try { rec.stop(); rec.release(); } catch (Throwable e) {}
@@ -3462,6 +3514,7 @@ public class TranslatorService extends Service {
           boolean taken = bargeOn && eng != null && bargeFrame(rec, win, n);
           if (!taken && giving) {
             float[] c = n == win.length ? win.clone() : Arrays.copyOf(win, n);
+            if (lf != null) side.put(c, lf, rf);       // до очереди: нарезка может закрыть кусок на этом же кадре
             if (!capOffer(c)) framesDropped++;
             ringPut(c);                                // последняя секунда слушания — подпор удержания
           }
@@ -3505,6 +3558,17 @@ public class TranslatorService extends Service {
   static final int FRAME_MS = Slicer.FRAME_MS;          // 512 отсчётов при 16 кГц
   /** Сборка куска — Slicer (подпор, хвост, выдержка, минимум речи, предел длины); его настройки меняет стенд. */
   final Slicer slicer = new Slicer();
+  /** Два микрофона (MicPair, results/2026-10-15-dual-mic.md): auto — слушание пишет два канала, и если это два разных
+   *  микрофона (MicPair.Detect по первым 2 с), распознаватель получает их сумму, выровненную по задержке куска; нарезка,
+   *  перебивание, удержание и звук реплик — по среднему, как телефон отдавал и раньше. off — один канал, как до 16.10;
+   *  on — складывать, даже если каналы совпали (стенд). Стенд: --es dualmic auto|on|off. */
+  volatile String dualMode = "auto";
+  /** Решение по нынешнему захвату: true — два микрофона, false — один, null — ещё не решено. */
+  volatile Boolean dualMic = null;
+  /** L и R кадров слушания до усиления (~32 с): кусок обычной длины с подпором и очередь при обычной работе. */
+  final MicPair.Side side = new MicPair.Side(1000);
+  /** Звук для распознавания вместо куска моно: {кусок, выровненная сумма}; кладёт emit, забирает recog. */
+  final ArrayDeque<float[][]> asrAlt = new ArrayDeque<>();
   /** Минимум речи после срабатывания детектора, мс: в тишине и при включённом шумодаве нарезки. Минимум считался
    *  дважды — 0,25 с у silero и ещё 250 мс здесь, — и однословные ответы («Não», «Claro», «Нет») куска не давали.
    *  Перебор на записях (results/2026-10-08-asr-review.md): в тишине silero 0,064 с + 150 мс отдаёт их распознаванию
@@ -3655,6 +3719,28 @@ public class TranslatorService extends Service {
       }
     }, "vad"); vadThread.start();
   }
+  /** Распознавателю — сумма двух микрофонов, выровненная по задержке куска (MicPair.delay, aligned): на шести записях
+   *  комнаты WER 12,9 → 8,5 % (results/2026-10-15-dual-mic.md). Усиление — то же, что у куска моно. Нет L и R хоть
+   *  одного кадра (подача моно, поток с диска, кадр от перебивания) — распознаётся моно. В at.tsv — задержка, мс, и
+   *  сколько стоил подсчёт, мкс. */
+  void dualAsr(Slicer.Piece pc, float[] out, double gdb) {
+    float[][] lr = side.piece(pc.src);
+    if (lr == null) { tsv("dualmic", "mono", "" + out.length); return; }
+    long t0 = System.nanoTime();
+    int lag = MicPair.delay(lr[0], lr[1], 16000);
+    float[] a = MicPair.aligned(lr[0], lr[1], lag);
+    Gain g = new Gain(16000); g.db = gdb; g.limit = limiterOn; g.apply(a, a.length, null);
+    synchronized (asrAlt) { asrAlt.addLast(new float[][]{out, a}); while (asrAlt.size() > 32) asrAlt.removeFirst(); }
+    tsv("dualmic", String.format(Locale.ROOT, "%.3f", lag / 16.0), "" + (System.nanoTime() - t0) / 1000);
+  }
+  /** Что распознавать вместо куска: его выровненная сумма, если она есть (dualAsr), иначе он сам. */
+  float[] asrFor(float[] samples) {
+    synchronized (asrAlt) {
+      for (java.util.Iterator<float[][]> it = asrAlt.iterator(); it.hasNext(); ) { float[][] p = it.next(); if (p[0] == samples) { it.remove(); return p[1]; } }
+    }
+    return samples;
+  }
+
   /** Поток до нарезки дочитан (RAW_END), но пришёл посреди фразы: файлы удаляются, когда она закроется. */
   boolean rawDropPending = false;
   void dropRawNow() { rawDropPending = false; Inbox in = inbox; int n = in == null ? 0 : in.dropRaw(); tsv("early", "raw_end", "" + (System.currentTimeMillis() - bootAt), "" + n); }
@@ -3665,6 +3751,7 @@ public class TranslatorService extends Service {
     final double nz = noiseRms; final long at = System.currentTimeMillis();
     if (dumpSegs != null) try { new DenoisedAudio(out, 16000).save(new File(dumpSegs, "seg_" + at + ".wav").getAbsolutePath()); } catch (Throwable e) {}
     final long pos = vadSamples; final double gdb = gainListen.db;
+    if (Boolean.TRUE.equals(dualMic)) dualAsr(pc, out, gdb);
     // Авто сдвигается здесь, в момент нарезки, а не в очереди распознавания: иначе следующая
     // фраза шла бы ещё со старым усилением, а при подаче записи ×4 — несколько фраз.
     final double[] sf = Gain.speechFloor(out);
