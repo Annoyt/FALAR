@@ -33,6 +33,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   boolean meterOn = false, resumed = false;
   EditText keyIn; SeekBar sMic, sHold; TextView micLbl, holdLbl, micVal; Switch cMicAuto;
   Switch cKeepAudio; TextView audioLbl; int audioReq = 0;
+  Switch swTele;                                       // статистика разработчику (Telemetry), по согласию
   View reviewBox; TextView revWord, revRu, revEx, revStat, revSub; Button bRevPlay, bRevShow, bRevOk, bRevNo, bRevStart, bModeEar, bModeSay, bRevHold, bRevIdk, bRevListen, bRevNext;
   /** Повторение: ключ, карточка, пример и что сказать; revMode 0 — на слух, 1 — вслух; revAnswered — ответ
    *  по этой карточке уже записан в лесенку (повторные попытки — упражнение, срок не меняют). */
@@ -793,7 +794,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final java.util.List<String> items = new java.util.ArrayList<>();
     if (photo) items.add(L.t("Показать снимок"));
     if (mine) { items.add(L.t("Исправить текст")); items.add(L.t("Исправить перевод")); }
-    if (svc.chats.audioOf(idx) != null) items.add(L.t("Послушать, как сказали"));   // живой звук собеседника, если хранится
+    if (svc.chats.audioOf(idx) != null) { items.add(L.t("Послушать, как сказали")); items.add(L.t("Отправить звук разработчику")); }   // живой звук собеседника, если хранится
     if (!photo && svc.mod(Modules.TTS)) items.add(L.t("Произнести ещё раз"));   // снимок не озвучивается; без модуля «Озвучка» — нечем
     items.add(L.t("Скопировать перевод")); items.add(L.t("Отправить перевод…"));
     items.add(L.t("Сообщить о переводе")); items.add(L.t("Удалить реплику")); items.add(L.t("Перенести в другой разговор"));
@@ -809,12 +810,103 @@ public class MainActivity extends Activity implements TranslatorService.Listener
           else if (it.equals(L.t("Произнести ещё раз"))) svc.sayTurn(idx);
           else if (it.equals(L.t("Скопировать перевод"))) copyText(t[2]);
           else if (it.equals(L.t("Отправить перевод…"))) shareText(t[2]);
+          else if (it.equals(L.t("Отправить звук разработчику"))) donateDialog(idx, t[1]);
           else if (it.equals(L.t("Сообщить о переводе"))) reportTurn(t[0], t[1], t[2]);
           else if (it.equals(L.t("Удалить реплику"))) { boolean wasLast = idx == svc.chats.size() - 1; if (svc.dropTurn(idx)) { refreshHist(); refreshChats(); if (wasLast) showLastTurn(); } }
           else moveTurnTo(idx);
         })
         .setNegativeButton(L.t("отмена"), null).show();
   }
+  // ---- Телеметрия по согласию (Telemetry, TranslatorService.maybeSendTelemetry): владелец 15.10 — «чтобы давали
+  // согласие» и «пункт „О приложении“ … отказ от ответственности, чтобы не было претензий».
+  void setTele(String v) {
+    if (svc != null) svc.setTelemetry(v);
+    else prefs.edit().putString("telemetry", v).putLong("tele_exit_at", System.currentTimeMillis()).apply();
+    Telemetry.collect = Telemetry.YES.equals(v);
+    refreshTele();
+  }
+  void refreshTele() {
+    if (swTele == null) return;
+    boolean on = Telemetry.YES.equals(prefs.getString("telemetry", Telemetry.ASK));
+    if (swTele.isChecked() != on) { uiSync = true; swTele.setChecked(on); uiSync = false; }
+  }
+  /** Спросить о статистике один раз: не на экране первой настройки и не поверх «Что нового». Закрыли, не
+   *  ответив, — спросим при следующем запуске. */
+  void maybeAskTelemetry() {
+    if (!Telemetry.ASK.equals(prefs.getString("telemetry", Telemetry.ASK)) || screen == 4 || newsBox != null || isFinishing()) return;
+    new android.app.AlertDialog.Builder(this)
+        .setTitle(L.t("Помочь сделать Falar лучше?"))
+        .setMessage(L.t("Раз в сутки Falar может отправлять разработчику анонимную статистику: модель телефона и версию Android, "
+            + "сколько фраз распозналось и сколько нет, фон вокруг, какой микрофон, скорость работы и сбои. Звук, тексты разговоров "
+            + "и номер телефона не уходят. Передумаете — переключатель «Статистика для разработчика» в настройках."))
+        .setPositiveButton(L.t("отправлять"), (d, w) -> setTele(Telemetry.YES))
+        .setNegativeButton(L.t("не отправлять"), (d, w) -> setTele(Telemetry.NO))
+        .setNeutralButton(L.t("подробнее"), (d, w) -> aboutDialog())
+        .show();
+  }
+  /** «О приложении»: что это, что уходит в интернет, отказ от ответственности, связь. */
+  void aboutDialog() {
+    android.content.pm.PackageInfo pi = pkg(); String myVer = pi == null ? "" : pi.versionName;
+    android.text.SpannableStringBuilder b = new android.text.SpannableStringBuilder();
+    b.append(L.f("Falar %s — переводчик разговора между бразильским португальским и русским. Распознавание речи, перевод "
+        + "и озвучка работают на телефоне, без интернета.", myVer));
+    aboutPart(b, L.t("Что уходит в интернет"), new String[]{
+        L.t("• Загрузка моделей и проверка обновлений — с GitHub и Hugging Face."),
+        L.t("• Облачный пересмотр — только с вашим ключом OpenRouter и после вашего согласия."),
+        L.t("• Статистика для разработчика — только если вы согласились: раз в сутки модель телефона, версия Android, сколько "
+            + "фраз распознано и сколько нет, фон вокруг, микрофон, скорость и сбои. Звук, тексты и номер телефона не уходят."),
+        L.t("• Звук реплики — только когда вы сами нажмёте «Отправить звук разработчику» и отметите, что человек на записи "
+            + "согласен. Запись получит номер: напишите его в Telegram @falar_tbot, и её удалят.")});
+    aboutPart(b, L.t("Отказ от ответственности"), new String[]{
+        L.t("Falar переводит автоматически и может ошибаться — в словах, числах, именах и смысле. Не полагайтесь на него там, "
+            + "где ошибка опасна или дорога: у врача, в суде, в полиции, в банке, при подписании документов и в экстренных случаях — "
+            + "там нужен живой переводчик."),
+        L.t("Приложение предоставляется как есть, без каких-либо гарантий. Разработчик не отвечает за последствия "
+            + "использования перевода и за решения, принятые на его основе."),
+        L.t("Предупреждайте собеседника, что разговор переводит приложение. Храните и отправляйте звук собеседника "
+            + "только с его согласия.")});
+    aboutPart(b, L.t("Связь"), new String[]{
+        L.t("Ошибки и идеи — «Написать разработчику» в настройках или Telegram @falar_tbot. Исходный код — github.com/Annoyt/FALAR.")});
+    new android.app.AlertDialog.Builder(this).setTitle(L.t("О приложении")).setMessage(b).setPositiveButton(L.t("Понятно"), null).show();
+  }
+  static void aboutPart(android.text.SpannableStringBuilder b, String head, String[] lines) {
+    b.append("\n\n");
+    int s0 = b.length(); b.append(head);
+    b.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), s0, b.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    for (String l : lines) b.append("\n").append(l);
+  }
+  /** «Отправить звук разработчику»: запись реплики и её текст — боту, в топик «Телеметрия», только с отметкой, что
+   *  человек на записи согласен. Текст можно поправить — как сказано на самом деле: такой пары (звук и верный
+   *  текст) распознаванию и не хватает. В ответ — номер записи: по нему её удаляют. */
+  void donateDialog(final int idx, String src) {
+    LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(dp(22), dp(8), dp(22), 0);
+    TextView why = new TextView(this); why.setTextSize(15);
+    why.setText(L.t("Запись этой реплики и её текст уйдут разработчику в Telegram, чтобы улучшить распознавание. "
+        + "Поправьте текст, если распознано неверно:"));
+    final EditText et = new EditText(this); et.setText(src); et.setSelection(et.getText().length());
+    final CheckBox cb = new CheckBox(this); cb.setText(L.t("Человек на записи согласен, чтобы её отправили"));
+    TextView note = new TextView(this); note.setTextSize(13);
+    note.setText(L.t("Запись получит номер: чтобы её удалили, напишите его в Telegram @falar_tbot."));
+    box.addView(why); box.addView(et); box.addView(cb); box.addView(note);
+    final android.app.AlertDialog d = new android.app.AlertDialog.Builder(this).setTitle(L.t("Отправить звук разработчику")).setView(box)
+        .setPositiveButton(L.t("отправить"), null).setNegativeButton(L.t("отмена"), null).show();
+    final Button ok = d.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+    ok.setEnabled(false);
+    cb.setOnCheckedChangeListener((x, on) -> ok.setEnabled(on));
+    ok.setOnClickListener(x -> {
+      if (svc == null) return;
+      ok.setEnabled(false); cb.setEnabled(false); et.setEnabled(false); d.setTitle(L.t("Отправляю…"));
+      svc.donateAudio(idx, et.getText().toString().trim(), (n, err) -> {
+        d.dismiss();
+        if (isFinishing()) return;
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(n > 0 ? L.t("Звук отправлен") : L.t("Не получилось отправить"))
+            .setMessage(n > 0 ? L.f("Спасибо! Номер записи: %d. Чтобы её удалили, напишите этот номер в Telegram @falar_tbot.", n) : err)
+            .setPositiveButton(L.t("Понятно"), null).show();
+      });
+    });
+  }
+
   /** «Сообщить о переводе»: два пути. Telegram — сообщение боту (bot/ в репозитории), его видит только
    *  разработчик, ответ приходит туда же; GitHub — открытое обсуждение по шаблону, нужен аккаунт.
    *  Своего сервера нет ни там, ни там — обычная ссылка, отправляет человек сам. Что уйдёт, написано
@@ -995,7 +1087,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     if (modsView != null) { modsView.setVisibility(tab == 5 ? View.VISIBLE : View.GONE); cloudView.setVisibility(tab == 6 ? View.VISIBLE : View.GONE); journalView.setVisibility(tab == 7 ? View.VISIBLE : View.GONE); }
     // Сегменты — заново у службы при каждом открытии: настройку меняют не только с этого экрана
     // (стенд, другой экран), а сегмент показывал бы прежнее до следующего запуска (test_ui_device.sh U4).
-    if (tab == 2 || tab == 6) { refreshIntervals(); refreshReadGuard(); refreshVoiceWhat(); refreshAudio(); }
+    if (tab == 2 || tab == 6) { refreshIntervals(); refreshReadGuard(); refreshVoiceWhat(); refreshAudio(); refreshTele(); }
     if (tab == 6) refreshKey(null);
     if (tab == 7 && logScroll != null) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     if (setupView != null) setupView.setVisibility(tab == 4 ? View.VISIBLE : View.GONE);
@@ -2331,6 +2423,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     rowMods = r.nav(c4, app.falar.R.drawable.ic_scan, L.t("Модули и файлы"), "", x -> { show(5); refreshModules(); refreshModels(); });
     rowLog = r.nav(c4, app.falar.R.drawable.ic_list, L.t("Журнал"), "", x -> show(7));
     logLast = rowLog.sub; logLast.setVisibility(View.VISIBLE); logLast.setSingleLine(true); logLast.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    // Статистика разработчику — только по согласию (окно согласия или здесь); что уходит — «О приложении».
+    swTele = r.sw(); swTele.setChecked(Telemetry.YES.equals(prefs.getString("telemetry", Telemetry.ASK)));
+    r.row(c4, app.falar.R.drawable.ic_chart, L.t("Статистика для разработчика"),
+        L.t("анонимно: телефон, Android, как распознаётся речь — без звука и текстов"), swTele);
+    swTele.setOnCheckedChangeListener((b, on) -> { if (!uiSync) setTele(on ? Telemetry.YES : Telemetry.NO); });
+    r.nav(c4, app.falar.R.drawable.ic_info, L.t("О приложении"), L.t("что отправляет Falar, отказ от ответственности"), x -> aboutDialog());
 
     ScrollView outer = new ScrollView(this); outer.setBackgroundColor(look.page); outer.addView(v);
     return outer;
@@ -2921,7 +3019,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
           .putInt("news_from", from).putString("news_from_name", stored > 0 ? prefs.getString("ran_name", "") : "")
           .putBoolean("news_show", any).putBoolean("news_logged", !any).apply();
     }
-    if (prefs.getBoolean("news_show", false)) newsDialog(false);
+    if (prefs.getBoolean("news_show", false)) newsDialog(false); else maybeAskTelemetry();
   }
   /** Окно: сначала «Новое», потом «Исправлено»; у пунктов версия, если версий несколько. Из «Настроек»
    *  (manual) без обновления — пункты установленной версии. */
@@ -2951,7 +3049,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         .setTitle(L.f("Что нового в Falar %s", p.versionName)).setView(sv)
         .setPositiveButton(L.t("Понятно"), null).create();
     // Закрыли — «Понятно», «назад» или касанием мимо — значит, видели: само больше не показывается.
-    d.setOnDismissListener(x -> { if (newsBox == d) { newsBox = null; prefs.edit().putBoolean("news_show", false).apply(); } });
+    d.setOnDismissListener(x -> { if (newsBox == d) { newsBox = null; prefs.edit().putBoolean("news_show", false).apply(); maybeAskTelemetry(); } });
     newsBox = d; d.show();
   }
   /** Раздел окна: заголовок цветом акцента и пункты точками; перенесённая строка пункта встаёт под текст. */
@@ -3254,8 +3352,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     TextView sub = new TextView(this); sub.setTextSize(16); sub.setText(L.t("Переводчик разговора: бразильский португальский ↔ русский, без интернета.")); v.addView(sub);
     TextView warn = new TextView(this); warn.setTextSize(15); warn.setPadding(0, 24, 0, 24);
     warn.setText(L.t("Приложение слушает микрофон и распознаёт речь всех, кто рядом, — предупредите собеседника. "
-               + "Распознавание, перевод и голос работают на телефоне: в интернет ничего не уходит, кроме загрузки моделей сейчас "
-               + "и облачного пересмотра, который включается отдельно и с вашего согласия."));
+               + "Распознавание, перевод и голос работают на телефоне: в интернет ничего не уходит, кроме загрузки моделей сейчас, "
+               + "облачного пересмотра и статистики для разработчика — их включают отдельно и только с вашего согласия."));
     v.addView(warn);
     TextView h1 = new TextView(this); h1.setTextSize(17); h1.setTypeface(null, Typeface.BOLD); h1.setText(L.t("1. Микрофон")); v.addView(h1);
     setupMic = new TextView(this); setupMic.setTextSize(15); v.addView(setupMic);

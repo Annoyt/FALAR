@@ -35,6 +35,35 @@ export const stats = table('stats', {
   data: text('data').notNull(),
 });
 
+// Пакеты статистики приложения по согласию человека (handlers/telemetry): устройство, счётчики
+// распознавания, сбои — JSON без звука, текстов и номера установки; адрес не пишется.
+export const telemetry = table('telemetry', {
+  id:   integer('id').primaryKey({ autoIncrement: true }),
+  day:  text('day').notNull(),
+  at:   integer('at').notNull(),
+  data: text('data').notNull(),
+}, (t) => ({
+  day: index('idx_telemetry_day').on(t.day),
+}));
+
+// Звук реплики, присланный человеком по кнопке и с согласием. Номер (id) приложение показывает ему —
+// по нему запись удаляют (/del). Сам звук — в Telegram (chat, msg, file — его file_id), здесь — что сказано.
+export const donations = table('donations', {
+  id:    integer('id').primaryKey({ autoIncrement: true }),
+  day:   text('day').notNull(),
+  at:    integer('at').notNull(),
+  lang:  text('lang').notNull(),
+  durMs: integer('dur_ms').notNull(),
+  heard: text('heard').notNull().default(''),
+  said:  text('said').notNull().default(''),
+  app:   text('app').notNull().default(''),
+  chat:  integer('chat'),
+  msg:   integer('msg'),
+  file:  text('file'),
+}, (t) => ({
+  day: index('idx_donations_day').on(t.day),
+}));
+
 // Группа разработчика и номера её топиков: пишет /setup.
 export const settings = table('settings', {
   key:   text('key').primaryKey(),

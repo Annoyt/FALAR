@@ -113,6 +113,7 @@ async function fromOwner(m, text) {
   if (cmd === 'setup') return setup(m);
   if (cmd === 'start' || cmd === 'help') return say(m.chat.id, F.OWNER_HELP, thread);
   if (cmd === 'id') return say(m.chat.id, 'Ваш id: ' + m.from.id + (m.chat.type === 'private' ? '' : ', группа: ' + m.chat.id), thread);
+  if (cmd === 'del') return delDonation(m, text, thread);
   // В топике каждое сообщение формально — ответ на его заглавное: это не ответ человеку.
   const re = m.reply_to_message && !m.reply_to_message.forum_topic_created ? m.reply_to_message : null;
   if (!re) { if (m.chat.type === 'private') await say(m.chat.id, F.OWNER_HINT); return; }   // в группе свои заметки — молча
@@ -129,6 +130,23 @@ async function fromOwner(m, text) {
   } catch (e) {
     await say(m.chat.id, 'Не доставлено: ' + ((e && e.description) || e), thread, m.message_id);
   }
+}
+
+/** /del 17 — удалить присланный звук № 17 (человек попросил): запись в базе и сообщение в «Телеметрии».
+ *  Telegram даёт боту удалять сообщения только первые 48 часов — позже бот просит удалить его вручную. */
+async function delDonation(m, text, thread) {
+  const n = Number((/^\/del(?:@\w+)?\s+№?\s*(\d{1,9})\b/i.exec(text) || [])[1]);
+  if (!n) return say(m.chat.id, 'Нужен номер записи: /del 17', thread);
+  const d = await store.donation(n);
+  if (!d) return say(m.chat.id, 'Записи № ' + n + ' нет — уже удалена или не было.', thread);
+  let gone = !d.msg;
+  if (d.chat && d.msg) {
+    try { await api.deleteMessage({ chat_id: d.chat, message_id: d.msg }); gone = true; }
+    catch (e) { console.warn('del', e && e.description); }
+  }
+  await store.dropDonation(n);
+  return say(m.chat.id, 'Запись № ' + n + ' удалена из базы' + (gone ? ' и из топика.'
+    : '. Сообщение со звуком удалите вручную: Telegram даёт боту удалять только первые 48 часов.'), thread);
 }
 
 /** /test — полчаса бот видит разработчика обычным человеком; повтор — выключить. */

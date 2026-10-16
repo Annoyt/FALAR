@@ -99,7 +99,7 @@ await handle(grp('/setup', {}, { id: -1007, type: 'supergroup' }));
 eq(calls().map((c) => c.params.text), [F.SETUP_NO_FORUM], 'S2 группа без топиков');
 await handle(grp('/setup@falar_tbot'));
 cs = calls();
-eq(sent(cs, 'createForumTopic').map((c) => c.params.name), ['Переводы', 'Ошибки', 'Идеи', 'Задачи', 'Аналитика'], 'S3 пять топиков');
+eq(sent(cs, 'createForumTopic').map((c) => c.params.name), ['Переводы', 'Ошибки', 'Идеи', 'Задачи', 'Аналитика', 'Телеметрия'], 'S3 шесть топиков');
 ok(/^Готово/.test(sent(cs, 'sendMessage')[0].params.text), 'S3 «Готово»');
 const topic = {};
 for (const k of Object.keys(F.TOPICS)) topic[k] = Number(sdk.rows("SELECT value FROM settings WHERE key = :k", { ':k': 'topic:' + GROUP + ':' + k })[0].value);
@@ -398,6 +398,117 @@ await daily();
 eq(calls().map((c) => [c.method, c.params.chat_id]), [['sendMessage', GROUP], ['sendMessage', OWNER]], 'A18 в группу не вышло (не топик) — в личку');
 globalThis.fetch = fetch0; NOW = SAVED_NOW;
 
+// ---- телеметрия: статистика и звук из приложения по согласию (lib/telemetry, handlers/telemetry, /del)
+const T = await import('lib/telemetry');
+const tele = await import('handlers/telemetry');
+const PKT = { v: 1, app: { name: '0.33.0', code: 39, slim: false, ui: 'ru', modules: ['tts', 'denoise'] },
+  device: { maker: 'Xiaomi', model: 'Redmi Note 12', android: '14', sdk: 34, ram_gb: 6, soc: 'SM6225', fx: { ns: true, agc: false } },
+  asr: { hours: 24, turns: { pt: 30, ru: 12 }, empty: 4, hold: 12, listen: 30, noise: [0, 5, 20, 12, 5], denoise: 6, wiener: 20,
+    music: 1, mic: { builtin: 40, bt: 2 }, rtf_ms: 380, load_ms: 9800, edits: 2, edit_chars: 14, edit_total: 230, foreign: 3, novo: 7,
+    skips: { lang: 1, late: 2 }, gain_db: 4.5, clip: 1 },
+  crashes: [{ at: at(15, 20, 31), kind: 'oom', what: 'java.lang.OutOfMemoryError', where: 'Engine.loadMt:412', v: '0.32.0' }] };
+let tp = T.packet(PKT);
+eq([tp.app.code, tp.asr.noise.length, tp.crashes.length], [39, 5, 1], 'T1 пакет принят как есть');
+const bad = (x, why) => { let e = null; try { T.packet(x); } catch (err) { e = err.message; } ok(e !== null, 'T2 ' + why + ' — отказ'); };
+bad({ ...PKT, v: 2 }, 'другая версия');
+bad({ ...PKT, app: { code: 1 } }, 'нет имени версии');
+bad({ ...PKT, device: { model: 'x'.repeat(301) } }, 'строка длиннее 300');
+bad({ ...PKT, asr: { a: { b: { c: { d: 1 } } } } }, 'слишком глубоко');
+bad({ ...PKT, asr: { turns: Infinity } }, 'бесконечность');
+bad({ ...PKT, asr: { 'Bad-Key': 1 } }, 'чужое имя поля');
+bad({ ...PKT, crashes: Array(11).fill({}) }, 'больше 10 сбоев');
+bad({ ...PKT, device: null }, 'null');
+eq(T.clean('a\u0000b\nc'), 'a b c', 'T2 служебные знаки — пробелами');
+txt = T.packetText(tp);
+eq(txt.split('\n').slice(0, 2), ['#устройство · Falar 0.33.0 (39) · интерфейс ru',
+  'Xiaomi Redmi Note 12 · Android 14 (34) · 6 ГБ · SM6225'], 'T3 устройство двумя строками');
+ok(txt.includes('обработка звука в телефоне: шумоподавление есть, автоусиление нет'), 'T3 обработка звука телефона');
+ok(txt.includes('#распознавание за 24 ч: фраз 42 (pt 30, ru 12), не распознано 4 (9 %), кнопкой 12, слушанием 30'), 'T3 фразы и доля нераспознанных');
+ok(txt.includes('фон, dBFS: <−60 0 · −60…−54 5 · −54…−48 20 · −48…−42 12 · ≥−42 5'), 'T3 ступени фона');
+ok(txt.includes('микрофон: встроенный 40, гарнитура 2') && txt.includes('1 с речи — 0,38 с, загрузка моделей 9,8 с'), 'T3 микрофон и скорость');
+ok(txt.includes('правок 2 (6 % знаков), чужой голос отброшен 3') && txt.includes('ещё: novo=7'), 'T3 правки; незнакомое поле — как есть');
+ok(txt.includes('пропущено: не тот язык 1, голос не успел 2') && txt.includes('усиление в среднем +4,5 дБ, со срезанным звуком 1'), 'T3 пропуски, усиление, срез — словами');
+ok(/#сбой · нехватка памяти · java\.lang\.OutOfMemoryError · Engine\.loadMt:412 · 0\.32\.0 · 15\.10 20:31/.test(txt), 'T3 сбой одной строкой');
+ok(T.packetText(T.packet({ v: 1, app: { name: '1', code: 1 }, device: {} })).startsWith('#устройство · Falar 1 (1)\nтелефон без имени'), 'T3 пустое устройство');
+
+// приём пакета: база, топик «Телеметрия» (создаётся сам), предел в сутки
+await sdk.db.run('DELETE FROM settings WHERE key = :k', { ':k': 'topic:' + GROUP + ':data' });
+calls(); NOW = at(15, 21);
+let res = await tele.packet(PKT);
+cs = calls();
+eq(res, { status: 200, body: { ok: true } }, 'T4 пакет принят');
+eq(sent(cs, 'createForumTopic').map((c) => c.params.name), ['Телеметрия'], 'T4 топика «Телеметрия» нет — бот создал');
+const dataTopic = Number(sdk.rows('SELECT value FROM settings WHERE key = :k', { ':k': 'topic:' + GROUP + ':data' })[0].value);
+eq(sent(cs, 'sendMessage').map((c) => [c.params.message_thread_id, c.params.text.split('\n')[0]]),
+  [[dataTopic, '#устройство · Falar 0.33.0 (39) · интерфейс ru']], 'T4 сообщение — в «Телеметрию»');
+eq(sdk.rows('SELECT day, at FROM telemetry'), [{ day: '2026-10-15', at: at(15, 21) }], 'T4 строка в базе — день, время и данные, без адреса');
+eq((await tele.packet({ v: 1 })).status, 400, 'T5 не тот пакет — 400');
+eq(calls().length, 0, 'T5 и в Telegram ничего');
+for (let i = 0; i < T.POSTS_PER_DAY - 1; i++) await sdk.db.run("INSERT INTO telemetry (day, at, data) VALUES ('2026-10-15', 0, '{}')");
+res = await tele.packet(PKT);
+eq([res.status, calls().length, sdk.rows("SELECT count(*) AS n FROM telemetry WHERE day = '2026-10-15'")[0].n],
+  [200, 0, T.POSTS_PER_DAY + 1], 'T6 сверх предела дня — в базу, но не в Telegram');
+owner.setOwner(0); eq((await tele.packet(PKT)).status, 503, 'T7 бот не настроен — 503'); owner.setOwner(OWNER);
+
+// звук по согласию
+const OGG = Buffer.from('OggS fake opus clip for the test').toString('base64');
+const AUD = { v: 1, consent: true, lang: 'pt', dur_ms: 3240, mime: 'audio/ogg', audio: OGG, heard: 'bom dia tudo bem', said: 'bom dia, tudo bem?',
+  app: { name: '0.33.0', code: 39 }, device: { maker: 'Xiaomi', model: 'Redmi Note 12', android: '14' } };
+const badA = (x, why) => { let e = null; try { T.audio(x); } catch (err) { e = err.message; } ok(e !== null, 'T8 ' + why + ' — отказ'); };
+badA({ ...AUD, consent: false }, 'без согласия');
+badA({ ...AUD, lang: 'en' }, 'чужой язык');
+badA({ ...AUD, mime: 'audio/mpeg' }, 'чужой формат');
+badA({ ...AUD, dur_ms: 100 }, 'короче 0,3 с');
+badA({ ...AUD, audio: 'не base64 !!!!!!!!' }, 'не base64');
+eq(T.audio({ ...AUD, said: '' }).said, 'bom dia tudo bem', 'T8 правки нет — «на самом деле» = распознанное');
+let cap = T.audioCaption(T.audio(AUD), 17);
+eq(cap.split('\n'), ['#звук · pt · 3,2 с · № 17', 'Falar 0.33.0 · Xiaomi Redmi Note 12 · Android 14',
+  'Распознано: bom dia tudo bem', 'На самом деле: bom dia, tudo bem?'], 'T9 подпись: язык, длина, номер, устройство, оба текста');
+ok(T.audioCaption(T.audio({ ...AUD, said: AUD.heard }), 1).endsWith('Распознано верно: bom dia tudo bem'), 'T9 правки нет — «распознано верно»');
+cap = T.audioCaption(T.audio({ ...AUD, heard: 'а'.repeat(1000), said: 'б'.repeat(1000) }), 99999);
+ok(cap.length <= 1024 && cap.includes('№ 99999'), 'T9 длинные тексты укорочены до 1024, номер на месте');
+res = await tele.audio(AUD);
+cs = calls();
+eq([res.status, res.body.ok, typeof res.body.n], [200, true, 'number'], 'T10 звук принят, в ответе номер');
+const v = sent(cs, 'sendVoice')[0];
+ok(v && v.params.message_thread_id === dataTopic && v.params.voice instanceof File && v.params.voice.name === 'falar-' + res.body.n + '.ogg' &&
+  v.params.voice.type === 'audio/ogg' && v.params.voice.size === Buffer.from(OGG, 'base64').length, 'T10 голос — файлом в «Телеметрию»');
+ok(v.params.caption.startsWith('#звук · pt · 3,2 с · № ' + res.body.n), 'T10 подпись с номером');
+const row = sdk.rows('SELECT lang, dur_ms, heard, said, app, chat, msg, file FROM donations WHERE id = :id', { ':id': res.body.n })[0];
+eq([row.lang, row.dur_ms, row.said, row.app, row.chat, row.file], ['pt', 3240, 'bom dia, tudo bem?', '0.33.0', GROUP, 'voice-' + row.msg], 'T10 запись: что сказано и где звук');
+res = await tele.audio({ ...AUD, mime: 'audio/wav' });
+ok(res.status === 200 && sent(calls(), 'sendDocument')[0].params.document.name.endsWith('.wav'), 'T11 WAV — документом');
+res = await tele.audio({ ...AUD, mime: 'audio/mp4' });
+ok(res.status === 200 && sent(calls(), 'sendDocument')[0].params.document.name.endsWith('.m4a'), 'T11 m4a (Android 9) — документом');
+eq((await tele.audio({ ...AUD, consent: false })).status, 400, 'T12 без согласия — 400');
+sdk.api.fail('sendVoice', 'Bad Request: wrong file', 400); sdk.api.fail('sendVoice', 'Bad Request: wrong file', 400);
+const before = sdk.rows('SELECT count(*) AS n FROM donations')[0].n;
+res = await tele.audio(AUD);
+eq([res.status, sdk.rows('SELECT count(*) AS n FROM donations')[0].n], [502, before], 'T13 до Telegram не дошло — 502, записи нет');
+calls();
+for (let i = sdk.rows("SELECT count(*) AS n FROM donations WHERE day = '2026-10-15'")[0].n; i < T.AUDIO_PER_DAY; i++) {
+  await sdk.db.run("INSERT INTO donations (day, at, lang, dur_ms) VALUES ('2026-10-15', 0, 'pt', 1000)");
+}
+eq([(await tele.audio(AUD)).status, calls().length], [429, 0], 'T14 сверх предела дня — 429, в Telegram ничего');
+
+// /del: удалить присланный звук по номеру (человек попросил)
+const d1 = sdk.rows("SELECT id, msg FROM donations WHERE msg IS NOT NULL ORDER BY id LIMIT 1")[0];
+await handle(grp('/del ' + d1.id));
+cs = calls();
+eq(cs.map((c) => [c.method, c.params.message_id ?? null]), [['deleteMessage', d1.msg], ['sendMessage', null]], 'D1 /del — сообщение со звуком удалено');
+ok(/удалена из базы и из топика/.test(cs[1].params.text) && sdk.rows('SELECT count(*) AS n FROM donations WHERE id = :id', { ':id': d1.id })[0].n === 0, 'D1 и запись в базе');
+const d2 = sdk.rows("SELECT id FROM donations WHERE msg IS NOT NULL ORDER BY id LIMIT 1")[0];
+sdk.api.fail('deleteMessage', 'Bad Request: message can\'t be deleted', 400);
+await handle(dm(ME, '/del №' + d2.id));
+ok(/удалите вручную/.test(sent(calls(), 'sendMessage')[0].params.text), 'D2 старше 48 ч — запись удалена, сообщение — вручную');
+await handle(dm(ME, '/del ' + d2.id));
+ok(/нет — уже удалена/.test(sent(calls(), 'sendMessage')[0].params.text), 'D3 повтор — «записи нет»');
+await handle(dm(ME, '/del'));
+ok(/Нужен номер/.test(sent(calls(), 'sendMessage')[0].params.text), 'D4 без номера — подсказка');
+await handle(dm(ANNA, '/del 1'));
+ok(!calls().some((c) => c.method === 'deleteMessage'), 'D5 не разработчик — /del не работает');
+NOW = SAVED_NOW;
+
 // ---- прослойка Cloudflare (cf/sdk.js): именованные параметры для D1 и Bot API через fetch
 const cf = await import(pathToFileURL(path.join(ROOT, 'cf/sdk.js')).href);
 eq(cf.positional('SELECT * FROM t WHERE a = :a AND b = :b OR a = :a', { ':a': 1, ':b': 'x' }),
@@ -405,6 +516,10 @@ eq(cf.positional('SELECT * FROM t WHERE a = :a AND b = :b OR a = :a', { ':a': 1,
 eq(cf.positional('UPDATE t SET v = :v WHERE k = :k', { ':k': 'a' }).values, [null, 'a'], 'CF1 нет значения — NULL, а не undefined');
 eq(cf.positional('SELECT 1', {}), { sql: 'SELECT 1', values: [] }, 'CF1 без параметров');
 ok(cf.api.then === undefined, 'CF2 api не «thenable»');
+const mp = cf.body({ chat_id: 5, caption: 'x', reply_markup: { a: 1 }, voice: new File([new Uint8Array([1, 2, 3])], 'c.ogg', { type: 'audio/ogg' }) });
+ok(mp.body instanceof FormData && !mp.headers && mp.body.get('voice').name === 'c.ogg' && mp.body.get('chat_id') === '5' &&
+  mp.body.get('reply_markup') === '{"a":1}', 'CF2 файл — multipart: файл с именем, поля строками, объекты — JSON');
+eq(cf.body({ chat_id: 5 }).headers, { 'content-type': 'application/json' }, 'CF2 без файла — JSON');
 const realFetch = globalThis.fetch, seen = [];
 globalThis.fetch = async (url, o) => { seen.push([url, JSON.parse(o.body)]);
   return { status: 200, json: async () => (url.endsWith('/getMe') ? { ok: true, result: { id: 9 } } : { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }) }; };

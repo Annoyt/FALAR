@@ -29,7 +29,7 @@ ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
 STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"
-SUITES="ui better scroll-day scroll-night busy memo hearing mic modules voices whatsnew audio learn early"
+SUITES="ui better scroll-day scroll-night busy memo hearing mic modules voices whatsnew audio learn early telemetry"
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json models/openrouter.json"
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
@@ -159,7 +159,8 @@ for s in $SUITES; do
   echo "$s ${p:--} ${f:--} ${k:-0} $(( $(date +%s) - t1 ))" >> "$L/summary"
   say "   ${r:-итога нет — смотрите $L/$s.log}"; grep -a '^FAIL' "$L/$s.log" | sed 's/^/   /' | head -5
 done
-crash=$($ADB shell "logcat -d -v time -t '$T0'" 2>/dev/null | tr -d '\r' | grep -A3 'FATAL EXCEPTION' | grep -A1 'Process: app.falar' | grep -vE 'Process:|^--' | head -1 | cut -c1-160)
+# Нарочный сбой test_telemetry (TM4, «стенд: проверка сбоя») — не падение.
+crash=$($ADB shell "logcat -d -v time -t '$T0'" 2>/dev/null | tr -d '\r' | grep -A3 'FATAL EXCEPTION' | grep -A1 'Process: app.falar' | grep -vE 'Process:|^--' | grep -v 'проверка сбоя' | head -1 | cut -c1-160)
 say; say "== итог ($L)"
 printf '%-14s %5s %5s %8s %6s\n' скрипт PASS FAIL пропуск сек
 awk '{printf "%-14s %5s %5s %8s %6s\n", $1, $2, $3, $4, $5}' "$L/summary"

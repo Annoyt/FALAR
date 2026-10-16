@@ -24,6 +24,8 @@
 #                не имена и не английский; со сверкой с tools/ocr_words.py (… golden);
 #   Feedback   — ссылки обратной связи: GitHub по шаблонам не длиннее замеренного предела, бот в Telegram
 #                с меткой топика; сверка полей и меток с .github/ISSUE_TEMPLATE и bot/lib/feedback.js;
+#   Telemetry  — статистика по согласию: счётчики распознавания, ступени фона, правки, сбой без текста ошибки,
+#                пакет и звук, отправка на локальный сервер, перехват сбоя только с согласием;
 #   VoiceOut   — что озвучивать: «авто» в наушниках только русский, через динамик оба; ручной выбор;
 #   DenoiseGate — шумодав нарезки «только при шуме»: когда включается и выключается по фону комнаты;
 #   Wiener     — дешёвый шумодав для детектора речи в тишине: счёт как у близнеца в tools/vad_denoise_eval.py;
@@ -80,6 +82,7 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Wiener.java $A/test/WienerTest.java \
   $A/src/dev/agenttranslator/Feedback.java $A/test/FeedbackTest.java \
   $A/src/dev/agenttranslator/VoiceOut.java $A/test/VoiceOutTest.java \
+  $A/src/dev/agenttranslator/Telemetry.java $A/test/TelemetryTest.java \
   $A/src/dev/agenttranslator/Clips.java $A/test/ClipsTest.java \
   $A/src/dev/agenttranslator/Learn.java $A/test/LearnTest.java $A/test/BackupRulesTest.java \
   $A/src/dev/agenttranslator/Cards.java $A/test/CardsTest.java \
@@ -111,6 +114,7 @@ java -cp "$OUT:$J" dev.agenttranslator.TextRulesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ScreenTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.FeedbackTest "$R" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.VoiceOutTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.TelemetryTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.WhatsNewTest "$A/whatsnew.txt" "$A/AndroidManifest.xml" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.DenoiseGateTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.ClipsTest || fail=1

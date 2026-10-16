@@ -55,6 +55,38 @@ export async function saveSnapshot(day, at, data) {
     'ON CONFLICT(day) DO UPDATE SET at = excluded.at, data = excluded.data', { ':day': day, ':at': at, ':data': data });
 }
 
+export async function saveTelemetry(day, at, data) {
+  await db.run('INSERT INTO telemetry (day, at, data) VALUES (:day, :at, :data)', { ':day': day, ':at': at, ':data': data });
+}
+
+export async function telemetryCount(day) {
+  return (await db.get('SELECT count(*) AS n FROM telemetry WHERE day = :day', { ':day': day })).n;
+}
+
+/** Новая запись звука, ещё без места в Telegram: её номер. */
+export async function newDonation(day, at, a) {
+  return (await db.get('INSERT INTO donations (day, at, lang, dur_ms, heard, said, app) ' +
+    'VALUES (:day, :at, :lang, :dur, :heard, :said, :app) RETURNING id',
+    { ':day': day, ':at': at, ':lang': a.lang, ':dur': a.durMs, ':heard': a.heard, ':said': a.said,
+      ':app': a.app.name ? String(a.app.name) : '' })).id;
+}
+
+export async function placeDonation(id, chat, msg, file) {
+  await db.run('UPDATE donations SET chat = :c, msg = :m, file = :f WHERE id = :id', { ':c': chat, ':m': msg, ':f': file, ':id': id });
+}
+
+export async function donation(id) {
+  return db.get('SELECT * FROM donations WHERE id = :id', { ':id': id });
+}
+
+export async function dropDonation(id) {
+  await db.run('DELETE FROM donations WHERE id = :id', { ':id': id });
+}
+
+export async function donationCount(day) {
+  return (await db.get('SELECT count(*) AS n FROM donations WHERE day = :day', { ':day': day })).n;
+}
+
 export async function setting(key) {
   const r = await db.get('SELECT value FROM settings WHERE key = :k', { ':k': key });
   return r ? r.value : null;

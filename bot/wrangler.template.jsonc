@@ -14,12 +14,17 @@
     "handlers/message": "./handlers/message.js",
     "handlers/callback_query": "./handlers/callback_query.js",
     "lib/stats": "./lib/stats.js",
-    "handlers/scheduled": "./handlers/scheduled.js"
+    "lib/topics": "./lib/topics.js",
+    "lib/telemetry": "./lib/telemetry.js",
+    "handlers/scheduled": "./handlers/scheduled.js",
+    "handlers/telemetry": "./handlers/telemetry.js"
   },
   // Раз в час, в :05 — handlers/scheduled: сводка скачиваний с GitHub раз в сутки.
   "triggers": { "crons": ["5 * * * *"] },
   "d1_databases": [
     { "binding": "DB", "database_name": "falar-feedback", "database_id": "__D1_ID__" }
   ],
-  "observability": { "enabled": true }
+  // Журнал вызовов (запрос с адресом и заголовками) не пишем: приложение шлёт сюда статистику и звук по
+  // согласию людей, и адрес мы обещали не хранить. Свои console.log/console.error бота остаются.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } }
 }

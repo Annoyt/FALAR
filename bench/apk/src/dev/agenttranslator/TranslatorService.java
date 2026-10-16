@@ -284,6 +284,10 @@ public class TranslatorService extends Service {
   @Override public void onCreate() {
     super.onCreate();
     UiLang.init(this);   // уведомление, подсказки и ход загрузки — на языке надписей
+    // Сбой — файлом в telemetry/, только с согласием на статистику; уйдёт со следующим пакетом.
+    Telemetry.collect = Telemetry.YES.equals(getSharedPreferences("at", MODE_PRIVATE).getString("telemetry", Telemetry.ASK));
+    Telemetry.catchCrashes(teleDir(), myName());
+    tele.merge(Telemetry.Counters.load(prefOrNull("tele_counters"), System.currentTimeMillis()));
     NotificationManager nm = getSystemService(NotificationManager.class);
     nm.createNotificationChannel(new NotificationChannel(CH, L.t("Переводчик"), NotificationManager.IMPORTANCE_LOW));
     if (toForeground()) init();
@@ -418,6 +422,9 @@ public class TranslatorService extends Service {
       } catch (Throwable t) { log("🎙 уборка звука: " + t); } });
       restoreContext();
       maybeCheckUpdates();
+      // Статистика — через 15 с: команды стенда (--es telemetrybase) успевают прийти раньше, и сеть не мешает
+      // загрузке моделей.
+      main.postDelayed(() -> maybeSendTelemetry(false), 15000);
       heartbeat(); startWarm(); startSay(); watchNetwork();
       // Слушание могли включить ещё во время загрузки (earlyStart или кнопкой) — тогда оно уже идёт.
       boolean lp = pr.getBoolean("lpt", false), lr = pr.getBoolean("lru", false);
@@ -723,6 +730,12 @@ public class TranslatorService extends Service {
     // Стенд: модели по манифесту. modelsbase — локальный сервер вместо Hugging Face (adb reverse), не сохраняется.
     if (i != null && i.hasExtra("modelsbase") && store != null) { String b = i.getStringExtra("modelsbase"); store.baseOverride = b == null || b.isEmpty() || "off".equals(b) ? null : b; log("⬇ стенд: источник моделей " + (store.baseOverride == null ? "Hugging Face" : store.baseOverride)); }
     if (i != null && i.hasExtra("anynet")) setAnyNet("1".equals(i.getStringExtra("anynet")));
+    if (i != null && i.hasExtra("telemetrybase")) { String b = i.getStringExtra("telemetrybase"); teleBase = b == null || b.isEmpty() || "off".equals(b) ? null : b; log("📊 стенд: статистика и звук — на " + (teleBase == null ? "бота" : teleBase)); }
+    if (i != null && i.hasExtra("telemetry")) { String t = i.getStringExtra("telemetry");
+      if ("now".equals(t)) maybeSendTelemetry(true);
+      else if ("show".equals(t)) log("📊 стенд: " + teleLine());
+      else if ("crash".equals(t)) new Thread(() -> { throw new IllegalStateException("стенд: проверка сбоя"); }, "crash-test").start();
+      else setTelemetry("yes".equals(t) ? Telemetry.YES : "no".equals(t) ? Telemetry.NO : Telemetry.ASK); }
     if (i != null && i.hasExtra("updatebase")) { String b = i.getStringExtra("updatebase"); updateBase = b == null || b.isEmpty() || "off".equals(b) ? null : b; log("⬆ стенд: описание релиза из " + (updateBase == null ? "GitHub" : updateBase)); }
     if (i != null && i.hasExtra("update")) { String u = i.getStringExtra("update");
       if ("check".equals(u)) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("update_check").apply(); checkUpdates(true); }
@@ -1416,6 +1429,7 @@ public class TranslatorService extends Service {
     final int held = raw.length - pttPreN;            // без подпора из слушания
     holdRelease(held >= 8000);                        // полсекунды — говорили; меньше — тык
     if (held < 1600) { log("● отпустили сразу — записи нет"); return; }   // пустой звук ронял распознаватель исключением
+    if (Telemetry.collect) tele.hold();
     // Подпора из слушания не было (микрофон открылся по нажатию): перед фразой — её же самые тихие 300 мс, настоящий
     // звук этой комнаты вместо резкого старта (на корпусе: 4,0 / 4,0 → 3,0 / 2,7 %; секунда слушания даёт 2,5 / 2,2).
     final float[] all = pttPreN > 0 ? raw : Gain.withLead(raw, 16000 * 3 / 10);
@@ -2434,6 +2448,139 @@ public class TranslatorService extends Service {
     if (System.currentTimeMillis() - last < UPDATE_EVERY) { upd(update == null ? "" : Updates.describe(myCode(), update)); return; }
     checkUpdates(false);
   }
+  // ---- Телеметрия по согласию человека (Telemetry, bot/handlers/telemetry.js): раз в сутки — пакет статистики
+  // в топик «Телеметрия» группы разработчика, по кнопке в меню реплики — её звук. Без «да» не уходит ничего.
+  // Накопленное за период — из настроек в onCreate: в инициализаторе поля у службы ещё нет контекста.
+  final Telemetry.Counters tele = new Telemetry.Counters(System.currentTimeMillis());
+  volatile String teleBase = null;                       // стенд: --es telemetrybase http://127.0.0.1:…
+  volatile boolean teleGate, teleWiener, teleMusic, teleBusy;
+  String prefOrNull(String k) { try { return getSharedPreferences("at", MODE_PRIVATE).getString(k, null); } catch (Throwable e) { return null; } }
+  File teleDir() { return new File(getFilesDir(), "telemetry"); }
+  void saveTele() { try { getSharedPreferences("at", MODE_PRIVATE).edit().putString("tele_counters", tele.save()).apply(); } catch (Throwable e) { } }
+  public String telemetry() { return getSharedPreferences("at", MODE_PRIVATE).getString("telemetry", Telemetry.ASK); }
+
+  /** Согласие на статистику — из окна согласия, переключателя в настройках или стенда. «Да» начинает период
+   *  с чистого листа (до согласия ничего не копилось), «нет» стирает накопленное и записанные сбои. */
+  public void setTelemetry(String v) {
+    SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
+    boolean was = Telemetry.YES.equals(p.getString("telemetry", Telemetry.ASK)), yes = Telemetry.YES.equals(v);
+    SharedPreferences.Editor e = p.edit().putString("telemetry", v);
+    if (yes && !was) { tele.take(System.currentTimeMillis()); e.putLong("tele_exit_at", System.currentTimeMillis()); }   // tele_sent не трогаем: в первый раз он и так 0
+    if (!yes) { tele.take(System.currentTimeMillis()); File[] fs = teleDir().listFiles(); if (fs != null) for (File f : fs) f.delete(); }
+    e.putString("tele_counters", tele.save()).apply();
+    Telemetry.collect = yes;
+    log(yes ? "📊 статистика разработчику: отправляю раз в сутки" : Telemetry.NO.equals(v) ? "📊 статистика разработчику: не отправляю" : "📊 статистика разработчику: спрошу");
+  }
+  String teleLine() {
+    return "согласие «" + telemetry() + "», с прошлой отправки " + (getSharedPreferences("at", MODE_PRIVATE).getLong("tele_sent", 0) == 0 ? "не отправлялось"
+        : (System.currentTimeMillis() - getSharedPreferences("at", MODE_PRIVATE).getLong("tele_sent", 0)) / 60000 + " мин") + ", сбоев в очереди " + Telemetry.crashFiles(teleDir()).size()
+        + ", счётчики " + tele.save();
+  }
+
+  /** Пакет статистики — раз в сутки, когда есть сеть; force — стенд. Счётчики забираются; не ушло — возвращаются. */
+  void maybeSendTelemetry(boolean force) {
+    final SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
+    if (!Telemetry.YES.equals(p.getString("telemetry", Telemetry.ASK)) || teleBusy) return;
+    if (!force && System.currentTimeMillis() - p.getLong("tele_sent", 0) < Telemetry.EVERY) return;
+    if (!online()) { if (force) log("📊 нет сети — статистика уйдёт позже"); return; }
+    teleBusy = true;
+    new Thread(() -> {
+      long now = System.currentTimeMillis();
+      Telemetry.Counters taken = tele.take(now);
+      List<File> files = Telemetry.crashFiles(teleDir());
+      try {
+        JSONArray cr = Telemetry.crashes(files);
+        long exitAt = exits(cr, p.getLong("tele_exit_at", now));
+        String body = Telemetry.packet(teleApp(), teleDevice(), taken.json(now, loadMsTotal()), cr);
+        Telemetry.post((teleBase != null ? teleBase : Telemetry.BASE) + "/t", body, "Falar/" + myName());
+        for (File f : files) f.delete();
+        p.edit().putLong("tele_sent", now).putLong("tele_exit_at", exitAt).putString("tele_counters", tele.save()).apply();
+        log("📊 статистика ушла разработчику: " + body.length() + " байт, фраз " + (taken.pt + taken.ru) + ", сбоев " + cr.length());
+      } catch (Throwable e) {
+        tele.merge(taken); saveTele();
+        log("📊 статистику отправить не вышло: " + why(e));
+      } finally { teleBusy = false; }
+    }, "telemetry").start();
+  }
+
+  /** Сбои, которых не видит свой обработчик (Android 11+): в библиотеке, зависание, нехватка памяти — после since. */
+  long exits(JSONArray cr, long since) {
+    long last = since;
+    if (Build.VERSION.SDK_INT < 30) return last;
+    try {
+      for (ApplicationExitInfo x : getSystemService(ActivityManager.class).getHistoricalProcessExitReasons(getPackageName(), 0, 16)) {
+        String k = Telemetry.exitKind(x.getReason());
+        if (k == null || x.getTimestamp() <= since || cr.length() >= Telemetry.MAX_CRASHES) continue;
+        String d = x.getDescription() == null ? "" : Telemetry.cut(x.getDescription(), 120);
+        cr.put(new JSONObject().put("at", x.getTimestamp() / 1000).put("kind", k).put("what", d).put("pss_mb", x.getPss() / 1024));
+        last = Math.max(last, x.getTimestamp());
+      }
+    } catch (Throwable e) { log("📊 причины прошлых выходов не прочитались: " + e); }
+    return last;
+  }
+
+  /** Сборка: версия, полная или облегчённая, язык надписей, включённые модули. */
+  JSONObject teleApp() throws JSONException {
+    JSONArray m = new JSONArray();
+    for (String x : modules) m.put(x);
+    return new JSONObject().put("name", myName()).put("code", myCode()).put("slim", slimBuild()).put("ui", L.lang).put("modules", m);
+  }
+
+  /** Телефон без номера и имени владельца: модель, процессор, Android и прошивка, память, обработка звука. */
+  JSONObject teleDevice() throws JSONException {
+    JSONObject d = new JSONObject().put("maker", Build.MANUFACTURER).put("model", Build.MODEL).put("android", Build.VERSION.RELEASE)
+        .put("sdk", Build.VERSION.SDK_INT).put("build", Telemetry.cut(String.valueOf(Build.DISPLAY), 80))
+        .put("ram_gb", Math.round(totalRam() / 1e9)).put("abi", Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "")
+        .put("cores", Runtime.getRuntime().availableProcessors()).put("lang", Locale.getDefault().getLanguage());
+    if (Build.VERSION.SDK_INT >= 31) d.put("soc", (Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL).trim());
+    JSONObject fx = new JSONObject();
+    try { fx.put("ns", android.media.audiofx.NoiseSuppressor.isAvailable()).put("agc", android.media.audiofx.AutomaticGainControl.isAvailable())
+        .put("aec", android.media.audiofx.AcousticEchoCanceler.isAvailable()); } catch (Throwable e) { }
+    return d.put("fx", fx);
+  }
+
+  /** Последняя загрузка моделей, мс: настройка load_ms — «распознавание,перевод,озвучка,прочее». */
+  long loadMsTotal() {
+    long sum = 0;
+    for (String x : String.valueOf(prefOrNull("load_ms")).split(",")) { try { sum += Long.parseLong(x.trim()); } catch (NumberFormatException e) { } }
+    return sum;
+  }
+
+  /** Звук реплики idx — разработчику, по кнопке и с отметкой согласия человека на записи. said — как сказано на
+   *  самом деле (человек мог поправить). done на главном потоке: номер записи (> 0) или причина неудачи. */
+  public void donateAudio(final int idx, final String said, final java.util.function.BiConsumer<Long, String> done) {
+    new Thread(() -> {
+      long n = 0; String why = null;
+      try {
+        String[] t = chats == null ? null : chats.turn(idx);
+        File f = chats == null ? null : chats.audioOf(idx);
+        String mime = f == null ? null : Telemetry.mimeOf(f.getName());
+        if (t == null || f == null || mime == null) throw new java.io.IOException(L.t("у этой реплики нет звука"));
+        if (f.length() > Telemetry.MAX_AUDIO) throw new java.io.IOException(L.t("запись слишком длинная"));
+        long durMs = 0;
+        try { MediaMetadataRetriever mr = new MediaMetadataRetriever(); mr.setDataSource(f.getAbsolutePath());
+          durMs = Long.parseLong(mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)); mr.release(); } catch (Throwable e) { }
+        if (durMs <= 0 && f.getName().endsWith(".wav")) durMs = (f.length() - 44) / 32;   // 16 кГц, моно, 16 бит
+        byte[] b = java.nio.file.Files.readAllBytes(f.toPath());
+        String body = Telemetry.audio(teleApp(), new JSONObject().put("maker", Build.MANUFACTURER).put("model", Build.MODEL)
+            .put("android", Build.VERSION.RELEASE), t[0].startsWith("pt") ? "pt" : "ru", durMs, t[1], said, mime, b);
+        n = Telemetry.number(Telemetry.post((teleBase != null ? teleBase : Telemetry.BASE) + "/audio", body, "Falar/" + myName()));
+        if (n <= 0) throw new java.io.IOException(L.t("бот не дал номер записи"));
+        log("📊 звук реплики " + (idx + 1) + " ушёл разработчику: № " + n + ", " + b.length / 1024 + " КБ");
+      } catch (Throwable e) {
+        String m = e.getMessage() == null ? "" : e.getMessage();
+        why = m.startsWith("HTTP 429") ? L.t("на сегодня записей хватит — попробуйте завтра")
+            : m.startsWith("HTTP ") ? L.t("бот не принял запись") + " (" + m.replaceAll("^HTTP (\\d+).*", "$1") + ")"
+            : e instanceof java.net.UnknownHostException || e instanceof java.net.SocketTimeoutException || e instanceof java.net.ConnectException
+              ? L.t("нет связи — попробуйте позже")
+            : e instanceof java.io.IOException && !m.isEmpty() ? m : why(e);
+        log("📊 звук реплики не ушёл: " + (m.isEmpty() ? String.valueOf(e) : m));
+      }
+      final long fn = n; final String fw = why;
+      main.post(() -> done.accept(fn, fw));
+    }, "donate").start();
+  }
+
   /** Проверка новой версии. Раз в сутки сама, по кнопке — когда попросят. Ошибку не прячем:
    *  «обновлений нет» и «проверить не вышло» — разные вещи, и молчание вместо второго означало
    *  бы, что приложение навсегда перестало обновляться, а снаружи это незаметно. */
@@ -2641,6 +2788,7 @@ public class TranslatorService extends Service {
       final Once r = translateOnce("ru2pt", newSrc.trim(), false, false);
       long at = chats.replaceTurn(idx, r.asr, r.mt);
       if (at == 0) { log("✎ не удалось заменить реплику " + (idx + 1)); return; }
+      if (Telemetry.collect) { tele.edit(t[1], r.asr); saveTele(); }
       final boolean last = idx == chats.size() - 1;
       synchronized (history) { for (Turn h : history) if (h.at == oldAt) h.dropped = true; }   // даже если поток озвучки уже взял её из очереди
       if (last || oldAt == lastAt) {
@@ -3679,6 +3827,8 @@ public class TranslatorService extends Service {
         }
         // Минимум речи — по тишине или шуму (DenoiseGate): silero перестраивается только на переключении.
         boolean noisy = dnMode.equals("auto") && gate.on();
+        teleGate = noisy; teleMusic = dnMode.equals("auto") && gate.music();          // для счётчиков телеметрии (emit)
+        teleWiener = dnMode.equals("auto") && vadDnLevel == 3 && !gate.on() && !gate.music();
         slicer.minSpeechMs = minSpeechFixed >= 0 ? minSpeechFixed : noisy ? MIN_SPEECH_NOISE : MIN_SPEECH_QUIET;
         en.rebuildVad(!Float.isNaN(vadMinSpeechFixed) ? vadMinSpeechFixed : noisy ? Engine.VAD_MIN_SPEECH_NOISE : Engine.VAD_MIN_SPEECH_QUIET);
         en.vad.acceptWaveform(vin);
@@ -3748,6 +3898,7 @@ public class TranslatorService extends Service {
   /** Закрытый кусок — в очередь распознавания: как слышно, шаг авто-чувствительности, во время загрузки — на диск и в early. */
   void emit(Slicer.Piece pc) {
     final float[] out = pc.pcm; final Gain.Stats st = pc.st;
+    if (Telemetry.collect) tele.listen(teleGate, teleWiener, teleMusic);
     final double nz = noiseRms; final long at = System.currentTimeMillis();
     if (dumpSegs != null) try { new DenoisedAudio(out, 16000).save(new File(dumpSegs, "seg_" + at + ".wav").getAbsolutePath()); } catch (Throwable e) {}
     final long pos = vadSamples; final double gdb = gainListen.db;
@@ -4544,6 +4695,12 @@ public class TranslatorService extends Service {
 
   /** Одна строка на сегмент: текст, уровень, фон, SNR — чтобы прогон через воздух считался по числам, а не по логу. */
   void tsvSeg(String kind, String dir, String asr, String mt, String tag, double durMs, long asrMs, long mtMs) {
+    if (Telemetry.collect) {
+      int mic = -1;
+      try { AudioDeviceInfo d = capRouted; if (d != null) mic = d.getType(); } catch (Throwable e) { }
+      tele.seg(kind, dir, durMs, asrMs, Double.isNaN(segFloorDb) ? segNoiseDb : segFloorDb, segGainDb, segCutPct, mic);
+      saveTele();
+    }
     tsv(kind, dir, asr, mt, tag, f1(durMs), f1(segDb), f1(segNoiseDb), f1(segDb - segNoiseDb), "" + segAt, "" + asrMs, "" + mtMs, "" + segPos,
         f1(segGainDb), f1(segSpeechDb), f1(segFloorDb), f3(segOverPct), f3(segLimPct), f3(segCutPct));
   }
@@ -5159,6 +5316,7 @@ public class TranslatorService extends Service {
   volatile long llmLoadedAt = 0, lastCritical = 0;
   @Override public void onDestroy() {
     running = false; capturing = false; main.removeCallbacks(idleStop);
+    saveTele();
     if (store != null) store.cancel();
     if (spkTrack != null) spkTrack.release();
     worker.shutdownNow(); early.shutdownNow(); llmWorker.shutdownNow(); cloudWorker.shutdownNow(); learnIo.shutdownNow();
