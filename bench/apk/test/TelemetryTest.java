@@ -75,6 +75,11 @@ public class TelemetryTest {
         Arrays.asList(1, 9800L, 1, 2, 16, 1), "T6 клип, загрузка, правки, чужие голоса");
     eq(j.getJSONObject("mic").getInt("builtin"), 2, "T6 микрофон");
     eq(j.getJSONObject("skips").getInt("late"), 2, "T6 пропуски");
+    eq(j.has("stand"), false, "T6 стендовых фраз не было — поля нет");
+    Telemetry.Counters cs = new Telemetry.Counters(0); cs.stand(); cs.stand(); cs.seg("asr", "pt2ru", 1000, 100, -50, 1, 0, -1);
+    eq(Arrays.asList(cs.json(3600_000, 0).getInt("stand"), cs.pt), Arrays.asList(2, 1), "T6 фразы стенда — отдельным числом, в счётчики не идут");
+    eq(Telemetry.Counters.load(cs.save(), 0).stand, 2, "T7 стендовые — переживают сохранение");
+    Telemetry.Counters ct = cs.take(5); cs.merge(ct); eq(cs.stand, 2, "T8 стендовые — забираются и возвращаются");
     JSONObject e0 = new Telemetry.Counters(0).json(3600_000, 0);
     ok(!e0.has("mic") && !e0.has("skips") && !e0.has("rtf_ms") && !e0.has("gain_db") && !e0.has("load_ms") && !e0.has("edit_chars"),
         "T6 пустой период — без пустых частей");
@@ -94,13 +99,17 @@ public class TelemetryTest {
 
     // сбой одной записью: тип, причины, свои кадры — без текста ошибки
     JSONObject cr = null;
-    try { deep(); } catch (RuntimeException e) { cr = Telemetry.crash(e, 1_791_029_124_000L, "0.33.0"); }
+    try { deep(); } catch (RuntimeException e) { cr = Telemetry.crash(e, 1_791_029_124_000L, "0.33.0", Telemetry.SCREEN); }
     eq(cr.getString("what"), "java.lang.RuntimeException ← java.lang.IllegalStateException", "T9 тип и причина");
     ok(cr.getString("where").startsWith("TelemetryTest.boom:") && cr.getString("where").contains(" ← TelemetryTest.deep:"), "T9 место — свои кадры корневой причины");
     eq(Arrays.asList(cr.getLong("at"), cr.getString("kind"), cr.getString("v")), Arrays.asList(1_791_029_124L, "crash", "0.33.0"), "T9 время в секундах, вид, версия");
+    eq(cr.getString("state"), "screen", "T9 где было приложение — в записи");
+    eq(Arrays.asList(Telemetry.importanceState(100), Telemetry.importanceState(200), Telemetry.importanceState(125), Telemetry.importanceState(230),
+        Telemetry.importanceState(300), Telemetry.importanceState(325), Telemetry.importanceState(400), Telemetry.importanceState(1000)),
+        Arrays.asList("screen", "screen", "fgs", "fgs", "background", "background", "background", "background"), "T10 важность процесса → на экране / служба на виду / в фоне");
     ok(!cr.toString().contains("bom dia") && !cr.toString().contains("обёртка"), "T9 текста ошибки нет");
-    eq(Telemetry.crash(new OutOfMemoryError("x"), 0, "1").getString("kind"), "oom", "T9 нехватка памяти — oom");
-    eq(Telemetry.crash(new RuntimeException(new OutOfMemoryError()), 0, "1").getString("kind"), "oom", "T9 OOM в причине — oom");
+    eq(Telemetry.crash(new OutOfMemoryError("x"), 0, "1", Telemetry.BACKGROUND).getString("kind"), "oom", "T9 нехватка памяти — oom");
+    eq(Telemetry.crash(new RuntimeException(new OutOfMemoryError()), 0, "1", Telemetry.BACKGROUND).getString("kind"), "oom", "T9 OOM в причине — oom");
     eq(Arrays.asList(Telemetry.exitKind(3), Telemetry.exitKind(5), Telemetry.exitKind(6), Telemetry.exitKind(9), Telemetry.exitKind(4), Telemetry.exitKind(10)),
         Arrays.asList("oom", "native", "anr", "killed", null, null), "T10 причины выхода: Java-сбой и «закрыл человек» — не в счёт");
 
@@ -159,6 +168,7 @@ public class TelemetryTest {
       JSONArray arr = Telemetry.crashes(fs);
       ok(arr.length() == 1 && arr.getJSONObject(0).getString("what").equals("java.lang.IllegalStateException")
           && arr.getJSONObject(0).getString("v").equals("0.33.0"), "T14 в файле — сбой одной записью");
+      eq(arr.getJSONObject(0).getString("state"), "background", "T14 экрана не было (onScreen = false) — «в фоне»");
       eq(prev, Arrays.asList("IllegalStateException"), "T14 прежний обработчик позван");
       Telemetry.collect = false;
       th = new Thread(TelemetryTest::boom); th.start(); th.join();

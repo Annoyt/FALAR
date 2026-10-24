@@ -2744,7 +2744,16 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // выглядело как «интент не работает».
     if (getIntent().getExtras() != null) i.putExtras(getIntent().getExtras());
     i.putExtra("fromUi", true);      // обычный запуск: сервис сбросит стендовые режимы
-    startForegroundService(i); bindSvc();
+    svcStart(i); bindSvc();
+  }
+  /** Поднять службу с экрана. Экран на виду — приложение на переднем плане, и обычный startService можно: он
+   *  не обязывает службу за секунды выйти на передний план. startForegroundService обязывает, а служба, которая
+   *  не может (микрофон из фона запрещён), останавливается — и Android закрывает приложение: «startForegroundService()
+   *  did not then call startForeground()» (телеметрия 16–19.10: Redmi — два падения и зависание, POCO — зависание,
+   *  всё из onResume). Из фона startService запрещён (IllegalStateException) — тогда по-старому. */
+  void svcStart(Intent i) {
+    try { startService(i); }
+    catch (IllegalStateException e) { startForegroundService(i); }
   }
   /** Связь с сервисом — только пока экран виден. Сервис, к которому кто-то подключён, не
    *  останавливается даже по собственной команде, а на Android 12+ экран после «назад» не
@@ -2797,7 +2806,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  «молчать, пока видна транскрипция» иначе приложение осталось бы глухим в кармане. */
   @Override protected void onPause() {
     super.onPause();
-    resumed = false;
+    resumed = false; Telemetry.onScreen = false;
     holdingRead = false;
     if (svc != null) svc.setReadingAloud(false);
   }
@@ -2807,10 +2816,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       uiStartPending = false;
       Intent si = new Intent(this, TranslatorService.class);
       if (!standStart) si.putExtra("fromUi", true);
-      startForegroundService(si);
+      svcStart(si);
     }
     standStart = false;      // запуск стенда при видимом окне onStart не вызывает — флаг не должен дожить до человека
-    resumed = true; meter();
+    resumed = true; Telemetry.onScreen = true; meter();
     syncGuard();
     if (setupView != null && setupView.getVisibility() == View.VISIBLE) {   // вернулись из настроек приложения
       if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { micForever = false; startSvc(); }

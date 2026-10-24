@@ -1429,7 +1429,7 @@ public class TranslatorService extends Service {
     final int held = raw.length - pttPreN;            // без подпора из слушания
     holdRelease(held >= 8000);                        // полсекунды — говорили; меньше — тык
     if (held < 1600) { log("● отпустили сразу — записи нет"); return; }   // пустой звук ронял распознаватель исключением
-    if (Telemetry.collect) tele.hold();
+    if (Telemetry.collect && !standNow()) tele.hold();
     // Подпора из слушания не было (микрофон открылся по нажатию): перед фразой — её же самые тихие 300 мс, настоящий
     // звук этой комнаты вместо резкого старта (на корпусе: 4,0 / 4,0 → 3,0 / 2,7 %; секунда слушания даёт 2,5 / 2,2).
     final float[] all = pttPreN > 0 ? raw : Gain.withLead(raw, 16000 * 3 / 10);
@@ -2512,7 +2512,8 @@ public class TranslatorService extends Service {
         String k = Telemetry.exitKind(x.getReason());
         if (k == null || x.getTimestamp() <= since || cr.length() >= Telemetry.MAX_CRASHES) continue;
         String d = x.getDescription() == null ? "" : Telemetry.cut(x.getDescription(), 120);
-        cr.put(new JSONObject().put("at", x.getTimestamp() / 1000).put("kind", k).put("what", d).put("pss_mb", x.getPss() / 1024));
+        cr.put(new JSONObject().put("at", x.getTimestamp() / 1000).put("kind", k).put("what", d).put("pss_mb", x.getPss() / 1024)
+            .put("state", Telemetry.importanceState(x.getImportance())));
         last = Math.max(last, x.getTimestamp());
       }
     } catch (Throwable e) { log("📊 причины прошлых выходов не прочитались: " + e); }
@@ -2788,7 +2789,7 @@ public class TranslatorService extends Service {
       final Once r = translateOnce("ru2pt", newSrc.trim(), false, false);
       long at = chats.replaceTurn(idx, r.asr, r.mt);
       if (at == 0) { log("✎ не удалось заменить реплику " + (idx + 1)); return; }
-      if (Telemetry.collect) { tele.edit(t[1], r.asr); saveTele(); }
+      if (Telemetry.collect && !standNow()) { tele.edit(t[1], r.asr); saveTele(); }
       final boolean last = idx == chats.size() - 1;
       synchronized (history) { for (Turn h : history) if (h.at == oldAt) h.dropped = true; }   // даже если поток озвучки уже взял её из очереди
       if (last || oldAt == lastAt) {
@@ -3898,7 +3899,7 @@ public class TranslatorService extends Service {
   /** Закрытый кусок — в очередь распознавания: как слышно, шаг авто-чувствительности, во время загрузки — на диск и в early. */
   void emit(Slicer.Piece pc) {
     final float[] out = pc.pcm; final Gain.Stats st = pc.st;
-    if (Telemetry.collect) tele.listen(teleGate, teleWiener, teleMusic);
+    if (Telemetry.collect && !standNow()) tele.listen(teleGate, teleWiener, teleMusic);
     final double nz = noiseRms; final long at = System.currentTimeMillis();
     if (dumpSegs != null) try { new DenoisedAudio(out, 16000).save(new File(dumpSegs, "seg_" + at + ".wav").getAbsolutePath()); } catch (Throwable e) {}
     final long pos = vadSamples; final double gdb = gainListen.db;
@@ -4696,9 +4697,12 @@ public class TranslatorService extends Service {
   /** Одна строка на сегмент: текст, уровень, фон, SNR — чтобы прогон через воздух считался по числам, а не по логу. */
   void tsvSeg(String kind, String dir, String asr, String mt, String tag, double durMs, long asrMs, long mtMs) {
     if (Telemetry.collect) {
-      int mic = -1;
-      try { AudioDeviceInfo d = capRouted; if (d != null) mic = d.getType(); } catch (Throwable e) { }
-      tele.seg(kind, dir, durMs, asrMs, Double.isNaN(segFloorDb) ? segNoiseDb : segFloorDb, segGainDb, segCutPct, mic);
+      if (standNow()) tele.stand();          // прогон стенда — не живой разговор: только число, в счётчики не идёт
+      else {
+        int mic = -1;
+        try { AudioDeviceInfo d = capRouted; if (d != null) mic = d.getType(); } catch (Throwable e) { }
+        tele.seg(kind, dir, durMs, asrMs, Double.isNaN(segFloorDb) ? segNoiseDb : segFloorDb, segGainDb, segCutPct, mic);
+      }
       saveTele();
     }
     tsv(kind, dir, asr, mt, tag, f1(durMs), f1(segDb), f1(segNoiseDb), f1(segDb - segNoiseDb), "" + segAt, "" + asrMs, "" + mtMs, "" + segPos,

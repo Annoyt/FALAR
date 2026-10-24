@@ -81,6 +81,9 @@ final class Telemetry {
   static final class Counters {
     long since;                                         // начало периода, мс
     int pt, ru, empty, foreign, hold, listen, denoise, wiener, music, clip, edits, editChars, editTotal, gainN;
+    /** Фразы прогонов стенда (TranslatorService.standNow): в счётчики не идут, их число — отдельно. На Redmi
+     *  стенда 16–24.10 они дали тысячи фраз и закрыли собой живые разговоры владельца. */
+    int stand;
     long asrMs, speechMs;
     double gainSum;
     final int[] noise = new int[NOISE_EDGES.length + 1];
@@ -117,6 +120,9 @@ final class Telemetry {
 
     synchronized void hold() { hold++; }
 
+    /** Фраза прогона стенда — только посчитать, что была. */
+    synchronized void stand() { stand++; }
+
     /** Человек поправил распознанный текст: сколько знаков поменял из скольких. */
     synchronized void edit(String was, String now) {
       edits++;
@@ -143,6 +149,7 @@ final class Telemetry {
       if (edits > 0) o.put("edit_chars", editChars).put("edit_total", editTotal);
       o.put("foreign", foreign);
       if (!skips.isEmpty()) o.put("skips", new JSONObject((Map<?, ?>) skips));
+      if (stand > 0) o.put("stand", stand);
       return o;
     }
 
@@ -152,7 +159,7 @@ final class Telemetry {
         JSONObject o = new JSONObject().put("since", since).put("pt", pt).put("ru", ru).put("empty", empty).put("foreign", foreign)
             .put("hold", hold).put("listen", listen).put("denoise", denoise).put("wiener", wiener).put("music", music).put("clip", clip)
             .put("edits", edits).put("editChars", editChars).put("editTotal", editTotal).put("gainN", gainN).put("asrMs", asrMs)
-            .put("speechMs", speechMs).put("gainSum", gainSum).put("mic", new JSONObject((Map<?, ?>) mic)).put("skips", new JSONObject((Map<?, ?>) skips));
+            .put("speechMs", speechMs).put("gainSum", gainSum).put("stand", stand).put("mic", new JSONObject((Map<?, ?>) mic)).put("skips", new JSONObject((Map<?, ?>) skips));
         JSONArray nz = new JSONArray();
         for (int x : noise) nz.put(x);
         return o.put("noise", nz).toString();
@@ -169,7 +176,7 @@ final class Telemetry {
         c.foreign = o.optInt("foreign"); c.hold = o.optInt("hold"); c.listen = o.optInt("listen"); c.denoise = o.optInt("denoise");
         c.wiener = o.optInt("wiener"); c.music = o.optInt("music"); c.clip = o.optInt("clip"); c.edits = o.optInt("edits");
         c.editChars = o.optInt("editChars"); c.editTotal = o.optInt("editTotal"); c.gainN = o.optInt("gainN");
-        c.asrMs = o.optLong("asrMs"); c.speechMs = o.optLong("speechMs"); c.gainSum = o.optDouble("gainSum", 0);
+        c.asrMs = o.optLong("asrMs"); c.speechMs = o.optLong("speechMs"); c.gainSum = o.optDouble("gainSum", 0); c.stand = o.optInt("stand");
         JSONArray nz = o.optJSONArray("noise");
         for (int i = 0; nz != null && i < Math.min(nz.length(), c.noise.length); i++) c.noise[i] = nz.optInt(i);
         for (String m : new String[]{"mic", "skips"}) {
@@ -184,7 +191,7 @@ final class Telemetry {
     /** Забрать счётчики для пакета: копия, а здесь — новый период с now. */
     synchronized Counters take(long now) {
       Counters c = load(save(), now);
-      since = now; pt = ru = empty = foreign = hold = listen = denoise = wiener = music = clip = edits = editChars = editTotal = gainN = 0;
+      since = now; pt = ru = empty = foreign = hold = listen = denoise = wiener = music = clip = edits = editChars = editTotal = gainN = stand = 0;
       asrMs = speechMs = 0; gainSum = 0; Arrays.fill(noise, 0); mic.clear(); skips.clear();
       return c;
     }
@@ -194,7 +201,7 @@ final class Telemetry {
       since = Math.min(since, o.since);
       pt += o.pt; ru += o.ru; empty += o.empty; foreign += o.foreign; hold += o.hold; listen += o.listen; denoise += o.denoise;
       wiener += o.wiener; music += o.music; clip += o.clip; edits += o.edits; editChars += o.editChars; editTotal += o.editTotal;
-      gainN += o.gainN; asrMs += o.asrMs; speechMs += o.speechMs; gainSum += o.gainSum;
+      gainN += o.gainN; asrMs += o.asrMs; speechMs += o.speechMs; gainSum += o.gainSum; stand += o.stand;
       for (int i = 0; i < noise.length; i++) noise[i] += o.noise[i];
       o.mic.forEach((k, v) -> mic.merge(k, v, Integer::sum));
       o.skips.forEach((k, v) -> skips.merge(k, v, Integer::sum));
@@ -204,9 +211,22 @@ final class Telemetry {
   static String simple(String cls) { int i = cls.lastIndexOf('.'); return i < 0 ? cls : cls.substring(i + 1); }
   static String cut(String s, int n) { return s.length() > n ? s.substring(0, n - 1) + "…" : s; }
 
+  /** Где было приложение: экран Falar на виду («screen»), видимая служба слушает без экрана («fgs»), в фоне
+   *  («background»). По телеметрии 19–22.10 нельзя было сказать, выгружали Falar посреди разговора или в фоне. */
+  static final String SCREEN = "screen", FGS = "fgs", BACKGROUND = "background";
+  /** Экран Falar на виду: MainActivity.onResume / onPause. */
+  static volatile boolean onScreen;
+  /** Важность процесса из ApplicationExitInfo.getImportance (RunningAppProcessInfo.IMPORTANCE_*) → то же. */
+  static String importanceState(int imp) {
+    if (imp <= 100 || imp == 200) return SCREEN;            // FOREGROUND, VISIBLE
+    if (imp == 125 || imp == 230) return FGS;               // FOREGROUND_SERVICE, PERCEPTIBLE
+    return BACKGROUND;                                      // SERVICE, TOP_SLEEPING, CACHED, GONE…
+  }
+
   /** Сбой одной записью: тип исключения и его причин; место — до четырёх своих кадров (dev.agenttranslator)
-   *  у корневой причины, иначе её первый кадр. Текста ошибки нет: в нём бывает текст разговора. */
-  static JSONObject crash(Throwable e, long at, String version) throws JSONException {
+   *  у корневой причины, иначе её первый кадр; state — где было приложение. Текста ошибки нет: в нём бывает
+   *  текст разговора. */
+  static JSONObject crash(Throwable e, long at, String version, String state) throws JSONException {
     StringBuilder what = new StringBuilder(e.getClass().getName());
     Throwable root = e;
     for (int d = 0; root.getCause() != null && root.getCause() != root && d < 4; d++) {
@@ -223,7 +243,7 @@ final class Telemetry {
     if (fr.isEmpty() && st.length > 0) fr.add(simple(st[0].getClassName()) + "." + st[0].getMethodName() + ":" + st[0].getLineNumber());
     boolean oom = e instanceof OutOfMemoryError || root instanceof OutOfMemoryError;
     return new JSONObject().put("at", at / 1000).put("kind", oom ? "oom" : "crash").put("what", cut(what.toString(), 300))
-        .put("where", cut(String.join(" ← ", fr), 300)).put("v", version);
+        .put("where", cut(String.join(" ← ", fr), 300)).put("v", version).put("state", state);
   }
 
   /** Причина прошлого выхода приложения (ApplicationExitInfo.REASON_*, Android 11+) → вид для пакета; null —
@@ -255,7 +275,7 @@ final class Telemetry {
           long now = System.currentTimeMillis();
           dir.mkdirs();
           try (OutputStream o = new FileOutputStream(new File(dir, "crash-" + now + ".json"))) {
-            o.write(crash(e, now, version).toString().getBytes(StandardCharsets.UTF_8));
+            o.write(crash(e, now, version, onScreen ? SCREEN : BACKGROUND).toString().getBytes(StandardCharsets.UTF_8));
           }
         }
       } catch (Throwable ignore) { }
