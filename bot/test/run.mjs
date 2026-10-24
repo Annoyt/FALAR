@@ -406,7 +406,7 @@ const PKT = { v: 1, app: { name: '0.33.0', code: 39, slim: false, ui: 'ru', modu
   asr: { hours: 24, turns: { pt: 30, ru: 12 }, empty: 4, hold: 12, listen: 30, noise: [0, 5, 20, 12, 5], denoise: 6, wiener: 20,
     music: 1, mic: { builtin: 40, bt: 2 }, rtf_ms: 380, load_ms: 9800, edits: 2, edit_chars: 14, edit_total: 230, foreign: 3, novo: 7,
     skips: { lang: 1, late: 2 }, gain_db: 4.5, clip: 1 },
-  crashes: [{ at: at(15, 20, 31), kind: 'oom', what: 'java.lang.OutOfMemoryError', where: 'Engine.loadMt:412', v: '0.32.0' }] };
+  crashes: [{ at: at(15, 20, 31), kind: 'oom', what: 'java.lang.OutOfMemoryError', where: 'Engine.loadMt:412', v: '0.32.0', state: 'background' }] };
 let tp = T.packet(PKT);
 eq([tp.app.code, tp.asr.noise.length, tp.crashes.length], [39, 5, 1], 'T1 пакет принят как есть');
 const bad = (x, why) => { let e = null; try { T.packet(x); } catch (err) { e = err.message; } ok(e !== null, 'T2 ' + why + ' — отказ'); };
@@ -428,7 +428,8 @@ ok(txt.includes('фон, dBFS: <−60 0 · −60…−54 5 · −54…−48 20 �
 ok(txt.includes('микрофон: встроенный 40, гарнитура 2') && txt.includes('1 с речи — 0,38 с, загрузка моделей 9,8 с'), 'T3 микрофон и скорость');
 ok(txt.includes('правок 2 (6 % знаков), чужой голос отброшен 3') && txt.includes('ещё: novo=7'), 'T3 правки; незнакомое поле — как есть');
 ok(txt.includes('пропущено: не тот язык 1, голос не успел 2') && txt.includes('усиление в среднем +4,5 дБ, со срезанным звуком 1'), 'T3 пропуски, усиление, срез — словами');
-ok(/#сбой · нехватка памяти · java\.lang\.OutOfMemoryError · Engine\.loadMt:412 · 0\.32\.0 · 15\.10 20:31/.test(txt), 'T3 сбой одной строкой');
+ok(/#сбой · нехватка памяти · в фоне · java\.lang\.OutOfMemoryError · Engine\.loadMt:412 · 0\.32\.0 · 15\.10 20:31/.test(txt), 'T3 сбой одной строкой, где было приложение');
+ok(T.packetText(T.packet({ ...PKT, asr: { ...PKT.asr, stand: 4800 } })).includes('прогоны стенда — не в счёте: 4800 фраз'), 'T3 прогоны стенда — отдельной строкой');
 ok(T.packetText(T.packet({ v: 1, app: { name: '1', code: 1 }, device: {} })).startsWith('#устройство · Falar 1 (1)\nтелефон без имени'), 'T3 пустое устройство');
 
 // приём пакета: база, топик «Телеметрия» (создаётся сам), предел в сутки

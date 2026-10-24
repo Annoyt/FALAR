@@ -65,7 +65,7 @@ const pairs = (o) => Object.entries(o || {}).map(([k, v]) => k + ' ' + num(v)).j
 const MIC = { builtin: 'встроенный', wired: 'проводной', bt: 'гарнитура', usb: 'USB', other: 'другой' };
 const SKIP = { lang: 'не тот язык', short: 'короткие', read: 'прочитано с экрана', novoice: 'без голоса разговора', late: 'голос не успел' };
 const KNOWN = new Set(['hours', 'turns', 'empty', 'hold', 'listen', 'noise', 'denoise', 'wiener', 'music', 'mic',
-  'rtf_ms', 'load_ms', 'edits', 'edit_chars', 'edit_total', 'foreign', 'skips', 'gain_db', 'clip']);
+  'rtf_ms', 'load_ms', 'edits', 'edit_chars', 'edit_total', 'foreign', 'skips', 'gain_db', 'clip', 'stand']);
 
 /** Строка устройства: «Xiaomi Redmi Note 12 · Android 14 · 6 ГБ · SM6225 · прошивка …». */
 export function deviceLine(d) {
@@ -103,6 +103,7 @@ export function asrLines(a) {
   const more = [a.edits !== undefined && 'правок ' + a.edits + (a.edit_total ? ' (' + pct(a.edit_chars || 0, a.edit_total) + ' знаков)' : ''),
     a.foreign !== undefined && 'чужой голос отброшен ' + a.foreign].filter(Boolean);
   if (more.length) out.push(more.join(', '));
+  if (a.stand) out.push('прогоны стенда — не в счёте: ' + a.stand + ' фраз');
   const rest = Object.entries(a).filter(([k]) => !KNOWN.has(k));
   if (rest.length) out.push('ещё: ' + rest.map(([k, v]) => k + '=' + JSON.stringify(v)).join(', '));
   return out;
@@ -113,6 +114,8 @@ const when = (t, tz = 5) => {
   return p(d.getUTCDate()) + '.' + p(d.getUTCMonth() + 1) + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes());
 };
 const KIND = { crash: 'сбой', native: 'сбой в библиотеке', anr: 'зависание', oom: 'нехватка памяти', killed: 'закрыто системой' };
+// Где было приложение (Telemetry.importanceState): посреди разговора или в фоне — разные беды.
+const STATE = { screen: 'на экране', fgs: 'служба на виду', background: 'в фоне' };
 
 /** Сообщение в топик «Телеметрия» по пакету статистики. */
 export function packetText(p) {
@@ -127,7 +130,8 @@ export function packetText(p) {
   if (Array.isArray(p.app.modules) && p.app.modules.length) lines.push('модули: ' + p.app.modules.join(', '));
   if (p.asr) lines.push(...asrLines(p.asr));
   for (const c of p.crashes || []) {
-    lines.push('#сбой · ' + (KIND[c.kind] || c.kind || 'сбой') + (c.what ? ' · ' + c.what : '') + (c.where ? ' · ' + c.where : '') +
+    lines.push('#сбой · ' + (KIND[c.kind] || c.kind || 'сбой') + (c.state ? ' · ' + (STATE[c.state] || c.state) : '') +
+      (c.what ? ' · ' + c.what : '') + (c.where ? ' · ' + c.where : '') +
       (c.v ? ' · ' + c.v : '') + (typeof c.at === 'number' ? ' · ' + when(c.at) : ''));
   }
   const t = lines.join('\n');
