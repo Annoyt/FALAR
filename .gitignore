@@ -49,3 +49,4 @@ bench/ocr/photos
 bench/ocr/runs/
 results/*.partial.json
 results/dualmic/
+results/asr_conf/
