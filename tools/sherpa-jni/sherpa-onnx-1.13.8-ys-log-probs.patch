@@ -1,0 +1,47 @@
+diff --git a/sherpa-onnx/jni/offline-recognizer.cc b/sherpa-onnx/jni/offline-recognizer.cc
+index d160bc5..1318178 100644
+--- a/sherpa-onnx/jni/offline-recognizer.cc
++++ b/sherpa-onnx/jni/offline-recognizer.cc
+@@ -658,10 +658,20 @@ Java_com_k2fsa_sherpa_onnx_OfflineRecognizer_getResult(JNIEnv *env,
+     SHERPA_ONNX_LOGE("Failed to find class OfflineRecognizerResult");
+     return nullptr;
+   }
+-  jmethodID ctor =
++  // Falar: if the Java class has the 8-argument constructor, also pass
++  // ys_log_probs (per-token log probabilities = confidence); otherwise fall
++  // back to the upstream 7-argument one.
++  jmethodID ctor8 =
+       env->GetMethodID(cls, "<init>",
+                        "(Ljava/lang/String;[Ljava/lang/String;[FLjava/lang/"
+-                       "String;Ljava/lang/String;Ljava/lang/String;[F)V");
++                       "String;Ljava/lang/String;Ljava/lang/String;[F[F)V");
++  if (ctor8 == nullptr) env->ExceptionClear();
++  jmethodID ctor =
++      ctor8 != nullptr
++          ? ctor8
++          : env->GetMethodID(cls, "<init>",
++                             "(Ljava/lang/String;[Ljava/lang/String;[FLjava/lang/"
++                             "String;Ljava/lang/String;Ljava/lang/String;[F)V");
+   jstring jtext = SafeNewStringUTF(env, result.text);
+ 
+   jclass string_cls = env->FindClass("java/lang/String");
+@@ -687,8 +697,17 @@ Java_com_k2fsa_sherpa_onnx_OfflineRecognizer_getResult(JNIEnv *env,
+   env->SetFloatArrayRegion(jdurations, 0, result.durations.size(),
+                            result.durations.data());
+ 
+-  jobject jresult = env->NewObject(cls, ctor, jtext, jtokens, jtimestamps,
+-                                   jlang, jemotion, jevent, jdurations);
++  jfloatArray jys = env->NewFloatArray(result.ys_log_probs.size());
++  env->SetFloatArrayRegion(jys, 0, result.ys_log_probs.size(),
++                           result.ys_log_probs.data());
++
++  jobject jresult =
++      ctor8 != nullptr
++          ? env->NewObject(cls, ctor, jtext, jtokens, jtimestamps, jlang,
++                           jemotion, jevent, jdurations, jys)
++          : env->NewObject(cls, ctor, jtext, jtokens, jtimestamps, jlang,
++                           jemotion, jevent, jdurations);
++  env->DeleteLocalRef(jys);
+ 
+   env->DeleteLocalRef(jtext);
+   env->DeleteLocalRef(jtokens);
