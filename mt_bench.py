@@ -330,10 +330,49 @@ class GemmaEngine:
 
 
 # ---------- Hy-MT2-1.8B (llama.cpp) — модель уточнителя приложения ----------
-class HyMtEngine:
-    name = "hy-mt2-1.8b-q4km"
+APP_LANG = {"ru": "Russian", "pt": "Portuguese (Brazil)"}   # TranslatorService.langName
+FRESH_CHARS = 1200                                          # Brief.FRESH_CHARS
 
-    def __init__(self):
+
+def brief_fit(lines, budget=FRESH_CHARS):
+    """Brief.fit приложения: фон в пределах бюджета, ближние реплики первыми; самая близкая, если сама не
+    влезает, — своим хвостом с «…». Порядок на выходе — от старых к новым."""
+    out, left = [], budget
+    for line in reversed(lines or []):
+        line = (line or "").strip()
+        if not line:
+            continue
+        if len(line) + 1 <= left:
+            out.append(line); left -= len(line) + 1; continue
+        if not out and left > 12:
+            out.append(brief_tail(line, left - 1))
+        break
+    return out[::-1]
+
+
+def brief_tail(s, n):
+    """Brief.tail: конец строки не длиннее n знаков с «…» впереди; обрывок слова на отрезе выбрасывается."""
+    if len(s) <= n:
+        return s
+    if n <= 1:
+        return "…"
+    start = len(s) - (n - 1)
+    if not s[start - 1].isspace():
+        sp = s.find(" ", start)
+        if sp != -1 and sp < len(s) - 1:
+            start = sp + 1
+    return "…" + s[start:].strip()
+
+
+class HyMtEngine:
+    """context: none — своя подсказка «переведи без пояснений» (шаг 4); app — подсказка уточнителя приложения
+    (TranslatorService.hyPrompt, без терминов) с прошлыми репликами из набора (поле ctx); empty — она же
+    с пустым фоном."""
+
+    def __init__(self, context="none"):
+        self.context = context
+        self.name = "hy-mt2-1.8b-q4km" + {"none": "", "app": "+ctx", "empty": "+ctx0"}[context]
+        self.wants_ctx = context != "none"
         from llama_cpp import Llama
         path = Path(__file__).parent / "models" / "llm" / "Hy-MT2-1.8B-Q4_K_M.gguf"
         if not path.exists():  # рабочее дерево git без моделей — берём из основной копии, как bench/quality/gate.sh
@@ -343,11 +382,18 @@ class HyMtEngine:
         self.llm = Llama(model_path=str(path), n_ctx=2048, n_threads=llama_threads(),
                          n_gpu_layers=llama_gpu_layers(), verbose=False)
 
-    def translate(self, text: str, src: str, tgt: str) -> str:
-        # Подсказка Hunyuan-MT для пар без китайского: «переведи в <язык> без пояснений».
-        prompt = f"Translate the following segment into {LANG_NAMES[tgt]}, without additional explanation.\n\n{text}"
+    def translate(self, text: str, src: str, tgt: str, ctx=None) -> str:
+        if self.context == "none":
+            # Подсказка Hunyuan-MT для пар без китайского: «переведи в <язык> без пояснений».
+            prompt = f"Translate the following segment into {LANG_NAMES[tgt]}, without additional explanation.\n\n{text}"
+            limit = 256
+        else:
+            bg = "\n".join(brief_fit(ctx) if self.context == "app" else [])
+            prompt = (f"[Background Information]\n{bg}\nPlease translate the following text into {APP_LANG[tgt]}, "
+                      f"taking the provided background information into consideration\n[Source Text]\n{text}")
+            limit = 200   # как llm.chat(…, 200) уточнителя
         resp = self.llm.create_chat_completion(messages=[{"role": "user", "content": prompt}],
-                                               temperature=0.0, max_tokens=256)
+                                               temperature=0.0, max_tokens=limit)
         return resp["choices"][0]["message"]["content"].strip().strip('"')
 
 
@@ -391,8 +437,9 @@ class OpenRouterEngine:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", choices=["nllb", "opus", "app", "bergamot", "gemma", "hymt", "openrouter"], required=True)
-    ap.add_argument("--setfile", default="", help="свой набор в том же виде (ключи pt_to_ru / ru_to_pt), имя набора — real; "
-                    "для частных данных: --out и FALAR_COMET_CACHE — в закрытую папку, вывод — туда же")
+    ap.add_argument("--setfile", action="append", default=[],
+                    help="свой набор в том же виде (ключи pt_to_ru / ru_to_pt): ПУТЬ[=ИМЯ], можно несколько, имя по "
+                         "умолчанию — real; для частных данных: --out и FALAR_COMET_CACHE — в закрытую папку")
     ap.add_argument("--tier", default="android", help="bergamot: android (base-memory) | tiny (нет для pt)")
     ap.add_argument("--direction", choices=["pt2ru", "ru2pt"], default="pt2ru")
     ap.add_argument("--model", default="google/gemini-2.0-flash-exp:free")
@@ -404,6 +451,8 @@ def main():
     ap.add_argument("--resume", action="store_true", help="продолжить прерванный прогон с .partial.json")
     ap.add_argument("--out", default="")
     ap.add_argument("--gpu", action="store_true", help="nllb, gemma, hymt: на видеокарте ПК (быстрее; задержки не телефонные)")
+    ap.add_argument("--context", choices=["none", "app", "empty"], default="none",
+                    help="hymt: подсказка уточнителя приложения с прошлыми репликами из поля ctx набора (app) или с пустым фоном (empty)")
     args = ap.parse_args()
     global GPU
     GPU = args.gpu
@@ -413,7 +462,8 @@ def main():
     src, tgt = args.direction.split("2")
     key = "pt_to_ru" if args.direction == "pt2ru" else "ru_to_pt"
     items = []
-    for name, path in ({"real": Path(args.setfile)} if args.setfile else SETS).items():
+    own = {(f.rsplit("=", 1)[1] if "=" in f else "real"): Path(f.rsplit("=", 1)[0] if "=" in f else f) for f in args.setfile}
+    for name, path in (own or SETS).items():
         if args.set not in ("all", name) and not args.setfile:
             continue
         part = json.loads(path.read_text())[key]
@@ -425,7 +475,7 @@ def main():
               "app": lambda: AppEngine(args.direction),
               "bergamot": lambda: BergamotEngine(args.direction, tier=args.tier),
               "gemma": lambda: GemmaEngine(glossary),
-              "hymt": lambda: HyMtEngine(),
+              "hymt": lambda: HyMtEngine(args.context),
               "openrouter": lambda: OpenRouterEngine(args.model, glossary)}[args.engine]()
 
     tag = args.engine + (f"-{args.tier}" if args.engine == "bergamot" else "") \
@@ -452,7 +502,8 @@ def main():
             results.append(done[(it["set"], it[src])])
             continue
         t0 = time.perf_counter()
-        hyp = engine.translate(it[src], src, tgt)
+        hyp = engine.translate(it[src], src, tgt, ctx=it.get("ctx", [])) if getattr(engine, "wants_ctx", False) \
+            else engine.translate(it[src], src, tgt)
         dt = time.perf_counter() - t0
         r = {"set": it["set"], "src": it[src], "ref": it[tgt], "hyp": hyp, "sec": round(dt, 2)}
         if "pid" in it:

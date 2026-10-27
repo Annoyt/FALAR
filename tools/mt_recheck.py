@@ -31,6 +31,8 @@ def main():
     ap.add_argument("--n", type=int, default=60)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--ordered", action="store_true", help="первые N фраз в порядке прогона, а не случайные")
+    ap.add_argument("--context", choices=["none", "app", "empty"], default="none", help="hymt: как у прогона (mt_bench --context)")
+    ap.add_argument("--setfile", default="", help="набор прогона — для --context app (прошлые реплики, поле ctx)")
     a = ap.parse_args()
     if a.ordered and len(a.files) > 1:
         sys.exit("--ordered: по одному файлу на запуск (иначе история кэша второго файла другая)")
@@ -39,7 +41,7 @@ def main():
         sys.exit("--gpu: нужен POCO_PROFILE=poco-gpu (см. mt_bench.py)")
     engine = {"nllb": lambda: mt_bench.NLLBEngine(),
               "gemma": lambda: mt_bench.GemmaEngine(mt_bench.load_glossary()),
-              "hymt": lambda: mt_bench.HyMtEngine()}[a.engine]()
+              "hymt": lambda: mt_bench.HyMtEngine(a.context)}[a.engine]()
     bad = 0
     for f in a.files:
         d = json.loads(Path(f).read_text())
@@ -47,8 +49,20 @@ def main():
         if s.get("engine") != engine.name:
             sys.exit(f"{Path(f).name}: движок {s.get('engine')}, а не {engine.name}")
         src, tgt = s["direction"].split("2")
-        rs = d["results"][:a.n] if a.ordered else random.Random(a.seed).sample(d["results"], min(a.n, len(d["results"])))
-        same = sum(engine.translate(r["src"], src, tgt) == r["hyp"] for r in rs)
+        res = d["results"]
+        ctx = [[] for _ in res]
+        if a.setfile:   # контекст — по месту фразы в наборе: одна и та же фраза бывает в разных разговорах
+            key = "pt_to_ru" if s["direction"] == "pt2ru" else "ru_to_pt"
+            items = json.loads(Path(a.setfile).read_text())[key]
+            assert len(items) == len(res) and all(it[src] == r["src"] for it, r in zip(items, res)), \
+                f"{Path(f).name}: порядок фраз разошёлся с набором"
+            ctx = [it.get("ctx", []) for it in items]
+        ix = list(range(min(a.n, len(res)))) if a.ordered else random.Random(a.seed).sample(range(len(res)), min(a.n, len(res)))
+        if getattr(engine, "wants_ctx", False):
+            same = sum(engine.translate(res[i]["src"], src, tgt, ctx=ctx[i]) == res[i]["hyp"] for i in ix)
+        else:
+            same = sum(engine.translate(res[i]["src"], src, tgt) == res[i]["hyp"] for i in ix)
+        rs = ix
         bad += same != len(rs)
         print(f"{Path(f).name}: совпало {same} из {len(rs)}", flush=True)
     sys.exit(1 if bad else 0)
