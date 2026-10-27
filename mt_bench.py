@@ -50,6 +50,12 @@ GPU = False
 NLLB_CODES = {"pt": "por_Latn", "ru": "rus_Cyrl"}
 
 
+def llama_threads() -> int:
+    """Потоки процессора для llama.cpp: при --gpu все слои на видеокарте, процессору хватит одного (этот ПК
+    сбрасывается от долгой нагрузки на процессор), иначе — как у профиля."""
+    return 1 if GPU else poco_limits.cpu_threads()
+
+
 def llama_gpu_layers() -> int:
     """Сколько слоёв llama.cpp отдать видеокарте: все при --gpu (сборка обязана уметь), иначе ни одного."""
     if not GPU:
@@ -302,7 +308,7 @@ class GemmaEngine:
         path = hf_hub_download(
             "bartowski/google_gemma-3-4b-it-GGUF",
             "google_gemma-3-4b-it-Q4_K_M.gguf")
-        self.llm = Llama(model_path=path, n_ctx=2048, n_threads=poco_limits.cpu_threads(),
+        self.llm = Llama(model_path=path, n_ctx=2048, n_threads=llama_threads(),
                          n_gpu_layers=llama_gpu_layers(), verbose=False)
         self.glossary = glossary
 
@@ -334,7 +340,7 @@ class HyMtEngine:
             common = subprocess.run(["git", "-C", str(Path(__file__).parent), "rev-parse", "--path-format=absolute",
                                      "--git-common-dir"], capture_output=True, text=True).stdout.strip()
             path = Path(common).parent / "models" / "llm" / path.name
-        self.llm = Llama(model_path=str(path), n_ctx=2048, n_threads=poco_limits.cpu_threads(),
+        self.llm = Llama(model_path=str(path), n_ctx=2048, n_threads=llama_threads(),
                          n_gpu_layers=llama_gpu_layers(), verbose=False)
 
     def translate(self, text: str, src: str, tgt: str) -> str:
