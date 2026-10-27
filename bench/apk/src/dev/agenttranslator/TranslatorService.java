@@ -1960,7 +1960,7 @@ public class TranslatorService extends Service {
     if (o == null) return;
     org.json.JSONArray t = o.optJSONArray("turns");
     if (t == null || t.length() == 0) return;
-    long t0 = System.nanoTime(); int changed = 0;
+    long t0 = System.nanoTime(); int changed = 0, rejected = 0;
     StringBuilder whole = new StringBuilder();
     for (int k = 0; k < t.length(); k++) {
       org.json.JSONObject x = t.optJSONObject(k);
@@ -1980,7 +1980,10 @@ public class TranslatorService extends Service {
       if (src.isEmpty()) continue;
       try {
         String out = llm.chat(null, hyPrompt(ctx, src, dirn.substring(3), terms(dirn, src)), 200).trim();
-        if (!out.isEmpty() && !out.equals(was)) { x.put("fixed", out); changed++; }
+        if (out.isEmpty() || out.equals(was)) continue;
+        String cur = x.optString("fixed", ""), why = Brief.swallowed(out, src, cur.isEmpty() ? was : cur, seen(t, k, mb));
+        if (why != null) { rejected++; log("🔁 разговор " + id + ", реплика " + (k + 1) + ": ответ отброшен — " + why + ": " + out); continue; }
+        x.put("fixed", out); changed++;
       } catch (Throwable e) { log("🧠 улучшение оборвалось на реплике " + k + ": " + e); break; }
     }
     busy("refine", null, 0, 0);
@@ -1988,7 +1991,7 @@ public class TranslatorService extends Service {
       log("🧠 разговор " + id + " удалён, пока шло улучшение — результат отброшен"); return;
     }
     describeChat(id);
-    log("🧠 разговор " + id + " улучшен: правок " + changed + " из " + t.length()
+    log("🧠 разговор " + id + " улучшен: правок " + changed + " из " + t.length() + (rejected > 0 ? ", отброшено " + rejected : "")
         + " за " + (System.nanoTime() - t0) / 1000000000 + " с");
   }
 
@@ -2082,7 +2085,7 @@ public class TranslatorService extends Service {
       // Что уточнитель знает о разговоре сверх свежих реплик — в журнал, когда это меняется: иначе
       // не понять, почему перевод вышел таким, а смотреть «Память разговора» посреди разговора некогда.
       if (!memo.equals(lastMemoLogged)) { lastMemoLogged = memo; log("🧠 память для уточнителя: " + (memo.isEmpty() ? "пусто" : memo.replace('\n', ' ')) + " (" + memo.length() + " зн.)"); }
-      int changed = 0, pairs = 0; long t0 = System.nanoTime(); int from = Math.max(0, h.length - 8);
+      int changed = 0, pairs = 0, rejected = 0; long t0 = System.nanoTime(); int from = Math.max(0, h.length - 8);
       if (hy) {
         int k = 0;
         for (Turn tn : todo) {
@@ -2101,7 +2104,9 @@ public class TranslatorService extends Service {
             String out = llm.chat(null, hyPrompt(bg, tn.asr, tgt, tm), 200).trim();
             long ms = (System.nanoTime() - t) / 1000000;
             if (tgt.equals("pt")) out = TextRules.toBrazilian(out);
-            if (applyFix(tn, out, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту (" + ms + " мс, фон " + bg.length() + " зн.): " + out); }
+            String why = Brief.swallowed(out, tn.asr, tn.refined != null ? tn.refined : tn.mt, seen(h, tn, tp));
+            if (why != null) { rejected++; log("🔁 #" + tn.n + " ответ отброшен (" + ms + " мс, фон " + bg.length() + " зн.) — " + why + ": " + out); }
+            else if (applyFix(tn, out, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту (" + ms + " мс, фон " + bg.length() + " зн.): " + out); }
             else log("🔁 #" + tn.n + " контекст не изменил перевод (" + ms + " мс, фон " + bg.length() + " зн.)");
           } catch (Exception e) {
             // Одна неудачная реплика не обрывает проход: раньше исключение выбрасывало весь цикл,
@@ -2126,6 +2131,8 @@ public class TranslatorService extends Service {
         for (Map.Entry<Integer, String> e : r.fixes.entrySet()) {
           Turn tn = byN.get(e.getKey()); if (tn == null || !todo.contains(tn)) continue;
           String fx = e.getValue(); if (tn.dir.endsWith("pt")) fx = TextRules.toBrazilian(fx);
+          String why = Brief.swallowed(fx, tn.asr, tn.refined != null ? tn.refined : tn.mt, seen(h, tn, memo));
+          if (why != null) { rejected++; log("🔁 #" + tn.n + " ответ отброшен — " + why + ": " + fx); continue; }
           if (applyFix(tn, fx, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту: " + fx); }
         }
         if (chats != null && chats.current == chatId) {
@@ -2138,9 +2145,9 @@ public class TranslatorService extends Service {
       if (chats == null || chats.current == chatId) lastLocalAt = todo.get(todo.size() - 1).at;
       long ms = (System.nanoTime() - t0) / 1000000;
       String tp = chats == null || chats.topic.isEmpty() ? (topic.isEmpty() ? "нет" : "по словам: " + topic) : chats.topic;
-      log("🧠 разбор контекста: реплик " + todo.size() + ", правок " + changed + (hy ? ", пары не извлекаются: переводная модель" : ", пар " + pairs) + " · тема: " + tp
+      log("🧠 разбор контекста: реплик " + todo.size() + ", правок " + changed + (rejected > 0 ? ", отброшено " + rejected : "") + (hy ? ", пары не извлекаются: переводная модель" : ", пар " + pairs) + " · тема: " + tp
           + " · память " + memo.length() + " зн." + (chats == null || chats.memo.isEmpty() ? "" : Chats.BY_USER.equals(chats.memoBy) ? " (ваша)" : " (" + chats.memoBy + ")") + " (" + ms + " мс)");
-      tsv("local_pass", "" + todo.size(), "" + changed, "" + pairs, "" + ms);
+      tsv("local_pass", "" + todo.size(), "" + changed, "" + pairs, "" + ms, "" + rejected);
       // Итог разбора — в журнале (строка ниже); на экране его видно по самим репликам (✓), шапку не трогаем.
     } } catch (Throwable e) { Log.e(TAG, "refine", e); log("🔁 ошибка уточнения: " + e); }
     finally {
@@ -2148,6 +2155,26 @@ public class TranslatorService extends Service {
       if (refinePending) llmWorker.submit(this::refineLoop);   // запрос, пришедший между проверкой и выходом, не теряется
       else if (llm != null) { main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); }
     }
+  }
+
+  /** Что уточнитель видел рядом с репликой tn: исходники и переводы других реплик истории и память
+   *  разговора. По этим текстам Brief.swallowed узнаёт в ответе кусок чужой реплики — до applyFix,
+   *  чтобы такой ответ не лёг ни в реплику, ни в выученное. Правки облака и человека идут мимо. */
+  static List<String> seen(Turn[] h, Turn tn, String memo) {
+    List<String> r = new ArrayList<>();
+    if (memo != null && !memo.isEmpty()) r.add(memo);
+    for (Turn t : h) if (t != tn) { r.add(t.asr); r.add(t.mt); if (t.refined != null) r.add(t.refined); }
+    return r;
+  }
+  /** То же для разговора с диска (refineSession): у прочих реплик — исходник, перевод и правка. */
+  static List<String> seen(org.json.JSONArray turns, int k, String memo) {
+    List<String> r = new ArrayList<>();
+    if (memo != null && !memo.isEmpty()) r.add(memo);
+    for (int i = 0; i < turns.length(); i++) {
+      org.json.JSONObject x = turns.optJSONObject(i);
+      if (x != null && i != k) { r.add(x.optString("src", "")); r.add(x.optString("dst", "")); r.add(x.optString("fixed", "")); }
+    }
+    return r;
   }
 
   /** Правка в реплику (по метке), в рабочую историю и в ярус выученного. false — перевод тот же,
