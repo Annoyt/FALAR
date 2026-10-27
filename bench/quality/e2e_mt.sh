@@ -6,7 +6,8 @@
 #
 #   bench/quality/e2e_mt.sh [движок mt_bench …]          например: bench/quality/e2e_mt.sh hymt
 #
-# E2E_GPU=1 — движки mt_bench на видеокарте (нужны POCO_PROFILE=poco-gpu и для llama.cpp PYTHONPATH на сборку с
+# E2E_TAG=имя — приписка к именам прогонов движков mt_bench (например, исходная и дообученная Hy-MT2 через
+# FALAR_HYMT_GGUF — см. mt_bench.py). E2E_GPU=1 — движки mt_bench на видеокарте (нужны POCO_PROFILE=poco-gpu и для llama.cpp PYTHONPATH на сборку с
 # CUDA, см. mt_bench.py); FALAR_COMET_PY — окружение COMET (с видеокартой — быстрее). Готовые прогоны не
 # пересчитываются. Выход — results/asr_conf/e2e/runs/ (вне git). На ПК с андервольтом — одно ядро (E2E_CORE, по
 # умолчанию 0), COMET — одним процессом; долгий прогон — под ~/.cache/falar-stand/thermal_guard.sh.
@@ -46,7 +47,7 @@ done; done
 
 # другие модели — mt_bench
 for eng in "$@"; do for d in pt2ru ru2pt; do for s in "" .clean; do
-  o=$OUT/${eng}_$d$s.json; sf=(); for r in $(recs $d); do sf+=(--setfile "$E/$r$s.json=$r"); done
+  o=$OUT/${eng}${E2E_TAG:+-$E2E_TAG}_$d$s.json; sf=(); for r in $(recs $d); do sf+=(--setfile "$E/$r$s.json=$r"); done
   if [ ! -f "$o" ]; then
     (cd "$R" && taskset -c $CORE $PY mt_bench.py --engine $eng --direction $d "${sf[@]}" --no-comet --resume --out "$o" \
       ${E2E_GPU:+--gpu}) >> "$OUT/mt.log" 2>&1 || { echo "mt_bench $eng $d$s упал: $OUT/mt.log"; exit 1; }
@@ -61,9 +62,10 @@ taskset -c $CORE "$CPY" "$R/tools/mt_metrics.py" "${files[@]}" > "$OUT/comet.log
 echo "== цена слуха: перевод приложения распознанного против сказанного"
 for d in pt2ru ru2pt; do $PY "$R/tools/e2e_compare.py" "$OUT/app_$d.clean.json" "$OUT/app_$d.json"; done
 for eng in "$@"; do
-  echo "== $eng против приложения: на распознанном, на сказанном, цена слуха"
+  e=${eng}${E2E_TAG:+-$E2E_TAG}
+  echo "== $e против приложения: на распознанном, на сказанном, цена слуха"
   for d in pt2ru ru2pt; do
-    for s in "" .clean; do $PY "$R/tools/e2e_compare.py" --pooled "$OUT/app_$d$s.json" "$OUT/${eng}_$d$s.json"; done
-    $PY "$R/tools/e2e_compare.py" --gap "$OUT/app_$d.clean.json" "$OUT/app_$d.json" "$OUT/${eng}_$d.clean.json" "$OUT/${eng}_$d.json"
+    for s in "" .clean; do $PY "$R/tools/e2e_compare.py" --pooled "$OUT/app_$d$s.json" "$OUT/${e}_$d$s.json"; done
+    $PY "$R/tools/e2e_compare.py" --gap "$OUT/app_$d.clean.json" "$OUT/app_$d.json" "$OUT/${e}_$d.clean.json" "$OUT/${e}_$d.json"
   done
 done

@@ -379,6 +379,9 @@ class HyMtEngine:
             common = subprocess.run(["git", "-C", str(Path(__file__).parent), "rev-parse", "--path-format=absolute",
                                      "--git-common-dir"], capture_output=True, text=True).stdout.strip()
             path = Path(common).parent / "models" / "llm" / path.name
+        if os.environ.get("FALAR_HYMT_GGUF"):   # другой файл модели — например, дообученный в Colab (tools/colab)
+            path = Path(os.environ["FALAR_HYMT_GGUF"])
+            self.name += "@" + path.stem
         self.llm = Llama(model_path=str(path), n_ctx=2048, n_threads=llama_threads(),
                          n_gpu_layers=llama_gpu_layers(), verbose=False)
 
