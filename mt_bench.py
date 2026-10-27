@@ -6,6 +6,7 @@
   app        — та же OPUS-MT ровно как в приложении: ONNX int8 с телефона, жадный декод
   bergamot   — Mozilla/Firefox tiny|base через slimt, офлайн, ПИВОТ через английский
   gemma      — Gemma 3 4B it GGUF Q4_K_M (llama.cpp), офлайн, с глоссарием
+  hymt       — Hy-MT2-1.8B GGUF Q4_K_M (llama.cpp) — модель уточнителя приложения (models/llm), как переводчик
   openrouter — OpenRouter :free-модели, онлайн-эталон (платные запрещены)
 
 Наборы (--set, по умолчанию оба):
@@ -42,7 +43,21 @@ SETS = {"tatoeba": Path(__file__).parent / "data" / "mt_test" / "tatoeba.json",
 GLOSSARY_PATH = Path(__file__).parent / "data" / "glossary.json"
 
 LANG_NAMES = {"pt": "Brazilian Portuguese", "ru": "Russian"}
+# --gpu: NLLB, Gemma и Hy-MT считают на видеокарте ПК — только чтобы быстрее прогнать сравнение моделей. Задержки
+# тогда не телефонные. Нужен POCO_PROFILE=poco-gpu (у poco-cpu лимит адресов, CUDA с ним не стартует), а для
+# llama.cpp — сборка с CUDA (PYTHONPATH на неё; в общем .venv — без CUDA).
+GPU = False
 NLLB_CODES = {"pt": "por_Latn", "ru": "rus_Cyrl"}
+
+
+def llama_gpu_layers() -> int:
+    """Сколько слоёв llama.cpp отдать видеокарте: все при --gpu (сборка обязана уметь), иначе ни одного."""
+    if not GPU:
+        return 0
+    import llama_cpp
+    if not llama_cpp.llama_supports_gpu_offload():
+        sys.exit(f"--gpu: llama_cpp {llama_cpp.__version__} ({llama_cpp.__file__}) собран без видеокарты")
+    return -1
 
 
 def load_glossary() -> dict:
@@ -63,7 +78,7 @@ class NLLBEngine:
         path = snapshot_download("entai2965/nllb-200-distilled-600M-ctranslate2")
         self.tokenizer = AutoTokenizer.from_pretrained(path)
         self.translator = ctranslate2.Translator(
-            path, device="cpu", compute_type="int8",
+            path, device="cuda" if GPU else "cpu", compute_type="int8",
             inter_threads=1, intra_threads=poco_limits.cpu_threads())
 
     def translate(self, text: str, src: str, tgt: str) -> str:
@@ -287,8 +302,8 @@ class GemmaEngine:
         path = hf_hub_download(
             "bartowski/google_gemma-3-4b-it-GGUF",
             "google_gemma-3-4b-it-Q4_K_M.gguf")
-        self.llm = Llama(model_path=path, n_ctx=2048,
-                         n_threads=poco_limits.cpu_threads(), verbose=False)
+        self.llm = Llama(model_path=path, n_ctx=2048, n_threads=poco_limits.cpu_threads(),
+                         n_gpu_layers=llama_gpu_layers(), verbose=False)
         self.glossary = glossary
 
     def _prompt(self, text: str, src: str, tgt: str) -> str:
@@ -305,6 +320,28 @@ class GemmaEngine:
         resp = self.llm.create_chat_completion(
             messages=[{"role": "user", "content": self._prompt(text, src, tgt)}],
             temperature=0.1, max_tokens=256)
+        return resp["choices"][0]["message"]["content"].strip().strip('"')
+
+
+# ---------- Hy-MT2-1.8B (llama.cpp) — модель уточнителя приложения ----------
+class HyMtEngine:
+    name = "hy-mt2-1.8b-q4km"
+
+    def __init__(self):
+        from llama_cpp import Llama
+        path = Path(__file__).parent / "models" / "llm" / "Hy-MT2-1.8B-Q4_K_M.gguf"
+        if not path.exists():  # рабочее дерево git без моделей — берём из основной копии, как bench/quality/gate.sh
+            common = subprocess.run(["git", "-C", str(Path(__file__).parent), "rev-parse", "--path-format=absolute",
+                                     "--git-common-dir"], capture_output=True, text=True).stdout.strip()
+            path = Path(common).parent / "models" / "llm" / path.name
+        self.llm = Llama(model_path=str(path), n_ctx=2048, n_threads=poco_limits.cpu_threads(),
+                         n_gpu_layers=llama_gpu_layers(), verbose=False)
+
+    def translate(self, text: str, src: str, tgt: str) -> str:
+        # Подсказка Hunyuan-MT для пар без китайского: «переведи в <язык> без пояснений».
+        prompt = f"Translate the following segment into {LANG_NAMES[tgt]}, without additional explanation.\n\n{text}"
+        resp = self.llm.create_chat_completion(messages=[{"role": "user", "content": prompt}],
+                                               temperature=0.0, max_tokens=256)
         return resp["choices"][0]["message"]["content"].strip().strip('"')
 
 
@@ -347,7 +384,9 @@ class OpenRouterEngine:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engine", choices=["nllb", "opus", "app", "bergamot", "gemma", "openrouter"], required=True)
+    ap.add_argument("--engine", choices=["nllb", "opus", "app", "bergamot", "gemma", "hymt", "openrouter"], required=True)
+    ap.add_argument("--setfile", default="", help="свой набор в том же виде (ключи pt_to_ru / ru_to_pt), имя набора — real; "
+                    "для частных данных: --out и FALAR_COMET_CACHE — в закрытую папку, вывод — туда же")
     ap.add_argument("--tier", default="android", help="bergamot: android (base-memory) | tiny (нет для pt)")
     ap.add_argument("--direction", choices=["pt2ru", "ru2pt"], default="pt2ru")
     ap.add_argument("--model", default="google/gemini-2.0-flash-exp:free")
@@ -358,13 +397,18 @@ def main():
     ap.add_argument("--no-comet", action="store_true", help="без COMET (только chrF и chrF++)")
     ap.add_argument("--resume", action="store_true", help="продолжить прерванный прогон с .partial.json")
     ap.add_argument("--out", default="")
+    ap.add_argument("--gpu", action="store_true", help="nllb, gemma, hymt: на видеокарте ПК (быстрее; задержки не телефонные)")
     args = ap.parse_args()
+    global GPU
+    GPU = args.gpu
+    if GPU and PROFILE == "poco-cpu":
+        sys.exit("--gpu: в профиле poco-cpu память ограничена 8 ГБ адресов, CUDA с ним не запускается — POCO_PROFILE=poco-gpu")
 
     src, tgt = args.direction.split("2")
     key = "pt_to_ru" if args.direction == "pt2ru" else "ru_to_pt"
     items = []
-    for name, path in SETS.items():
-        if args.set not in ("all", name):
+    for name, path in ({"real": Path(args.setfile)} if args.setfile else SETS).items():
+        if args.set not in ("all", name) and not args.setfile:
             continue
         part = json.loads(path.read_text())[key]
         items += [dict(it, set=name) for it in (part[: args.limit] if args.limit else part)]
@@ -375,6 +419,7 @@ def main():
               "app": lambda: AppEngine(args.direction),
               "bergamot": lambda: BergamotEngine(args.direction, tier=args.tier),
               "gemma": lambda: GemmaEngine(glossary),
+              "hymt": lambda: HyMtEngine(),
               "openrouter": lambda: OpenRouterEngine(args.model, glossary)}[args.engine]()
 
     tag = args.engine + (f"-{args.tier}" if args.engine == "bergamot" else "") \
@@ -416,7 +461,7 @@ def main():
     lat_sorted = sorted(latencies)
     n = len(latencies)
     summary = {
-        "engine": engine.name, "direction": args.direction, "profile": PROFILE,
+        "engine": engine.name, "direction": args.direction, "profile": PROFILE, "device": "gpu" if GPU else "cpu",
         "lat_avg": round(sum(latencies) / n, 2),
         "lat_p50": round(lat_sorted[n // 2], 2),
         "lat_p95": round(lat_sorted[int(n * 0.95)], 2),
