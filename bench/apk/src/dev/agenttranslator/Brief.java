@@ -121,7 +121,7 @@ public class Brief {
    *  реплики, draft — её нынешний перевод, others — что уточнитель видел рядом: другие реплики (и
    *  исходники, и переводы) и память разговора. */
   public static String swallowed(String out, String src, String draft, List<String> others) {
-    if (out == null || out.isEmpty()) return null;
+    if (out == null) return null;                       // пустой ответ ниже любого предела и проходит сам
     int n = out.length(), ref = Math.max(src == null ? 0 : src.length(), draft == null ? 0 : draft.length());
     String times = String.format(Locale.ROOT, "%.1f", n / (double) Math.max(1, ref));
     if (n > SWELL * ref + SWELL_SLACK) return "в " + times + " раза длиннее реплики (" + n + " знаков на " + ref + ")";
