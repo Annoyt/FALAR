@@ -92,6 +92,30 @@ OPENSLR = ['https://us.openslr.org/resources', 'https://www.openslr.org/resource
 SR = 16000
 
 
+def gpu_kind():
+    """'bf16' — видеокарта с родным bf16 (A100, L4, H100: архитектура 8.0+), 'fp16' — без него (T4: 7.5),
+    None — видеокарты нет."""
+    import torch
+    if not torch.cuda.is_available():
+        return None
+    return 'bf16' if torch.cuda.get_device_capability()[0] >= 8 else 'fp16'
+
+
+def need_gpu(stage):
+    if gpu_kind() is None:
+        raise SystemExit(f'этап {stage} — на видеокарте: Среда выполнения → Сменить среду выполнения → GPU (T4 или A100); '
+                         'готовые этапы сохранены на Диске и повторно не считаются')
+
+
+def for_gpu(cfg):
+    """Настройки под видеокарту: на T4 (16 ГБ, без bf16) — пачки меньше, накопление больше (размер шага тот же).
+    Явно заданное в SETTINGS не трогается: применяется к ключам, которых нет в cfg['_set']."""
+    if gpu_kind() != 'fp16':
+        return cfg
+    t4 = dict(batch=8, accum=4, gen_batch=32, comet_batch=32)
+    return dict(cfg, **{k: v for k, v in t4.items() if k not in cfg.get('_set', ())})
+
+
 def log(*a):
     print(time.strftime('%H:%M:%S'), *a, flush=True)
 
@@ -310,6 +334,7 @@ def labse(cfg):
     if out.exists():
         log('labse: готов', out)
         return out
+    need_gpu('labse')
     from sentence_transformers import SentenceTransformer
     m = SentenceTransformer('sentence-transformers/LaBSE', device='cuda')
     m.half()
@@ -344,14 +369,35 @@ def select_rows(rows, cfg):
     return out
 
 
+SELECT_KEYS = ('n_train', 'n_dev', 'n_test', 'noisy_share', 'seed')
+# что получается из отбора: при другом отборе оно устарело
+DOWNSTREAM = ('noisy.jsonl', 'noisy_shards', 'sft_train.jsonl', 'sft_dev.jsonl', 'checkpoints', 'lora', 'full', 'eval',
+              'export')
+
+
 def select(cfg):
+    """Отбор помнит свои настройки (selected.meta.json). Сделанный с другими — или прежней версией ноутбука, без
+    отметки, — откладывается вместе со всем, что из него получено, в stale/<время>/ (не удаляется) и делается заново."""
     w, _ = paths(cfg)
-    out = w / 'selected.jsonl'
+    out, meta = w / 'selected.jsonl', w / 'selected.meta.json'
+    want = {k: cfg[k] for k in SELECT_KEYS}
     if out.exists():
-        log('select: готов', out)
-        return out
+        have = json.loads(meta.read_text()) if meta.exists() else None
+        if have == want:
+            log('select: готов', out)
+            return out
+        stale, k = w / 'stale' / time.strftime('%Y%m%d-%H%M%S'), 1
+        while stale.exists():
+            k += 1
+            stale = w / 'stale' / time.strftime(f'%Y%m%d-%H%M%S-{k}')
+        stale.mkdir(parents=True)
+        for name in ('selected.jsonl', 'selected.meta.json') + DOWNSTREAM:
+            if (w / name).exists():
+                shutil.move(str(w / name), str(stale / name))
+        log(f'select: прежний отбор сделан с другими настройками ({have}) — он и всё, что из него, отложены в {stale}')
     rows = select_rows(jload(w / 'corpus_labse.jsonl'), cfg)
     jdump(rows, out)
+    meta.write_text(json.dumps(want))
     log('select:', {p: sum(1 for r in rows if r['part'] == p) for p in ('train', 'dev', 'test')},
         'с шумом:', sum(r['noisy'] for r in rows))
     return out
@@ -645,6 +691,12 @@ def train(cfg, model_path=None, max_steps=-1):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
     from transformers.trainer_utils import get_last_checkpoint
+    kind = gpu_kind()
+    if model_path is None:
+        need_gpu('train')
+    if cfg['full_ft'] and kind != 'bf16':
+        raise SystemExit('полное дообучение — только на A100 (bf16, 40+ ГБ); на T4 — LoRA (full_ft=False)')
+    cfg = for_gpu(cfg)
     src = model_path or cfg['base']
     tok = AutoTokenizer.from_pretrained(src)
     data = {}
@@ -652,7 +704,8 @@ def train(cfg, model_path=None, max_steps=-1):
         ex = [encode(tok, e, cfg['max_len']) for e in jload(w / f'sft_{part}.jsonl')]
         data[part] = [e for e in ex if e]
         log(f'train: {part} — {len(data[part]):,} примеров (длиннее {cfg["max_len"]} токенов: {len(ex) - len(data[part])})')
-    dtype = torch.float32 if cfg['full_ft'] else torch.bfloat16      # полное — веса fp32, счёт bf16
+    # полное — веса fp32, счёт bf16; LoRA — замороженная модель в bf16 (A100) или fp16 (T4), сама LoRA — fp32 (peft)
+    dtype = torch.float32 if cfg['full_ft'] else torch.float16 if kind == 'fp16' else torch.bfloat16
     model = AutoModelForCausalLM.from_pretrained(src, torch_dtype=dtype, attn_implementation='sdpa')
     model = build_model(cfg, model)
     ck = w / 'checkpoints'
@@ -660,7 +713,7 @@ def train(cfg, model_path=None, max_steps=-1):
         output_dir=str(ck), per_device_train_batch_size=cfg['batch'], gradient_accumulation_steps=cfg['accum'],
         per_device_eval_batch_size=cfg['batch'], learning_rate=cfg['lr_full'] if cfg['full_ft'] else cfg['lr'],
         lr_scheduler_type='cosine_with_min_lr', lr_scheduler_kwargs={'min_lr_rate': 0.1}, warmup_ratio=0.03,
-        num_train_epochs=cfg['epochs'], max_steps=max_steps, bf16=torch.cuda.is_available(),
+        num_train_epochs=cfg['epochs'], max_steps=max_steps, bf16=kind == 'bf16', fp16=kind == 'fp16',
         logging_steps=25, save_steps=500, save_total_limit=2, eval_strategy='steps', eval_steps=500,
         group_by_length=True, report_to='none', remove_unused_columns=False, seed=cfg['seed'],
         dataloader_num_workers=2, gradient_checkpointing=True, gradient_checkpointing_kwargs={'use_reentrant': False},
@@ -689,7 +742,7 @@ def load_for_eval(cfg, which, base=None):
     base = base or cfg['base']
     tok = AutoTokenizer.from_pretrained(base)
     tok.padding_side = 'left'
-    dt = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    dt = {'bf16': torch.bfloat16, 'fp16': torch.float16}.get(gpu_kind(), torch.float32)
     if which == 'base':
         m = AutoModelForCausalLM.from_pretrained(base, torch_dtype=dt)
     elif cfg['full_ft']:
@@ -786,6 +839,8 @@ def boot(a, b, n_boot=1000, seed=12345):
 
 
 def evaluate(cfg):
+    need_gpu('evaluate')
+    cfg = for_gpu(cfg)
     w, c = paths(cfg)
     ev = w / 'eval'
     ev.mkdir(exist_ok=True)

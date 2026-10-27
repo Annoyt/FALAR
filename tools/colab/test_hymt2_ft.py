@@ -8,9 +8,10 @@
 - обучение крошечной модели той же архитектуры (LoRA, 3 шага) и перевод ею;
 - с --gguf — выгрузка в GGUF конвертером llama.cpp той же версии и чтение llama.cpp ПК;
 - с --pipeline — весь конвейер этапами ноутбука в миниатюре: настоящие субтитры (300 тыс. строк), шум,
-  обучение, оценка с COMET (окружение ПК с видеокартой), сборка llama.cpp и Q4_K_M.
+  обучение, оценка с COMET (окружение ПК с видеокартой), сборка llama.cpp и Q4_K_M;
+- с --fp16 — всё это путём T4: fp16 вместо bf16, GradScaler, пачки 8 × 4.
 
-    ~/tools/venv-colab-test/bin/python tools/colab/test_hymt2_ft.py [--gguf] [--pipeline]
+    ~/tools/venv-colab-test/bin/python tools/colab/test_hymt2_ft.py [--gguf] [--pipeline] [--fp16]
 
 Нужны окружение с пинами ноутбука (transformers 4.57.6, peft 0.18.1, accelerate 1.10.1, sherpa-onnx 1.13.8,
 soundfile, scipy, sacrebleu), файлы токенизатора Hy-MT2 без весов (FALAR_HYMT_TOK, по умолчанию
@@ -75,6 +76,15 @@ def test_text():
             'provided background information into consideration\n[Source Text]\nПривет')
     check(H.prompt('Привет', 'pt', ['A', 'B']) == want, 'подсказка уточнителя — как TranslatorService.hyPrompt')
     check(H.prompt('Привет', 'pt', []).startswith('[Background Information]\n\nPlease'), 'пустой фон — как в приложении')
+    real = H.gpu_kind
+    try:
+        H.gpu_kind = lambda: 'fp16'
+        c = H.for_gpu(dict(H.CFG, batch=16, accum=2, _set=('accum',)))
+        check(c['batch'] == 8 and c['accum'] == 2 and c['gen_batch'] == 32, 'T4: пачки меньше, заданное явно не трогается')
+        H.gpu_kind = lambda: 'bf16'
+        check(H.for_gpu(dict(H.CFG))['batch'] == H.CFG['batch'], 'A100: настройки как есть')
+    finally:
+        H.gpu_kind = real
 
 
 def test_corpus():
@@ -101,6 +111,24 @@ def test_corpus():
     check(sum(r['dir'] == 'pt2ru' for r in by['train']) == 4, 'направления поровну')
     check(sum(r['noisy'] for r in by['train']) == 4 and all(r['noisy'] for r in by['test'])
           and not any(r['noisy'] for r in by['dev']), 'шум: доля обучения, весь тест, без проверки')
+    work = RUN / 'select-work'
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    H.jdump(syn, work / 'corpus_labse.jsonl')
+    ca = dict(H.CFG, work=str(work), cache=str(RUN / 'cache'), n_train=8, n_dev=2, n_test=2, noisy_share=0.5)
+    H.select(ca)
+    (work / 'noisy.jsonl').write_text('{}\n')
+    H.select(ca)
+    check((work / 'noisy.jsonl').exists() and not (work / 'stale').exists(), 'отбор с теми же настройками — пропуск')
+    H.select(dict(ca, noisy_share=0.25))
+    stale = list((work / 'stale').glob('*'))
+    check(len(stale) == 1 and (stale[0] / 'noisy.jsonl').exists() and (stale[0] / 'selected.jsonl').exists()
+          and not (work / 'noisy.jsonl').exists() and (work / 'selected.jsonl').exists(),
+          'отбор с другими настройками — прежний и всё из него отложены в stale/, отбор заново')
+    (work / 'selected.meta.json').unlink()
+    H.select(dict(ca, noisy_share=0.25))
+    check(len(list((work / 'stale').glob('*'))) >= 1 and (work / 'selected.meta.json').exists(),
+          'отбор прежней версии (без отметки) — тоже заново')
     import random
     rng = random.Random(1)
     r = dict(syn[0], dir='pt2ru', noisy=True, asr='frase treinou aqui', wer=0.4)
@@ -156,7 +184,8 @@ def test_noisy():
     clean = [H._noisy_one((i, lang, t, base)) for i, (lang, t) in enumerate(texts)]
     dt = (time.time() - t0) / len(texts)
     ws = [H.wer(t, r['asr']) for (_, t), r in zip(texts, clean)]
-    check(all(w <= 0.25 for w in ws), f'без шума распознано почти всё: WER {[round(w, 2) for w in ws]}')
+    # озвучка VITS случайна при каждом вызове: порог — с запасом, на ошибки распознавания самого голоса
+    check(all(w <= 0.5 for w in ws) and sum(ws) / len(ws) <= 0.3, f'без шума распознано почти всё: WER {[round(w, 2) for w in ws]}')
     loud = dict(base, clean_audio=0.0, rir_prob=1.0, snr_db=(-5.0, -5.0))
     noisy = [H._noisy_one((i, lang, t, loud)) for i, (lang, t) in enumerate(texts)]
     check(all('rir' in r['cond'] and 'dB' in r['cond'] for r in noisy), 'комната и шум легли')
@@ -347,6 +376,7 @@ def test_pipeline(base):
                opus_lines=300_000, n_train=200, n_dev=20, n_test=20, noisy_share=0.5, noise='rirs',
                voices={'pt': ['pt_BR-faber-medium'], 'ru': ['ru_RU-dmitri-medium']}, workers=2, batch=4, accum=1,
                max_len=256, eval_limit=40, gen_batch=16, build_jobs=2, comet_batch=8,
+               _set=('batch', 'accum', 'gen_batch', 'comet_batch'),
                comet_model=str(m / 'comet' / 'wmt22-comet-da' / 'checkpoints' / 'model.ckpt'))
     t0 = time.time()
     H.corpus(cfg)
@@ -381,6 +411,9 @@ def test_pipeline(base):
 
 def main():
     RUN.mkdir(parents=True, exist_ok=True)
+    if '--fp16' in sys.argv:                   # видеокарта ПК умеет bf16 — путь T4 (fp16, GradScaler) включаем сами
+        H.gpu_kind = lambda: 'fp16'
+        print('режим T4: fp16')
     test_text()
     syn = test_corpus()
     test_encode()
