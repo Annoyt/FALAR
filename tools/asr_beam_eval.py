@@ -23,6 +23,7 @@ def main():
     ap.add_argument('recs', nargs='+')
     ap.add_argument('--paths', type=int, default=4)
     ap.add_argument('--out', default=os.path.join(R, 'results', 'asr_conf'))
+    ap.add_argument('--noisy', action='store_true', help='луч только для кусков, закрытых при включённом шумодаве нарезки')
     a = ap.parse_args()
     m = os.path.join(R, 'models', 'asr_multi')
     rec = ac.vde.so.OfflineRecognizer.from_transducer(
@@ -43,8 +44,20 @@ def main():
                 t0 = time.time(); texts.append(ac.recognize(rec, piece(s[0], s[1]))[0]); sec += time.time() - t0
             beam = dict(texts=texts, sec=sec)
             json.dump(beam, open(bpath + '.tmp', 'w', encoding='utf-8'), ensure_ascii=False); os.replace(bpath + '.tmp', bpath)
-        g = de.per_phrase(segs, [r[0] for r in cache['asr']], plays, gap, lang)
-        b = de.per_phrase(segs, beam['texts'], plays, gap, lang)
+        greedy = [r[0] for r in cache['asr']]
+        texts = beam['texts']
+        if a.noisy:                                       # где шумодав нарезки выключен — жадный, как сейчас
+            fpath = os.path.join(a.out, f'{name}.gate.json')
+            if os.path.exists(fpath): flags = json.load(open(fpath, encoding='utf-8'))
+            else:
+                flags = []
+                s2, _ = ac.vde.segment(x, 'dn_sil', 'gtcrn', 0.0, -48.0, True, ac.vde.Wiener(), on_out=flags, **ac.APP)
+                assert [tuple(t) for t in s2] == segs, 'нарезка разошлась с кэшем'
+                json.dump(flags, open(fpath, 'w', encoding='utf-8'))
+            texts = [bt if f else gt for bt, gt, f in zip(texts, greedy, flags)]
+            print(f'   {name}: кусков при шумодаве {sum(flags)} из {len(flags)}', flush=True)
+        g = de.per_phrase(segs, greedy, plays, gap, lang)
+        b = de.per_phrase(segs, texts, plays, gap, lang)
         allg += g; allb += b; tb += beam['sec']
         e1, n = sum(r[1] for r in g), sum(r[2] for r in g); e2 = sum(r[1] for r in b)
         d, lo, hi = de.boot(g, b)

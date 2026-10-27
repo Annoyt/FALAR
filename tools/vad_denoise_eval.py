@@ -251,7 +251,7 @@ class Gate:
 
 
 def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=None, minsp=250, tail=300, carry=True, dead=True,
-            vad_min=None, vad_min_noise=None, minsp_noise=None):
+            vad_min=None, vad_min_noise=None, minsp_noise=None, on_out=None):
     """TranslatorService.startVad при 0 дБ. variant: raw — silero и порог по исходному; dn — silero, порог и
     его фон по очищенному; dn_sil — silero по очищенному, порог по исходному. Шумодав — потоком, кадр за
     кадром, как в приложении: его выход копится и отдаётся по 512 отсчётов, пока выхода нет — тишина.
@@ -335,6 +335,7 @@ def segment(x, variant, model='gtcrn', att=0.0, gate=None, music=False, quiet=No
         keep = len(seg) - max(0, silent - TAIL)
         if voiced * F >= (minsp_noise if on and minsp_noise is not None else MINSP) and keep > 0:
             out.append((seg[0] * FRAME, (seg[keep - 1] + 1) * FRAME, (i + 1) * FRAME))
+            if on_out is not None: on_out.append(on)    # шумодав нарезки включён в момент закрытия куска (DenoiseGate приложения)
         if carry:                                         # тишина конца куска — подпор следующего (не больше PRE кадров)
             pre = deque(seg[len(seg) - min(silent, max(1, PRE)):])
         in_sp, seg, silent, voiced = False, [], 0, 0
