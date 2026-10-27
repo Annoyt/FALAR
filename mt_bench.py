@@ -478,6 +478,10 @@ def main():
     if not mt_metrics.COMET_PY.exists():
         print(f"COMET пропущен: нет {mt_metrics.COMET_PY} (как поставить — в начале tools/mt_metrics.py)")
         return
+    if GPU:   # видеокарта на 4 ГБ: модель перевода (Gemma — 3 ГБ) и COMET вместе не помещаются
+        import gc
+        del engine
+        gc.collect()
     sys.stdout.flush()   # иначе строка COMET из дочернего процесса окажется посреди журнала
     rc = subprocess.run([str(mt_metrics.COMET_PY), str(Path(mt_metrics.__file__)), str(out)]).returncode
     if rc:

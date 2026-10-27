@@ -13,7 +13,8 @@ COMET — Unbabel/wmt22-comet-da (Apache-2.0, 2,3 ГБ, кодировщик XLM
 models/comet/wmt22-comet-da, работает в своём окружении .venv-comet (torch для процессора,
 unbabel-comet): у comet старые пины (numpy<2, torchmetrics 0.10), которые сломали бы остальные замеры
 в .venv. Только на ПК, на телефон не едет. На 8 потоках процессора — около 3,5 пары в секунду:
-1000 пар — 5 минут; модель грузится 20 с.
+1000 пар — 5 минут; модель грузится 20 с. Если torch окружения видит видеокарту, COMET считает на ней;
+другое окружение — FALAR_COMET_PY=путь/к/python (так и mt_bench зовёт COMET).
 
   .venv-comet/bin/python tools/mt_metrics.py results/mt_opus_pt2ru.json     # всё, с COMET
   .venv/bin/python tools/mt_metrics.py --no-comet results/mt_*.json           # только chrF и chrF++
@@ -26,6 +27,8 @@ unbabel-comet): у comet старые пины (numpy<2, torchmetrics 0.10), к�
   uv pip install --python .venv-comet/bin/python torch --index-url https://download.pytorch.org/whl/cpu
   uv pip install --python .venv-comet/bin/python unbabel-comet
   (модель скачивается из Hugging Face: Unbabel/wmt22-comet-da в models/comet/wmt22-comet-da)
+Для видеокарты — то же, но torch из https://download.pytorch.org/whl/cu130 (или подходящей драйверу CUDA)
+и в отдельное окружение; оно указывается через FALAR_COMET_PY.
 """
 import argparse
 import json
@@ -35,7 +38,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 COMET_CKPT = ROOT / "models" / "comet" / "wmt22-comet-da" / "checkpoints" / "model.ckpt"
-COMET_PY = ROOT / ".venv-comet" / "bin" / "python"
+COMET_PY = Path(os.environ.get("FALAR_COMET_PY") or ROOT / ".venv-comet" / "bin" / "python")
 N_BOOT = 1000
 SEED = 12345
 # Какой набор — заголовок прогона: большой, если есть
@@ -139,7 +142,7 @@ class Comet:
     """Модель грузится один раз (~20 с) на все файлы — и только если в кэше нашлось не всё."""
 
     def __init__(self, threads=0, cache=True):
-        self.threads, self.model = threads, None
+        self.threads, self.model, self.gpus = threads, None, 0
         self.cache = CometCache() if cache else None
 
     def _load(self):
@@ -148,6 +151,7 @@ class Comet:
         import torch
         warnings.filterwarnings("ignore")
         torch.set_num_threads(self.threads or max(1, min(8, (os.cpu_count() or 2) - 2)))
+        self.gpus = 1 if torch.cuda.is_available() else 0
         from comet import load_from_checkpoint
         # lightning настраивает свои журналы при импорте — глушить после него
         for name in ("pytorch_lightning", "lightning", "lightning.pytorch", "lightning_fabric", "comet"):
@@ -169,7 +173,7 @@ class Comet:
             if self.model is None:
                 self._load()
             data = [{"src": r["src"], "mt": r["hyp"], "ref": r["ref"]} for r in todo]
-            out = self.model.predict(data, batch_size=batch, gpus=0, progress_bar=False)
+            out = self.model.predict(data, batch_size=batch, gpus=self.gpus, progress_bar=False)
             for r, v in zip(todo, out.scores):
                 r["comet"] = round(float(v), 4)
             if self.cache:
