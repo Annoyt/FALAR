@@ -84,6 +84,10 @@ public class Engine {
    *  черновика зависят от соседей: логиты строки сдвигаются до 0,5 (проверено 03.10). По одному —
    *  вероятности ровно как у жадного пути, но вызовов в mtBeam раз больше. */
   public static volatile boolean mtBeamSeq = false;
+  /** Опыт на ПК (results/2026-10-27-asr-confidence.md, шаг 3): декодирование, контрастное по исходнику (Sennrich и др.,
+   *  2024) — к оценке куска добавляется −λ·log p(кусок | пустой исходник): штраф за то, что модель написала бы при любом
+   *  исходнике (гладкая выдумка). 0 — выключено, как в приложении. Отбор в этом режиме — на Java, без BeamOps. */
+  public static volatile double mtContrast = 0;
   /** Потоков ONNX Runtime у сессий перевода. Телефон — 4; замер на столе «как одно ядро» — 1. */
   public static volatile int mtThreads = 4;
   /** Какие направления поднимать. Приложению нужны оба; замеру одного направления (MtRun, TimeRun) — одно:
@@ -93,6 +97,7 @@ public class Engine {
    *  луча; оценка последнего луча — для сверки с пересчётом по выбранным кускам (bench/quality/BeamCheck.java). */
   static volatile long mtRunNs, mtSteps, mtSelNs, mtGatNs;
   double lastBeamSum, lastBeamNorm; boolean lastBeamEos;
+  List<Long> contrastIds;   // пустой исходник для mtContrast — кладёт translate
 
   /** Резидентная память процесса, МБ: по ней видно, сколько стоит каждая часть при загрузке. */
   public static long rssMb() {
@@ -279,6 +284,7 @@ public class Engine {
     for (String sent : text.split("(?<=[.!?…])\\s+(?=\\S)")) {
       if (sent.trim().isEmpty()) continue;
       List<Long> ids = tk.encode(sent, lt);
+      contrastIds = mtContrast > 0 ? tk.encode("", lt) : null;
       int beam = mtBeam;
       List<Long> o = s.length == 3 ? greedy(s[0], s[1], s[2], ids, start, eos, 64)
           : beam > 1 ? beamKv(s[0], s[1], ids, start, eos, 64, beam) : greedyKv(s[0], s[1], ids, start, eos, 64);
@@ -391,7 +397,21 @@ public class Engine {
     OnnxTensor tK = OnnxTensor.createTensor(env, new long[]{K});
     Map<Integer, OnnxTensor[]> ban = new HashMap<>();   // по размеру пакета: какой кусок запретить (<pad>) и чем (−∞)
     Map<String, OnnxTensor> enc1 = new HashMap<>(), encB = new HashMap<>(), dec = new HashMap<>(); OrtSession.Result er = null;
+    final double lam = mtContrast; final List<Long> cid = contrastIds;
+    Map<String, OnnxTensor> encC1 = new HashMap<>(), encCB = new HashMap<>(), decC = new HashMap<>(); OrtSession.Result erC = null;
+    OnnxTensor tInC = null, tMaskC = null, tMaskCB = null;
     try {
+      if (lam > 0) {                                 // тот же декодер на пустом исходнике — своё прошлое, свои K/V
+        long[][] ic = new long[1][cid.size()], mc = new long[1][cid.size()];
+        for (int k = 0; k < cid.size(); k++) { ic[0][k] = cid.get(k); mc[0][k] = 1; }
+        tInC = OnnxTensor.createTensor(env, ic); tMaskC = OnnxTensor.createTensor(env, mc);
+        Map<String, OnnxTensor> eic = new HashMap<>(); eic.put("input_ids", tInC); eic.put("attention_mask", tMaskC);
+        erC = enc.run(eic);
+        for (int i = 0; i < DEC_KEYS.length; i++) {
+          encC1.put(ENC_KEYS[i], (OnnxTensor) erC.get(ENC_KEYS[i].replace("past_key_values.", "present.")).get());
+          decC.put(DEC_KEYS[i], OnnxTensor.createTensor(env, java.nio.FloatBuffer.allocate(0), new long[]{1, HEADS, 0, HEAD_DIM}));
+        }
+      }
       Map<String, OnnxTensor> ei = new HashMap<>(); ei.put("input_ids", tIn); ei.put("attention_mask", tMask);
       er = enc.run(ei);
       for (int i = 0; i < DEC_KEYS.length; i++) {
@@ -424,6 +444,19 @@ public class Engine {
           bn = new OnnxTensor[]{OnnxTensor.createTensor(env, pad), OnnxTensor.createTensor(env, neg)}; ban.put(b, bn);
         }
         long[][] ix; float[][] lp; long t1 = System.nanoTime();
+        if (lam > 0) {
+          if (b > 1 && encCB.isEmpty()) {
+            encCB = gatherOrt(encC1, ENC_KEYS, new long[b]);
+            long[][] mcb = new long[b][cid.size()]; for (long[] row : mcb) Arrays.fill(row, 1);
+            tMaskCB = OnnxTensor.createTensor(env, mcb);
+          }
+          float[] real, con;
+          try { java.nio.FloatBuffer fb = lg.getFloatBuffer(); real = new float[fb.remaining()]; fb.get(real); } finally { lg.close(); }
+          OnnxTensor lgC = stepBatchT(decP, decC, b == 1 ? encC1 : encCB, b == 1 ? tMaskC : tMaskCB, last);
+          try { java.nio.FloatBuffer fb = lgC.getFloatBuffer(); con = new float[fb.remaining()]; fb.get(con); } finally { lgC.close(); }
+          ix = new long[b][]; lp = new float[b][];
+          contrastTop(real, con, b, K, lam, (int) start, ix, lp);
+        } else
         try {
           Map<String, OnnxTensor> si = new HashMap<>(); si.put("logits", lg); si.put("pad", bn[0]); si.put("neg", bn[1]); si.put("k", tK);
           try (OrtSession.Result sr = beamSel.run(si)) { ix = (long[][]) sr.get("ix").get().getValue(); lp = (float[][]) sr.get("lp").get().getValue(); }
@@ -446,6 +479,7 @@ public class Engine {
         }
         if (done.size() >= beam || ns.isEmpty()) break;
         reorder(dec, par, ns.size());
+        if (lam > 0) reorder(decC, par, ns.size());
         seqs = ns; sc = Arrays.copyOf(nsc, ns.size());
       }
       int best = 0;
@@ -456,9 +490,34 @@ public class Engine {
     } finally {
       for (OnnxTensor x : dec.values()) x.close();
       for (OnnxTensor x : encB.values()) x.close();
+      for (OnnxTensor x : decC.values()) x.close();
+      for (OnnxTensor x : encCB.values()) x.close();
+      if (tMaskCB != null) tMaskCB.close(); if (tInC != null) tInC.close(); if (tMaskC != null) tMaskC.close(); if (erC != null) erC.close();
       for (OnnxTensor[] x : ban.values()) { x[0].close(); x[1].close(); }
       if (tMaskB != null) tMaskB.close();
       tK.close(); tIn.close(); tMask.close(); if (er != null) er.close();   // K/V кодировщика на одну строку закрывает свой результат
+    }
+  }
+
+  /** Отбор для mtContrast: по строке r — K лучших кусков по log p(v | x) − λ·log p(v | пустой исходник), <pad> не
+   *  берётся; ix/lp — как у графа BeamOps.SELECT (по убыванию). */
+  static void contrastTop(float[] real, float[] con, int b, int K, double lam, int pad, long[][] ix, float[][] lp) {
+    int V = real.length / b;
+    for (int r = 0; r < b; r++) {
+      int o = r * V; double mr = Double.NEGATIVE_INFINITY, mc = Double.NEGATIVE_INFINITY;
+      for (int v = 0; v < V; v++) { mr = Math.max(mr, real[o + v]); mc = Math.max(mc, con[o + v]); }
+      double zr = 0, zc = 0;
+      for (int v = 0; v < V; v++) { zr += Math.exp(real[o + v] - mr); zc += Math.exp(con[o + v] - mc); }
+      double lr = mr + Math.log(zr), lc = mc + Math.log(zc);
+      long[] bi = new long[K]; float[] bs = new float[K]; Arrays.fill(bs, Float.NEGATIVE_INFINITY);
+      for (int v = 0; v < V; v++) {
+        if (v == pad) continue;
+        float sv = (float) ((real[o + v] - lr) - lam * (con[o + v] - lc));
+        if (sv <= bs[K - 1]) continue;
+        int i = K - 1; for (; i > 0 && bs[i - 1] < sv; i--) { bs[i] = bs[i - 1]; bi[i] = bi[i - 1]; }
+        bs[i] = sv; bi[i] = v;
+      }
+      ix[r] = bi; lp[r] = bs;
     }
   }
 

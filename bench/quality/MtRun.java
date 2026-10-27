@@ -35,6 +35,7 @@ public class MtRun {
     Engine.mtDirs = new String[]{dir};
     Engine.mtLp = Double.parseDouble(System.getProperty("falar.lp", "1.0"));
     Engine.mtBeamSeq = Boolean.getBoolean("falar.seq");
+    Engine.mtContrast = Double.parseDouble(System.getProperty("falar.scd", "0"));   // опыт: контраст по исходнику (λ)
     Engine e = Engine.mtOnly(new File(a[0]), s -> System.err.println(s));
     JSONArray res = new JSONArray(); List<Double> ms = new ArrayList<>(); long steps = 0, runNs = 0, selNs = 0, gatNs = 0;
     for (int k = 3; k < a.length; k++) {
@@ -57,7 +58,7 @@ public class MtRun {
     int n = ms.size(); double sum = 0; for (double x : ms) sum += x;
     List<Double> sorted = new ArrayList<>(ms); Collections.sort(sorted);
     JSONObject summary = new JSONObject().put("engine", "app-java" + (Engine.mtBeam > 1 ? "-beam" + Engine.mtBeam + (Engine.mtBeamSeq ? "-seq" : "") : ""))
-        .put("direction", dir).put("n", res.length()).put("beam", Engine.mtBeam).put("threads", Engine.mtThreads).put("lp", Engine.mtLp).put("seq", Engine.mtBeamSeq)
+        .put("direction", dir).put("n", res.length()).put("beam", Engine.mtBeam).put("threads", Engine.mtThreads).put("lp", Engine.mtLp).put("seq", Engine.mtBeamSeq).put("scd", Engine.mtContrast)
         .put("timed", n).put("ms_avg", Math.round(sum / n * 10) / 10.0).put("ms_p50", Math.round(sorted.get(n / 2) * 10) / 10.0)
         .put("ms_p95", Math.round(sorted.get((int) (n * 0.95)) * 10) / 10.0)
         .put("steps_avg", Math.round(steps * 10.0 / n) / 10.0).put("run_share", Math.round(runNs / 1e4 / sum) / 100.0)
