@@ -64,6 +64,12 @@ CFG = dict(
     wer_max=0.6,                 # испорченнее — пример выбрасывается: учить надо восстанавливать, а не сочинять
     workers=0,                   # 0 — по числу ядер
     # примеры
+    run='v2',                    # папка обучения в WORK: '' — корень (первая версия), 'v2' — вторая
+    targets='teacher',           # эталон примеров: 'teacher' — перевод учителя (v2), 'subtitles' — субтитров (v1)
+    teacher=None,                # GGUF учителя (репозиторий, файл) или путь; по умолчанию — из профиля
+    teacher_slots=16,            # параллельных запросов к учителю
+    teacher_ctx=2048,            # окно учителя на запрос
+    teacher_cuda=None,           # None — llama.cpp с CUDA, если есть видеокарта
     simple_share=0.3,            # доля с простой подсказкой (остальное — подсказка уточнителя приложения)
     empty_bg=0.2,                # доля подсказок уточнителя с пустым фоном
     # обучение
@@ -101,8 +107,12 @@ def gpu_kind():
     return 'bf16' if torch.cuda.get_device_capability()[0] >= 8 else 'fp16'
 
 
-PROFILES = dict(big=dict(n_train=100_000, noisy_share=0.35, n_test=500, eval_limit=0),       # A100, H100
-                small=dict(n_train=40_000, noisy_share=0.25, n_test=300, eval_limit=300))   # T4: 16 ГБ, 2 ядра
+# учитель: A100 — сильнейшая в семействе Hy-MT2-30B-A3B (MoE, 3 млрд активных), Q8_0 почти без потерь, 29,8 ГБ;
+# T4 (16 ГБ) — Hy-MT2-7B Q8_0, 7,4 ГБ
+PROFILES = dict(big=dict(n_train=100_000, noisy_share=0.35, n_test=500, eval_limit=0, teacher_slots=16,
+                         teacher=('tencent/Hy-MT2-30B-A3B-GGUF', 'Hy-MT2-30B-A3B-Q8_0.gguf')),
+                small=dict(n_train=40_000, noisy_share=0.25, n_test=300, eval_limit=300, teacher_slots=8,
+                           teacher=('tencent/Hy-MT2-7B-GGUF', 'HY-MT2-7B-Q8_0.gguf')))
 
 
 def with_profile(cfg, profile='auto'):
@@ -142,6 +152,13 @@ def log(*a):
 def sh(cmd, **kw):
     log('$', cmd if len(cmd) < 300 else cmd[:300] + '…')
     subprocess.run(cmd, shell=True, check=True, **kw)
+
+
+def run_dir(cfg):
+    """Папка обучения: v1 — корень WORK, v2 — WORK/v2. Корпус, отбор и шум — общие, в корне."""
+    d = Path(cfg['work']) / cfg['run'] if cfg.get('run') else Path(cfg['work'])
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def paths(cfg):
@@ -425,7 +442,7 @@ def select(cfg):
         if have == want:
             log('select: готов', out)
             return out
-        stash(w, ('selected.jsonl', 'selected.meta.json') + DOWNSTREAM,
+        stash(w, ('selected.jsonl', 'selected.meta.json') + DOWNSTREAM + tuple(x.name for x in w.glob('v[0-9]*')),
               f'select: прежний отбор сделан с другими настройками ({have}) — он и всё, что из него,')
     rows = select_rows(jload(w / 'corpus_labse.jsonl'), cfg)
     jdump(rows, out)
@@ -631,6 +648,172 @@ def noisy(cfg):
     return out
 
 
+# ---------------------------------------------------------------- учитель (v2)
+
+def plan_of(r, i, cfg):
+    """Форма подсказки фразы — одна для учителя и для ученика: ('simple', 0) или ('app', k прошлых реплик);
+    у тестовых — подсказка уточнителя с полным контекстом. Зерно — по месту фразы, план повторяем."""
+    if r['part'] == 'test':
+        return 'app', None
+    rng = random.Random(cfg['seed'] * 7_000_003 + i)
+    if rng.random() < cfg['simple_share']:
+        return 'simple', 0
+    if rng.random() < cfg['empty_bg']:
+        return 'app', 0
+    return 'app', rng.randint(1, cfg['ctx_lines'])
+
+
+def form_prompt(r, form, k, src_text):
+    s, t = r['dir'][:2], r['dir'][3:]
+    if form == 'simple':
+        return prompt(src_text, t, simple=True)
+    ctx = r[f'ctx_{s}'] if k is None else (r[f'ctx_{s}'][-k:] if k else [])
+    return prompt(src_text, t, ctx)
+
+
+def teacher_ok(out, src, tgt_lang):
+    """Перевод учителя годится в эталон: не пустой, не раздутый (как Brief.swallowed: 2,5× + 12) и тем алфавитом."""
+    return bool(out) and len(out) <= 2.5 * len(src) + 12 and script_ok(tgt_lang, out)
+
+
+THINK = re.compile(r'<think>.*?</think>', re.S)
+
+
+def clean_out(text):
+    return THINK.sub('', text or '').strip().strip('"').strip()
+
+
+def llama_server(cfg, c):
+    """llama-server закреплённой версии: с CUDA под архитектуру этой видеокарты (собирается ~5–8 мин) или без."""
+    import torch
+    d = c / 'llama.cpp'
+    if not d.exists():
+        sh(f'git clone --depth 1 --branch {cfg["llama_cpp_tag"]} https://github.com/ggml-org/llama.cpp "{d}"')
+    cuda = torch.cuda.is_available() if cfg['teacher_cuda'] is None else cfg['teacher_cuda']
+    b = d / ('build-cuda' if cuda else 'build-server')
+    srv = b / 'bin' / 'llama-server'
+    if not srv.exists():
+        arch = ''.join(map(str, torch.cuda.get_device_capability())) if cuda else ''
+        flags = f'-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES={arch}' if cuda else '-DGGML_CUDA=OFF'
+        sh(f'cmake -S "{d}" -B "{b}" {flags} -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF > /dev/null')
+        sh(f'cmake --build "{b}" --target llama-server -j {cfg["build_jobs"] or os.cpu_count()} > /dev/null')
+    return srv, cuda
+
+
+def serve(srv, model, cfg, log_path, port=8090):
+    """Запустить llama-server и дождаться готовности; вернуть процесс."""
+    import urllib.request
+    n = cfg['teacher_slots']
+    lf = open(log_path, 'w')
+    p = subprocess.Popen([str(srv), '-m', str(model), '-ngl', '999', '-c', str(n * cfg['teacher_ctx']), '-np', str(n),
+                          '--host', '127.0.0.1', '--port', str(port)], stdout=lf, stderr=subprocess.STDOUT)
+    for _ in range(1800):
+        if p.poll() is not None:
+            raise SystemExit(f'учитель не запустился (код {p.returncode}): {log_path}')
+        try:
+            if urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=5).status == 200:
+                return p
+        except Exception:
+            pass
+        time.sleep(1)
+    p.terminate()
+    raise SystemExit(f'учитель не ответил за 30 мин: {log_path}')
+
+
+def ask(prompt_text, port=8090, max_tokens=256):
+    import urllib.request
+    body = json.dumps(dict(messages=[dict(role='user', content=prompt_text)], temperature=0, max_tokens=max_tokens)).encode()
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(f'http://127.0.0.1:{port}/v1/chat/completions', body,
+                                         {'Content-Type': 'application/json'})
+            r = json.load(urllib.request.urlopen(req, timeout=900))
+            return clean_out(r['choices'][0]['message']['content'])
+        except Exception:
+            if attempt == 3:
+                raise
+            time.sleep(5 * (attempt + 1))
+
+
+def public_sets(cfg):
+    """Tatoeba и ситуации (эталон от людей), простая подсказка — как mt_bench hymt."""
+    _, c = paths(cfg)
+    sets = {}
+    for name, f in (('tatoeba', 'mt_test/tatoeba.json'), ('situations', 'test_set.json')):
+        # наборы — на диске машины Colab: после смены среды (T4 → A100) корпус берётся готовым с Диска, а их тут нет
+        d = json.loads(Path(fetch(f"{cfg['tests_url']}/{f}", c / 'tests' / f.replace('/', '_'))).read_text(encoding='utf-8'))
+        for k, dr in (('pt_to_ru', 'pt2ru'), ('ru_to_pt', 'ru2pt')):
+            s, t = dr[:2], dr[3:]
+            rows = [dict(src=it[s], ref=it[t], prompt=prompt(it[s], t, simple=True)) for it in d[k]]
+            sets[f'{name}_{dr}'] = rows[:cfg['eval_limit']] if cfg['eval_limit'] else rows
+    return sets
+
+
+def teacher(cfg):
+    """Эталон второй версии: учитель переводит сказанное — не испорченное распознаванием — той же подсказкой, что
+    увидит ученик (план — plan_of). Заодно — Tatoeba и ситуации, проверка самого учителя (eval/teacher_*.json).
+    Идёт кусками по 4000 запросов, каждый сразу на Диск."""
+    if cfg['targets'] != 'teacher':
+        log('teacher: не нужен — эталон из субтитров')
+        return None
+    w, c = paths(cfg)
+    rd = run_dir(cfg)
+    out = rd / 'teacher.jsonl'
+    if out.exists():
+        log('teacher: готов', out)
+        return out
+    from concurrent.futures import ThreadPoolExecutor
+    rows = jload(w / 'noisy.jsonl')
+    jobs = []
+    for i, r in enumerate(rows):
+        form, k = plan_of(r, i, cfg)
+        jobs.append(dict(key=f'r{i}', i=i, form=form, k=k, prompt=form_prompt(r, form, k, r[r['dir'][:2]])))
+    pub = public_sets(cfg)
+    for name, rs in pub.items():
+        jobs += [dict(key=f'{name}:{j}', set=name, j=j, prompt=x['prompt']) for j, x in enumerate(rs)]
+    shards = rd / 'teacher_shards'
+    shards.mkdir(exist_ok=True)
+    size = 4000
+    left = [k for k in range(0, len(jobs), size) if not (shards / f'{k // size:04d}.jsonl').exists()]
+    if left:
+        t = cfg['teacher']
+        if isinstance(t, str) and Path(t).exists():
+            model = Path(t)
+        else:
+            need_gpu('teacher')
+            from huggingface_hub import hf_hub_download
+            model = Path(hf_hub_download(t[0], t[1]))
+        srv, cuda = llama_server(cfg, c)
+        log(f'teacher: {model.name}, {"видеокарта" if cuda else "процессор"}, запросов {len(jobs):,}')
+        proc = serve(srv, model, cfg, c / 'teacher-server.log')
+        try:
+            with ThreadPoolExecutor(cfg['teacher_slots']) as ex:
+                for k in left:
+                    part, t0 = jobs[k:k + size], time.time()
+                    outs = list(ex.map(lambda j: ask(j['prompt']), part))
+                    jdump([dict({x: j[x] for x in j if x != 'prompt'}, out=o) for j, o in zip(part, outs)],
+                          shards / f'{k // size:04d}.jsonl')
+                    log(f'  учитель: {k + len(part):,} из {len(jobs):,} · {len(part) / (time.time() - t0):.1f} фраз/с')
+        finally:
+            proc.terminate()
+            proc.wait(timeout=60)
+    got = {}
+    for sp in sorted(shards.glob('*.jsonl')):
+        for x in jload(sp):
+            got[x['key']] = x
+    ev = rd / 'eval'
+    ev.mkdir(exist_ok=True)
+    for name, rs in pub.items():
+        json.dump([dict(x, hyp=got[f'{name}:{j}']['out']) for j, x in enumerate(rs)],
+                  open(ev / f'teacher_{name}.json', 'w', encoding='utf-8'), ensure_ascii=False)
+    res = [dict(i=x['i'], form=x['form'], k=x['k'], out=x['out']) for key, x in got.items() if key.startswith('r')]
+    res.sort(key=lambda x: x['i'])
+    jdump(res, out)
+    ok = sum(teacher_ok(x['out'], rows[x['i']][rows[x['i']]['dir'][:2]], rows[x['i']]['dir'][3:]) for x in res)
+    log(f'teacher: переведено {len(res):,}, годных в эталон {ok:,} ({ok / max(1, len(res)):.1%})')
+    return out
+
+
 # ---------------------------------------------------------------- примеры
 
 def make_example(r, cfg, rng):
@@ -650,16 +833,37 @@ def make_example(r, cfg, rng):
                 dir=r['dir'], noisy=bool(r.get('noisy')))
 
 
+def make_example_teacher(r, plan, cfg):
+    """Пример второй версии: на входе — распознанное (у фраз с шумом) той же подсказкой, что видел учитель, ответ —
+    перевод учителя сказанного; None — шум испортил фразу сильнее порога или учитель ответил негодно."""
+    s, t = r['dir'][:2], r['dir'][3:]
+    if not teacher_ok(plan['out'], r[s], t):
+        return None
+    src = r[s]
+    if r.get('noisy'):
+        if not r.get('asr') or r.get('wer', 1.0) > cfg['wer_max'] or not script_ok(s, r['asr']):
+            return None
+        src = r['asr']
+    return dict(messages=[dict(role='user', content=form_prompt(r, plan['form'], plan['k'], src)),
+                          dict(role='assistant', content=plan['out'])], dir=r['dir'], noisy=bool(r.get('noisy')))
+
+
 def sft(cfg):
     w, _ = paths(cfg)
-    out = {p: w / f'sft_{p}.jsonl' for p in ('train', 'dev')}
+    rd = run_dir(cfg)
+    out = {p: rd / f'sft_{p}.jsonl' for p in ('train', 'dev')}
     if all(p.exists() for p in out.values()):
         log('sft: готов')
         return out
     rng = random.Random(cfg['seed'])
     rows = jload(w / 'noisy.jsonl')
+    plans = {x['i']: x for x in jload(rd / 'teacher.jsonl')} if cfg['targets'] == 'teacher' else None
     for part in out:
-        ex = [e for e in (make_example(r, cfg, rng) for r in rows if r['part'] == part) if e]
+        if plans is None:
+            ex = [e for e in (make_example(r, cfg, rng) for r in rows if r['part'] == part) if e]
+        else:
+            ex = [e for e in (make_example_teacher(r, plans[i], cfg) for i, r in enumerate(rows)
+                              if r['part'] == part and i in plans) if e]
         rng.shuffle(ex)
         jdump(ex, out[part])
         log(f'sft {part}: {len(ex):,} примеров, с шумом {sum(e["noisy"] for e in ex):,}')
@@ -715,7 +919,7 @@ def build_model(cfg, model):
 
 
 def train(cfg, model_path=None, max_steps=-1):
-    w, _ = paths(cfg)
+    w = run_dir(cfg)
     done = w / ('full' if cfg['full_ft'] else 'lora')
     if (done / 'DONE').exists():
         log('train: готов', done)
@@ -770,7 +974,7 @@ def load_for_eval(cfg, which, base=None):
     """Исходная модель или дообученная (LoRA влита), bf16, для пакетного жадного перевода."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    w, _ = paths(cfg)
+    w = run_dir(cfg)
     base = base or cfg['base']
     tok = AutoTokenizer.from_pretrained(base)
     tok.padding_side = 'left'
@@ -813,24 +1017,20 @@ def translate(tok, model, prompts, batch=64, max_new=200):
 def eval_sets(cfg):
     """Наборы оценки: Tatoeba и ситуации (эталон от людей, простая подсказка) и отложенный тест с шумом
     (фильмы, которых не было в обучении): распознанное с простой подсказкой и с подсказкой уточнителя и контекстом,
-    и то же сказанное — потолок."""
-    w, c = paths(cfg)
-    sets = {}
-    for name, f in (('tatoeba', 'mt_test/tatoeba.json'), ('situations', 'test_set.json')):
-        # наборы — на диске машины Colab: после смены среды (T4 → A100) корпус берётся готовым с Диска, а их тут нет
-        d = json.loads(Path(fetch(f"{cfg['tests_url']}/{f}", c / 'tests' / f.replace('/', '_'))).read_text(encoding='utf-8'))
-        for k, dr in (('pt_to_ru', 'pt2ru'), ('ru_to_pt', 'ru2pt')):
-            s, t = dr[:2], dr[3:]
-            sets[f'{name}_{dr}'] = [dict(src=it[s], ref=it[t], prompt=prompt(it[s], t, simple=True)) for it in d[k]]
-    if cfg['eval_limit']:
-        sets = {n: v[:cfg['eval_limit']] for n, v in sets.items()}
-    test = [r for r in jload(w / 'noisy.jsonl') if r['part'] == 'test' and r.get('asr')]
+    и то же сказанное — потолок. Эталон теста — перевод учителя сказанного (v2) или субтитры (v1)."""
+    w, _ = paths(cfg)
+    sets = public_sets(cfg)
+    rows = jload(w / 'noisy.jsonl')
+    refs = {}
+    if cfg['targets'] == 'teacher':
+        refs = {x['i']: x['out'] for x in jload(run_dir(cfg) / 'teacher.jsonl')}
+    test = [(i, r) for i, r in enumerate(rows) if r['part'] == 'test' and r.get('asr')]
     for dr in ('pt2ru', 'ru2pt'):
         s, t = dr[:2], dr[3:]
-        rs = [r for r in test if r['dir'] == dr]
-        sets[f'noisy_{dr}'] = [dict(src=r[s], ref=r[t], prompt=prompt(r['asr'], t, simple=True)) for r in rs]
-        sets[f'noisyctx_{dr}'] = [dict(src=r[s], ref=r[t], prompt=prompt(r['asr'], t, r[f'ctx_{s}'])) for r in rs]
-        sets[f'cleanctx_{dr}'] = [dict(src=r[s], ref=r[t], prompt=prompt(r[s], t, r[f'ctx_{s}'])) for r in rs]
+        rs = [(refs.get(i, r[t]) if refs else r[t], r) for i, r in test if r['dir'] == dr and (not refs or refs.get(i))]
+        sets[f'noisy_{dr}'] = [dict(src=r[s], ref=f, prompt=prompt(r['asr'], t, simple=True)) for f, r in rs]
+        sets[f'noisyctx_{dr}'] = [dict(src=r[s], ref=f, prompt=prompt(r['asr'], t, r[f'ctx_{s}'])) for f, r in rs]
+        sets[f'cleanctx_{dr}'] = [dict(src=r[s], ref=f, prompt=prompt(r[s], t, r[f'ctx_{s}'])) for f, r in rs]
     if cfg['eval_limit']:
         sets = {n: v[:cfg['eval_limit']] for n, v in sets.items()}
     return sets
@@ -869,22 +1069,28 @@ def comet_env(c):
 
 
 def summary_table(ev, names):
-    """Таблица «до и после» по наборам оценки: COMET (если посчитан) с парным бутстрэпом и chrF."""
+    """Таблица «до и после» по наборам оценки: COMET (если посчитан) с парным бутстрэпом, COMET учителя (где он
+    переводил), chrF и длина перевода к эталону — видно, не стал ли ответ короче."""
     import sacrebleu
-    has = all('comet' in json.load(open(ev / f'{w}_{n}.json', encoding='utf-8'))[0] for n in names for w in ('base', 'ft'))
-    lines = ['| набор | n | COMET исходная | COMET дообученная | Δ [95 %] p | chrF исх. → дообуч. |', '|---|---|---|---|---|---|']
+    load = lambda w, n: json.load(open(ev / f'{w}_{n}.json', encoding='utf-8'))
+    has = all('comet' in load(w, n)[0] for n in names for w in ('base', 'ft'))
+    lines = ['| набор | n | COMET исходная | COMET дообученная | Δ [95 %] p | COMET учителя | chrF исх. → дообуч. | '
+             'длина исх. / дообуч. |', '|---|---|---|---|---|---|---|---|']
     for n in names:
-        a = json.load(open(ev / f'base_{n}.json', encoding='utf-8'))
-        b = json.load(open(ev / f'ft_{n}.json', encoding='utf-8'))
+        a, b = load('base', n), load('ft', n)
+        tp = ev / f'teacher_{n}.json'
+        tch = json.load(open(tp, encoding='utf-8')) if tp.exists() else None
         ca = sacrebleu.corpus_chrf([r['hyp'] for r in a], [[r['ref'] for r in a]]).score
         cb = sacrebleu.corpus_chrf([r['hyp'] for r in b], [[r['ref'] for r in b]]).score
+        ln = lambda rs: sum(len(r['hyp']) for r in rs) / max(1, sum(len(r['ref']) for r in rs))
+        tc = f"{sum(r['comet'] for r in tch) / len(tch):.4f}" if tch and 'comet' in tch[0] else '—'
         if has:
             d, lo, hi, p = boot([r['comet'] for r in a], [r['comet'] for r in b])
             ma = sum(r['comet'] for r in a) / len(a)
-            lines.append(f'| {n} | {len(a)} | {ma:.4f} | {ma + d:.4f} | {d:+.4f} [{lo:+.4f}; {hi:+.4f}] p={p:.3f} | '
-                         f'{ca:.1f} → {cb:.1f} |')
+            lines.append(f'| {n} | {len(a)} | {ma:.4f} | {ma + d:.4f} | {d:+.4f} [{lo:+.4f}; {hi:+.4f}] p={p:.3f} | {tc} | '
+                         f'{ca:.1f} → {cb:.1f} | {ln(a):.2f} / {ln(b):.2f} |')
         else:
-            lines.append(f'| {n} | {len(a)} | — | — | — | {ca:.1f} → {cb:.1f} |')
+            lines.append(f'| {n} | {len(a)} | — | — | — | {tc} | {ca:.1f} → {cb:.1f} | {ln(a):.2f} / {ln(b):.2f} |')
     if not has:
         lines.append('\nCOMET не посчитан — посчитать на ПК: tools/colab/eval_local.py папка_eval')
     return lines
@@ -904,8 +1110,8 @@ def boot(a, b, n_boot=1000, seed=12345):
 def evaluate(cfg):
     need_gpu('evaluate')
     cfg = for_gpu(cfg)
-    w, c = paths(cfg)
-    ev = w / 'eval'
+    _, c = paths(cfg)
+    ev = run_dir(cfg) / 'eval'
     ev.mkdir(exist_ok=True)
     summary = ev / 'summary.md'
     if summary.exists() and all('comet' in json.load(open(f, encoding='utf-8'))[0] for f in ev.glob('*_*.json')):
@@ -969,10 +1175,15 @@ def to_gguf(hf_dir, out, d, q):
 
 
 def export(cfg):
-    w, c = paths(cfg)
+    _, c = paths(cfg)
+    w = run_dir(cfg)
     ex = w / 'export'
     ex.mkdir(exist_ok=True)
-    ft, base = ex / 'Hy-MT2-1.8B-falar-ft-Q4_K_M.gguf', ex / 'Hy-MT2-1.8B-base-Q4_K_M.gguf'
+    ft = ex / f'Hy-MT2-1.8B-falar-{cfg["run"] or "ft"}-Q4_K_M.gguf'
+    base = ex / 'Hy-MT2-1.8B-base-Q4_K_M.gguf'
+    prev = Path(cfg['work']) / 'export' / base.name            # исходная, сжатая первой версией, — та же самая
+    if not base.exists() and prev.exists() and prev != base:
+        base = prev
     if ft.exists() and base.exists():
         log('export: готов', ex)
         return ex
@@ -981,7 +1192,7 @@ def export(cfg):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     d, q = llama_cpp(cfg, c)
     src = cfg['base'] if Path(cfg['base']).exists() else snapshot_download(cfg['base'])
-    merged = c / 'merged'
+    merged = c / f'merged-{cfg["run"] or "v1"}'
     if not (merged / 'config.json').exists():
         if cfg['full_ft']:
             m = AutoModelForCausalLM.from_pretrained(str(w / 'full'), torch_dtype=torch.bfloat16)
@@ -1002,8 +1213,8 @@ def export(cfg):
     return ex
 
 
-STAGES = dict(corpus=corpus, labse=labse, select=select, noisy=noisy, sft=sft, train=train, evaluate=evaluate,
-              export=export)
+STAGES = dict(corpus=corpus, labse=labse, select=select, noisy=noisy, teacher=teacher, sft=sft, train=train,
+              evaluate=evaluate, export=export)
 
 if __name__ == '__main__':
     for st in sys.argv[1:] or list(STAGES):

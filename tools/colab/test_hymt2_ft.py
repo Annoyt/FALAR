@@ -153,6 +153,27 @@ def test_corpus():
     check(H.make_example(dict(r, wer=0.9), H.CFG, rng) is None, 'слишком испорченное — без примера')
     ex = H.make_example(dict(r, noisy=False), dict(H.CFG, simple_share=0.0, empty_bg=0.0), rng)
     check(ex['messages'][0]['content'].startswith('[Background Information]\nAntes.\n'), 'подсказка уточнителя с контекстом')
+    # вторая версия: план подсказки, эталон учителя
+    rows = [dict(syn[i], dir='pt2ru', part='train') for i in range(200)] if len(syn) >= 200 else \
+        [dict(syn[i % len(syn)], dir='pt2ru', part='train') for i in range(200)]
+    plans = [H.plan_of(x, i, H.CFG) for i, x in enumerate(rows)]
+    check(plans == [H.plan_of(x, i, H.CFG) for i, x in enumerate(rows)], 'план подсказки повторяем')
+    share = sum(f == 'simple' for f, _ in plans) / len(plans)
+    check(0.15 < share < 0.45 and all(f in ('simple', 'app') for f, _ in plans), f'доля простых подсказок {share:.2f} (~0,3)')
+    check(H.plan_of(dict(rows[0], part='test'), 0, H.CFG) == ('app', None), 'тест — подсказка уточнителя с полным контекстом')
+    rr = dict(syn[0], dir='pt2ru', ctx_pt=['A.', 'B.', 'C.'])
+    check(H.form_prompt(rr, 'app', 2, 'X') == H.prompt('X', 'ru', ['B.', 'C.']) and
+          H.form_prompt(rr, 'app', None, 'X') == H.prompt('X', 'ru', ['A.', 'B.', 'C.']) and
+          H.form_prompt(rr, 'simple', 0, 'X') == H.prompt('X', 'ru', simple=True), 'подсказка по плану')
+    check(H.teacher_ok('Добрый день.', 'Bom dia.', 'ru') and not H.teacher_ok('', 'Bom dia.', 'ru')
+          and not H.teacher_ok('Bom dia.', 'Bom dia.', 'ru') and not H.teacher_ok('Да. ' * 30, 'Sim.', 'ru'),
+          'ответ учителя: пустой, не тем алфавитом и раздутый — отсекаются')
+    check(H.clean_out('<think>хм</think>\n"Привет"') == 'Привет', 'рассуждения и кавычки учителя вырезаются')
+    noisy_row = dict(rr, noisy=True, asr='bom dia todo bem', wer=0.3)
+    ex = H.make_example_teacher(noisy_row, dict(form='app', k=1, out='Доброе утро.'), H.CFG)
+    check(ex and 'bom dia todo bem' in ex['messages'][0]['content'] and ex['messages'][1]['content'] == 'Доброе утро.',
+          'пример второй версии: на входе распознанное, ответ — перевод учителя')
+    check(H.make_example_teacher(noisy_row, dict(form='app', k=1, out=''), H.CFG) is None, 'негодный ответ учителя — без примера')
     return syn
 
 
@@ -425,6 +446,79 @@ def test_pipeline(base):
     print(f'       весь конвейер: {time.time() - t0:.0f} с')
 
 
+def test_pipeline_v2(base):
+    """Вторая версия в миниатюре: учитель — llama-server ПК без CUDA с крошечной моделью (ответы — мусор, поэтому
+    проверка годности ответа здесь выключена: проверяется связка — сервер, запросы разом, куски, эталоны, таблица)."""
+    print('вторая версия в миниатюре: учитель — llama-server без CUDA, крошечная модель')
+    import numpy as np
+    work, cache = RUN / 'pipe2-work', RUN / 'pipe2-cache'
+    for d in (work, cache):
+        shutil.rmtree(d, ignore_errors=True)
+    cache.mkdir(parents=True)
+    m = models_dir()
+    (cache / 'voices').mkdir()
+    for v, d in (('pt_BR-faber-medium', 'tts_pt'), ('ru_RU-dmitri-medium', 'tts_ru')):
+        (cache / 'voices' / f'vits-piper-{v}').symlink_to(m / d)
+    (cache / 'asr').symlink_to(m / 'asr_multi')
+    import soundfile as sf
+    rr = cache / 'RIRS_NOISES'
+    (rr / 'simulated_rirs' / 'smallroom' / 'Room001').mkdir(parents=True)
+    (rr / 'pointsource_noises').mkdir()
+    g = np.random.default_rng(1)
+    sf.write(rr / 'simulated_rirs/smallroom/Room001/Room001-00001.wav',
+             (np.exp(-np.arange(4800) / 800.0) * g.standard_normal(4800)).astype(np.float32), 16000)
+    sf.write(rr / 'pointsource_noises/noise-free-sound-0001.wav', (g.standard_normal(48000) * 0.1).astype(np.float32), 16000)
+    lc = RUN.parent / f'llama.cpp-{H.CFG["llama_cpp_tag"]}'
+    (cache / 'llama.cpp').symlink_to(lc)
+    comet_py = Path.home() / 'tools/venv-comet-gpu/bin/python'
+
+    def comet_env(c):
+        (Path(c) / 'comet_score.py').write_text(H.COMET_SCRIPT)
+        return comet_py
+    H.comet_env = comet_env
+    tiny = RUN / 'tiny.gguf'                                 # из test_gguf: крошечная модель архитектуры Hy-MT2
+    if not tiny.exists():
+        test_gguf(dict(H.CFG, work=str(RUN / 'work')), base)
+    cfg = dict(H.CFG, work=str(work), cache=str(cache), base=str(base), opus_url='file://' + str(opus_mini()),
+               opus_lines=300_000, n_train=200, n_dev=20, n_test=20, noisy_share=0.5, noise='rirs',
+               voices={'pt': ['pt_BR-faber-medium'], 'ru': ['ru_RU-dmitri-medium']}, workers=2, batch=4, accum=1,
+               max_len=256, eval_limit=40, gen_batch=16, build_jobs=2, comet_batch=8, run='v2', targets='teacher',
+               teacher=str(tiny), teacher_slots=2, teacher_ctx=1024, teacher_cuda=False,
+               _set=('batch', 'accum', 'gen_batch', 'comet_batch', 'teacher_slots'),
+               comet_model=str(m / 'comet' / 'wmt22-comet-da' / 'checkpoints' / 'model.ckpt'))
+    real_ok = H.teacher_ok
+    H.teacher_ok = lambda out, src, lang: bool(out)          # крошечная модель отвечает мусором
+    t0 = time.time()
+    try:
+        H.corpus(cfg)
+        rows = H.jload(work / 'corpus.jsonl')
+        H.jdump(H.labse_filter(rows, lambda xs: np.ones((len(xs), 2)) / np.sqrt(2), cfg['labse_min']), work / 'corpus_labse.jsonl')
+        H.select(cfg)
+        H.noisy(cfg)
+        H.teacher(cfg)
+        rd = work / 'v2'
+        tch = H.jload(rd / 'teacher.jsonl')
+        nrows = len(H.jload(work / 'noisy.jsonl'))
+        check(len(tch) == nrows and all('out' in x and 'form' in x for x in tch), f'учитель: {len(tch)} переводов — на каждую фразу')
+        check(len(list((rd / 'eval').glob('teacher_*.json'))) == 4, 'учитель перевёл Tatoeba и ситуации — для проверки')
+        H.teacher(cfg)
+        check(True, 'повторный запуск учителя — пропуск готового')
+        H.sft(cfg)
+        ex = H.jload(rd / 'sft_train.jsonl')
+        outs = {x['out'] for x in tch}
+        check(ex and all(e['messages'][1]['content'] in outs for e in ex), f'примеры второй версии: {len(ex)}, ответ — учителя')
+        H.train(cfg)
+        H.evaluate(cfg)
+        summ = (rd / 'eval' / 'summary.md').read_text(encoding='utf-8')
+        tline = next(x for x in summ.split('\n') if x.startswith('| tatoeba_pt2ru'))
+        check(tline.split('|')[6].strip() not in ('', '—'), 'в таблице — COMET учителя на Tatoeba')
+        H.export(cfg)
+        check((rd / 'export' / 'Hy-MT2-1.8B-falar-v2-Q4_K_M.gguf').exists(), 'выгрузка второй версии: Hy-MT2-1.8B-falar-v2-Q4_K_M.gguf')
+    finally:
+        H.teacher_ok = real_ok
+    print(f'       вторая версия: {time.time() - t0:.0f} с')
+
+
 def main():
     RUN.mkdir(parents=True, exist_ok=True)
     if '--fp16' in sys.argv:                   # видеокарта ПК умеет bf16 — путь T4 (fp16, GradScaler) включаем сами
@@ -439,6 +533,8 @@ def main():
         test_gguf(cfg, base)
     if '--pipeline' in sys.argv:
         test_pipeline(base)
+    if '--pipeline-v2' in sys.argv:
+        test_pipeline_v2(base)
     print(f'\nпровалов {len(FAILS)}' + ('' if not FAILS else ': ' + '; '.join(FAILS)))
     sys.exit(1 if FAILS else 0)
 
