@@ -401,6 +401,7 @@ def test_pipeline(base):
     ex = H.jload(work / 'sft_train.jsonl')
     check(len(ex) >= 120 and all(e['messages'][1]['role'] == 'assistant' for e in ex), f'примеров обучения: {len(ex)}')
     H.train(cfg)
+    shutil.rmtree(cache / 'tests')              # смена среды Colab (T4 → A100): диск машины новый, Диск — прежний
     H.evaluate(cfg)
     summ = (work / 'eval' / 'summary.md').read_text(encoding='utf-8')
     check(summ.count('\n') >= 12 and 'noisyctx_pt2ru' in summ and 'tatoeba_ru2pt' in summ, 'оценка: таблица по всем наборам')

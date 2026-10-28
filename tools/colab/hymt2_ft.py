@@ -817,7 +817,8 @@ def eval_sets(cfg):
     w, c = paths(cfg)
     sets = {}
     for name, f in (('tatoeba', 'mt_test/tatoeba.json'), ('situations', 'test_set.json')):
-        d = json.loads((c / 'tests' / f.replace('/', '_')).read_text(encoding='utf-8'))
+        # наборы — на диске машины Colab: после смены среды (T4 → A100) корпус берётся готовым с Диска, а их тут нет
+        d = json.loads(Path(fetch(f"{cfg['tests_url']}/{f}", c / 'tests' / f.replace('/', '_'))).read_text(encoding='utf-8'))
         for k, dr in (('pt_to_ru', 'pt2ru'), ('ru_to_pt', 'ru2pt')):
             s, t = dr[:2], dr[3:]
             sets[f'{name}_{dr}'] = [dict(src=it[s], ref=it[t], prompt=prompt(it[s], t, simple=True)) for it in d[k]]
