@@ -76,6 +76,12 @@ def test_text():
             'provided background information into consideration\n[Source Text]\nПривет')
     check(H.prompt('Привет', 'pt', ['A', 'B']) == want, 'подсказка уточнителя — как TranslatorService.hyPrompt')
     check(H.prompt('Привет', 'pt', []).startswith('[Background Information]\n\nPlease'), 'пустой фон — как в приложении')
+    ev = RUN / 'summary-nocomet'
+    ev.mkdir(parents=True, exist_ok=True)
+    for w in ('base', 'ft'):
+        (ev / f'{w}_x.json').write_text(json.dumps([dict(src='a', ref='b c', hyp='b c'), dict(src='d', ref='e', hyp='f')]))
+    lines = H.summary_table(ev, ['x'])
+    check(any('—' in x for x in lines) and 'COMET не посчитан' in lines[-1], 'таблица без COMET — по chrF, с пометкой')
     real = H.gpu_kind
     try:
         H.gpu_kind = lambda: 'fp16'

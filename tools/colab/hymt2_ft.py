@@ -851,13 +851,43 @@ for path in sys.argv[3:]:
 
 
 def comet_env(c):
-    """COMET — в своём окружении: у unbabel-comet старые пины (как .venv-comet на ПК)."""
-    py = c / 'comet_env' / 'bin' / 'python'
-    if not py.exists():
-        sh(f'"{sys.executable}" -m venv --system-site-packages "{c / "comet_env"}"')
-        sh(f'"{py}" -m pip -q install unbabel-comet==2.2.7')
+    """COMET — в своём окружении на Python 3.12 (как .venv-comet на ПК): у unbabel-comet 2.2.7 numpy<2, а такого
+    numpy нет для Python 3.13, на котором Colab с осени 2026 года, и venv там без ensurepip. Окружение ставит uv,
+    torch — сборка CUDA 12.6 (идёт и на драйверах постарше)."""
+    env = c / 'comet_env'
+    py = env / 'bin' / 'python'
+    if not (env / 'DONE').exists():
+        shutil.rmtree(env, ignore_errors=True)
+        sh(f'"{sys.executable}" -m pip -q install uv')
+        uv = f'"{sys.executable}" -m uv'
+        sh(f'{uv} venv -q --python 3.12 "{env}"')
+        sh(f'{uv} pip install -q --python "{py}" "torch==2.14.1" --index-url https://download.pytorch.org/whl/cu126')
+        sh(f'{uv} pip install -q --python "{py}" "unbabel-comet==2.2.7"')
+        (env / 'DONE').touch()
     (c / 'comet_score.py').write_text(COMET_SCRIPT)
     return py
+
+
+def summary_table(ev, names):
+    """Таблица «до и после» по наборам оценки: COMET (если посчитан) с парным бутстрэпом и chrF."""
+    import sacrebleu
+    has = all('comet' in json.load(open(ev / f'{w}_{n}.json', encoding='utf-8'))[0] for n in names for w in ('base', 'ft'))
+    lines = ['| набор | n | COMET исходная | COMET дообученная | Δ [95 %] p | chrF исх. → дообуч. |', '|---|---|---|---|---|---|']
+    for n in names:
+        a = json.load(open(ev / f'base_{n}.json', encoding='utf-8'))
+        b = json.load(open(ev / f'ft_{n}.json', encoding='utf-8'))
+        ca = sacrebleu.corpus_chrf([r['hyp'] for r in a], [[r['ref'] for r in a]]).score
+        cb = sacrebleu.corpus_chrf([r['hyp'] for r in b], [[r['ref'] for r in b]]).score
+        if has:
+            d, lo, hi, p = boot([r['comet'] for r in a], [r['comet'] for r in b])
+            ma = sum(r['comet'] for r in a) / len(a)
+            lines.append(f'| {n} | {len(a)} | {ma:.4f} | {ma + d:.4f} | {d:+.4f} [{lo:+.4f}; {hi:+.4f}] p={p:.3f} | '
+                         f'{ca:.1f} → {cb:.1f} |')
+        else:
+            lines.append(f'| {n} | {len(a)} | — | — | — | {ca:.1f} → {cb:.1f} |')
+    if not has:
+        lines.append('\nCOMET не посчитан — посчитать на ПК: tools/colab/eval_local.py папка_eval')
+    return lines
 
 
 def boot(a, b, n_boot=1000, seed=12345):
@@ -878,11 +908,10 @@ def evaluate(cfg):
     ev = w / 'eval'
     ev.mkdir(exist_ok=True)
     summary = ev / 'summary.md'
-    if summary.exists():
+    if summary.exists() and all('comet' in json.load(open(f, encoding='utf-8'))[0] for f in ev.glob('*_*.json')):
         log('evaluate: готов', summary)
         print(summary.read_text(encoding='utf-8'))
         return summary
-    import sacrebleu
     sets = eval_sets(cfg)
     for which in ('base', 'ft'):
         if all((ev / f'{which}_{n}.json').exists() for n in sets):
@@ -900,18 +929,12 @@ def evaluate(cfg):
         __import__('torch').cuda.empty_cache()
     todo = [str(p) for p in sorted(ev.glob('*.json')) if 'comet' not in json.load(open(p, encoding='utf-8'))[0]]
     if todo:
-        sh(f'"{comet_env(c)}" "{c / "comet_score.py"}" "{cfg["comet_model"]}" {cfg["comet_batch"]} '
-           + ' '.join(f'"{t}"' for t in todo))
-    lines = ['| набор | n | COMET исходная | COMET дообученная | Δ [95 %] p | chrF исх. → дообуч. |', '|---|---|---|---|---|---|']
-    for n in sets:
-        a = json.load(open(ev / f'base_{n}.json', encoding='utf-8'))
-        b = json.load(open(ev / f'ft_{n}.json', encoding='utf-8'))
-        d, lo, hi, p = boot([r['comet'] for r in a], [r['comet'] for r in b])
-        ca = sacrebleu.corpus_chrf([r['hyp'] for r in a], [[r['ref'] for r in a]]).score
-        cb = sacrebleu.corpus_chrf([r['hyp'] for r in b], [[r['ref'] for r in b]]).score
-        ma = sum(r['comet'] for r in a) / len(a)
-        lines.append(f'| {n} | {len(a)} | {ma:.4f} | {ma + d:.4f} | {d:+.4f} [{lo:+.4f}; {hi:+.4f}] p={p:.3f} | '
-                     f'{ca:.1f} → {cb:.1f} |')
+        try:      # COMET не держит выгрузку: без него — таблица по chrF, COMET досчитывается на ПК
+            sh(f'"{comet_env(c)}" "{c / "comet_score.py"}" "{cfg["comet_model"]}" {cfg["comet_batch"]} '
+               + ' '.join(f'"{t}"' for t in todo))
+        except subprocess.CalledProcessError as e:
+            log('evaluate: COMET не посчитан —', e)
+    lines = summary_table(ev, list(sets))
     summary.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     print('\n'.join(lines))
     return summary
