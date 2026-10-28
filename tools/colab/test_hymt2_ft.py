@@ -81,8 +81,17 @@ def test_text():
         H.gpu_kind = lambda: 'fp16'
         c = H.for_gpu(dict(H.CFG, batch=16, accum=2, _set=('accum',)))
         check(c['batch'] == 8 and c['accum'] == 2 and c['gen_batch'] == 32, 'T4: пачки меньше, заданное явно не трогается')
+        check(H.with_profile(dict(H.CFG, work=str(RUN)))['n_train'] == 40_000, 'T4: профиль small')
         H.gpu_kind = lambda: 'bf16'
         check(H.for_gpu(dict(H.CFG))['batch'] == H.CFG['batch'], 'A100: настройки как есть')
+        c = H.with_profile(dict(H.CFG, work=str(RUN), n_train=7, _set=('n_train',)))
+        check(c['profile'] == 'big' and c['n_train'] == 7 and c['noisy_share'] == 0.35 and c['eval_limit'] == 0,
+              'A100: профиль big, явно заданное сильнее профиля')
+        H.gpu_kind = lambda: None
+        w = RUN / 'profile-work'
+        w.mkdir(exist_ok=True)
+        (w / 'selected.meta.json').write_text(json.dumps(dict(n_train=100_000, n_dev=500, n_test=500, noisy_share=0.35, seed=1)))
+        check(H.with_profile(dict(H.CFG, work=str(w)))['profile'] == 'big', 'без видеокарты — профиль готового отбора')
     finally:
         H.gpu_kind = real
 

@@ -101,6 +101,25 @@ def gpu_kind():
     return 'bf16' if torch.cuda.get_device_capability()[0] >= 8 else 'fp16'
 
 
+PROFILES = dict(big=dict(n_train=100_000, noisy_share=0.35, n_test=500, eval_limit=0),       # A100, H100
+                small=dict(n_train=40_000, noisy_share=0.25, n_test=300, eval_limit=300))   # T4: 16 ГБ, 2 ядра
+
+
+def with_profile(cfg, profile='auto'):
+    """Объём по видеокарте: с родным bf16 (A100, H100) — big, иначе (T4) — small. Без видеокарты (этапы на
+    процессоре) — объём того отбора, что уже лежит на Диске, иначе small. Явно заданное в SETTINGS не трогается."""
+    if profile == 'auto':
+        kind = gpu_kind()
+        meta = Path(cfg['work']) / 'selected.meta.json'
+        if kind is None and meta.exists():
+            have = json.loads(meta.read_text())
+            profile = next((n for n, pr in PROFILES.items() if all(have.get(k) == v for k, v in pr.items()
+                                                                   if k in have)), 'small')
+        else:
+            profile = 'big' if kind == 'bf16' else 'small'
+    return dict(cfg, **{k: v for k, v in PROFILES[profile].items() if k not in cfg.get('_set', ())}, profile=profile)
+
+
 def need_gpu(stage):
     if gpu_kind() is None:
         raise SystemExit(f'этап {stage} — на видеокарте: Среда выполнения → Сменить среду выполнения → GPU (T4 или A100); '
@@ -295,12 +314,37 @@ def corpus_rows(lines_pt, lines_ru, lines_ids, cfg, exclude, pick):
             log(f'  строк корпуса: {n:,}')
 
 
+SELECT_KEYS = ('n_train', 'n_dev', 'n_test', 'noisy_share', 'seed')
+# что получается из отбора: при другом отборе оно устарело
+DOWNSTREAM = ('noisy.jsonl', 'noisy_shards', 'sft_train.jsonl', 'sft_dev.jsonl', 'checkpoints', 'lora', 'full', 'eval',
+              'export')
+
+
+def stash(w, names, why):
+    """Устаревшие итоги этапов — в stale/<время>/ (не удаляются)."""
+    stale, k = w / 'stale' / time.strftime('%Y%m%d-%H%M%S'), 1
+    while stale.exists():
+        k += 1
+        stale = w / 'stale' / time.strftime(f'%Y%m%d-%H%M%S-{k}')
+    stale.mkdir(parents=True)
+    for name in names:
+        if (w / name).exists():
+            shutil.move(str(w / name), str(stale / name))
+    log(f'{why} — отложено в {stale}')
+
+
 def corpus(cfg):
+    """Кандидатов набирается с запасом под n_train (corpus.meta.json). Собранный под меньший объём (например, под
+    T4, а теперь A100) собирается заново; собранный прежней версией, без отметки, — берётся как есть."""
     w, c = paths(cfg)
-    out = w / 'corpus.jsonl'
+    out, meta = w / 'corpus.jsonl', w / 'corpus.meta.json'
     if out.exists():
-        log('corpus: готов', out)
-        return out
+        have = json.loads(meta.read_text()) if meta.exists() else None
+        if have is None or have['n_train'] >= cfg['n_train']:
+            log('corpus: готов', out)
+            return out
+        stash(w, ('corpus.jsonl', 'corpus.meta.json', 'corpus_labse.jsonl', 'selected.jsonl', 'selected.meta.json')
+              + DOWNSTREAM, f'corpus: собран под {have["n_train"]:,} примеров, нужно {cfg["n_train"]:,}')
     z = zipfile.ZipFile(fetch(cfg['opus_url'], c / 'opus' / 'pt_br-ru.txt.zip'))
     names = {n.rsplit('.', 1)[1]: n for n in z.namelist() if n.startswith('OpenSubtitles.')}
     exclude = test_keys(cfg, c)
@@ -311,6 +355,7 @@ def corpus(cfg):
     files = [io.TextIOWrapper(z.open(names[x]), encoding='utf-8', errors='replace') for x in ('pt_br', 'ru', 'ids')]
     rows = list(corpus_rows(*files, cfg, exclude, pick))
     jdump(rows, out)
+    meta.write_text(json.dumps(dict(n_train=cfg['n_train'])))
     log('corpus:', {p: sum(1 for r in rows if r['part'] == p) for p in need}, '→', out)
     return out
 
@@ -369,12 +414,6 @@ def select_rows(rows, cfg):
     return out
 
 
-SELECT_KEYS = ('n_train', 'n_dev', 'n_test', 'noisy_share', 'seed')
-# что получается из отбора: при другом отборе оно устарело
-DOWNSTREAM = ('noisy.jsonl', 'noisy_shards', 'sft_train.jsonl', 'sft_dev.jsonl', 'checkpoints', 'lora', 'full', 'eval',
-              'export')
-
-
 def select(cfg):
     """Отбор помнит свои настройки (selected.meta.json). Сделанный с другими — или прежней версией ноутбука, без
     отметки, — откладывается вместе со всем, что из него получено, в stale/<время>/ (не удаляется) и делается заново."""
@@ -386,15 +425,8 @@ def select(cfg):
         if have == want:
             log('select: готов', out)
             return out
-        stale, k = w / 'stale' / time.strftime('%Y%m%d-%H%M%S'), 1
-        while stale.exists():
-            k += 1
-            stale = w / 'stale' / time.strftime(f'%Y%m%d-%H%M%S-{k}')
-        stale.mkdir(parents=True)
-        for name in ('selected.jsonl', 'selected.meta.json') + DOWNSTREAM:
-            if (w / name).exists():
-                shutil.move(str(w / name), str(stale / name))
-        log(f'select: прежний отбор сделан с другими настройками ({have}) — он и всё, что из него, отложены в {stale}')
+        stash(w, ('selected.jsonl', 'selected.meta.json') + DOWNSTREAM,
+              f'select: прежний отбор сделан с другими настройками ({have}) — он и всё, что из него,')
     rows = select_rows(jload(w / 'corpus_labse.jsonl'), cfg)
     jdump(rows, out)
     meta.write_text(json.dumps(want))
