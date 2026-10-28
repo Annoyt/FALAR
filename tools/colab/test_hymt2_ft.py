@@ -269,7 +269,8 @@ def test_train(syn):
     rows = [dict(r, dir='pt2ru' if i % 2 else 'ru2pt', noisy=False) for i, r in enumerate(syn)]
     H.jdump([H.make_example(r, H.CFG, rng) for r in rows[:20]], work / 'sft_train.jsonl')
     H.jdump([H.make_example(r, H.CFG, rng) for r in rows[20:24]], work / 'sft_dev.jsonl')
-    cfg = dict(H.CFG, work=str(work), cache=str(RUN / 'cache'), base=str(base), batch=2, accum=1, max_len=256)
+    cfg = dict(H.CFG, work=str(work), cache=str(RUN / 'cache'), base=str(base), batch=2, accum=1, max_len=256,
+               run='', targets='subtitles')        # раскладка первой версии
     out = H.train(cfg, max_steps=3)
     check((out / 'DONE').exists() and (out / 'adapter_model.safetensors').exists(), 'LoRA обучилась и сохранилась')
     check(H.train(cfg, max_steps=3) == out, 'повторный запуск — пропуск готового этапа')
@@ -411,7 +412,7 @@ def test_pipeline(base):
     cfg = dict(H.CFG, work=str(work), cache=str(cache), base=str(base), opus_url='file://' + str(opus_mini()),
                opus_lines=300_000, n_train=200, n_dev=20, n_test=20, noisy_share=0.5, noise='rirs',
                voices={'pt': ['pt_BR-faber-medium'], 'ru': ['ru_RU-dmitri-medium']}, workers=2, batch=4, accum=1,
-               max_len=256, eval_limit=40, gen_batch=16, build_jobs=2, comet_batch=8,
+               max_len=256, eval_limit=40, gen_batch=16, build_jobs=2, comet_batch=8, run='', targets='subtitles',
                _set=('batch', 'accum', 'gen_batch', 'comet_batch'),
                comet_model=str(m / 'comet' / 'wmt22-comet-da' / 'checkpoints' / 'model.ckpt'))
     t0 = time.time()
