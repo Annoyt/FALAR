@@ -13,7 +13,7 @@
 # - BUILD=1: build.sh, test.sh (провал на столе — на телефон не идём), установка — только когда
 #   телефон свободен; Falar, бывший впереди, после установки снова впереди;
 # - страховочный снимок до прогона (выученное, словари, свои слова, пины, ключи облака, разговоры,
-#   настройки, модули, состояние «Что нового») в ~/.cache/falar-stand/. После прогона — сверка и возврат
+#   настройки, модули, состояние «Что нового») в .stand/. После прогона — сверка и возврат
 #   того, что отличается. Окно «Что нового», которое ждёт показа (поставили новую версию), на время
 #   прогона прячется — иначе оно легло бы поверх экрана под касаниями проверок — и после возвращается;
 #   Прогон оборвался, даже kill -9 — снимок остаётся «невозвращённым», и следующий запуск сначала
@@ -22,13 +22,14 @@
 # - Falar запускается только поверх себя, рабочего стола или погашенного экрана — телефон рабочий,
 #   его могут взять в руки посреди прогона;
 # - падения Falar за прогон — по logcat; итог — таблица по скриптам, журналы — в
-#   ~/.cache/falar-stand/runs/<время>/ (из /tmp их стирала перезагрузка ПК посреди прогона), пять
+#   .stand/runs/<время>/ (из /tmp их стирала перезагрузка ПК посреди прогона), пять
 #   последних; код выхода 0 — только если всё прошло и Falar не падал.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd); A=$R/bench/apk
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"
+STATE=$STAND; mkdir -p "$STATE"
 SUITES="ui better scroll-day scroll-night busy memo hearing mic modules voices whatsnew audio learn early telemetry wordmarks"
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json models/openrouter.json"
 say() { printf '%s\n' "$*"; }

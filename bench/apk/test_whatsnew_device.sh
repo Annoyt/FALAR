@@ -20,9 +20,10 @@
 # настройки не трогаются, наружу ничего не уходит. Телефон — рабочий аппарат владельца: начинаем,
 # когда экран включён, впереди Falar или рабочий стол и экрана не касались FREE_S секунд (60);
 # касаемся, только пока впереди Falar.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd); A=$R/bench/apk
 if [ -z "$FALAR_STAND_LOCK" ]; then
-  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  mkdir -p "$STAND"; exec 9>"$STAND/lock"
   flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
 fi
 ADB=${ADB:-$R/tools/platform-tools/adb}

@@ -26,13 +26,14 @@
 # погашенного экрана, и только когда экрана не касались минуту.
 #
 #   INSTALL=1 bash bench/apk/test_voices_device.sh   # сначала поставить bench/apk/Falar.apk
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=f6lnlrorgi59xwge; ONLY_RESTORE=0
 for a in "$@"; do case "$a" in --restore) ONLY_RESTORE=1;; *) SER=$a;; esac; done
 ADB="$R/tools/platform-tools/adb -s $SER"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log; M=$F/models
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"; PEND=$STATE/voices-pending
+STATE=$STAND; mkdir -p "$STATE"; PEND=$STATE/voices-pending
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json"
 SPK=speaker/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx
 PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3

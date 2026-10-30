@@ -23,13 +23,14 @@
 # отпечатка на время прогона выключен: в тестовом разговоре голосов нет, слушание переводило бы ничего
 # (skip_novoice). Громкость — та, что у владельца. Прогон оборвался, даже kill -9, — следующий запуск
 # сначала возвращает телефон (или --restore). Замок общий с остальными стендами.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=${SER:-f6lnlrorgi59xwge}; ONLY_RESTORE=0
 for a in "$@"; do case "$a" in --restore) ONLY_RESTORE=1;; esac; done
 ADB="$R/tools/platform-tools/adb -s $SER"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log; TSV=$F/at.tsv
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"; PEND=$STATE/barge-pending
+STATE=$STAND; mkdir -p "$STATE"; PEND=$STATE/barge-pending
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json"
 PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3
 pass=0; fail=0; skip=0

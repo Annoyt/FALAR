@@ -9,16 +9,17 @@
 # _aec — со встроенным эхоподавителем Android на сессии записи; _e<k> / _d<k> / _q<k> — фраза k: только эхо,
 # человек из колонок ПК поверх неё (NEAR=1), только человек. Режим звука и маршрут не трогаются;
 # VOICE_COMMUNICATION при подключённом Bluetooth пропускается (§5 плана). Записи и что играли —
-# в ~/.cache/falar-stand/aec-<время>/, на телефоне удаляются; разбор — tools/aec_eval.py, tools/barge_eval.py.
+# в .stand/aec-<время>/, на телефоне удаляются; разбор — tools/aec_eval.py, tools/barge_eval.py.
 #
 # Только на свободный телефон: экран погашен или впереди Falar/рабочий стол, экрана не касались 3 минуты,
 # журнал Falar молчит 3 минуты и владелец не слушает. Замок общий с test_all_device.sh.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=${SER:-f6lnlrorgi59xwge}; ADB="$R/tools/platform-tools/adb -s $SER"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
 CFGS=${1:-vr,vr_aec,vc,vc_aec}; [ "$CFGS" = "--restore" ] && CFGS=vr
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"; OUT=$STATE/aec-$(date +%Y%m%d-%H%M%S)
+STATE=$STAND; mkdir -p "$STATE"; OUT=$STATE/aec-$(date +%Y%m%d-%H%M%S)
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }

@@ -22,13 +22,14 @@
 # FREE_S с (60): телефон рабочий, его могут взять в руки.
 # В конце всё как было: слушание выключено, частота разбора и облака, выученное и словари из снимка, «Что нового»,
 # тестовые разговоры удалены — текущим снова становится прежний разговор.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd); A=$R/bench/apk
 # Из рабочей копии git worktree: записи комнаты и adb — из основной (их нет в git).
 MAIN=$(cd "$(git -C "$R" rev-parse --git-common-dir)/.." && pwd)
 pick() { [ -e "$R/$1" ] && echo "$R/$1" || echo "$MAIN/$1"; }
 # Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh.
 if [ -z "$FALAR_STAND_LOCK" ]; then
-  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  mkdir -p "$STAND"; exec 9>"$STAND/lock"
   flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
 fi
 ADB=${ADB:-$(pick tools/platform-tools/adb)}; PY=${PY:-python3}
@@ -38,8 +39,8 @@ NAME=${1:-near-pt}; REC=$(pick bench/air/rec/$NAME)
 PARTS=${PARTS:-12}      # PARTS=2 — только экран (часть 2), без подачи записи
 case $NAME in near-pt) PC=4.4;; far-pt) PC=10.6;; noisy-pt) PC=23.0;; nearbg40-pt) PC=13.6;; nearbg45-pt) PC=9.0;; *) PC=;; esac
 [ -f "$REC/room.wav" ] || { echo "нет записи $REC/room.wav"; exit 2; }
-# Выученное, словари и журнал с телефона — только в ~/.cache/falar-private (владелец 27.10), после прогона удаляются.
-PRIV=${XDG_CACHE_HOME:-$HOME/.cache}/falar-private; mkdir -p "$PRIV"
+# Выученное, словари и журнал с телефона — только в private/ (владелец 27.10), после прогона удаляются.
+PRIV=$PRIVATE; mkdir -p "$PRIV"
 D=$(mktemp -d "$PRIV/wordmarks.XXXX"); SNAP=$D/snap; mkdir -p $SNAP
 TID=$(date +%s%3N); TID2=$((TID + 1))
 pass=0; fail=0; skip=0

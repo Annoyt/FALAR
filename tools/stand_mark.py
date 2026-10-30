@@ -24,12 +24,14 @@
   python3 tools/stand_mark.py --unmark   # снять все метки
 """
 import difflib, fcntl, glob, json, os, re, subprocess, sys, time, unicodedata
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stand_paths  # noqa: E402
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADB = os.path.join(R, "tools/platform-tools/adb")
 PKG = "app.falar"; ACT = PKG + "/dev.agenttranslator.MainActivity"
 F = "/sdcard/Android/data/%s/files" % PKG; LOG = F + "/at.log"
-LOCK = os.path.expanduser("~/.cache/falar-stand/lock")
+LOCK = stand_paths.stand("lock")
 SENT = re.compile(r"(?<=[.!?…])\s+(?=\S)|\s*\n+\s*")
 CONTR = {"vc": "você", "tá": "está", "ta": "está", "pra": "para", "pro": "para o", "né": "não é", "tô": "estou",
          "to": "estou", "cadê": "onde está", "q": "que", "tb": "também"}
@@ -160,7 +162,7 @@ if __name__ == "__main__":
     marks = plan("--show" in sys.argv)
     if "--apply" in sys.argv:
         if not marks: print("помечать нечего"); sys.exit(0)
-        tmp = os.path.expanduser("~/.cache/falar-stand/standmark.txt")
+        tmp = stand_paths.stand("standmark.txt")
         with open(tmp, "w") as f:
             for cid, ats in marks.items():
                 for at in ats: f.write("%d %d\n" % (cid, at))

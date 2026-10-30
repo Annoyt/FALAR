@@ -17,6 +17,7 @@
 # Стенд --es feedonly 1 держит микрофон глухим и вне подачи: до неё и после «подача закончена» в нарезку
 # шли живые фразы комнаты и попадали в listener.tsv (02.10 так 16 минут не кончался gain_sweep). На выходе
 # — feedonly 0, иначе приложение осталось бы глухим, пока его не откроют с рабочего стола.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 set -e
 if [ "${FORCE:-}" != 1 ]; then
   echo "replay_air.sh устарел: пишет в текущий разговор владельца и не выключает отпечаток голоса (WER тогда 100 %)." >&2
@@ -26,7 +27,7 @@ fi
 R=$(cd "$(dirname "$0")/../.." && pwd)
 # Один прогон на телефоне за раз — и отдельный скрипт, и вызванный из других (как у test_*_device.sh).
 if [ -z "$FALAR_STAND_LOCK" ]; then
-  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  mkdir -p "$STAND"; exec 9>"$STAND/lock"
   flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
 fi
 ADB=$R/tools/platform-tools/adb

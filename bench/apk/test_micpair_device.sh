@@ -9,18 +9,19 @@
 # По конфигурации за раз (--es mictest, TranslatorService.micStand): источник_каналы_частота[_микрофон] — vr
 # VOICE_RECOGNITION (как у слушания), mic MIC, cam CAMCORDER, unp UNPROCESSED; mo/st — один или два канала; 16/48 кГц;
 # bottom/back — микрофон с таким адресом. В каждой 0,8 с фона, потом динамик играет шум обоими каналами, левым и
-# правым. Записи и сводка — в ~/.cache/falar-stand/mic-<время>/ (в них и звук комнаты — в git не кладутся), на телефоне
+# правым. Записи и сводка — в .stand/mic-<время>/ (в них и звук комнаты — в git не кладутся), на телефоне
 # удаляются; разбор — tools/mic_probe.py, он же сверяет свой счёт со счётом телефона (MicPair).
 #
 # Только на свободный телефон: экран погашен или впереди Falar/рабочий стол, экрана не касались 3 минуты, журнал
 # Falar молчит 3 минуты и слушание выключено. Громкость на время прогона — VOL из 15 (по умолчанию 8), прежняя
 # возвращается и сверяется. Замок общий с test_all_device.sh.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=${SER:-${ANDROID_SERIAL:-f6lnlrorgi59xwge}}; ADB="$R/tools/platform-tools/adb -s $SER"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
 CFGS=${1:-vr_mo_16,vr_mo_16_bottom,vr_mo_16_back,vr_st_16,vr_st_48,mic_st_48,cam_st_48,unp_st_48}; [ "$CFGS" = "--restore" ] && CFGS=vr_mo_16
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"; OUT=$STATE/mic-$(date +%Y%m%d-%H%M%S)
+STATE=$STAND; mkdir -p "$STATE"; OUT=$STATE/mic-$(date +%Y%m%d-%H%M%S)
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }

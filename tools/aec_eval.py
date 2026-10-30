@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Эхо озвучки в микрофоне телефона: разбор записей стенда (bench/apk/test_aec_device.sh).
 
-  .venv/bin/python tools/aec_eval.py <каталог записей>      # ~/.cache/falar-stand/aec-<время>
+  .venv/bin/python tools/aec_eval.py <каталог записей>      # .stand/aec-<время>
 
 Что считается:
   1. По каждой записи (vr, vr_aec, vc, vc_aec): задержка «отдали в динамик → слышно в микрофоне»

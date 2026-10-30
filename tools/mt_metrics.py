@@ -33,6 +33,9 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stand_paths  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 COMET_CKPT = ROOT / "models" / "comet" / "wmt22-comet-da" / "checkpoints" / "model.ckpt"
 COMET_PY = ROOT / ".venv-comet" / "bin" / "python"
@@ -108,7 +111,7 @@ class CometCache:
 
     def __init__(self, path=None):
         self.path = Path(path or os.environ.get("FALAR_COMET_CACHE")
-                         or Path.home() / ".cache" / "falar-stand" / "comet-cache.tsv")
+                         or Path(stand_paths.stand("comet-cache.tsv")))
         self.d = {}
         if self.path.exists():
             for line in self.path.read_text(encoding="utf-8").splitlines():

@@ -25,5 +25,5 @@ patchelf --replace-needed libonnxruntime.so libonnxruntime_sherpa.so build-andro
 Итог 27.10: sha256 начинается на 6c428468827f8698, размер 4 860 929 байт. Прежний — e6ad967b9875ba7b, 4 795 441 байт.
 Проверен на телефоне 30.10 (Redmi, `bench/apk/test_wordmarks_device.sh`): распознаватель отдаёт уверенность, доля
 сомнительных слов — как на ПК (5,1 % против 4,4 % на near-pt). С 30.10 лежит в общем `bench/apk/jni`; прежний сохранён
-вне репозитория (`~/src/falar-jni/libsherpa-onnx-jni.so.orig`). Запасной путь — Java-класс без восьмого поля (ветки до
+в проекте, вне git (`third_party/falar-jni/libsherpa-onnx-jni.so.orig`; исходники и сборка — `third_party/sherpa-onnx-1.13.8`). Запасной путь — Java-класс без восьмого поля (ветки до
 0.35) — на телефоне не проверялся, только по коду.
