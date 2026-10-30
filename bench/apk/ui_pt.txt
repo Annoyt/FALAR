@@ -691,3 +691,4 @@ Falar переводит автоматически и может ошибать
 На телефонах с двумя микрофонами Falar слушает обоими и точнее узнаёт речь.	Em celulares com dois microfones, o Falar ouve pelos dois e reconhece a fala melhor.
 Falar больше не закрывается сам, когда к нему возвращаешься.	O Falar não fecha mais sozinho quando você volta para ele.
 Слова, которые Falar расслышал неуверенно, подчёркнуты цветом — их стоит переспросить.	Palavras que o Falar ouviu sem certeza aparecem sublinhadas em cor — vale a pena perguntar de novo.
+Уточнитель больше не подменяет перевод реплики переводом соседних.	O refinador não troca mais a tradução de uma fala pela das falas vizinhas.

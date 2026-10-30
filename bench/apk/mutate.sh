@@ -32,6 +32,7 @@ JU=$P/junit-platform-console-standalone-1.11.4.jar
 SRC=""; for t in Brief Heard Updates ModelStore Chats Memo WordList Pressure OcrCore OcrWords Modules Screen Voices Fbank BargeIn WhatsNew DenoiseGate Wiener Feedback VoiceOut Telemetry Clips Learn Cards Practice Inbox Slicer Numbers VoiceMsg L MicPair; do SRC="$SRC $A/src/dev/agenttranslator/$t.java $A/test/${t}Test.java"; done
 SRC="$SRC $A/src/dev/agenttranslator/Phrasebook.java $A/src/dev/agenttranslator/TextRules.java $A/src/dev/agenttranslator/Translit.java $A/test/TextRulesTest.java"
 SRC="$SRC $A/src/dev/agenttranslator/Cloud.java $A/test/CloudTest.java"      # ради Cloud.Review и порядка моделей; заглушки Android — только для сборки
+SRC="$SRC $A/src/dev/agenttranslator/Gain.java"      # Gain.Stats нужен Slicer: без него javac падал и PIT не запускался
 javac --release 11 -nowarn -g -cp "$J:$JU:$R/tools/android.jar" -d "$C" $SRC $A/test/SuitesTest.java
 CP=$(ls $P/pitest*.jar $P/commons-*.jar | paste -sd:):$JU
 java -cp "$CP" org.pitest.mutationtest.commandline.MutationCoverageReport \
