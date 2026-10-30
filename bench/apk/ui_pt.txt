@@ -492,6 +492,7 @@ Pode falar · здесь появится перевод	Pode falar · a traduç
 словарь и разговоры	dicionário e conversas
 озвучка	voz
 Готово. ASR %d · MT %d · TTS %d мс · %s	Pronto. ASR %d · MT %d · TTS %d ms · %s
+ · убрано раздутых правок уточнителя: %d	 · removidas correções infladas do refinador: %d
 Готов. %s	Pronto. %s
  · слушаю	 · ouvindo
 Обновление установлено	Atualização instalada
@@ -692,3 +693,5 @@ Falar переводит автоматически и может ошибать
 Falar больше не закрывается сам, когда к нему возвращаешься.	O Falar não fecha mais sozinho quando você volta para ele.
 Слова, которые Falar расслышал неуверенно, подчёркнуты цветом — их стоит переспросить.	Palavras que o Falar ouviu sem certeza aparecem sublinhadas em cor — vale a pena perguntar de novo.
 Уточнитель больше не подменяет перевод реплики переводом соседних.	O refinador não troca mais a tradução de uma fala pela das falas vizinhas.
+Перевод облака в прошлых разговорах больше не заменяется переводом уточнителя.	A tradução da nuvem em conversas anteriores não é mais substituída pela do refinador.
+Раздутые уточнителем переводы из прежних версий убраны: в разговорах снова обычный перевод.	As traduções infladas pelo refinador em versões anteriores foram removidas: as conversas voltam a ter a tradução normal.
