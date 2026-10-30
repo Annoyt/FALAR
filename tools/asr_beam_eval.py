@@ -4,7 +4,7 @@
 tools/asr_confidence.py (берутся из его кэша results/asr_conf/). Parakeet, один поток. Счёт — по всем фразам, как
 tools/dualmic_eval.per_phrase; сравнение — парный бутстрэп по фразам. Время — сумма по кускам на этом ПК.
 
-    taskset -c 0 .venv/bin/python tools/asr_beam_eval.py near-pt … [--paths 4]
+    taskset -c 0 .venv/bin/python tools/asr_beam_eval.py near-pt … [--paths 4] [--noisy | --doubt 0.7]
 """
 import argparse
 import json
@@ -24,6 +24,8 @@ def main():
     ap.add_argument('--paths', type=int, default=4)
     ap.add_argument('--out', default=os.path.join(R, 'results', 'asr_conf'))
     ap.add_argument('--noisy', action='store_true', help='луч только для кусков, закрытых при включённом шумодаве нарезки')
+    ap.add_argument('--doubt', type=float, help='луч только для кусков, где у жадного есть слово с уверенностью ниже порога '
+                    '(шаг 9, разведка: «луч при сомнении»)')
     a = ap.parse_args()
     m = os.path.join(R, 'models', 'asr_multi')
     rec = ac.vde.so.OfflineRecognizer.from_transducer(
@@ -56,6 +58,8 @@ def main():
                 json.dump(flags, open(fpath, 'w', encoding='utf-8'))
             texts = [bt if f else gt for bt, gt, f in zip(texts, greedy, flags)]
             print(f'   {name}: кусков при шумодаве {sum(flags)} из {len(flags)}', flush=True)
+        if a.doubt is not None:                           # луч — только где жадный сам не уверен
+            texts = [bt if any(c < a.doubt for _, c in ac.words(r[1], r[2])) else r[0] for bt, r in zip(texts, cache['asr'])]
         g = de.per_phrase(segs, greedy, plays, gap, lang)
         b = de.per_phrase(segs, texts, plays, gap, lang)
         allg += g; allb += b; tb += beam['sec']
