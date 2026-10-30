@@ -49,6 +49,16 @@ FRAME = 512
 MODELS = os.path.join(R, 'models')
 
 
+def ref_file(lang, name):
+    """Эталон фразы: корпус bench/air/corpus; новые фразы шага 9 (results/2026-10-27-asr-confidence.md) — в
+    bench/air/fresh (не в git, tools/tatoeba_audio.py --out)."""
+    for d in ('corpus', 'fresh'):
+        p = os.path.join(R, 'bench', 'air', d, lang, name[:-4] + '.txt')
+        if os.path.exists(p):
+            return p
+    return os.path.join(R, 'bench', 'air', 'corpus', lang, name[:-4] + '.txt')
+
+
 def load_rec(name):
     """Запись, что и когда играло (имя, начало в секундах от начала записи, длительность) и пауза."""
     d = os.path.join(R, 'bench', 'air', 'rec', name)
@@ -361,7 +371,7 @@ def score(segs, texts, plays, gap, lang):
     err = tot = nothing = merged = split = 0; clean = []
     for name, _, _, heard_l in wins:
         split += len(heard_l) > 1
-        ref = open(os.path.join(R, 'bench', 'air', 'corpus', lang, name[:-4] + '.txt'), encoding='utf-8').read().strip()
+        ref = open(ref_file(lang, name), encoding='utf-8').read().strip()
         heard = ' '.join(t for t in heard_l if t)
         e, n = wer(ref, heard); err += e; tot += n
         if not heard: nothing += 1
@@ -403,7 +413,7 @@ def main():
         x, plays, gap = load_rec(name)
         if level is not None:
             x = mix(x, noise, level); name = '%s+%s%g' % (name, a.mix, level)
-        plays = [p for p in plays if os.path.exists(os.path.join(R, 'bench', 'air', 'corpus', lang, p[0][:-4] + '.txt'))]
+        plays = [p for p in plays if os.path.exists(ref_file(lang, p[0]))]
         res = {'rec': name, 'model': a.model, 'att': a.att, 'variants': {}}
         for v in a.variants.split(','):
             music = v.startswith('auto2') or v.startswith('auto3')

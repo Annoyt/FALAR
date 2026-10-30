@@ -139,7 +139,7 @@ def per_phrase(segs, texts, plays, gap, lang):
             hit[3].append(t)
     rows = []
     for name, _, _, heard_l in wins:
-        ref = open(os.path.join(R, 'bench', 'air', 'corpus', lang, name[:-4] + '.txt'), encoding='utf-8').read().strip()
+        ref = open(vde.ref_file(lang, name), encoding='utf-8').read().strip()
         heard = ' '.join(t for t in heard_l if t)
         e, n = wer(ref, heard)
         rows.append((name, e, n, not heard))

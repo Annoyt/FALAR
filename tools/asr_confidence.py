@@ -68,7 +68,7 @@ def load(name):
             return (L[a:b] + rr) / 2
         return mean.astype(np.float32), piece, plays, gap, lang
     x, plays, gap = vde.load_rec(name)
-    plays = [p for p in plays if os.path.exists(os.path.join(R, 'bench', 'air', 'corpus', lang, p[0][:-4] + '.txt'))]
+    plays = [p for p in plays if os.path.exists(vde.ref_file(lang, p[0]))]
     return x, (lambda a, b: x[a:b]), plays, gap, lang
 
 
@@ -137,7 +137,7 @@ def main():
         for pn, _, _, rs in wins:
             if len(rs) != 1 or not rs[0][0]: continue
             text, toks, lps = rs[0]
-            ref = norm(open(os.path.join(R, 'bench', 'air', 'corpus', lang, pn[:-4] + '.txt'), encoding='utf-8').read().strip())
+            ref = norm(open(vde.ref_file(lang, pn), encoding='utf-8').read().strip())
             hw = words(toks, lps)
             if not hw or not ref: continue
             ok = align([w for w, _ in hw], ref)
