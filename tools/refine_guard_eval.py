@@ -15,7 +15,7 @@ history в службе), и ближние, и следующие за ней, 
 (Brief.swallowed): bench/apk/test/RefineGuardSim.java.
 
   PYTHONPATH=~/tools/llama-cuda taskset -c 2 .venv/bin/python tools/refine_guard_eval.py \
-      [--cache ~/.cache/falar-stand/refine-guard/gen.jsonl] [--limit N] [--cond ctx|empty|both] [--short | --split]
+      [--cache .stand/refine-guard/gen.jsonl] [--limit N] [--cond ctx|empty|both] [--short | --split]
       [--recheck N] [--cpu]
 """
 import argparse
@@ -25,6 +25,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stand_paths  # noqa: E402
 
 R = Path(__file__).resolve().parent.parent
 APP_LANG = {"ru": "Russian", "pt": "Portuguese (Brazil)"}  # TranslatorService.langName
@@ -179,7 +182,7 @@ def model_path():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cache", default=os.path.expanduser("~/.cache/falar-stand/refine-guard/gen.jsonl"))
+    ap.add_argument("--cache", default=stand_paths.stand("refine-guard", "gen.jsonl"))
     ap.add_argument("--limit", type=int, default=0, help="только первые N запросов каждого условия (проба)")
     ap.add_argument("--cpu", action="store_true", help="без видеокарты (медленно; ПК не любит долгую нагрузку)")
     ap.add_argument("--short", action="store_true", help="короткие реплики и обрывки (SHORT) на фоне «ситуаций»")

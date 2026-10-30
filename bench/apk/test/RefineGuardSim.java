@@ -27,7 +27,7 @@ public class RefineGuardSim {
   static String cut(String s, int n) { s = s.replace('\n', ' '); return s.length() > n ? s.substring(0, n) + "…" : s; }
 
   public static void main(String[] a) throws Exception {
-    Path f = Paths.get(a.length > 0 ? a[0] : System.getProperty("user.home") + "/.cache/falar-stand/refine-guard/gen.jsonl");
+    Path f = a.length > 0 ? Paths.get(a[0]) : Paths.get(System.getenv().getOrDefault("FALAR_STAND", ".stand"), "refine-guard", "gen.jsonl");
     int show = a.length > 1 ? Integer.parseInt(a[1]) : 15;
     Map<String, JSONObject> ctx = new LinkedHashMap<>(), empty = new LinkedHashMap<>();
     for (String line : Files.readAllLines(f, StandardCharsets.UTF_8)) {
