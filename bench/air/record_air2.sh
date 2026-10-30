@@ -14,6 +14,7 @@
 #
 # Телефон должен лежать: экран погашен или впереди Falar/рабочий стол, минуту не трогали, слушание выключено. Пока
 # идёт проход, телефон не трогать — запись сырая, но человек у телефона попадёт в неё.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=${SER:-${ANDROID_SERIAL:-f6lnlrorgi59xwge}}; ADB="$R/tools/platform-tools/adb -s $SER"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
@@ -31,7 +32,7 @@ REF=$R/bench/air/corpus/$LANG_; [ -d "$REF" ] || { echo "нет корпуса $
 OUT=$R/bench/air/rec/st-$LABEL-$LANG_
 [ -e "$OUT/room2.wav" ] && [ "${FORCE:-0}" != 1 ] && { echo "запись $OUT уже есть — FORCE=1 перепишет"; exit 1; }
 PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"
+STATE=$STAND; mkdir -p "$STATE"
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }

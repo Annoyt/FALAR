@@ -9,7 +9,7 @@
 близнецы разошлись. Сверх того на ПК: задержка по GCC-PHAT с долями отсчёта и связность каналов на фоне — у двух
 микрофонов в 15 см друг от друга в рассеянном шуме комнаты она на 1–4 кГц близка к нулю, у копии одного — 1.
 
-    .venv/bin/python tools/mic_probe.py ~/.cache/falar-stand/mic-<время>
+    .venv/bin/python tools/mic_probe.py .stand/mic-<время>
 """
 import json
 import os

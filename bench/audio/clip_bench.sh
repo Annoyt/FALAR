@@ -4,11 +4,12 @@
 # Приложение и его данные не трогаются; файлы замера — в /data/local/tmp/clipbench, в конце удаляются.
 #   bash bench/audio/clip_bench.sh [набор…]        # по умолчанию near-pt far-pt из bench/air/rec
 # Переменные: CLIPS (кусочков на конфиг, 40), SEC (длина кусочка, 5), CFGS (конфиги), LOCK_WAIT (с, 7200).
-# Итог — по строке JSON на конфиг в ~/.cache/falar-stand/clipbench/<время>/<набор>.jsonl.
+# Итог — по строке JSON на конфиг в .stand/clipbench/<время>/<набор>.jsonl.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 set -u
 A=$(cd "$(dirname "$0")" && pwd); R=$(cd "$A/../.." && pwd)
 AJ=$R/tools/android.jar; R8=$R/tools/r8.jar; ADB=$R/tools/platform-tools/adb
-STATE=$HOME/.cache/falar-stand; OUT=$STATE/clipbench/$(date +%Y%m%d-%H%M%S); mkdir -p "$OUT"
+STATE=$STAND; OUT=$STATE/clipbench/$(date +%Y%m%d-%H%M%S); mkdir -p "$OUT"
 E=/data/local/tmp/clipbench; PKG=app.falar
 CLIPS=${CLIPS:-40}; SEC=${SEC:-5}; CFGS=${CFGS:-ogg:16000,ogg:24000,m4a:24000,m4a:32000,wav:0}
 SETS=${*:-near-pt far-pt}

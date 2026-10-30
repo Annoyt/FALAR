@@ -9,19 +9,20 @@
 # Две конфигурации: 4 потока на четырёх больших ядрах (на Redmi cpu4–7, Cortex-A78; так переводит
 # приложение) и 1 поток на одном большом ядре (телефон занят распознаванием и голосом; владелец 03.10 —
 # сначала эмулировать одно крупное ядро). Варианты — как у TimeRun: ширина луча, «s» — черновики по
-# одному. Итог — ~/.cache/falar-stand/mt-time/<время>/time-<потоки>-<направление>.json и таблица.
+# одному. Итог — .stand/mt-time/<время>/time-<потоки>-<направление>.json и таблица.
 #
 # Телефон — рабочий телефон человека. Один прогон на стенде за раз (замок, как у test_*_device.sh), и
 # каждый прогон ждёт, пока телефоном не пользуются: экран погашен или последнее касание больше
 # минуты назад, на экране FALAR или рабочий стол, само приложение почти не нагружает процессор, свободно
 # не меньше гигабайта памяти. Файлы на телефоне — только в /data/local/tmp/falar-mt, в конце удаляются.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd)
 MAIN=$(cd "$(git -C "$R" rev-parse --git-common-dir)/.." && pwd)
 pick() { [ -e "$R/$1" ] && echo "$R/$1" || echo "$MAIN/$1"; }
 ADB=${ADB:-$(pick tools/platform-tools)/adb}
 N=${1:-100}; VARS=${2:-1,2,4}
 CFGS=${CFGS:-"4:f0 1:80"}; DIRS=${DIRS:-"pt2ru ru2pt"}   # «потоки:маска ядер» по порядку, направления
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; OUT=$STATE/mt-time/$(date +%Y%m%d-%H%M%S); mkdir -p "$OUT"
+STATE=$STAND; OUT=$STATE/mt-time/$(date +%Y%m%d-%H%M%S); mkdir -p "$OUT"
 DT=/data/local/tmp/falar-mt; MODELS=/sdcard/Android/data/app.falar/files/models
 say() { printf '%s %s\n' "$(date +%T)" "$*" | tee -a "$OUT/run.log"; }
 

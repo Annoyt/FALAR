@@ -4,7 +4,7 @@
 играло, приглушить озвучку, убедиться и замолчать. Разбор записей стенда эха (bench/apk/test_aec_device.sh:
 vr_e<k> — только эхо фразы k, vr_d<k> — человек из колонок ПК поверх неё, vr_q<k> — только человек).
 
-  .venv/bin/python tools/barge_eval.py <каталог записей> [<каталог> …]   # ~/.cache/falar-stand/aec-<время>
+  .venv/bin/python tools/barge_eval.py <каталог записей> [<каталог> …]   # .stand/aec-<время>
   .venv/bin/python tools/barge_eval.py golden                            # эталон для BargeInTest.java
 
 Датчик (класс Barge; тот же счёт — в BargeIn.java). Кадр 32 мс, шаг 16 мс, 20 мел-полос. Ожидаемое эхо в

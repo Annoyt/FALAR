@@ -31,12 +31,13 @@
 # на прогон. Прогон оборвался, даже kill -9, — следующий запуск сначала возвращает телефон (или --restore).
 # Замок общий с test_all_device.sh; Falar запускается только поверх себя, рабочего стола или
 # погашенного экрана, и только когда экрана не касались минуту.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd); A=$R/bench/apk
 ONLY_RESTORE=0; [ "${1:-}" = "--restore" ] && ONLY_RESTORE=1
 ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"; PEND=$STATE/audio-pending
+STATE=$STAND; mkdir -p "$STATE"; PEND=$STATE/audio-pending
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json"
 PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3
 pass=0; fail=0

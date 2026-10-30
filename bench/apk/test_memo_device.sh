@@ -15,11 +15,12 @@
 # уходит только синтетический тестовый разговор ниже.
 #
 # Экран: касания — только когда он включён и впереди Falar; экран блокировки не трогаем никогда.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd)
 # Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
 # девять минут касались телефона одновременно).
 if [ -z "$FALAR_STAND_LOCK" ]; then
-  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  mkdir -p "$STAND"; exec 9>"$STAND/lock"
   flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
 fi
 SER=${1:-f6lnlrorgi59xwge}; ADB="$R/tools/platform-tools/adb -s $SER"

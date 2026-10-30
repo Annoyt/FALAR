@@ -30,13 +30,14 @@
 # начинается), стендовые earlylisten/earlyasr — как были. Отпечаток голоса на время прогона выключен: в
 # тестовом разговоре голосов нет. Озвучки нет (--es silent 1). Прогон оборвался, даже kill -9, — следующий
 # запуск сначала возвращает телефон (или --restore). Замок общий с остальными стендами.
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd)
 SER=${SER:-f6lnlrorgi59xwge}; ONLY_RESTORE=0
 for a in "$@"; do case "$a" in --restore) ONLY_RESTORE=1;; esac; done
 ADB="$R/tools/platform-tools/adb -s $SER"
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log; TSV=$F/at.tsv
-STATE=${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand; mkdir -p "$STATE"; PEND=$STATE/early-pending
+STATE=$STAND; mkdir -p "$STATE"; PEND=$STATE/early-pending
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json"
 PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3
 RUNS=${RUNS:-6}

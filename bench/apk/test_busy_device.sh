@@ -9,11 +9,12 @@
 # длится каждая; после конца хода на его месте снова кнопки. Если уточнителю не хватило памяти и
 # разбор отложен, порог снижается до перезапуска (--es llmneed 900) и подаётся вторая фраза. Разговоры владельца не трогаются: тестовый разговор — отдельным файлом, выученное
 # и словари возвращаются из снимка, настройки разбора — к тем, что были (REFINE_EVERY/CLOUD_EVERY — явно).
+. "$(dirname "$0")/../stand.sh"   # $STAND, $PRIVATE — состояние стенда и данные телефонов внутри проекта
 R=$(cd "$(dirname "$0")/../.." && pwd); A=$R/bench/apk
 # Один прогон на телефоне за раз — и отдельный скрипт, и test_all_device.sh (01.10 две копии test_ui
 # девять минут касались телефона одновременно).
 if [ -z "$FALAR_STAND_LOCK" ]; then
-  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand"; exec 9>"${XDG_CACHE_HOME:-$HOME/.cache}/falar-stand/lock"
+  mkdir -p "$STAND"; exec 9>"$STAND/lock"
   flock -n 9 || { echo "на телефоне уже идёт проверка — вторую не начинаю"; exit 1; }; export FALAR_STAND_LOCK=1
 fi
 ADB=${ADB:-$R/tools/platform-tools/adb}
