@@ -35,6 +35,7 @@ ADB=${ADB:-$(pick tools/platform-tools/adb)}; PY=${PY:-python3}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
 NAME=${1:-near-pt}; REC=$(pick bench/air/rec/$NAME)
+PARTS=${PARTS:-12}      # PARTS=2 — только экран (часть 2), без подачи записи
 case $NAME in near-pt) PC=4.4;; far-pt) PC=10.6;; noisy-pt) PC=23.0;; nearbg40-pt) PC=13.6;; nearbg45-pt) PC=9.0;; *) PC=;; esac
 [ -f "$REC/room.wav" ] || { echo "нет записи $REC/room.wav"; exit 2; }
 # Выученное, словари и журнал с телефона — только в ~/.cache/falar-private (владелец 27.10), после прогона удаляются.
@@ -78,19 +79,24 @@ orig_settings() {
   REF=${REF:-3}; CLOUD=${CLOUD:-0}
 }
 AUTO0=$(sh "grep -E '🎚 (чувствительность: авто, сейчас|авто-чувствительность:)' $LOG | tail -1" | sed -n 's/.* \([+-][0-9.]*\) дБ.*/\1/p'); AUTO0=${AUTO0:-0}
-# Точки цвета пометки на снимке (или в прямоугольнике): Look.doubtFg днём (0x8A6420) и ночью (GOLD 0xE0B878).
+# Точки цвета пометки (Look.doubtFg: днём 0x8A6420, ночью GOLD 0xE0B878), которых на снимке без пометок на том же месте
+# нет: «число высота», высота — строк снимка, где они есть (пометка — одна строка текста). Тем же цветом ночью
+# нарисованы значки и кнопки (на снимке без пометок их ~10 тыс. точек), поэтому сравнение — по месту, а не по счёту.
 cat > $D/px.py <<'PY'
 import sys
 from PIL import Image
-img = Image.open(sys.argv[1]).convert('RGB'); px = img.load()
-x0, y0, x1, y1 = (int(v) for v in sys.argv[2:6]) if len(sys.argv) > 5 else (0, 0, img.width, img.height)
+a, b = (Image.open(f).convert('RGB') for f in sys.argv[1:3])
+if a.size != b.size: print(0, 0); sys.exit()
+pa, pb = a.load(), b.load()
 cols = [(0x8A, 0x64, 0x20), (0xE0, 0xB8, 0x78)]
-n = 0
-for y in range(max(0, y0), min(img.height, y1)):
-    for x in range(max(0, x0), min(img.width, x1)):
-        p = px[x, y]
-        if min(sum((a - b) ** 2 for a, b in zip(p, c)) for c in cols) < 40 * 40: n += 1
-print(n)
+mark = lambda p: min(sum((u - v) ** 2 for u, v in zip(p, c)) for c in cols) < 40 * 40
+n, ys = 0, []
+for y in range(a.height):
+    row = 0
+    for x in range(a.width):
+        if mark(pa[x, y]) and not mark(pb[x, y]): row += 1
+    if row: n += row; ys.append(y)
+print(n, ys[-1] - ys[0] + 1 if ys else 0)
 PY
 # Разговор части 2: «Где здесь аптека?» (своя, ru2pt) и «Bom dia, tudo bem?» (собеседника, pt2ru); пометки — ни у
 # какой (none), только у собеседника (big) или только у своей (card).
@@ -107,19 +113,24 @@ json.dump({"id": tid, "name": "ТЕСТ сомнительные слова, э�
           open(out, "w", encoding="utf-8"), ensure_ascii=False)
 PY
 }
-# Открыть разговор части 2 и снять главный экран стендом uishot; печатает число точек цвета пометки на снимке или
-# «-»: снимка нет либо на нём не этот разговор.
+# Открыть разговор части 2 и снять главный экран стендом uishot в $D/<вид>.png; «-» — снимка нет либо на нём не этот
+# разговор.
+# Сразу после запуска окно может нарисоваться раньше, чем служба отдала ему разговор (30.10: пустой экран «—» на
+# третьем снимке из трёх) — тогда снимок повторяется, пока на нём не будет этот разговор.
 shot2() {   # shot2 <none|big|card>
-  local f=$F/wordmarks-$1 m i n0=-1 n1
+  local f=$F/wordmarks-$1 m i k n0 n1
   chat2 $D/c2.json "$1"
   $ADB shell "am force-stop $PKG"; sleep 1; $ADB push $D/c2.json "$F/chats/$TID2.json" >/dev/null 2>&1
   m=$(count $LOG); launch --es listen off; wl "$m" '🧩 модули:' 60 >/dev/null; sleep 2
-  sh "rm -f $f.png $f.txt"; launch --es uishot wordmarks-$1 --es uiscreen main
-  for i in $(seq 20); do sleep 1; n1=$(sh "stat -c %s $f.txt 2>/dev/null"); [ -n "$n1" ] && [ "$n1" = "$n0" ] && break; n0=${n1:--1}; done
-  $ADB pull "$f.png" $D/$1.png >/dev/null 2>&1; $ADB pull "$f.txt" $D/$1.txt >/dev/null 2>&1; sh "rm -f $f.png $f.txt"
-  [ -s $D/$1.png ] && [ -s $D/$1.txt ] || { echo "-"; return; }
-  { grep -qxF 'Bom dia, tudo bem?' $D/$1.txt || grep -qxF 'dia,' $D/$1.txt; } && grep -qxF 'Где здесь аптека?' $D/$1.txt || { echo "-"; return; }
-  "$PY" $D/px.py $D/$1.png
+  for k in 1 2 3; do
+    rm -f $D/$1.png $D/$1.txt; n0=-1; n1=
+    sh "rm -f $f.png $f.txt"; launch --es uishot wordmarks-$1 --es uiscreen main
+    for i in $(seq 20); do sleep 1; n1=$(sh "stat -c %s $f.txt 2>/dev/null"); [ -n "$n1" ] && [ "$n1" = "$n0" ] && break; n0=${n1:--1}; done
+    $ADB pull "$f.png" $D/$1.png >/dev/null 2>&1; $ADB pull "$f.txt" $D/$1.txt >/dev/null 2>&1; sh "rm -f $f.png $f.txt"
+    [ -s $D/$1.png ] && { grep -qxF 'Bom dia, tudo bem?' $D/$1.txt || grep -qxF 'dia,' $D/$1.txt; } && grep -qxF 'Где здесь аптека?' $D/$1.txt && break
+    rm -f $D/$1.png; sleep 3
+  done
+  [ -s $D/$1.png ] && echo ok || echo "-"
 }
 restore() {
   say "== возврат"
@@ -157,6 +168,7 @@ wl "$m" '🧪 что нового:' 15 | sed -n 's/.*снимок //p' > $D/what
 if [ -s $D/whatsnew ]; then w=$(cat $D/whatsnew); launch "--es whatsnew 'put:${w%|*|*}|0|${w##*|}'"; sleep 2; fi
 for f in models/learned.json models/phrasebook_user.json word_ru.json known_words.json; do $ADB pull "$F/$f" "$SNAP/" >/dev/null 2>&1; done
 
+if [[ $PARTS == *1* ]]; then
 say "== Часть 1: запись $NAME — распознавание и пометки"
 "$PY" -c "import json; json.dump({'id': $TID, 'name': 'ТЕСТ сомнительные слова', 'named': True, 'saved': $TID, 'turns': []}, open('$D/t.json','w',encoding='utf-8'), ensure_ascii=False)"
 # Перезапуск: строка «отдаёт ли уверенность» пишется при первом распознавании после запуска службы.
@@ -203,16 +215,22 @@ v=$(sed -n 's/^D3 \([01]\).*/\1/p' $D/d.txt); bad=$(sed -n 's/^D3 [01] *//p' $D/
 res "$v" "D3 пометки разговора — на словах, названных в журнале${bad:+ (не сошлось: $bad)}"
 v=$(sed -n 's/^D4 //p' $D/d.txt)
 case "$v" in -) sk "D4 доля сомнительных: нет числа ПК для $NAME или меньше 100 слов";; *) res "$v" "D4 доля сомнительных слов — как на ПК (от трети до тройной)";; esac
+fi
 
 say "== Часть 2: экран — цвет пометки в крупном тексте и в карточке"
 # Текущий разговор — самый свежий файл (Chats.list): разговор части 1 убрать, когда Falar уже не может его записать.
 $ADB shell "am force-stop $PKG"; sleep 1; $ADB shell "rm -f $F/chats/$TID.json"
-n0=$(shot2 none); nb=$(shot2 big); nc=$(shot2 card)
-say "  точек цвета пометки на снимке: без пометок $n0 · пометка собеседника $nb · своя $nc"
-if [ "$n0" = - ]; then res 1 "D5 снимка разговора без пометок нет (или на нём не тот разговор)"
+s0=$(shot2 none); sb=$(shot2 big); sc=$(shot2 card)
+if [ "$s0" = - ]; then res 1 "D5 снимка разговора без пометок нет (или на нём не тот разговор)"
 else
-  [ "$nb" != - ] && [ $((nb - n0)) -ge 40 ] && res 0 "D5 сомнительное слово собеседника — цветом (+$((nb - n0)) точек)" || res 1 "D5 пометка собеседника не видна: $n0 → $nb точек"
-  [ "$nc" != - ] && [ $((nc - n0)) -ge 15 ] && res 0 "D6 своё сомнительное слово в карточке — цветом (+$((nc - n0)) точек)" || res 1 "D6 своя пометка не видна: $n0 → $nc точек"
+  # Пометка — одна строка текста: новых точек цвета не меньше порога, и все они в полосе высотой не больше строки.
+  # Пороги — с запасом над шумом: пустой экран вместо разговора дал 190 новых точек (другой значок «Melhorar»).
+  if [ "$sb" = - ]; then res 1 "D5 снимка с пометкой собеседника нет"
+  else read nb hb <<< "$("$PY" $D/px.py $D/big.png $D/none.png)"; say "  пометка «dia» в крупном тексте: новых точек цвета $nb, полоса $hb пк"
+    [ "$nb" -ge 800 ] && [ "$hb" -le 250 ] && res 0 "D5 сомнительное слово собеседника — цветом" || res 1 "D5 пометка собеседника не видна или не одной строкой: $nb точек, полоса $hb пк"; fi
+  if [ "$sc" = - ]; then res 1 "D6 снимка с пометкой своей реплики нет"
+  else read nc hc <<< "$("$PY" $D/px.py $D/card.png $D/none.png)"; say "  пометка «аптека» в карточке: новых точек цвета $nc, полоса $hc пк"
+    [ "$nc" -ge 400 ] && [ "$hc" -le 150 ] && res 0 "D6 своё сомнительное слово в карточке — цветом" || res 1 "D6 своя пометка не видна или не одной строкой: $nc точек, полоса $hc пк"; fi
 fi
 c=$(crashed); [ -z "$c" ] && res 0 "D7 за проверку Falar не падал" || res 1 "D7 Falar упал: $c"
 [ $fail = 0 ]
