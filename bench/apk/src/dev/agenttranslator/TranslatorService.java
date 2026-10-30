@@ -206,6 +206,17 @@ public class TranslatorService extends Service {
   volatile double segGainDb = 0, segSpeechDb = Double.NaN, segFloorDb = Double.NaN, segOverPct = 0, segLimPct = 0, segCutPct = 0;
   final List<float[]> pttBuf = new ArrayList<>(); String pttDir = "pt2ru"; AudioTrack track; int trackRate = 0; Thread capThread;
   PowerManager.WakeLock wl; volatile String lastDir, lastSrc, lastDst, lastLine = "";
+  /** Сомнительные слова последней реплики (WordConf): исходник и пары [начало, конец) знаков в нём — одним
+   *  объектом, чтобы экран не взял пометки одной реплики к тексту другой, пока сервис меняет последнюю. */
+  public static final class Doubt {
+    public final String src; public final int[] spans;
+    Doubt(String src, int[] spans) { this.src = src; this.spans = spans; }
+    /** Пометки для текста src; к другому тексту — никаких. */
+    public int[] of(String text) { return src.equals(text) ? spans : new int[0]; }
+  }
+  public volatile Doubt lastDoubt = null;
+  /** В журнал уже сказано, отдаёт ли библиотека распознавателя уверенность в словах (один раз за запуск). */
+  volatile boolean probsTold = false;
   public static class Turn { public final int n; public final String dir, asr, mt; public final long at; public volatile String refined;
     /** Реплику поправили или удалили, пока она ждала озвучки: поток озвучки её пропускает. */
     public volatile boolean dropped;
@@ -540,6 +551,17 @@ public class TranslatorService extends Service {
     final Engine.Asr ar; final int[] cuts; final long ms;
     Recog(Engine.Asr ar, int[] cuts, long ms) { this.ar = ar; this.cuts = cuts; this.ms = ms; }
   }
+  /** Строка журнала о сомнительных словах реплики: слова с уверенностью и сколько из них нашлось в тексте реплики
+   *  (текст после распознавания правят — числа, свои слова). null — сомнительных нет. */
+  static String doubtLine(List<WordConf.Word> words, int[] doubt) {
+    StringBuilder b = new StringBuilder(); int n = 0;
+    for (WordConf.Word w : words) {
+      if (w.conf >= WordConf.DOUBT) continue;
+      b.append(n++ == 0 ? "" : " · ").append('«').append(w.text).append("» ").append(String.format(Locale.ROOT, "%.2f", w.conf));
+    }
+    if (n == 0) return null;
+    return "🔎 распознаватель не уверен (< " + WordConf.DOUBT + "): " + b + (doubt.length / 2 < n ? " · в тексте отмечено " + doubt.length / 2 + " из " + n : "");
+  }
   /** Распознать фразу. Тишина перед речью: модель обучена на высказываниях с паузой в начале, и резкий старт
    *  с нулевой отметки сбивает ей первые токены («A que» → «RKA4JL»). В микрофонном пути это закрывает подпор
    *  начала, а при подаче файлом взять тишину неоткуда — дорисовываем. Где реплика делится на предложения —
@@ -552,6 +574,11 @@ public class TranslatorService extends Service {
     long t0 = System.nanoTime(); Engine.Asr ar;
     synchronized (asrLock) { ar = en.asrFull(dir.substring(0, 2), fed, sr); }   // sherpa ресемплирует сам
     long ms = (System.nanoTime() - t0) / 1000000;
+    if (!probsTold && ar.tokens != null && ar.tokens.length > 0) {   // с прежней библиотекой JNI пометок нет — видно по журналу
+      probsTold = true;
+      log(ar.probs != null ? "🔎 распознаватель отдаёт уверенность в словах — сомнительные помечаются"
+                           : "🔎 библиотека распознавателя без уверенности в словах (tools/sherpa-jni) — сомнительные не помечаются");
+    }
     return new Recog(ar, Clips.cuts(ar.tokens, ar.times, ar.durs, samples, sr, (fed.length - samples.length) / (double) sr), ms);
   }
   /** Фраза, которую ещё некому перевести: early распознаёт её, как только поднялось распознавание, и сразу
@@ -1534,11 +1561,11 @@ public class TranslatorService extends Service {
     if (chats == null || !chats.delete(id)) return false;
     if (chats.current != id) { /* удалили не тот, в котором сидим — память трогать незачем */ }
     sayQ.clear(); rebuildHistory();
-    lastSrc = null; lastDst = null; lastDir = null;
+    lastSrc = null; lastDst = null; lastDir = null; lastDoubt = null;
     return true;
   }
   /** Последняя реплика ушла из разговора: указатели для пина и очереди озвучки больше не её. */
-  void forgetLast() { lastSrc = null; lastDst = null; lastMaskedSrc = null; lastMaskedDst = null; lastSlots = new ArrayList<>(); lastAt = 0; }
+  void forgetLast() { lastSrc = null; lastDst = null; lastMaskedSrc = null; lastMaskedDst = null; lastSlots = new ArrayList<>(); lastAt = 0; lastDoubt = null; }
   public boolean moveTurn(int idx, long to) {
     if (chats == null) return false;
     boolean wasLast = idx == chats.size() - 1;
@@ -2795,6 +2822,7 @@ public class TranslatorService extends Service {
       if (last || oldAt == lastAt) {
         sayQ.removeIf(it -> it.length > 4 && it[4] instanceof Turn && ((Turn) it[4]).at == oldAt);   // старый перевод не должен прозвучать
         lastDir = r.dir; lastSrc = r.asr; lastDst = r.mt; lastMaskedSrc = r.maskedSrc; lastMaskedDst = r.maskedMt; lastSlots = r.slots; lastAt = at;
+        lastDoubt = null;                          // текст исправил человек — пометки распознавателя к нему не относятся
       }
       rebuildHistory();
       log("✎ реплика " + (idx + 1) + " исправлена: " + r.asr + " → " + r.mt + " · " + r.tag);
@@ -4240,10 +4268,11 @@ public class TranslatorService extends Service {
         long t0 = System.nanoTime();
         List<float[]> pieces = sliceVoice(x);
         List<String> texts = new ArrayList<>(); long asrMs = 0;
+        List<WordConf.Word> heard = new ArrayList<>();   // слова всех кусков подряд — по ним сомнительные (WordConf)
         for (int k = 0; k < pieces.size(); k++) {
           busy("live", L.k("распознаю голосовое…"), k, pieces.size());
           Recog h = recog("pt2ru", pieces.get(k), 16000, eng);
-          asrMs += h.ms; texts.add(h.ar.text);
+          asrMs += h.ms; texts.add(h.ar.text); heard.addAll(WordConf.words(h.ar.tokens, h.ar.probs));
         }
         String text = VoiceMsg.join(texts);
         log("🎙 голосовое " + VoiceMsg.duration(sec) + (from == null ? "" : " из " + from) + ": кусков " + pieces.size()
@@ -4251,7 +4280,7 @@ public class TranslatorService extends Service {
         if (text.isEmpty()) { hint(L.f("🎙 в голосовом (%s) речи не нашлось", VoiceMsg.duration(sec))); return; }
         // Откуда пришло — ответ («Отправить перевод…») уходит туда же, пока открыт этот разговор.
         if (from != null) getSharedPreferences("at", MODE_PRIVATE).edit().putString("voice_src_pkg", from).putLong("voice_src_chat", chatId).apply();
-        processText("pt2ru", unshout(text), true, false, sec * 1000, asrMs, VOICE_KIND, chatId, null, x, 16000, null);
+        processText("pt2ru", unshout(text), true, false, sec * 1000, asrMs, VOICE_KIND, chatId, null, x, 16000, null, heard);
       } catch (Throwable t) { Log.e(TAG, "voicemsg", t); log("🎙 голосовое: ошибка " + t); }
       finally {
         busy("live", null, 0, 0);
@@ -4347,7 +4376,7 @@ public class TranslatorService extends Service {
       Recog h = pre != null ? pre : recog(dir, samples, sr, eng);
       String asr = h.ar.text;
       if (asr.isEmpty()) { log("(тишина / не распознано, " + String.format("%.1f", samples.length / (double) sr) + " с)"); tsvSeg("silence", dir, "", "", "", durMs, h.ms, 0); return; }
-      processText(dir, asr, auto, true, durMs, h.ms, "asr", chatId, who, samples, sr, h.cuts);   // звук — без подставленной тишины
+      processText(dir, asr, auto, true, durMs, h.ms, "asr", chatId, who, samples, sr, h.cuts, WordConf.words(h.ar.tokens, h.ar.probs));   // звук — без подставленной тишины
     } catch (Throwable t) { Log.e(TAG, "process", t); log("Ошибка: " + t); tsv("error", dirIn, String.valueOf(t)); }
     finally { busy("live", null, 0, 0); }
   }
@@ -4463,6 +4492,11 @@ public class TranslatorService extends Service {
   /** pcm, sr — звук, который слышал распознаватель: он ляжет рядом с репликой, если включено
    *  «Хранить звук собеседников» и речь португальская. */
   void processText(String dirIn, String asrIn, boolean auto, boolean gate, double durMs, long srcMs, String kind, final long chatId, Who whoIn, final float[] pcm, final int sr, final int[] cuts) {
+    processText(dirIn, asrIn, auto, gate, durMs, srcMs, kind, chatId, whoIn, pcm, sr, cuts, null);
+  }
+  /** heard — слова, которые слышал распознаватель, с уверенностью в каждом (WordConf.words): по ним сомнительные
+   *  слова реплики. null — набранный текст, снимок, распознавание без вероятностей. */
+  void processText(String dirIn, String asrIn, boolean auto, boolean gate, double durMs, long srcMs, String kind, final long chatId, Who whoIn, final float[] pcm, final int sr, final int[] cuts, final List<WordConf.Word> heard) {
     busy("live", L.k("перевожу…"), 0, 0);
     try {
       long t1 = System.nanoTime();
@@ -4547,6 +4581,10 @@ public class TranslatorService extends Service {
       final boolean here = chats == null || chats.current == chatId;   // разговор не сменился, пока считали
       final Turn turn = new Turn(++turnNo, dir, asr, mt, at);
       if (here) { history.add(turn); if (history.size() > 30) history.remove(0); }
+      // Сомнительные слова исходника: где распознаватель сам не уверен. На экране — цветом, в журнале — словами с
+      // уверенностью (решение владельца: экран — цветом, журнал — словами).
+      final List<WordConf.Word> heardWords = heard == null ? new ArrayList<>() : heard;
+      final int[] doubt = WordConf.spans(asr, heardWords, WordConf.DOUBT);
       final String fTgt = r.tgt;                 // направление могло смениться по языку реплики
       final long[] first = {0}; double audioS = 0;
       final boolean cacheable = r.cacheable;
@@ -4565,16 +4603,19 @@ public class TranslatorService extends Service {
         first[0] = t2; tag += soon ? " · озвучка — когда поднимутся голоса" : " · озвучка ждёт паузы";
       }
       else { first[0] = 0; audioS = speakTurn(dir, fTgt, mt, cacheable, first); if (first[0] == 0) first[0] = System.nanoTime(); }
-      if (here) { lastDir = dir; lastSrc = asr; lastDst = mt; lastMaskedSrc = r.maskedSrc; lastMaskedDst = r.maskedMt; lastSlots = r.slots; lastAt = at; }
+      if (here) { lastDir = dir; lastSrc = asr; lastDst = mt; lastMaskedSrc = r.maskedSrc; lastMaskedDst = r.maskedMt; lastSlots = r.slots; lastAt = at; lastDoubt = new Doubt(asr, doubt); }
       String line = String.format("#%d %s | %s\n   → %s\n   %s · %s %d · mt %d · tts→звук %d · до звука %d мс%s", turn.n, dir, asr, mt, tag,
           kind, srcMs, (t2 - t1) / 1000000, (first[0] - t2) / 1000000, srcMs + (first[0] - t1) / 1000000,
           durMs > 0 ? String.format(Locale.ROOT, " (аудио %.1f с)", durMs / 1000.0) : "");
       log(line); tsvSeg(kind, dir, asr, mt, tag, durMs, srcMs, (t2 - t1) / 1000000);
+      String unsure = doubtLine(heardWords, doubt);
+      if (unsure != null) log(unsure);
       if (chats != null) {
         // Живой звук — только португальская речь собеседника (решение владельца 03.10): по нему учат
         // язык, а свою русскую речь человек слышит и так. Имя — до записи в разговор, файл — в фоне после.
         String clip = keepAudio && pcm != null && dir.startsWith("pt") ? Clips.name(chatId, at, chats.audio()) : null;
         JSONObject tj = Chats.turn(dir, asr, mt, who, at);
+        if (doubt.length > 0) tj.put("doubt", WordConf.pack(doubt));   // сомнительные слова исходника (Chats, WordConf)
         if (kind.equals(VOICE_KIND)) tj.put("voice", Math.round(durMs / 1000));   // длительность, с — пометка 🎙 (Chats.VOICE)
         if (clip != null) {
           tj.put("audio", clip);
