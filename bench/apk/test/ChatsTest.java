@@ -257,6 +257,77 @@ public class ChatsTest {
     eq(w.audioSize()[0], 1L, "C43 WAV и недописанный Opus — одна реплика");
     ok(w.deleteTurn(w.size() - 1) && !raw.exists() && !part.exists(), "C43 удалены и WAV, и недописанный Opus");
 
+    // правка облака: уточнитель её не перезаписывает, облако правку уточнителя — да
+    Chats cc = new Chats(tmp());
+    cc.add("pt2ru", "Onde fica a farmácia?", "Где аптека?", null, 5000);
+    cc.add("pt2ru", "Obrigado pela ajuda", "Спасибо за помощь", null, 6000);
+    ok(cc.fixByAt(5000, "Где находится аптека?", Chats.BY_CLOUD), "C44 облако правит машинную реплику");
+    ok(!cc.fixByAt(5000, "Подскажите, где аптека?", Chats.BY_LLM), "C44 уточнитель не перезаписывает правку облака");
+    eq(cc.turn(0)[2], "Где находится аптека?", "C44 перевод — облака");
+    eq(cc.byAt(5000), Chats.BY_CLOUD, "C44 и пометка — облака");
+    ok(cc.fixByAt(6000, "Спасибо, что помогли", Chats.BY_LLM), "C44 уточнитель правит машинную реплику");
+    ok(cc.fixByAt(6000, "Большое спасибо за помощь", Chats.BY_CLOUD), "C44 облако правит поверх уточнителя");
+    eq(cc.byAt(6000), Chats.BY_CLOUD, "C44 пометка сменилась на облако");
+    eq(cc.byAt(1), "", "C44 нет такой реплики — пусто");
+
+    // проход по прошлому разговору: пока уточнитель считал копию, облако поправило реплику — правка облака остаётся
+    Chats cs = new Chats(tmp());
+    cs.add("pt2ru", "Bom dia", "Доброе утро", null, 7000);
+    cs.add("pt2ru", "Tudo bem com você?", "Как у тебя дела?", null, 8000);
+    JSONObject copy = cs.load(cs.current);
+    ok(cs.fixByAt(7000, "Добрый день", Chats.BY_CLOUD), "C45 облако поправило реплику, пока уточнитель считал");
+    copy.getJSONArray("turns").getJSONObject(0).put("fixed", "Утро доброе").put("by", Chats.BY_LLM);
+    copy.getJSONArray("turns").getJSONObject(1).put("fixed", "Как ты?").put("by", Chats.BY_LLM);
+    ok(cs.saveRefined(cs.current, copy, true), "C45 улучшение записано");
+    eq(cs.turn(0)[2], "Добрый день", "C45 правка облака осталась, хотя в копии уточнителя своя");
+    eq(cs.byAt(7000), Chats.BY_CLOUD, "C45 пометка — облака");
+    eq(cs.turn(1)[2], "Как ты?", "C45 непоправленная реплика получила правку уточнителя");
+    eq(cs.byAt(8000), Chats.BY_LLM, "C45 с пометкой уточнителя");
+
+    // разовая чистка раздутых правок прежних версий: снимаются правки уточнителя, вобравшие фон, во всех разговорах
+    Chats cw = new Chats(tmp());
+    cw.add("pt2ru", "Sim.", "Да.", null, 9000);
+    cw.add("ru2pt", "Где ближайшая аптека?", "Onde fica a farmácia mais próxima?", null, 9100);
+    cw.add("pt2ru", "Obrigada.", "Спасибо.", null, 9200);
+    cw.add("pt2ru", "Pode repetir?", "Можете повторить?", null, 9300);
+    cw.add("pt2ru", "Tá bom.", "Хорошо.", null, 9400);
+    ok(cw.fixByAt(9000, "Да. Где ближайшая аптека? Можете повторить? Спасибо за помощь, всё понятно.", Chats.BY_LLM), "C46 раздутая правка уточнителя — как до 0.35.1");
+    ok(cw.fixByAt(9200, "Спасибо большое.", Chats.BY_LLM), "C46 обычная правка уточнителя");
+    ok(cw.fixByAt(9300, "Можете повторить? Где ближайшая аптека? Спасибо, понятно, всё ясно теперь.", Chats.BY_CLOUD), "C46 длинная правка облака");
+    cw.turns.getJSONObject(4).put("fixed", "Хорошо. Где ближайшая аптека? Можете повторить? Спасибо, понятно."); cw.save();   // без пометки источника — так писал прошлый проход
+    long firstChat = cw.current;
+    cw.newChat("");
+    cw.add("pt2ru", "Não.", "Нет.", null, 9500);
+    ok(cw.fixByAt(9500, "Нет. Спасибо большое, мне не нужна аптека, я сам найду дорогу домой.", Chats.BY_LLM), "C46 раздутая правка и в другом разговоре");
+    eq(cw.dropSwollen(), 3, "C46 сняты три раздутые правки уточнителя в двух разговорах");
+    eq(cw.turn(0)[2], "Нет.", "C46 в разговоре на экране — снова перевод");
+    eq(cw.byAt(9500), "", "C46 и без пометки правки");
+    JSONArray ft = cw.load(firstChat).getJSONArray("turns");
+    ok(!ft.getJSONObject(0).has("fixed") && !ft.getJSONObject(4).has("fixed"), "C46 в прежнем разговоре раздутые правки сняты (и без пометки источника)");
+    eq(ft.getJSONObject(2).optString("fixed"), "Спасибо большое.", "C46 обычная правка уточнителя осталась");
+    eq(ft.getJSONObject(3).optString("by"), Chats.BY_CLOUD, "C46 правка облака осталась, хоть и длинная");
+    eq(cw.dropSwollen(), 0, "C46 повторная чистка — ничего");
+
+    // то же в выученном: быстрая фраза с раздутым переводом от уточнителя убирается и выучится заново
+    File md = tmp();
+    Phrasebook pb = new Phrasebook(md, false);
+    for (int i = 0; i < 3; i++) pb.record("pt2ru", "Pode repetir?", "Можете повторить?");
+    pb.record("pt2ru", "Sim, claro.", "Да, конечно.");
+    pb.record("pt2ru", "Muito obrigada.", "Большое спасибо.");
+    String puffed = "Можете повторить? Где ближайшая аптека? Спасибо, понятно, всё ясно.";
+    eq(pb.fix("pt2ru", "Pode repetir?", puffed, Chats.BY_LLM), 1, "C47 раздутая правка легла в выученное — как до 0.35.1");
+    eq(pb.lookup("pt2ru", "Pode repetir?").dst, puffed, "C47 и быстрая фраза отдаёт её без перевода");
+    eq(pb.fix("pt2ru", "Sim, claro.", "Да, конечно, разумеется.", Chats.BY_LLM), 1, "C47 обычная правка уточнителя");
+    eq(pb.fix("pt2ru", "Muito obrigada.", "Огромное спасибо вам за помощь, мне это очень помогло сегодня.", Chats.BY_CLOUD), 1, "C47 длинная правка облака");
+    int learned0 = pb.learnedCount, fast0 = pb.fastCount;
+    eq(pb.dropSwollen(), 1, "C47 убрана одна запись — раздутая правка уточнителя");
+    eq(pb.learnedCount, learned0 - 1, "C47 выученных на одну меньше");
+    eq(pb.fastCount, fast0 - 1, "C47 и быстрых: убранная была быстрой");
+    ok(pb.lookup("pt2ru", "Pode repetir?") == null, "C47 раздутый перевод больше не отдаётся — фраза пойдёт в перевод");
+    eq(pb.dropSwollen(), 0, "C47 повторная чистка — ничего");
+    pb.io.submit(() -> {}).get();                    // запись на диск идёт в фоне
+    eq(new Phrasebook(md, false).learnedCount, learned0 - 1, "C47 убранное не вернётся после перезапуска");
+
     System.out.println(fails == 0 ? "Chats: " + checks + " проверок, все прошли" : "Chats: провалов " + fails + " из " + checks);
     return fails;
   }

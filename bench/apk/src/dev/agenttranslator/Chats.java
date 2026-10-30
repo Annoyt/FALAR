@@ -478,9 +478,20 @@ public class Chats {
     }
     return false;
   }
+  /** Кто правил реплику с такой меткой: BY_USER, BY_CLOUD, BY_LLM; пусто — не правлена или такой нет. */
+  public synchronized String byAt(long at) {
+    for (int k = 0; k < turns.length(); k++) {
+      JSONObject x = turns.optJSONObject(k);
+      if (x != null && x.optLong("at", -1) == at) return x.optString("by", "");
+    }
+    return "";
+  }
   boolean fix(JSONObject x, String fixed, String by) {
     if (x == null || fixed == null || fixed.trim().isEmpty()) return false;
     if (BY_USER.equals(x.optString("by", "")) && !BY_USER.equals(by)) return false;
+    // Правку облака уточнитель не перезаписывает: облако разбирало весь разговор сильной моделью, и
+    // локальный ответ поверх него — шаг назад, а пометка ☁ осталась бы на чужом тексте.
+    if (BY_CLOUD.equals(x.optString("by", "")) && BY_LLM.equals(by)) return false;
     String cur = x.optString("fixed", x.optString("dst", ""));
     if (Phrasebook.norm(fixed).equals(Phrasebook.norm(cur))) return false;   // «правка» без изменений — не правка и не галочка
     try { x.put("fixed", fixed.trim()).put("by", by == null ? "" : by); } catch (JSONException e) { return false; }
@@ -706,7 +717,9 @@ public class Chats {
           JSONObject x = now.optJSONObject(k);
           if (x == null || BY_USER.equals(x.optString("by", ""))) continue;
           String[] f = fixed.get(x.optLong("at", Long.MIN_VALUE));
-          if (f != null) x.put("fixed", f[0]).put("by", f[1]);   // источник сохраняем: правка облака не становится «от уточнителя»
+          // Облако могло поправить реплику, пока уточнитель считал свою копию: его правка остаётся (как в fix).
+          if (f == null || BY_CLOUD.equals(x.optString("by", "")) && BY_LLM.equals(f[1])) continue;
+          x.put("fixed", f[0]).put("by", f[1]);   // источник сохраняем: правка облака не становится «от уточнителя»
         }
       }
       // Название берём из своей копии, только если на диске его до сих пор нет и его не задавал
@@ -722,6 +735,46 @@ public class Chats {
       if (id == current) { JSONArray t = cur.optJSONArray("turns"); if (t != null) turns = t; name = cur.optString("name", ""); }
       return true;
     } catch (Exception ignore) { return false; }
+  }
+
+  /** Тексты разговора рядом с репликой k — исходник, перевод и правка прочих реплик и память: по ним
+   *  Brief.swallowed узнаёт в ответе уточнителя кусок чужой реплики (проход по прошлому разговору, чистка). */
+  static List<String> seen(JSONArray turns, int k, String memo) {
+    List<String> r = new ArrayList<>();
+    if (memo != null && !memo.isEmpty()) r.add(memo);
+    for (int i = 0; i < turns.length(); i++) {
+      JSONObject x = turns.optJSONObject(i);
+      if (x != null && i != k) { r.add(x.optString("src", "")); r.add(x.optString("dst", "")); r.add(x.optString("fixed", "")); }
+    }
+    return r;
+  }
+
+  /** Раздутые правки уточнителя прежних версий, до Brief.swallowed: ответ вобрал фон разговора и лёг в
+   *  реплику вместо перевода. Во всех разговорах на диске такая правка снимается — остаётся перевод;
+   *  правки облака и человека не трогаются. Пустой источник — правка уточнителя: до пометок их так
+   *  писал проход по прошлому разговору. Возвращает, сколько правок снято (видимый счёт — у службы). */
+  public synchronized int dropSwollen() {
+    File[] fs = dir.listFiles((d, n) -> n.endsWith(".json"));
+    int n = 0;
+    if (fs != null) for (File f : fs) {
+      try {
+        JSONObject o = new JSONObject(read(f));
+        JSONArray t = o.optJSONArray("turns");
+        int was = n;
+        for (int k = 0; t != null && k < t.length(); k++) {
+          JSONObject x = t.optJSONObject(k);
+          if (x == null || x.optString("fixed", "").isEmpty()) continue;
+          String by = x.optString("by", "");
+          if (!by.isEmpty() && !BY_LLM.equals(by)) continue;
+          if (Brief.swallowed(x.optString("fixed"), x.optString("src", ""), x.optString("dst", ""), seen(t, k, o.optString("memo", ""))) == null) continue;
+          x.remove("fixed"); x.remove("by"); n++;
+        }
+        if (n == was) continue;
+        write(f, o.toString());
+        if (f.getName().equals(file(current).getName())) turns = t;   // разговор на экране — тот же, что на диске
+      } catch (Exception ignore) {}
+    }
+    return n;
   }
 
   static String read(File f) throws IOException {

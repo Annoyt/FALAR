@@ -225,6 +225,8 @@ public class TranslatorService extends Service {
   /** Знаков на токен у модели уточнителя — замер при её запуске (Brief). */
   volatile double llmCpt = Brief.DEFAULT_CHARS_PER_TOKEN;
   public volatile Llm llm; public volatile boolean contextMode = false; final ExecutorService llmWorker = Executors.newSingleThreadExecutor(); volatile boolean refinePending = false, refineRunning = false;
+  /** Сколько раздутых правок уточнителя убрала разовая чистка при этом запуске — для строки «Готово». */
+  volatile int swollenGone = 0;
   /** Интервалы разбора контекста, в репликах: 0 — только по кнопке. Локальный — уточнитель 🧠,
    *  облачный — пересмотр всего разговора. Счётчики идут с последнего разбора и сбрасываются
    *  ручным нажатием; cloudBackoff удваивает облачный интервал после отказа 429 или обрыва —
@@ -411,6 +413,16 @@ public class TranslatorService extends Service {
       // По умолчанию «точнее»: сырой перевод понятен редко, и от облака ждут прежде всего качества.
       cloud.preferQuality = getSharedPreferences("at", MODE_PRIVATE).getBoolean("cloud_quality", true);
       chats = new Chats(getExternalFilesDir(null)); learn = new Learn(chats, models, getExternalFilesDir(null));
+      // Раздутые правки уточнителя прежних версий (ответ вобрал фон, Brief.swallowed) — один раз, до рабочей
+      // истории: из разговоров назад к переводу, из выученного прочь. Новые туда уже не попадают. Выброс
+      // хранимого — только со счётом (правило версионирования): в журнале и в строке «Готово».
+      android.content.SharedPreferences sw = getSharedPreferences("at", MODE_PRIVATE);
+      if (!sw.getBoolean("swollen_cleaned", false)) {
+        int inChats = chats.dropSwollen(), inLearned = pb.dropSwollen();
+        swollenGone = inChats + inLearned;
+        log("🧹 раздутые правки уточнителя прежних версий: в разговорах снято " + inChats + ", из выученного убрано " + inLearned);
+        sw.edit().putBoolean("swollen_cleaned", true).apply();
+      }
       // Рабочая история — из текущего разговора. Раньше после запуска она была пустой, и уточнитель
       // видел только реплики, сказанные после перезапуска, — а процесс теперь завершается через
       // минуту в свёрнутом виде, и каждое возвращение было бы разговором с чистого листа.
@@ -468,7 +480,8 @@ public class TranslatorService extends Service {
     } catch (Throwable t) { Log.e(TAG, "tts", t); log("TTS: " + t); }
     finally { ttsLoading = false; }
     log("🧩 модули: " + modulesLine());
-    status(L.f("Готово. ASR %d · MT %d · TTS %d мс · %s", eng.loadAsrMs, eng.loadMtMs, eng.loadTtsMs, pb.stats()));
+    status(L.f("Готово. ASR %d · MT %d · TTS %d мс · %s", eng.loadAsrMs, eng.loadMtMs, eng.loadTtsMs, pb.stats())
+        + (swollenGone > 0 ? L.f(" · убрано раздутых правок уточнителя: %d", swollenGone) : ""));
     // Сколько шёл каждый этап — для хода загрузки в следующий раз: распознавание, перевод, озвучка, остальное.
     getSharedPreferences("at", MODE_PRIVATE).edit().putString("load_ms", eng.loadAsrMs + "," + eng.loadMtMs + "," + eng.loadTtsMs + "," + restMs).apply();
     busy("load", null, 0, 0);
@@ -2003,14 +2016,18 @@ public class TranslatorService extends Service {
       busy("refine", L.k("улучшаю прошлый разговор"), k, t.length());
       org.json.JSONObject x = t.optJSONObject(k);
       if (x == null) continue;
-      String src = x.optString("src", ""), was = x.optString("dst", ""), dirn = x.optString("dir", "pt2ru");
+      String src = x.optString("src", ""), was = x.optString("dst", ""), dirn = x.optString("dir", "pt2ru"), by = x.optString("by", "");
       if (src.isEmpty()) continue;
+      // Правленное облаком и человеком не разбираем: перезаписать его уточнителю нельзя (Chats.fix,
+      // saveRefined), а раньше он переводил такие реплики заново и затирал правку облака своей.
+      if (Chats.BY_CLOUD.equals(by) || Chats.BY_USER.equals(by)) continue;
       try {
         String out = llm.chat(null, hyPrompt(ctx, src, dirn.substring(3), terms(dirn, src)), 200).trim();
-        if (out.isEmpty() || out.equals(was)) continue;
-        String cur = x.optString("fixed", ""), why = Brief.swallowed(out, src, cur.isEmpty() ? was : cur, seen(t, k, mb));
+        String cur = x.optString("fixed", "");
+        if (out.isEmpty() || out.equals(was) || out.equals(cur)) continue;
+        String why = Brief.swallowed(out, src, cur.isEmpty() ? was : cur, Chats.seen(t, k, mb));
         if (why != null) { rejected++; log("🔁 разговор " + id + ", реплика " + (k + 1) + ": ответ отброшен — " + why + ": " + out); continue; }
-        x.put("fixed", out); changed++;
+        x.put("fixed", out).put("by", Chats.BY_LLM); changed++;
       } catch (Throwable e) { log("🧠 улучшение оборвалось на реплике " + k + ": " + e); break; }
     }
     busy("refine", null, 0, 0);
@@ -2103,9 +2120,9 @@ public class TranslatorService extends Service {
       for (Turn t : h) if (t.at > lastLocalAt) todo.add(t);
       if (lastLocalAt == 0 && todo.size() > 2) todo = new ArrayList<>(todo.subList(todo.size() - 2, todo.size()));   // первый проход: как раньше, две последние
       if (todo.size() > 5) todo = new ArrayList<>(todo.subList(todo.size() - 5, todo.size()));
-      // Правленное человеком не разбираем вовсе: менять его всё равно нельзя, а разбор — это
-      // 10–20 секунд процессора и поднятый уточнитель.
-      if (chats != null) todo.removeIf(t -> chats.humanAt(t.at));
+      // Правленное человеком и облаком не разбираем вовсе: менять его уточнителю нельзя (Chats.fix), а
+      // разбор — это 10–20 секунд процессора и поднятый уточнитель.
+      if (chats != null) todo.removeIf(t -> { String b = chats.byAt(t.at); return Chats.BY_USER.equals(b) || Chats.BY_CLOUD.equals(b); });
       if (todo.isEmpty()) continue;
       boolean hy = llm.model.toLowerCase().contains("hy-mt");
       String topic = topicLine(), memo = memoBlock(topic);
@@ -2193,19 +2210,8 @@ public class TranslatorService extends Service {
     for (Turn t : h) if (t != tn) { r.add(t.asr); r.add(t.mt); if (t.refined != null) r.add(t.refined); }
     return r;
   }
-  /** То же для разговора с диска (refineSession): у прочих реплик — исходник, перевод и правка. */
-  static List<String> seen(org.json.JSONArray turns, int k, String memo) {
-    List<String> r = new ArrayList<>();
-    if (memo != null && !memo.isEmpty()) r.add(memo);
-    for (int i = 0; i < turns.length(); i++) {
-      org.json.JSONObject x = turns.optJSONObject(i);
-      if (x != null && i != k) { r.add(x.optString("src", "")); r.add(x.optString("dst", "")); r.add(x.optString("fixed", "")); }
-    }
-    return r;
-  }
-
   /** Правка в реплику (по метке), в рабочую историю и в ярус выученного. false — перевод тот же,
-   *  реплика удалена или поправлена человеком. */
+   *  реплика удалена или поправлена человеком (или облаком — для правки уточнителя). */
   boolean applyFix(final Turn tn, final String out, String by) {
     if (out == null || out.isEmpty()) return false;
     String cur = tn.refined != null ? tn.refined : tn.mt;

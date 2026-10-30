@@ -155,6 +155,25 @@ public class Phrasebook {
     save(new File(dir, "learned.json"), learned);
     return 1;
   }
+  /** Раздутые правки уточнителя прежних версий в выученном: до Brief.swallowed fix клал сюда ответ,
+   *  вобравший фон разговора, — и быстрая фраза отдавала его без перевода при каждом повторе. Такие
+   *  записи выбрасываем: фраза выучится заново через перевод. Только правки уточнителя; чужих реплик у
+   *  записи нет, поэтому — правило длины. Возвращает, сколько записей убрано. */
+  public synchronized int dropSwollen() {
+    int n = 0;
+    for (Map<String, JSONObject> m : learned.values())
+      for (Iterator<JSONObject> it = m.values().iterator(); it.hasNext();) {
+        JSONObject o = it.next();
+        if (!Chats.BY_LLM.equals(o.optString("by", ""))) continue;
+        if (Brief.swallowed(o.optString("dst", ""), o.optString("src", ""), null, null) == null) continue;
+        it.remove(); n++;
+      }
+    if (n == 0) return 0;
+    learnedCount = count(learned); fastCount = 0;
+    for (Map<String, JSONObject> m : learned.values()) for (JSONObject o : m.values()) if (o.optBoolean("fast")) fastCount++;
+    save(new File(dir, "learned.json"), learned);
+    return n;
+  }
   // ---- кэш синтезированного звука (память + wav на диске)
   String akey(String direction, String dst) { return direction + "|" + norm(dst); }
   public float[] audio(String direction, String dst) {
