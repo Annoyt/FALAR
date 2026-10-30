@@ -53,14 +53,12 @@ final class WordConf {
    *  нет (текст после распознавания правят — числа, свои слова), пропускается. */
   static int[] spans(String text, List<Word> words, double thr) {
     if (text == null || words == null || words.isEmpty()) return new int[0];
-    String low = text.toLowerCase(Locale.ROOT);
     List<Integer> out = new ArrayList<>(); int from = 0;
     for (Word w : words) {
-      String q = w.text.toLowerCase(Locale.ROOT);
-      int at = find(low, q, from);
+      int at = find(text, w.text, from);
       if (at < 0) continue;
-      if (w.conf < thr) { out.add(at); out.add(at + q.length()); }
-      from = at + q.length();
+      if (w.conf < thr) { out.add(at); out.add(at + w.text.length()); }
+      from = at + w.text.length();
     }
     int[] a = new int[out.size()]; for (int k = 0; k < a.length; k++) a[k] = out.get(k);
     return a;
@@ -119,13 +117,16 @@ final class WordConf {
     return false;
   }
 
-  /** Вхождение q в low не раньше from, по границам слов (до и после — не буква и не цифра). */
-  static int find(String low, String q, int from) {
+  /** Вхождение q в text не раньше from, без учёта регистра и по границам слов (до и после — не буква и не цифра).
+   *  Сравнение — по знакам на месте: toLowerCase всего текста меняет длину у редких букв («İ» — два знака), и
+   *  отрезки съехали бы. */
+  static int find(String text, String q, int from) {
     if (q.isEmpty()) return -1;
-    for (int at = low.indexOf(q, from); at >= 0; at = low.indexOf(q, at + 1)) {
-      boolean left = at == 0 || !Character.isLetterOrDigit(low.charAt(at - 1));
+    for (int at = Math.max(0, from); at + q.length() <= text.length(); at++) {
+      if (!text.regionMatches(true, at, q, 0, q.length())) continue;
+      boolean left = at == 0 || !Character.isLetterOrDigit(text.charAt(at - 1));
       int e = at + q.length();
-      boolean right = e >= low.length() || !Character.isLetterOrDigit(low.charAt(e));
+      boolean right = e >= text.length() || !Character.isLetterOrDigit(text.charAt(e));
       if (left && right) return at;
     }
     return -1;

@@ -41,6 +41,8 @@ public class WordConfTest {
     eq(WordConf.spans("Bom dia", new ArrayList<>(), WordConf.DOUBT).length, 0, "S6 нет слов");
     List<WordConf.Word> ok2 = Arrays.asList(new WordConf.Word("Bom", 0.69), new WordConf.Word("dia", 0.7));
     eq(Arrays.toString(WordConf.spans("Bom dia", ok2, WordConf.DOUBT)), "[0, 3]", "S7 порог: 0,69 сомнительно, 0,7 — уже нет");
+    List<WordConf.Word> tr = Arrays.asList(new WordConf.Word("i̇stanbul", 0.9), new WordConf.Word("dia", 0.3));
+    eq(Arrays.toString(WordConf.spans("İstanbul dia", tr, WordConf.DOUBT)), "[9, 12]", "S8 буква, у которой строчная длиннее («İ»), не сдвигает отрезки");
 
     // хранение в разговоре
     eq(WordConf.pack(new int[]{4, 7, 12, 15}), "4-7,12-15", "P1 отрезки — в строку");
