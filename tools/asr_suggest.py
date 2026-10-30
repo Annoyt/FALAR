@@ -147,8 +147,9 @@ class Dictionary:
 
 
 # ---- распознаватель ------------------------------------------------------------------------------------------
-def asr_alternatives(pk, enc, out, span, k=3, branch=4):
-    """Ветвление в самом неуверенном токене слова: другие токены и жадное продолжение до конца слова."""
+def asr_alternatives(pk, enc, out, span, branch=4):
+    """Ветвление в самом неуверенном токене слова: до branch других токенов и жадное продолжение до конца слова.
+    Возвращает [(слово, log p токена ветвления)] в порядке распознавателя."""
     ks = span[2]
     probs = [math.exp(out[i][2]) for i in ks]
     alnum = [i for i in ks if any(ch.isalnum() for ch in pk.tokens[out[i][1]])] or ks
@@ -156,8 +157,8 @@ def asr_alternatives(pk, enc, out, span, k=3, branch=4):
     lsm = out[worst][3]
     prefix = ''.join(pk.tokens[out[i][1]] for i in ks if i < worst)
     order = np.argsort(-lsm)
-    alts = []
-    for y in order[: branch + 2]:
+    alts, seen = [], set()
+    for y in order[: branch * 3 + 2]:
         y = int(y)
         if y == out[worst][1] or y == pk.blank: continue
         tok = pk.tokens[y]
@@ -165,8 +166,9 @@ def asr_alternatives(pk, enc, out, span, k=3, branch=4):
         cont = pk.greedy(enc, start=out[worst][4], force=y, stop_at_word=True)
         word = (prefix + ''.join(pk.tokens[c[1]] for c in cont)).replace('▁', '')
         nw = norm1(word)
-        if nw and nw not in alts: alts.append(nw)
-        if len(alts) >= k: break
+        if nw and nw not in seen and nw != norm1(''.join(pk.tokens[out[i][1]] for i in ks).replace('▁', '')):
+            alts.append((nw, float(lsm[y]))); seen.add(nw)
+        if len(alts) >= branch: break
     return alts
 
 
@@ -189,12 +191,13 @@ def main():
     ap.add_argument('--out', default=os.path.join(R, 'results', 'asr_conf'))
     ap.add_argument('--lm', help='кэш ответов языковой модели (tools/asr_suggest_lm.py)')
     ap.add_argument('--dump', help='куда выписать сомнительные слова с контекстом (для языковой модели)')
+    ap.add_argument('--branch', type=int, default=4, help='сколько других токенов пробовать (шаг 12: 8)')
     a = ap.parse_args()
     pk = None
     items = []
     for name in a.recs:
         lang = name.split('-')[-1]
-        cpath = os.path.join(a.out, name + '.suggest.json')
+        cpath = os.path.join(a.out, name + ('.suggest.json' if a.branch == 4 else f'.suggest{a.branch}.json'))
         if os.path.exists(cpath):
             got = json.load(open(cpath, encoding='utf-8'))
         else:
@@ -225,7 +228,8 @@ def main():
                     j = pair[i]
                     rec = dict(phrase=f'{name}/{pn}', lang=lang, hyp=hyp[i], conf=c, ref=ref[j] if j is not None else None,
                                sent=' '.join(hyp), idx=i, ok=j is not None and hyp[i] == ref[j],
-                               asr=asr_alternatives(pk, enc, out, [w, c, ks]))
+                               cands=asr_alternatives(pk, enc, out, [w, c, ks], branch=a.branch))
+                    rec['asr'] = [v for v, _ in rec['cands']][:3]
                     got.append(rec)
             json.dump(got, open(cpath + '.tmp', 'w', encoding='utf-8'), ensure_ascii=False); os.replace(cpath + '.tmp', cpath)
         print(f'{name}: сомнительных слов {len(got)}, неверных заменой {sum(1 for g in got if not g["ok"] and g["ref"])}', flush=True)
