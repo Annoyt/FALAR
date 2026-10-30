@@ -92,7 +92,8 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Slicer.java $A/test/SlicerTest.java \
   $A/src/dev/agenttranslator/Numbers.java $A/test/NumbersTest.java \
   $A/src/dev/agenttranslator/VoiceMsg.java $A/test/VoiceMsgTest.java \
-  $A/src/dev/agenttranslator/MicPair.java $A/test/MicPairTest.java
+  $A/src/dev/agenttranslator/MicPair.java $A/test/MicPairTest.java \
+  $A/src/dev/agenttranslator/WordConf.java $A/test/WordConfTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
@@ -130,4 +131,5 @@ java -cp "$OUT:$J" dev.agenttranslator.SlicerTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.NumbersTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.VoiceMsgTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.MicPairTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.WordConfTest || fail=1
 exit $fail

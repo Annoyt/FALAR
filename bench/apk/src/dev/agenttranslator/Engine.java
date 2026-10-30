@@ -249,16 +249,28 @@ public class Engine {
   }
   /** Распознанное и время токенов: у Parakeet TDT — начало и длительность каждого (шаг 80 мс). По ним реплика
    *  режется на предложения (Clips.cuts; замер results/2026-10-03-asr-timestamps.md). Без времени (потоковая
-   *  русская модель, шумодав перед распознаванием) — tokens == null. */
+   *  русская модель, шумодав перед распознаванием) — tokens == null. probs — вероятности токенов (не логарифмы):
+   *  по ним сомнительные слова (WordConf); их отдаёт только пересобранная библиотека JNI (tools/sherpa-jni),
+   *  с прежней — null. */
   public static final class Asr {
-    public final String text; public final String[] tokens; public final float[] times, durs;
-    Asr(String text, String[] tokens, float[] times, float[] durs) { this.text = text; this.tokens = tokens; this.times = times; this.durs = durs; }
+    public final String text; public final String[] tokens; public final float[] times, durs, probs;
+    Asr(String text, String[] tokens, float[] times, float[] durs, float[] probs) {
+      this.text = text; this.tokens = tokens; this.times = times; this.durs = durs; this.probs = probs;
+    }
+  }
+  /** Вероятности токенов из логарифмов; null — их нет или не столько, сколько токенов. */
+  static float[] probs(float[] logProbs, String[] tokens) {
+    if (logProbs == null || tokens == null || logProbs.length == 0 || logProbs.length != tokens.length) return null;
+    float[] p = new float[logProbs.length];
+    for (int k = 0; k < p.length; k++) p[k] = (float) Math.exp(logProbs[k]);
+    return p;
   }
   public Asr asrFull(String lang, float[] s, int sr) {
     OfflineRecognizer off = asrMulti != null ? asrMulti : (lang.equals("pt") ? asrPt : null);
-    if (off == null || denoiseOn && denoiser != null) return new Asr(asr(lang, s, sr), null, null, null);
+    if (off == null || denoiseOn && denoiser != null) return new Asr(asr(lang, s, sr), null, null, null, null);
     OfflineStream st = off.createStream();              // поток освобождается и при исключении (пустой вход его бросает)
-    try { st.acceptWaveform(s, sr); off.decode(st); OfflineRecognizerResult r = off.getResult(st); return new Asr(r.getText().trim(), r.getTokens(), r.getTimestamps(), r.getDurations()); }
+    try { st.acceptWaveform(s, sr); off.decode(st); OfflineRecognizerResult r = off.getResult(st);
+      return new Asr(r.getText().trim(), r.getTokens(), r.getTimestamps(), r.getDurations(), probs(r.getYsLogProbs(), r.getTokens())); }
     finally { st.release(); }
   }
   public String asr(String lang, float[] s, int sr) {

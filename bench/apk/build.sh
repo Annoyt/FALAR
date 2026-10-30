@@ -60,6 +60,12 @@ if [ -n "$SLIM" ]; then
 else
   cp $A/jni/arm64-v8a/*.so $OUT/stage/lib/arm64-v8a/
 fi
+# Сомнительные слова (WordConf) помечаются по уверенности распознавателя, а её отдаёт только пересобранный мост JNI
+# (tools/sherpa-jni): в нём конструктор результата с восемью аргументами. С прежним приложение работает, но слов
+# не помечает — об этом предупреждение.
+grep -qaF '(Ljava/lang/String;[Ljava/lang/String;[FLjava/lang/String;Ljava/lang/String;Ljava/lang/String;[F[F)V' \
+  $OUT/stage/lib/arm64-v8a/libsherpa-onnx-jni.so \
+  || echo "⚠ libsherpa-onnx-jni.so без уверенности распознавателя (tools/sherpa-jni/README.md): сомнительные слова не помечаются"
 # Версию берём только из манифеста: здесь оставались --version-code 10 --version-name 1.0 от
 # старой нумерации, и сборка расходилась бы с тем, что записано в проекте.
 cp $OUT/base.apk $OUT/unaligned.apk; (cd $OUT/stage && zip -q -r ../unaligned.apk classes.dex lib)

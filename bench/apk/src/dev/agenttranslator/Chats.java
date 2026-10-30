@@ -44,6 +44,10 @@ import org.json.*;
  *  быть `cuts` — где реплика делится на предложения, мс от начала звука (Clips.cuts): по ним «Слова» играют
  *  живой голос одного предложения.
  *
+ *  **Сомнительные слова** (`doubt`, с 0.35) — где в исходнике распознаватель сам не уверен (WordConf): пары
+ *  «начало-конец» знаков через запятую, «5-9,17-23». Экран красит эти слова цветом. Правка исходника человеком
+ *  поле стирает: пометки распознавателя к новому тексту не относятся.
+ *
  *  **Стенд** (`stand: 1`, с 0.29) — реплика пришла со стендового прогона (подача записи, комнатный
  *  прогон в молчаливом режиме). Из разговора не удаляется, но «Слова» её не считают: на 02.10 треть
  *  реплик в разговорах владельца была корпусом прогонов, и частоты врали.
@@ -397,7 +401,8 @@ public class Chats {
                         x.optString("fixed", x.optString("dst", "")), String.valueOf(k),
                         x.optString("fixed", "").isEmpty() ? "" : "1", x.optString("by", ""),
                         String.valueOf(x.optLong("at", 0)), x.optString("who", ""),
-                        x.has("photo") ? PHOTO : x.has("voice") ? VOICE : "", x.optString("audio", "")};
+                        x.has("photo") ? PHOTO : x.has("voice") ? VOICE : "", x.optString("audio", ""),
+                        x.optString("doubt", "")};
   }
   /** Метка реплики со снимком в ряду all() (поле 8). */
   public static final String PHOTO = "📷";
@@ -444,6 +449,7 @@ public class Chats {
       // («Posso oferecer uvas e maçãs» → «Posso sugerir…», журнал 20.09). Снаружи это выглядело
       // как «два перевода подряд».
       x.put("src", src).put("dst", dst).put("at", at).put("by", BY_USER); x.remove("fixed");
+      x.remove("doubt");                    // пометки распознавателя к исправленному тексту не относятся
       save(); return at;
     } catch (JSONException e) { return 0; }
   }
