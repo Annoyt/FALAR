@@ -22,5 +22,5 @@ ANDROID_NDK=…/android-ndk-r27d bash build-falar.sh
 patchelf --replace-needed libonnxruntime.so libonnxruntime_sherpa.so build-android-arm64-v8a/install/lib/libsherpa-onnx-jni.so
 ```
 
-Итог 27.10: sha256 начинается на 6c428468827f8698, размер 4 801 288 байт. Прежний — e6ad967b9875ba7b, 4 795 441 байт.
+Итог 27.10: sha256 начинается на 6c428468827f8698, размер 4 860 929 байт. Прежний — e6ad967b9875ba7b, 4 795 441 байт.
 На телефоне ещё не проверен. До проверки общий `bench/apk/jni` не заменяется.

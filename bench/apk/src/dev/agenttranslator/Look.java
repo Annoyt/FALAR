@@ -22,6 +22,9 @@ final class Look {
   final int page, hair, segBg, okBg, okFg, waitBg, waitFg, noBg, noFg, goBg, goFg;
   /** Не вышло — «Скажите сами»: слово не распознано (пара к okFg). */
   final int badFg;
+  /** Сомнительное слово распознанного (WordConf) — цветом «ждёт», с подчёркиванием: распознаватель в нём не уверен,
+   *  но ошибка ли это, неизвестно (верно примерно каждое второе). */
+  final int doubtFg;
 
   Look(Context c) {
     night = (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
@@ -31,7 +34,7 @@ final class Look {
       btn = 0xFFF6F2F5; btnLine = 0xFFE0D7E0; offBg = 0xFFF7F4F7; offLine = 0xFFEEE8EE; offText = 0xFFB4AAB9;
       page = 0xFFF4F1F4; hair = 0xFFF0EAF0; segBg = 0xFFF1ECF1;
       okBg = 0xFFE2F6EE; okFg = 0xFF18775A; waitBg = 0xFFFBF3E4; waitFg = 0xFF8A6420; noBg = 0xFFEFEAF0; noFg = dim; goBg = tint; goFg = PLUM;
-      badFg = 0xFFB3261E;
+      badFg = 0xFFB3261E; doubtFg = waitFg;
     } else {
       // Слива на тёмном фоне почти не видна — текст состояния золотой, как ночная ссылка на странице Falar.
       bg = 0xFF15101A; fg = 0xFFF2ECF2; dim = 0xFFA79DB0; soft = 0xFF857B8F; card = 0xFF1E1725; line = 0xFF352B3D;
@@ -39,7 +42,7 @@ final class Look {
       btn = 0xFF221A29; btnLine = 0xFF3A2F43; offBg = 0xFF1A141F; offLine = 0xFF2A2230; offText = 0xFF5E5566;
       page = 0xFF100C14; hair = 0xFF261D2D; segBg = 0xFF241C2A;
       okBg = 0xFF16332A; okFg = MINT; waitBg = 0xFF2E2416; waitFg = GOLD; noBg = 0xFF241C2A; noFg = dim; goBg = tint; goFg = 0xFFE8A0BC;
-      badFg = 0xFFF2867A;
+      badFg = 0xFFF2867A; doubtFg = waitFg;
     }
   }
 

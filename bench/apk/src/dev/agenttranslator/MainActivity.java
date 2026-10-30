@@ -20,6 +20,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   TextView status, logView, smallRu, hint, keyState;
   /** Крупный текст словами: под каждым словом транскрипция для чтения вслух. */
   FlowLayout bigBox; String bigText = "—", bigDir = "pt2ru", hintBase = ""; boolean bigRefined = false, cribShown = false, cribManual = false;
+  /** Сомнительные слова крупного текста (WordConf) и текст, к которому они относятся: перерисовка того же текста
+   *  (подсказка, размер шрифта) их сохраняет, другой текст — нет. */
+  int[] bigDoubt = new int[0]; String bigDoubtFor = "";
   /** Настройки: строки и сегменты (Rows), переключатели. */
   Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segMtPrefer, segReadGuard, segMicSrc, segVoiceWhat; Switch tTranslitOther;
   ListView histList;
@@ -491,17 +494,24 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     bigBox.removeAllViews();
     if (bigScroll != null && newTurn) bigScroll.post(() -> bigScroll.scrollTo(0, 0));
     boolean crib = cribShown && pt.length() > 1 && pt.matches("(?s).*\\p{L}.*");
+    int[] dz = pt.equals(bigDoubtFor) ? bigDoubt : new int[0];
     cribVisible = crib; syncGuard();
     if (!crib) {
       TextView t = new TextView(this); t.setTextSize(szPt); t.setTypeface(null, Typeface.BOLD);
-      t.setTextColor(look.fg); t.setLineSpacing(0, 1.05f); t.setText(pt);
+      t.setTextColor(look.fg); t.setLineSpacing(0, 1.05f); t.setText(doubtful(pt, dz, 0));
       bigBox.addView(t); return;
     }
+    int cur = 0;                                  // где в тексте этот кусок — по нему сомнительные слова
     // Число остаётся цифрами, а под ним — как его сказать: «R$ 20,50» → «ви́нчи хеа́йс и синкуэ́нта сента́вус»
     // (Numbers; владелец 08.10: писать можно цифрами, проговаривать и давать транскрипцию буквами).
     for (String[] tk : Numbers.tokens(pt.trim())) {
       LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
       TextView t = new TextView(this); t.setTextSize(szPt); t.setTypeface(null, Typeface.BOLD); t.setTextColor(look.fg); t.setText(tk[0]);
+      int at = pt.indexOf(tk[0], cur);
+      if (at >= 0) {
+        if (WordConf.touches(dz, at, at + tk[0].length())) { t.setTextColor(look.doubtFg); t.setPaintFlags(t.getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG); }
+        cur = at + tk[0].length();
+      }
       StringBuilder say = new StringBuilder();
       for (String w : tk[1].split("\\s+")) { if (say.length() > 0) say.append(' '); say.append(Translit.say(w)); }
       TextView c = new TextView(this); c.setTextSize(Math.max(9, szPt * 0.45f)); c.setTextColor(look.soft); c.setText(say.toString());
@@ -509,6 +519,26 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
   }
   boolean cribDefault() { return bigDir.startsWith("ru") || prefs.getBoolean("translit_other", false); }
+
+  /** Сомнительные слова распознанного (WordConf) — цветом «ждёт» и подчёркиванием: распознаватель в них не уверен
+   *  (экран — цветом, журнал — словами). spans — пары [начало, конец) в тексте, сдвинутые на shift. */
+  CharSequence doubtful(String text, int[] spans, int shift) {
+    if (text == null || spans == null || spans.length < 2) return text;
+    android.text.SpannableStringBuilder b = new android.text.SpannableStringBuilder(text);
+    for (int k = 0; k + 1 < spans.length; k += 2) {
+      int a = spans[k] + shift, e = spans[k + 1] + shift;
+      if (a < 0 || e > text.length() || a >= e) continue;
+      b.setSpan(new android.text.style.ForegroundColorSpan(look.doubtFg), a, e, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      b.setSpan(new android.text.style.UnderlineSpan(), a, e, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+    return b;
+  }
+  /** Сомнительные слова исходника на экран: у реплики собеседника (pt) — в крупный текст, у своей (ru) — в строку
+   *  русского. big — что пойдёт в крупный текст (с подписью «📷 »/«🎙 »), shift — длина подписи. */
+  void setDoubt(boolean srcPt, String big, int[] spans, int shift) {
+    bigDoubt = srcPt ? WordConf.shift(spans, shift) : new int[0];
+    bigDoubtFor = srcPt ? big : "";
+  }
 
   void startReading() {
     holdingRead = true; buzz();
@@ -717,7 +747,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     String[] t = svc.chats.turn(svc.chats.size() - 1);
     if (t == null) { showBig("—", "pt2ru", false); smallRu.setText(""); setWho(null); return; }
     boolean srcPt = t[0].startsWith("pt"), photo = Chats.PHOTO.equals(t[8]), voice = Chats.VOICE.equals(t[8]);
-    showBig((photo ? "📷 " : voice ? "🎙 " : "") + (srcPt ? t[1] : t[2]), t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : t[1]);
+    String pre = photo ? "📷 " : voice ? "🎙 " : "", big = pre + (srcPt ? t[1] : t[2]);
+    int[] dz = WordConf.unpack(t[10]);
+    setDoubt(srcPt, big, dz, pre.length());
+    showBig(big, t[0], !t[4].isEmpty()); smallRu.setText(srcPt ? t[2] : doubtful(t[1], dz, 0));
     setWho(t[0]);
   }
 
@@ -756,10 +789,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         bg.setCornerRadii(me ? new float[]{r, r, s, s, r, r, r, r} : new float[]{s, s, r, r, r, r, r, r});
         bub.setBackground(bg);
         TextView pt = new TextView(MainActivity.this);
-        pt.setText((photo ? "📷 " : voice ? "🎙 " : "") + (srcPt ? t[1] : t[2])); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(look.fg);
+        String pre = photo ? "📷 " : voice ? "🎙 " : "";
+        int[] dz = WordConf.unpack(t[10]);       // сомнительные слова исходника — цветом (WordConf)
+        pt.setText(srcPt ? doubtful(pre + t[1], dz, pre.length()) : pre + t[2]); pt.setTextSize(Math.max(12, szRu)); pt.setTextColor(look.fg);
         pt.setMaxWidth(maxW); if (photo) pt.setMaxLines(3);
         TextView ru = new TextView(MainActivity.this);
-        ru.setText((srcPt ? t[2] : t[1]) + ("1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : ""));
+        String mark = "1".equals(t[4]) ? ("user".equals(t[5]) ? "  ✎" : "  ✓") : "";
+        ru.setText(srcPt ? t[2] + mark : doubtful(t[1] + mark, dz, 0));
         ru.setTextSize(Math.max(10, szRu - 3)); ru.setTextColor(look.dim); ru.setMaxWidth(maxW);
         bub.addView(pt); bub.addView(ru);
         LinearLayout row = new LinearLayout(MainActivity.this);
@@ -1283,8 +1319,10 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       boolean srcPt = last.optString("dir", "").startsWith("pt");
       String fixed = last.optString("fixed", "");
       String dst = fixed.isEmpty() ? last.optString("dst", "") : fixed;
+      int[] dz = WordConf.unpack(last.optString("doubt", ""));
+      setDoubt(srcPt, last.optString("src", ""), dz, 0);
       showBig(srcPt ? last.optString("src", "") : dst, last.optString("dir", "pt2ru"), !fixed.isEmpty());
-      smallRu.setText(srcPt ? dst : last.optString("src", ""));
+      smallRu.setText(srcPt ? dst : doubtful(last.optString("src", ""), dz, 0));
       setWho(last.optString("dir", "pt2ru"));
     }
     refreshHist(); refreshHint();
@@ -3492,8 +3530,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     boolean srcIsPt = dir.startsWith("pt");
     String pt = srcIsPt ? src : dst, ru = srcIsPt ? dst : src;
     refreshHist();                      // список строится из самого разговора, а не копится в строке
+    TranslatorService.Doubt ld = svc == null ? null : svc.lastDoubt;
+    int[] dz = ld == null ? new int[0] : ld.of(src);
+    setDoubt(srcIsPt, src, dz, 0);
     showBig(pt, dir, refined);
-    smallRu.setText(ru); setWho(dir);
+    smallRu.setText(srcIsPt ? ru : doubtful(ru, dz, 0)); setWho(dir);
     String wl = lastWhoLabel();
     setHint((wl.isEmpty() ? L.t(srcIsPt ? "собеседник" : "вы") : wl) + (refined ? L.t(" · уточнено") : ""));
     refreshBetter();
