@@ -146,14 +146,14 @@ def per_phrase(segs, texts, plays, gap, lang):
     return rows
 
 
-def boot(base, var, n=10000, seed=1):
-    """Парный бутстрэп разницы WER (вариант − mean), п.п.: оценка и 95 % интервал."""
+def boot(base, var, n=10000, seed=1, level=0.95):
+    """Парный бутстрэп разницы WER (вариант − mean), п.п.: оценка и интервал level (95 % по умолчанию)."""
     rng = np.random.default_rng(seed)
     eb = np.array([r[1] for r in base], float); ev = np.array([r[1] for r in var], float); nw = np.array([r[2] for r in base], float)
     d = 100 * (ev.sum() - eb.sum()) / nw.sum()
     idx = rng.integers(0, len(nw), (n, len(nw)))
     ds = 100 * (ev[idx].sum(1) - eb[idx].sum(1)) / nw[idx].sum(1)
-    return d, float(np.percentile(ds, 2.5)), float(np.percentile(ds, 97.5))
+    return d, float(np.percentile(ds, 50 * (1 - level))), float(np.percentile(ds, 50 * (1 + level)))
 
 
 def main():
