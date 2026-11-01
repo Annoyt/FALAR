@@ -11,6 +11,15 @@ tools/asr_confidence.py (кэш results/asr_conf/), распознавание �
 
     taskset -c 0 .venv/bin/python tools/asr_polar_eval.py near-pt … [--alpha 0.25,0.5]
     taskset -c 0 .venv/bin/python tools/asr_polar_eval.py --selftest near-pt
+
+Шаг 14 — DPDFNet с пределом ослабления (sherpa-onnx, attenuation_limit_db: выход = a·исходный + (1 − a)·очищенный,
+a = 10^(−дБ/20)), те же куски и счёт:
+
+    taskset -c 0 .venv/bin/python tools/asr_polar_eval.py near-pt … --dpdfnet models/dpdfnet/dpdfnet2.onnx --att 6,12
+    taskset -c 0 .venv/bin/python tools/asr_polar_eval.py --selftest near-pt --dpdfnet models/dpdfnet/dpdfnet2.onnx
+
+--stop-on-harm: досчёт прекращается, как только каждый вариант хоть на одной записи хуже на 1 п.п. и больше с
+интервалом выше нуля (второе условие шагов 2, 13, 14 уже не выполнить).
 """
 import argparse
 import json
@@ -82,6 +91,46 @@ class Polar:
         return out
 
 
+class Dpdf:
+    """DPDFNet sherpa-onnx (весь кусок сразу) с пределом ослабления; варианты — 'dpdf<дБ>'."""
+
+    def __init__(self, path, atts):
+        so = ac.vde.so
+        self.dn = {f'dpdf{a:g}': so.OfflineSpeechDenoiser(so.OfflineSpeechDenoiserConfig(
+            model=so.OfflineSpeechDenoiserModelConfig(
+                dpdfnet=so.OfflineSpeechDenoiserDpdfNetModelConfig(model=path, attenuation_limit_db=a), num_threads=1)))
+            for a in atts}
+
+    def run(self, x, arms):
+        out = {}
+        for k in arms:
+            r = self.dn[k].run(np.ascontiguousarray(x, np.float32), ac.SR)
+            assert r.sample_rate == ac.SR, r.sample_rate
+            y = np.zeros(len(x), np.float32)
+            v = np.array(r.samples, np.float32)[:len(x)]
+            y[:len(v)] = v
+            out[k] = y
+        return out
+
+
+def selftest_dpdf(name, path):
+    """До замера: при пределе 0,1 дБ (почти весь исходный звук) выход совпадает с входом — значит, исходный и очищенный
+    звук сложены без сдвига; длина выхода — как у входа."""
+    x, piece, plays, gap, lang = ac.load(name)
+    seg = json.load(open(os.path.join(R, 'results', 'asr_conf', name + '.json'), encoding='utf-8'))['segs'][0]
+    p = piece(seg[0], seg[1])
+    so = ac.vde.so
+    dn = so.OfflineSpeechDenoiser(so.OfflineSpeechDenoiserConfig(model=so.OfflineSpeechDenoiserModelConfig(
+        dpdfnet=so.OfflineSpeechDenoiserDpdfNetModelConfig(model=path, attenuation_limit_db=0.1), num_threads=1)))
+    y = np.array(dn.run(np.ascontiguousarray(p, np.float32), ac.SR).samples, np.float32)
+    m = min(len(y), len(p))
+    c = float(np.corrcoef(y[:m], p[:m])[0, 1])
+    print(f'самопроверка DPDFNet на {name}: длина {len(y)} при входе {len(p)}; предел 0,1 дБ — корреляция с входом {c:.4f}')
+    ok = abs(len(y) - len(p)) <= 256 and c > 0.99
+    print('самопроверка ' + ('прошла' if ok else 'НЕ прошла'))
+    return ok
+
+
 def selftest(name):
     """До замера: α = 0 — исходный звук; полная маска — как шумодав sherpa-onnx (OfflineSpeechDenoiser)."""
     x, piece, plays, gap, lang = ac.load(name)
@@ -109,31 +158,42 @@ def main():
     ap.add_argument('--alpha', default='0.25,0.5')
     ap.add_argument('--out', default=os.path.join(R, 'results', 'asr_conf'))
     ap.add_argument('--selftest', action='store_true')
+    ap.add_argument('--dpdfnet', help='шаг 14: модель DPDFNet вместо маски GTCRN')
+    ap.add_argument('--att', default='6,12', help='шаг 14: пределы ослабления, дБ')
+    ap.add_argument('--stop-on-harm', action='store_true')
     a = ap.parse_args()
     if a.selftest:
-        sys.exit(0 if selftest(a.recs[0]) else 1)
-    alphas = [float(v) for v in a.alpha.split(',')]
-    pol, rec = Polar(), ac.recognizer()
-    level = 1 - 0.05 / len(alphas)                       # поправка Бонферрони на число плеч
-    allg, allv, tdn = [], {al: [] for al in alphas}, 0.0
+        sys.exit(0 if (selftest_dpdf(a.recs[0], a.dpdfnet) if a.dpdfnet else selftest(a.recs[0])) else 1)
+    if a.dpdfnet:
+        arms, tag = [f'dpdf{float(v):g}' for v in a.att.split(',')], 'dpdf'
+        dn = Dpdf(a.dpdfnet, [float(v) for v in a.att.split(',')])
+        transform = dn.run
+    else:
+        alphas = [float(v) for v in a.alpha.split(',')]
+        arms, tag = [str(al) for al in alphas], 'polar'
+        pol = Polar()
+        transform = lambda x, ks: {str(k): v for k, v in pol.run(x, alphas).items() if k != 'full'}   # noqa: E731
+    rec = ac.recognizer()
+    level = 1 - 0.05 / len(arms)                         # поправка Бонферрони на число плеч
+    allg, allv, tdn, harmed = [], {k: [] for k in arms}, 0.0, set()
     for name in a.recs:
         cache = json.load(open(os.path.join(a.out, name + '.json'), encoding='utf-8'))
         x, piece, plays, gap, lang = ac.load(name)
         segs = [tuple(s) for s in cache['segs']]
-        path = os.path.join(a.out, f'{name}.polar.json')
+        path = os.path.join(a.out, f'{name}.{tag}.json')
         done = json.load(open(path, encoding='utf-8')) if os.path.exists(path) else {}
-        for al in alphas:
-            done.setdefault(str(al), [])
+        for k in arms:
+            done.setdefault(k, [])
         done.setdefault('sec_dn', 0.0)
         for k, s in enumerate(segs):
-            if all(len(done[str(al)]) > k for al in alphas):
+            if all(len(done[arm]) > k for arm in arms):
                 continue
             t0 = time.time()
-            outs = pol.run(piece(s[0], s[1]), alphas)
+            outs = transform(piece(s[0], s[1]), arms)
             done['sec_dn'] += time.time() - t0
-            for al in alphas:
-                if len(done[str(al)]) == k:
-                    done[str(al)].append(ac.recognize(rec, outs[al])[0])
+            for arm in arms:
+                if len(done[arm]) == k:
+                    done[arm].append(ac.recognize(rec, outs[arm])[0])
             if k % 20 == 19:   # можно прервать и продолжить
                 json.dump(done, open(path + '.tmp', 'w', encoding='utf-8'), ensure_ascii=False); os.replace(path + '.tmp', path)
         json.dump(done, open(path + '.tmp', 'w', encoding='utf-8'), ensure_ascii=False); os.replace(path + '.tmp', path)
@@ -142,17 +202,22 @@ def main():
         allg += g; tdn += done['sec_dn']
         e0, n = sum(r[1] for r in g), sum(r[2] for r in g)
         line = f'{name:20s} сырой {100 * e0 / n:5.1f} %'
-        for al in alphas:
-            v = de.per_phrase(segs, done[str(al)], plays, gap, lang)
-            allv[al] += v
+        for arm in arms:
+            v = de.per_phrase(segs, done[arm], plays, gap, lang)
+            allv[arm] += v
             d, lo, hi = de.boot(g, v, level=level)
-            line += f' · α {al:g}: {100 * sum(r[1] for r in v) / n:5.1f} % ({d:+.1f} [{lo:+.1f}; {hi:+.1f}])'
+            if d >= 1 and lo > 0:
+                harmed.add(arm)
+            line += f' · {arm}: {100 * sum(r[1] for r in v) / n:5.1f} % ({d:+.1f} [{lo:+.1f}; {hi:+.1f}])'
         print(line, flush=True)
+        if a.stop_on_harm and harmed == set(arms):
+            print(f'остановлено после {name}: каждый вариант уже хуже на 1 п.п. и больше хоть на одной записи', flush=True)
+            break
     n = sum(r[2] for r in allg)
     print(f'все вместе: сырой {100 * sum(r[1] for r in allg) / n:.2f} %', flush=True)
-    for al in alphas:
-        d, lo, hi = de.boot(allg, allv[al], level=level)
-        print(f'   α {al:g}: {100 * sum(r[1] for r in allv[al]) / n:.2f} % · {d:+.2f} п.п. [{lo:+.2f}; {hi:+.2f}] '
+    for arm in arms:
+        d, lo, hi = de.boot(allg, allv[arm], level=level)
+        print(f'   {arm}: {100 * sum(r[1] for r in allv[arm]) / n:.2f} % · {d:+.2f} п.п. [{lo:+.2f}; {hi:+.2f}] '
               f'(интервал {100 * level:.1f} %)', flush=True)
     print(f'время шумодава на ПК: {tdn:.0f} с на все куски', flush=True)
 
