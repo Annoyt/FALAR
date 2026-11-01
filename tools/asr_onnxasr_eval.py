@@ -7,6 +7,12 @@
     PYTHONPATH=~/tools/onnx-asr-pkg taskset -c 0 .venv/bin/python tools/asr_onnxasr_eval.py run base models/onnxasr-base-v3 near-pt …
     PYTHONPATH=~/tools/onnx-asr-pkg taskset -c 0 .venv/bin/python tools/asr_onnxasr_eval.py run tagarela models/onnxasr-tagarela near-pt …
     taskset -c 0 .venv/bin/python tools/asr_onnxasr_eval.py score near-pt …
+
+На видеокарте (владелец 01.11: «запускай только на гпу») — onnxruntime-gpu 1.31.1 (CUDA 13) из ~/tools/ort-gpu-pkg с
+библиотеками CUDA и cuDNN окружения ~/tools/venv-comet-gpu, ключ --gpu:
+    V=~/tools/venv-comet-gpu/lib/python3.12/site-packages/nvidia
+    LD_LIBRARY_PATH=$V/cu13/lib:$V/cudnn/lib PYTHONPATH=~/tools/ort-gpu-pkg:~/tools/onnx-asr-pkg \
+      ~/tools/venv-comet-gpu/bin/python tools/asr_onnxasr_eval.py run --gpu tagarela models/onnxasr-tagarela near-pt …
 """
 import argparse
 import json
@@ -21,12 +27,15 @@ OUT = os.path.join(R, 'results', 'asr_conf')
 SR = 16000
 
 
-def run(tag, model_dir, recs):
+def run(tag, model_dir, recs, gpu=False):
     import onnx_asr
     import onnxruntime as rt
     so = rt.SessionOptions()
     so.intra_op_num_threads = so.inter_op_num_threads = 1
-    model = onnx_asr.load_model('nemo-parakeet-tdt-0.6b-v3', model_dir, sess_options=so, providers=['CPUExecutionProvider'])
+    prov = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if gpu else ['CPUExecutionProvider']
+    if gpu and 'CUDAExecutionProvider' not in rt.get_available_providers():
+        sys.exit('нет CUDAExecutionProvider: onnxruntime-gpu и библиотеки CUDA — см. начало файла')
+    model = onnx_asr.load_model('nemo-parakeet-tdt-0.6b-v3', model_dir, sess_options=so, providers=prov)
     for name in recs:
         path = os.path.join(OUT, f'{name}.oa-{tag}.json')
         done = json.load(open(path, encoding='utf-8')) if os.path.exists(path) else {'texts': [], 'sec': 0.0}
@@ -82,9 +91,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['run', 'score'])
     ap.add_argument('args', nargs='+')
+    ap.add_argument('--gpu', action='store_true', help='run: на видеокарте (CUDAExecutionProvider)')
     a = ap.parse_args()
     if a.cmd == 'run':
-        run(a.args[0], a.args[1], a.args[2:])
+        run(a.args[0], a.args[1], a.args[2:], a.gpu)
     else:
         score(a.args)
 
