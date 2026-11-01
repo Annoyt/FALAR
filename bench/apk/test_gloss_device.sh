@@ -91,9 +91,12 @@ chat "$D/a.json" "$TA" "ТЕСТ глоссарий, старый" "skate elétr
 chat "$D/b.json" "$TB" "ТЕСТ глоссарий" "bicicleta" "велосипед"
 $ADB shell "am force-stop $PKG"; sleep 1
 $ADB push "$D/a.json" "$F/chats/$TA.json" >/dev/null 2>&1; $ADB push "$D/b.json" "$F/chats/$TB.json" >/dev/null 2>&1
+# adb push оставляет время файла с точностью до секунды: у двух разговоров оно совпадёт, и приложение (последний
+# по времени изменения) может открыть «старый». Текущий — заметно новее.
+sleep 2; $ADB shell "touch $F/chats/$TB.json"
 m=$(mark); launch --es listen off; wl "$m" 'восстановлено реплик|микрофон выключен' 120 >/dev/null; sleep 2
 cur=$(sh "ls -t $F/chats/ | head -1")
-[ "$cur" = "$TB.json" ] || { res 1 "T0 текущий разговор не тестовый"; exit 1; }
+[ "$cur" = "$TB.json" ] || { res 1 "T0 текущий разговор не тестовый: сверху $cur, тестовые: $(sh "ls $F/chats/ | grep -cE '^($TA|$TB).json'") из 2"; sh "ls -lt --time-style=+%s $F/chats/ | head -4" | awk '{print "   ", $6, $7}'; exit 1; }
 launch --es refineevery 1 --es cloudevery 0; sleep 2
 
 say "== T1–T2: фраза с термином старого разговора"
@@ -101,8 +104,10 @@ m=$(mark); feed 'Meu filho quer um skate elétrico de aniversário.'
 raw=$(wl "$m" '#[0-9]+ pt2ru' 60); n=$(printf '%s' "$raw" | grep -o '#[0-9]*' | head -1)
 l=$(wl "$m" "📚 $n |разбор отложен" 120)
 if printf '%s' "$l" | grep -q "разбор отложен"; then
-  say "  уточнитель отложен нехваткой памяти — порог снижен для проверки (--es llmneed 900)"
-  launch --es llmneed 900; sleep 1
+  # Ядро и уточнитель вместе на этом телефоне помещаются не всегда (results/2026-09-28-memory.md); 01.11 на Redmi
+  # было свободно 0,9–1,1 ГБ, и запаса 900 МБ не хватало. Порог — до перезапуска; система освободит место за счёт фоновых.
+  say "  уточнитель отложен нехваткой памяти — порог снижен для проверки (--es llmneed ${LLMNEED:-500})"
+  launch --es llmneed "${LLMNEED:-500}"; sleep 1
   m=$(mark); feed 'Meu filho ainda quer um skate elétrico de aniversário.'
   raw=$(wl "$m" '#[0-9]+ pt2ru' 60); n=$(printf '%s' "$raw" | grep -o '#[0-9]*' | head -1)
   l=$(wl "$m" "📚 $n " 150)
