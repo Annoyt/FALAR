@@ -27,7 +27,7 @@ OUT = os.path.join(R, 'results', 'asr_conf')
 SR = 16000
 
 
-def run(tag, model_dir, recs, gpu=False):
+def run(tag, model_dir, recs, gpu=False, int8=False):
     import onnx_asr
     import onnxruntime as rt
     so = rt.SessionOptions()
@@ -35,7 +35,8 @@ def run(tag, model_dir, recs, gpu=False):
     prov = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if gpu else ['CPUExecutionProvider']
     if gpu and 'CUDAExecutionProvider' not in rt.get_available_providers():
         sys.exit('нет CUDAExecutionProvider: onnxruntime-gpu и библиотеки CUDA — см. начало файла')
-    model = onnx_asr.load_model('nemo-parakeet-tdt-0.6b-v3', model_dir, sess_options=so, providers=prov)
+    model = onnx_asr.load_model('nemo-parakeet-tdt-0.6b-v3', model_dir, quantization='int8' if int8 else None,
+                                sess_options=so, providers=prov)
     for name in recs:
         path = os.path.join(OUT, f'{name}.oa-{tag}.json')
         done = json.load(open(path, encoding='utf-8')) if os.path.exists(path) else {'texts': [], 'sec': 0.0}
@@ -92,9 +93,10 @@ def main():
     ap.add_argument('cmd', choices=['run', 'score'])
     ap.add_argument('args', nargs='+')
     ap.add_argument('--gpu', action='store_true', help='run: на видеокарте (CUDAExecutionProvider)')
+    ap.add_argument('--int8', action='store_true', help='run: файлы *.int8.onnx (шаг 16б: своё сжатие, как в выгрузке sherpa)')
     a = ap.parse_args()
     if a.cmd == 'run':
-        run(a.args[0], a.args[1], a.args[2:], a.gpu)
+        run(a.args[0], a.args[1], a.args[2:], a.gpu, a.int8)
     else:
         score(a.args)
 

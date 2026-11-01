@@ -41,13 +41,18 @@ def _mel_knf(sr=SR, n_fft=NFFT, n_mels=NMEL, low=0.0, high=SR / 2 - 400):
 
 
 _MEL = _mel_knf()
+_MEL8000 = _mel_knf(high=SR / 2)
 _POVEY = (0.5 - 0.5 * np.cos(2 * np.pi / (WIN - 1) * np.arange(WIN))) ** 0.85
+_HANN = 0.5 - 0.5 * np.cos(2 * np.pi / WIN * np.arange(WIN))          # knf «hann»: периодическое
 
 
-def features(x):
+def features(x, kind='sherpa'):
     """[128, T] — признаки, как у sherpa-onnx для NeMo-моделей (kaldi-native-fbank: snip_edges=false с отражением
     краёв, без DC и без дизера, предыскажение 0,97 внутри кадра, окно Пови, БПФ 512, мел Слейни 0–7600 Гц,
-    log(max(e, eps)), затем нормировка по признаку: среднее и смещённое СКО + 1e-5)."""
+    log(max(e, eps)), затем нормировка по признаку: среднее и смещённое СКО + 1e-5).
+    kind='hann8000' — то же, но окно Ханна и мел до 8000 Гц: как у NeMo; в sherpa-onnx 1.13.8 эти две настройки для
+    NeMo-моделей закомментированы (offline-recognizer-transducer-nemo-impl.h, PostInit)."""
+    win, mel_fb = (_HANN, _MEL8000) if kind == 'hann8000' else (_POVEY, _MEL)
     x = np.asarray(x, np.float32)
     n = len(x)
     nf = (n + HOP // 2) // HOP
@@ -61,18 +66,23 @@ def features(x):
     pre = fr.copy()
     fr[:, 1:] = pre[:, 1:] - 0.97 * pre[:, :-1]
     fr[:, 0] = pre[:, 0] - 0.97 * pre[:, 0]
-    fr *= _POVEY.astype(np.float32)[None, :]
+    fr *= win.astype(np.float32)[None, :]
     spec = np.abs(np.fft.rfft(fr, n=NFFT, axis=1)) ** 2
-    mel = np.log(np.maximum(spec.astype(np.float32) @ _MEL.T, np.finfo(np.float32).eps))   # [T, 128]
+    mel = np.log(np.maximum(spec.astype(np.float32) @ mel_fb.T, np.finfo(np.float32).eps))   # [T, 128]
     mu = mel.mean(axis=0, keepdims=True)
     sd = np.sqrt(((mel - mu) ** 2).mean(axis=0, keepdims=True))
     return ((mel - mu) / (sd + 1e-5)).T.astype(np.float32)
 
 
 class Parakeet:
-    def __init__(self, model_dir, threads=1):
+    def __init__(self, model_dir, threads=1, providers=None, feats='sherpa', nemo_pre=None):
+        """feats: 'sherpa' (как приложение), 'hann8000' (окно Ханна, мел до 8000 Гц) или 'nemo' — признаки самого NeMo
+        (nemo_pre — путь к nemo128.onnx из onnx-asr; выход уже нормирован по признаку)."""
         so = ort.SessionOptions(); so.intra_op_num_threads = threads; so.inter_op_num_threads = 1
-        p = ['CPUExecutionProvider']
+        so.log_severity_level = 3
+        p = providers or ['CPUExecutionProvider']
+        self.feats = feats
+        self.pre = ort.InferenceSession(nemo_pre, so, providers=p) if feats == 'nemo' else None
         self.enc = ort.InferenceSession(os.path.join(model_dir, 'encoder.int8.onnx'), so, providers=p)
         self.dec = ort.InferenceSession(os.path.join(model_dir, 'decoder.int8.onnx'), so, providers=p)
         self.joi = ort.InferenceSession(os.path.join(model_dir, 'joiner.int8.onnx'), so, providers=p)
@@ -85,7 +95,11 @@ class Parakeet:
         self.din = [i.name for i in self.dec.get_inputs()]
 
     def encode(self, x):
-        f = features(x)[None]
+        if self.pre is not None:
+            x = np.asarray(x, np.float32)
+            f = self.pre.run(None, {'waveforms': x[None], 'waveforms_lens': np.array([len(x)], np.int64)})[0]
+        else:
+            f = features(x, self.feats)[None]
         out, _ = self.enc.run(None, {'audio_signal': f, 'length': np.array([f.shape[2]], np.int64)})
         return out[0]                                       # [1024, T']
 
