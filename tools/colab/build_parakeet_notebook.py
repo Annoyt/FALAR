@@ -88,7 +88,8 @@ drive.mount('/content/drive')
 if not os.path.exists('{VENV}/bin/python'):
     !pip -q install uv
     !uv venv --python 3.12 {VENV}
-    !uv pip install --python {VENV}/bin/python "{NEMO}" "huggingface_hub>=0.34,<1.0" "numba==0.61.2" "numpy<2.3" "datasets>=3" soundfile librosa "onnx>=1.17" "onnxruntime>=1.20"
+# установка — каждый раз: uv быстро проверит готовое и поправит версии (cuda-bindings < 13: драйвер Colab — CUDA 12)
+!uv pip install --python {VENV}/bin/python "{NEMO}" "huggingface_hub>=0.34,<1.0" "numba==0.61.2" "numpy<2.3" "cuda-bindings<13" "datasets>=3" soundfile librosa "onnx>=1.17" "onnxruntime>=1.20"
 !{VENV}/bin/python -c "import torch, nemo; print('NeMo', nemo.__version__, '· torch', torch.__version__, '· CUDA', torch.cuda.is_available())\""""
 
 STAGES = [

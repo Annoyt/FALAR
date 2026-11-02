@@ -447,6 +447,13 @@ def load_model(name_or_path, device='cuda'):
             if attempt == 2:
                 raise
             log('  модель не загрузилась, ещё раз:', type(e).__name__, str(e)[:120])
+    # декодер на графах CUDA компилирует ядро через NVRTC из cuda-bindings; в Colab 02.11 его PTX оказался новее
+    # драйвера (CUDA_ERROR_UNSUPPORTED_PTX_VERSION). Обычный пакетный декодер NeMo — без графов, результат тот же
+    from omegaconf import open_dict
+    dc = m.cfg.decoding
+    with open_dict(dc):
+        dc.greedy.use_cuda_graph_decoder = False
+    m.change_decoding_strategy(dc, verbose=False)
     m = m.to(device if torch.cuda.is_available() else 'cpu').eval()
     return m
 
