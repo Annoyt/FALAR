@@ -46,6 +46,8 @@ import time
 from pathlib import Path
 
 SR = 16000
+# видеопамять — растущими сегментами, а не кусками постоянного размера: меньше дробления на пачках разной длины
+os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
 OPENSLR = ['https://us.openslr.org/resources', 'https://www.openslr.org/resources', 'https://openslr.elda.org/resources']
 
 CFG = dict(
@@ -866,9 +868,13 @@ def ds_cfg(manifest, cfg, train, w):
     from omegaconf import OmegaConf
     d = dict(manifest_filepath=str(manifest), sample_rate=SR, use_lhotse=True, shuffle=train,
              num_workers=cfg['num_workers'], pin_memory=True, batch_duration=cfg['batch_duration'],
-             quadratic_duration=30, num_buckets=20 if train else 1, shuffle_buffer_size=10000 if train else 0,
+             quadratic_duration=30, shuffle_buffer_size=10000 if train else 0,
              max_duration=cfg['max_sec'], min_duration=cfg['min_sec'], seed=cfg['seed'])
     if train:
+        # фразы — пачками близкой длины, как у NVIDIA (use_bucketing, 30 корзин). Без этого (Colab 02.11, «bucketing is
+        # disabled») короткие фразы добивались до самой длинной в пачке (до 20 с): видеопамять и время уходили на
+        # пустые кадры, и на 2800-м шаге пачка в 900 с не влезла в 80 ГБ
+        d.update(use_bucketing=True, num_buckets=30, bucket_buffer_size=20000)
         # NeMo 2.7.3, lhotse/dataloader.py: шум — манифест NeMo (словарь с manifest_filepath), комнаты — RecordingSet
         # самой lhotse; без него lhotse берёт синтетические комнаты
         rir = w / 'noise' / 'rir_recordings.jsonl.gz'
@@ -913,6 +919,9 @@ def progress_callback(every=50):
 
         def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
             s = trainer.global_step
+            if s and s == int(os.environ.get('FALAR_TEST_OOM_STEP') or 0):   # проверка на ПК: нехватка понарошку
+                import torch
+                raise torch.cuda.OutOfMemoryError(f'проверка: нехватка видеопамяти понарошку на шаге {s}')
             if s % every == 0 and s:
                 loss = outputs.get('loss') if isinstance(outputs, dict) else outputs
                 loss = float(loss.detach()) if hasattr(loss, 'detach') else float('nan')
@@ -921,7 +930,8 @@ def progress_callback(every=50):
                 log(f'шаг {s} из {trainer.max_steps}: потеря {loss:.3f}, lr {lr:.2e}, {el / 60:.0f} мин, '
                     f'осталось ~{el / s * (trainer.max_steps - s) / 60:.0f} мин')
 
-        def on_validation_epoch_end(self, trainer, pl_module):
+        def on_validation_end(self, trainer, pl_module):
+            # не on_validation_epoch_end: тот зовётся раньше, чем NeMo считает val_wer, и печатал число прошлой проверки
             m = trainer.callback_metrics
             if 'val_wer' in m:
                 log(f'проверка на шаге {trainer.global_step}: val_wer {float(m["val_wer"]):.4f}')
@@ -929,15 +939,41 @@ def progress_callback(every=50):
 
 
 def train(cfg):
+    """Обучение — в своём процессе (_train). Не хватило видеопамяти — снова с последней контрольной точки, пачка на
+    четверть меньше, до 4 попыток. Colab 02.11, A100 80 ГБ, пачки по 900 с: нехватка на 38-й минуте остановила весь
+    прогон. Тяжёлые пачки редки — длинные фразы с плотным текстом: потеря TDT держит градиент размером
+    [фразы × кадры × токены × 8198] во float32 до обратного прохода; поэтому пачка урезается, только когда упёрлась."""
+    w, c = paths(cfg)
+    out = w / 'model' / 'parakeet-ft.nemo'
+    if out.exists():
+        log('обучение уже сделано:', out)
+        return
+    oom, bd, env = c / 'train-oom.json', cfg['batch_duration'], dict(os.environ)
+    for attempt in range(4):
+        if oom.exists():
+            oom.unlink()
+        r = subprocess.run([sys.executable, os.path.abspath(__file__), '_train', '--cfg-json',
+                            json.dumps(dict(cfg, batch_duration=bd))], env=env)
+        if r.returncode == 0:
+            return
+        if not oom.exists():
+            raise SystemExit(f'обучение упало (код {r.returncode}) — ошибка в выводе выше')
+        info = json.loads(oom.read_text(encoding='utf-8'))
+        env.pop('FALAR_TEST_OOM_STEP', None)            # проверка на ПК: нехватка — только в первой попытке
+        bd = round(bd * 0.75, 1)
+        log(f'видеопамяти не хватило на шаге {info["step"]} (пачка {info["batch"]} с): {info["error"][:300]}')
+        log(f'снова с последней контрольной точки, пачка {bd} с звука')
+    raise SystemExit(f'видеопамяти не хватает и при пачке {bd} с')
+
+
+def _train(cfg):
+    """Обучение в своём процессе (зовёт train): упало от нехватки видеопамяти — пишет train-oom.json и выходит."""
     import lightning.pytorch as pl
     import torch
     from omegaconf import OmegaConf, open_dict
     w, c = paths(cfg)
     env_report()
     out = w / 'model' / 'parakeet-ft.nemo'
-    if out.exists():
-        log('обучение уже сделано:', out)
-        return
     d = w / 'data'
     torch.manual_seed(cfg['seed'])
     model = load_model(base_model(cfg))
@@ -969,14 +1005,21 @@ def train(cfg):
     from nemo.utils.exp_manager import exp_manager
     exp_manager(trainer, OmegaConf.create(dict(
         exp_dir=str(ckpt), name='ckpt', create_tensorboard_logger=False, create_checkpoint_callback=True,
+        # точка — после проверки (эпоха = val_every шагов): с every_n_train_steps она писалась до проверки того же шага
+        # и получала val_wer прошлой проверки, а лучшей считалась модель на 500 шагов новее (Colab 02.11)
         checkpoint_callback_params=dict(monitor='val_wer', mode='min', save_top_k=1, always_save_nemo=False,
-                                        every_n_train_steps=cfg['val_every'], every_n_epochs=None, save_last=True),
+                                        every_n_train_steps=None, every_n_epochs=1, save_last=True),
         resume_if_exists=True, resume_ignore_no_checkpoint=True, use_datetime_version=False, version='run')))
     model.set_trainer(trainer)
     model.setup_optimization(model.cfg.optim)
     log(f'обучение: {cfg["max_steps"]} шагов, пачка {cfg["batch_duration"]} с звука, lr {cfg["lr"]}, '
         f'{"bf16" if bf16 else "fp16"}; контрольные точки — {ckpt}')
-    trainer.fit(model)
+    try:
+        trainer.fit(model)
+    except torch.cuda.OutOfMemoryError as e:
+        (c / 'train-oom.json').write_text(json.dumps(dict(step=trainer.global_step, batch=cfg['batch_duration'],
+                                                          error=str(e)), ensure_ascii=False), encoding='utf-8')
+        raise
     # на Диск — лучшая по проверке (val_wer), а не последняя
     cb = trainer.checkpoint_callback
     best = getattr(cb, 'best_model_path', '') if cb else ''
@@ -1137,7 +1180,7 @@ STAGES = dict(data=data, noise=noise, pack=pack, labels=labels, train=train, eva
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('stage', choices=list(STAGES) + ['_hyps'])
+    ap.add_argument('stage', choices=list(STAGES) + ['_hyps', '_train'])
     ap.add_argument('--cfg', help='JSON с настройками ноутбука (поверх CFG)')
     ap.add_argument('--profile', default='auto', help='auto | ' + ' | '.join(PROFILES))
     ap.add_argument('--cfg-json', help=argparse.SUPPRESS)
@@ -1146,6 +1189,8 @@ def main():
     try:
         if a.stage == '_hyps':
             _hyps(json.loads(a.cfg_json), a.tag)
+        elif a.stage == '_train':
+            _train(json.loads(a.cfg_json))
         else:
             over = json.loads(Path(a.cfg).read_text(encoding='utf-8')) if a.cfg else {}
             cfg = with_profile(dict(CFG, **over, _set=tuple(over)), over.get('profile', a.profile))
