@@ -139,15 +139,15 @@ def paths(cfg):
 
 
 def gpu_profile():
-    """Профиль по видеокарте: a100_80, a100_40, l4 (24 ГБ), t4; None — видеокарты нет."""
+    """Профиль по видеокарте: a100_80, a100_40, l4 (24 ГБ), t4; None — видеокарты нет. Через nvidia-smi, а не torch:
+    torch заводит контекст CUDA (~0,5 ГБ видеопамяти), и процесс этапа держал бы его, пока учится дочерний."""
     try:
-        import torch
-    except ImportError:
+        out = subprocess.run(['nvidia-smi', '--query-gpu=memory.total,compute_cap', '--format=csv,noheader,nounits'],
+                             capture_output=True, text=True, timeout=60).stdout.strip().split('\n')[0]
+        gb, major = float(out.split(',')[0]) / 1024, int(float(out.split(',')[1]))
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return None
-    if not torch.cuda.is_available():
-        return None
-    gb = torch.cuda.get_device_properties(0).total_memory / 2 ** 30
-    if torch.cuda.get_device_capability()[0] < 8:
+    if major < 8:
         return 't4'
     return 'a100_80' if gb > 60 else 'a100_40' if gb > 30 else 'l4' if gb > 18 else 't4'
 
