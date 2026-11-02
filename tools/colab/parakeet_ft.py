@@ -55,6 +55,9 @@ CFG = dict(
     dev_n=200,                   # фраз проверки при обучении — на язык
     min_sec=1.0, max_sec=20.0,
     label_wer_max=0.5,           # parakeet против разметки: расходится сильнее — фраза отбрасывается
+    stream_buffer=2000,          # перемешивание потока с Hugging Face: строк в буфере
+    data_workers=0,              # процессов разбора звука (0 — по числу ядер)
+    asr_batch=32,                # фраз в пачке при распознавании (разметка, оценка)
     # шум: MUSAN (шум, музыка, говор) и комнаты RIRS_NOISES; на ПК для проверки — свои папки (noise_dirs, speech_dirs)
     noise_src='musan', noise_dirs=(), speech_dirs=(), rir_src='rirs',
     noise_snr=(0.0, 20.0), noise_prob=0.6, rir_prob=0.3, babble_n=300, babble_voices=(3, 6),
@@ -74,7 +77,8 @@ PROFILES = dict(
     a100_40=dict(batch_duration=500),
     t4=dict(batch_duration=150, max_steps=3000),
     smoke=dict(hours=dict(coraa=0.15, mupe=0.15, golos_far=0.15, fleurs_ru=0), test_n=30, dev_n=15, max_steps=20,
-               val_every=10, warmup=5, babble_n=10, batch_duration=30, num_workers=2, fleurs_tests=False),
+               val_every=10, warmup=5, babble_n=10, batch_duration=8, max_sec=8.0, num_workers=2, fleurs_tests=False,
+               stream_buffer=50, asr_batch=4),
 )
 
 FILLERS = {'pt': {'ãh', 'ah', 'ahn', 'eh', 'éh', 'uh', 'uhm', 'hum', 'hm', 'hmm', 'mm', 'mhm', 'aham', 'uhum', 'hã', 'ã',
@@ -264,30 +268,68 @@ SOURCES = {
 }
 
 
+def _audio_job(job):
+    """В процессе пула: звук строки → FLAC 16 кГц, если длительность годится. Возвращает длительность или None."""
+    path, audio, lo, hi = job
+    x, sr = _decode(audio)
+    dur = len(x) / sr
+    if not lo <= dur <= hi:
+        return None
+    p = Path(path)
+    if not p.exists():
+        _write_flac(p, x, sr)
+    return dur
+
+
 def take_stream(src, split, cfg, c, hours=None, n=None):
-    """Строки источника до нужного объёма: часов (обучение) или фраз (тест). Звук — FLAC на диск Colab."""
+    """Строки источника до нужного объёма: часов (обучение) или фраз (тест). Поток читается здесь, разбор звука и
+    запись FLAC — в пуле процессов (на 200 ч звука в одном процессе ушли бы часы)."""
+    from concurrent.futures import ProcessPoolExecutor
     name, _, _, lang, field, pnc, ok = SOURCES[src]
-    rows, total = [], 0.0
-    for i, r in enumerate(_stream(name, split, cfg['seed'])):
-        text = (r.get(field) or '').strip()
-        if not text or (ok and not ok(r)):
-            continue
-        text = drop_fillers(text, lang)
-        if len(words_norm(text)) < 1:
-            continue
-        x, sr = _decode(r['audio'])
-        dur = len(x) / sr
-        if not cfg['min_sec'] <= dur <= cfg['max_sec']:
-            continue
-        p = c / 'audio' / f'{src}-{split}' / f'{i:07d}.flac'
-        if not p.exists():
-            _write_flac(p, x, sr)
-        rows.append(dict(audio_filepath=str(p), duration=round(dur, 3), text=text, lang=lang, src=src, pnc=pnc))
-        total += dur
-        if (hours is not None and total >= hours * 3600) or (n is not None and len(rows) >= n):
-            break
-        if len(rows) % 2000 == 0:
-            log(f'  {src}/{split}: {len(rows)} фраз, {total / 3600:.1f} ч')
+    rows, total, pending = [], 0.0, []
+    workers = cfg['data_workers'] or os.cpu_count() or 2
+
+    def enough():
+        return (hours is not None and total >= hours * 3600) or (n is not None and len(rows) >= n)
+
+    def collect(block):
+        """Готовое — по порядку подачи (итог не зависит от скорости процессов); block — ждать, пока в работе не
+        останется меньше 4 задач на процесс."""
+        nonlocal total
+        while pending:
+            fut, row = pending[0]
+            if not fut.done() and not (block and len(pending) >= workers * 4):
+                break
+            pending.pop(0)
+            dur = fut.result()
+            if dur is not None and not enough():
+                rows.append(dict(row, duration=round(dur, 3)))
+                total += dur
+                if len(rows) % 2000 == 0:
+                    log(f'  {src}/{split}: {len(rows)} фраз, {total / 3600:.1f} ч')
+
+    with ProcessPoolExecutor(workers) as pool:
+        for i, r in enumerate(_stream(name, split, cfg['seed'], cfg['stream_buffer'])):
+            if enough():
+                break
+            text = (r.get(field) or '').strip()
+            if not text or (ok and not ok(r)):
+                continue
+            text = drop_fillers(text, lang)
+            if len(words_norm(text)) < 1:
+                continue
+            p = c / 'audio' / f'{src}-{split}' / f'{i:07d}.flac'
+            fut = pool.submit(_audio_job, (str(p), r['audio'], cfg['min_sec'], cfg['max_sec']))
+            pending.append((fut, dict(audio_filepath=str(p), text=text, lang=lang, src=src, pnc=pnc)))
+            collect(len(pending) >= workers * 8)
+        while pending and not enough():
+            fut, row = pending.pop(0)
+            dur = fut.result()
+            if dur is not None:
+                rows.append(dict(row, duration=round(dur, 3)))
+                total += dur
+        for fut, _ in pending:
+            fut.cancel()
     log(f'{src}/{split}: {len(rows)} фраз, {total / 3600:.2f} ч')
     return rows
 
@@ -357,10 +399,17 @@ def data(cfg):
 def load_model(name_or_path, device='cuda'):
     import nemo.collections.asr as nemo_asr
     import torch
-    if os.path.exists(str(name_or_path)):
-        m = nemo_asr.models.ASRModel.restore_from(str(name_or_path), map_location='cpu')
-    else:
-        m = nemo_asr.models.ASRModel.from_pretrained(name_or_path, map_location='cpu')
+    for attempt in (1, 2):                           # на ПК однажды не прочиталась с первого раза (02.11) — повтор
+        try:
+            if os.path.exists(str(name_or_path)):
+                m = nemo_asr.models.ASRModel.restore_from(str(name_or_path), map_location='cpu')
+            else:
+                m = nemo_asr.models.ASRModel.from_pretrained(name_or_path, map_location='cpu')
+            break
+        except Exception as e:
+            if attempt == 2:
+                raise
+            log('  модель не загрузилась, ещё раз:', type(e).__name__, str(e)[:120])
     m = m.to(device if torch.cuda.is_available() else 'cpu').eval()
     return m
 
@@ -405,7 +454,7 @@ def labels(cfg):
     for raw in sorted(d.glob('raw_*.jsonl')):
         rows = jload(raw)
         t0 = time.time()
-        texts = transcribe(model, [r['audio_filepath'] for r in rows])
+        texts = transcribe(model, [r['audio_filepath'] for r in rows], cfg['asr_batch'])
         keep, why = label_rows(rows, texts, cfg)
         name = raw.name.replace('raw_', '')
         jdump(keep, d / name)
@@ -482,14 +531,25 @@ def noise(cfg):
             sf.write(str(p), mix, SR)
         rows.append(info(p))
     jdump(rows, d / 'noise.jsonl')
-    rir = []
-    if cfg['rir_src'] == 'rirs':                    # настоящие и смоделированные комнаты — RecordingSet для lhotse
-        from lhotse import Recording, RecordingSet
+    from lhotse import Recording, RecordingSet
+    if cfg['rir_src'] == 'rirs':                    # настоящие и смоделированные комнаты RIRS_NOISES
         files = sorted(rirs.glob('simulated_rirs/*/*/*.wav')) + [p for p in sorted(rirs.glob('real_rirs_isotropic_noises/*.wav'))
                                                                    if 'noise' not in p.name]
-        rir = [info(p) for p in files]
-        RecordingSet.from_recordings(Recording.from_file(str(p)) for p in files).to_file(str(d / 'rir_recordings.jsonl.gz'))
-    jdump(rir, d / 'rir.jsonl')                     # пусто — lhotse строит комнаты сама
+    else:                                           # проверка без загрузки: простые комнаты — затухающий шум
+        files = []
+        for k in range(20):
+            p = c / 'rir_synth' / f'rir_{k:02d}.wav'
+            if not p.exists():
+                n = int(SR * rng.uniform(0.2, 0.8))
+                h = np.random.default_rng(k).standard_normal(n).astype(np.float32) * np.exp(-6.9 * np.arange(n) / n)
+                h[0] = 1.0
+                p.parent.mkdir(parents=True, exist_ok=True)
+                sf.write(str(p), h / np.abs(h).max(), SR)
+            files.append(p)
+    rir = [info(p) for p in files]
+    # RecordingSet — единственный вид комнат, который берёт загрузчик NeMo (lhotse/dataloader.py, rir_path)
+    RecordingSet.from_recordings(Recording.from_file(str(p)) for p in files).to_file(str(d / 'rir_recordings.jsonl.gz'))
+    jdump(rir, d / 'rir.jsonl')
     log(f'шум: {len(rows)} файлов (говор {cfg["babble_n"]}); комнат: {len(rir)}')
 
 
@@ -505,8 +565,10 @@ def ds_cfg(manifest, cfg, train, w):
         # NeMo 2.7.3, lhotse/dataloader.py: шум — манифест NeMo (словарь с manifest_filepath), комнаты — RecordingSet
         # самой lhotse; без него lhotse берёт синтетические комнаты
         rir = w / 'noise' / 'rir_recordings.jsonl.gz'
+        # эхо — только из файлов комнат: свой генератор комнат lhotse требует torchaudio, а его нет ни в зависимостях
+        # NeMo, ни в нашем окружении (проверено на ПК: «torchaudio-free Lhotse installation»)
         d.update(noise_path=dict(manifest_filepath=str(w / 'noise' / 'noise.jsonl')), noise_snr=list(cfg['noise_snr']),
-                 noise_mix_prob=cfg['noise_prob'], rir_enabled=cfg['rir_prob'] > 0,
+                 noise_mix_prob=cfg['noise_prob'], rir_enabled=cfg['rir_prob'] > 0 and rir.exists(),
                  rir_path=str(rir) if rir.exists() else None, rir_prob=cfg['rir_prob'])
     else:
         d['batch_duration'] = min(cfg['batch_duration'], 300)
@@ -535,10 +597,15 @@ def train(cfg):
                        max_steps=cfg['max_steps'])))
     model.setup_training_data(model.cfg.train_ds)
     model.setup_validation_data(model.cfg.validation_ds)
+    # load_model отдаёт модель в режиме оценки, а Lightning 2.x режим подмодулей сохраняет как есть: без этого LSTM
+    # декодера падает на обратном проходе («cudnn RNN backward can only be called in training mode», проверено на ПК)
+    model.train()
     if cfg['freeze_encoder']:
         model.encoder.freeze()
         model.preprocessor.freeze()
-    ckpt = w / 'model' / 'ckpt'
+    # контрольные точки Lightning — с состоянием оптимизатора, ~7 ГБ каждая: на диск машины Colab, не на Google Диск
+    # (после обрыва сессии обучение начнётся заново); на Диск — только итоговая модель .nemo, 2,5 ГБ
+    ckpt = c / 'ckpt'
     trainer = pl.Trainer(devices=1, accelerator='gpu', precision='bf16-mixed' if bf16 else '16-mixed',
                          max_steps=cfg['max_steps'], val_check_interval=cfg['val_every'], check_val_every_n_epoch=None,
                          limit_train_batches=cfg['val_every'], log_every_n_steps=50, gradient_clip_val=cfg['grad_clip'],
@@ -546,15 +613,22 @@ def train(cfg):
                          num_sanity_val_steps=0)
     from nemo.utils.exp_manager import exp_manager
     exp_manager(trainer, OmegaConf.create(dict(
-        exp_dir=str(w / 'model'), name='ckpt', create_tensorboard_logger=False, create_checkpoint_callback=True,
-        checkpoint_callback_params=dict(monitor='val_wer', mode='min', save_top_k=2, always_save_nemo=False,
-                                        every_n_train_steps=cfg['val_every'], save_last=True),
+        exp_dir=str(ckpt), name='ckpt', create_tensorboard_logger=False, create_checkpoint_callback=True,
+        checkpoint_callback_params=dict(monitor='val_wer', mode='min', save_top_k=1, always_save_nemo=False,
+                                        every_n_train_steps=cfg['val_every'], every_n_epochs=None, save_last=True),
         resume_if_exists=True, resume_ignore_no_checkpoint=True, use_datetime_version=False, version='run')))
     model.set_trainer(trainer)
     model.setup_optimization(model.cfg.optim)
     log(f'обучение: {cfg["max_steps"]} шагов, пачка {cfg["batch_duration"]} с звука, lr {cfg["lr"]}, '
         f'{"bf16" if bf16 else "fp16"}; контрольные точки — {ckpt}')
     trainer.fit(model)
+    # на Диск — лучшая по проверке (val_wer), а не последняя
+    cb = trainer.checkpoint_callback
+    best = getattr(cb, 'best_model_path', '') if cb else ''
+    if best and os.path.exists(best):
+        sd = torch.load(best, map_location='cpu', weights_only=False)['state_dict']
+        model.load_state_dict(sd)
+        log(f'лучшая проверка: {best} (val_wer {float(cb.best_model_score):.4f})')
     out.parent.mkdir(parents=True, exist_ok=True)
     model.save_to(str(out))
     log('сохранено:', out)
@@ -614,17 +688,15 @@ def evaluate(cfg):
         sets[name] = rows
         for snr in cfg['test_snr']:
             sets[f'{name}+шум{int(snr)}'] = noisy_copy(rows, cfg, c, w, snr, name)
+    jdump([dict(r, set=k) for k, v in sets.items() for r in v], out / 'sets.jsonl')
     hyps = {}
-    for tag, path in (('base', cfg['base']), ('ft', w / 'model' / 'parakeet-ft.nemo')):
+    for tag in ('base', 'ft'):
         cache = out / f'hyps_{tag}.json'
-        if cache.exists():
-            hyps[tag] = json.loads(cache.read_text(encoding='utf-8'))
-            if set(hyps[tag]) >= set(sets):
-                continue
-        model = load_model(path)
-        hyps[tag] = {k: transcribe(model, [r['audio_filepath'] for r in v]) for k, v in sets.items()}
-        cache.write_text(json.dumps(hyps[tag], ensure_ascii=False), encoding='utf-8')
-        del model
+        if not cache.exists() or not set(json.loads(cache.read_text(encoding='utf-8'))) >= set(sets):
+            # каждая модель — в своём процессе: видеопамять освобождается целиком, сбой одной не тянет другую
+            subprocess.run([sys.executable, os.path.abspath(__file__), '_hyps', '--cfg-json', json.dumps(cfg), '--tag', tag],
+                           check=True)
+        hyps[tag] = json.loads(cache.read_text(encoding='utf-8'))
     lines = ['| тест | фраз | до | после | разница [95 %] |', '|---|---|---|---|---|']
     for k, rows in sets.items():
         a, ea, n, idx = corpus_wer(rows, hyps['base'][k])
@@ -662,7 +734,7 @@ def export(cfg):
         return
     tmp = c / 'export'
     tmp.mkdir(parents=True, exist_ok=True)
-    model = load_model(w / 'model' / 'parakeet-ft.nemo', device='cpu')
+    model = load_model(w / 'model' / 'parakeet-ft.nemo')   # на видеокарте, если она есть
     os.chdir(tmp)
     with open('tokens.txt', 'w', encoding='utf-8') as f:
         for i, s in enumerate(model.joint.vocabulary):
@@ -691,15 +763,33 @@ def export(cfg):
     log('выгрузка:', out, [f'{f} {(out / f).stat().st_size / 2 ** 20:.0f} МБ' for f in keep])
 
 
+def _hyps(cfg, tag):
+    """Ответы одной модели на все тесты оценки (зовёт evaluate в отдельном процессе)."""
+    w, _ = paths(cfg)
+    out = w / 'eval'
+    rows = jload(out / 'sets.jsonl')
+    model = load_model(cfg['base'] if tag == 'base' else w / 'model' / 'parakeet-ft.nemo')
+    texts = transcribe(model, [r['audio_filepath'] for r in rows], cfg['asr_batch'])
+    res = {}
+    for r, t in zip(rows, texts):
+        res.setdefault(r['set'], []).append(t)
+    (out / f'hyps_{tag}.json').write_text(json.dumps(res, ensure_ascii=False), encoding='utf-8')
+    log(f'ответы {tag}: {len(rows)} фраз')
+
+
 STAGES = dict(data=data, labels=labels, noise=noise, train=train, evaluate=evaluate, export=export)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('stage', choices=list(STAGES))
+    ap.add_argument('stage', choices=list(STAGES) + ['_hyps'])
     ap.add_argument('--cfg', help='JSON с настройками ноутбука (поверх CFG)')
     ap.add_argument('--profile', default='auto', help='auto | ' + ' | '.join(PROFILES))
+    ap.add_argument('--cfg-json', help=argparse.SUPPRESS)
+    ap.add_argument('--tag', help=argparse.SUPPRESS)
     a = ap.parse_args()
+    if a.stage == '_hyps':
+        return _hyps(json.loads(a.cfg_json), a.tag)
     over = json.loads(Path(a.cfg).read_text(encoding='utf-8')) if a.cfg else {}
     cfg = with_profile(dict(CFG, **over, _set=tuple(over)), over.get('profile', a.profile))
     log('этап', a.stage, '· профиль', cfg['profile'])
