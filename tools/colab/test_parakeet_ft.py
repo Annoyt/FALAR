@@ -57,6 +57,18 @@ def units():
     keep, why = P.label_rows(rows, ['Tenho dois filhos.', 'Em 1940.', 'Tenho dois filhos.'], P.CFG)
     eq([r['text'] for r in keep], ['Tenho dois filhos.', 'Tenho dois filhos.'], 'разметка: оставлено')
     eq(why['цифры'], 1, 'разметка: отброшено из-за цифр')
+    # поток с повтором: обрыв посреди — тот же порядок, без повторов и пропусков
+    calls = {'n': 0}
+
+    def flaky():
+        calls['n'] += 1
+        for k in range(10):
+            if calls['n'] == 1 and k == 6:
+                raise OSError('499 Client Error (проверка)')
+            yield f'строка {k}'
+    got = [x for _, x in P.robust_rows(flaky, wait0=0)]
+    eq(got, [f'строка {k}' for k in range(10)], 'поток с повтором: все строки по порядку, один раз')
+    eq(calls['n'], 2, 'поток с повтором: пересоздан один раз')
 
 
 def pipeline():

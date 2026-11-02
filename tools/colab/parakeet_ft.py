@@ -249,6 +249,27 @@ def _stream(name, split, seed, buffer=2000):
     return ds.shuffle(seed=seed, buffer_size=buffer) if buffer else ds
 
 
+def robust_rows(make_iter, tries=8, wait0=5):
+    """(номер, строка) потока с повтором при ошибке сети: Hugging Face отвечает и 499, и 5xx, а datasets такие ответы
+    не повторяет (Colab, 02.11: CORAA, train-00014-of-00127.parquet — 499). Поток пересоздаётся с тем же seed и
+    проматывается до места обрыва: порядок тот же, отданное второй раз не отдаётся."""
+    done = 0
+    for attempt in range(tries):
+        try:
+            for k, r in enumerate(make_iter()):
+                if k < done:
+                    continue
+                yield k, r
+                done = k + 1
+            return
+        except Exception as e:                         # сеть: HTTP, обрыв, таймаут — всё, что не наше
+            if attempt == tries - 1:
+                raise
+            wait = min(120, wait0 * 2 ** attempt)
+            log(f'  сеть: {type(e).__name__}: {str(e)[:140]} — повтор через {wait} с, с {done}-й строки потока')
+            time.sleep(wait)
+
+
 def coraa_ok(r):
     """CORAA: только pt-BR и без замечаний оценщиков (шум, второй голос, тихо)."""
     if r.get('variety') != 'pt_br':
@@ -323,7 +344,7 @@ def take_stream(src, split, cfg, c, hours=None, n=None):
 
     # spawn, а не fork: поток datasets держит свои нити, а fork посреди них может замереть навсегда
     with ProcessPoolExecutor(workers, mp_context=mp.get_context('spawn')) as pool:
-        for i, r in enumerate(_stream(name, split, cfg['seed'], cfg['stream_buffer'])):
+        for i, r in robust_rows(lambda: _stream(name, split, cfg['seed'], cfg['stream_buffer'])):
             if enough():
                 break
             text = (r.get(field) or '').strip()
@@ -419,7 +440,7 @@ def restore_stream(src, split, rows, cfg, c):
             if len(q) < workers * 4:
                 break
     with ProcessPoolExecutor(workers, mp_context=mp.get_context('spawn')) as pool:
-        for i, r in enumerate(_stream(SOURCES[src][0], split, cfg['seed'], cfg['stream_buffer'])):
+        for i, r in robust_rows(lambda: _stream(SOURCES[src][0], split, cfg['seed'], cfg['stream_buffer'])):
             if i in need:
                 q.append((need[i], pool.submit(_audio_job, (need[i]['audio_filepath'], r['audio'], 0.0, 1e9))))
                 check(len(q) >= workers * 8)
