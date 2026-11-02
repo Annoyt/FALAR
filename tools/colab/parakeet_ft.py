@@ -10,15 +10,18 @@
 
 Этапы (каждый пишет итог в WORK на Google Диске; готовое при повторном запуске пропускается):
   data      португальский: CORAA v1.1 (только pt-BR, по оценкам качества) и CORAA-MUPE (интервью, со знаками);
-            русский: Golos farfield (дальний микрофон) и FLEURS ru; отложенные тесты: CORAA, MUPE, FLEURS pt-BR и ru,
-            Golos farfield. Звук — 16 кГц FLAC на диск машины Colab
-  labels    разметка со знаками и заглавными: где в данных их нет (CORAA, Golos), слова берутся из разметки, а знаки и
-            заглавные — из ответа самого parakeet (он пишет со знаками, и этого нельзя потерять: от знаков зависит
-            перевод). Междометия убираются; фраза отбрасывается, если parakeet расходится с разметкой больше чем на
-            половину слов или пишет цифрами то, что в разметке словами
+            русский: Golos farfield (дальний микрофон), SOVA RuDevices и FLEURS ru; отложенные тесты: CORAA, MUPE,
+            FLEURS pt-BR и ru, Golos farfield, SOVA. Звук — 16 кГц FLAC на диск машины Colab
   noise     MUSAN (шум, музыка, говор нескольких голосов) и комнаты RIRS_NOISES — для подмешивания при обучении
-  train     NeMo: полное дообучение, bf16, AdamW, косинус; шум и эхо подмешиваются на лету (lhotse);
-            контрольные точки — на Диск, после обрыва продолжается с последней
+  pack      звук, шум и исходная модель — архивом на Google Диск (правило владельца 03.11: всё для обучения — сначала
+            на Диск). Новая машина Colab берёт их оттуда за минуты; 02.11 без архива звук шёл потоком 24 мин, шум —
+            1 ч 40 мин. Подготовку (data, noise, pack) лучше гонять на дешёвой среде без видеокарты
+  labels    разметка со знаками и заглавными: где в данных их нет (CORAA, Golos, SOVA), слова берутся из разметки, а
+            знаки и заглавные — из ответа самого parakeet (он пишет со знаками, и этого нельзя потерять: от знаков
+            зависит перевод). Междометия убираются; фраза отбрасывается, если parakeet расходится с разметкой больше
+            чем на половину слов или пишет цифрами то, что в разметке словами
+  train     NeMo: полное дообучение, bf16, AdamW, косинус; шум и эхо подмешиваются на лету (lhotse); контрольные
+            точки — на диске машины Colab, на Диск — лучшая модель
   evaluate  до и после: WER на отложенных тестах — чистых и с шумом (SNR 5 и 10 дБ, тот же шум для обеих моделей)
   export    ONNX для sherpa-onnx, как scripts/nemo/parakeet-tdt-0.6b-v3/export_onnx.py sherpa-onnx 1.13.8:
             кодировщик, декодер, объединитель, int8 (кодировщик QUInt8, остальное QInt8), tokens.txt
@@ -28,12 +31,14 @@ Python 3.12 с NeMo: python parakeet_ft.py ЭТАП --cfg cfg.json. Провер
 """
 import argparse
 import difflib
+import hashlib
 import io
 import json
 import math
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -63,6 +68,7 @@ CFG = dict(
     noise_src='musan', noise_dirs=(), speech_dirs=(), rir_src='rirs',
     noise_snr=(0.0, 20.0), noise_prob=0.6, rir_prob=0.3, babble_n=300, babble_voices=(3, 6),
     test_snr=(5.0, 10.0),
+    shard_gb=1.0,                # архив на Диске — частями tar по столько ГБ (Диск в Colab медлен на мелких файлах)
     # обучение
     lr=3e-5, min_lr=1e-6, warmup=400, max_steps=5000, batch_duration=600, val_every=500,
     weight_decay=1e-3, grad_clip=1.0, num_workers=8,
@@ -80,7 +86,7 @@ PROFILES = dict(
     t4=dict(batch_duration=150, max_steps=3000),
     smoke=dict(hours=dict(coraa=0.15, mupe=0.15, golos_far=0.15, sova=0.1, fleurs_ru=0), test_n=30, dev_n=15, max_steps=20,
                val_every=10, warmup=5, babble_n=10, batch_duration=8, max_sec=8.0, num_workers=2, fleurs_tests=False,
-               stream_buffer=50, asr_batch=4),
+               stream_buffer=50, asr_batch=4, shard_gb=0.01),
 )
 
 FILLERS = {'pt': {'ãh', 'ah', 'ahn', 'eh', 'éh', 'uh', 'uhm', 'hum', 'hm', 'hmm', 'mm', 'mhm', 'aham', 'uhum', 'hã', 'ã',
@@ -482,7 +488,8 @@ def restore_audio(cfg, out, c):
 def data(cfg):
     w, c = paths(cfg)
     out = w / 'data'
-    restore_audio(cfg, out, c)                         # новая машина Colab: звук собранных частей — заново
+    unpack_set('audio', w, c)                          # новая машина Colab: звук — из архива на Диске (этап pack)
+    restore_audio(cfg, out, c)                         # чего нет в архиве — заново потоком (02.11 — 24 мин на всё)
     if (out / 'raw_train.jsonl').exists():
         log('данные уже собраны:', out)
         return
@@ -588,7 +595,7 @@ def labels(cfg):
     if (d / 'train.jsonl').exists():
         log('разметка уже готова')
         return
-    model = load_model(cfg['base'])
+    model = load_model(base_model(cfg))
     for raw in sorted(d.glob('raw_*.jsonl')):
         rows = jload(raw)
         t0 = time.time()
@@ -627,6 +634,8 @@ def noise(cfg):
     d = w / 'noise'
     def files_ok(manifest):
         return manifest.exists() and all(os.path.exists(r['audio_filepath']) for r in jload(manifest))
+    if not (files_ok(d / 'noise.jsonl') and files_ok(d / 'rir.jsonl')):
+        unpack_set('noise', w, c)                      # новая машина Colab: из архива на Диске, без загрузки MUSAN
     if files_ok(d / 'noise.jsonl') and files_ok(d / 'rir.jsonl'):
         log('шум уже готов')
         return
@@ -704,6 +713,151 @@ def noise(cfg):
     RecordingSet.from_recordings(Recording.from_file(str(p)) for p in files).to_file(str(d / 'rir_recordings.jsonl.gz'))
     jdump(rir, d / 'rir.jsonl')
     log(f'шум: {len(rows)} файлов (говор {cfg["babble_n"]}); комнат: {len(rir)}')
+
+
+# ---------------------------------------------------------------- архив на Диске
+
+def drive_free(path):
+    """Свободно на Диске, байт (Google Диск в Colab отдаёт квоту через statvfs); None — неизвестно."""
+    try:
+        st = os.statvfs(path)
+    except OSError:
+        return None
+    return st.f_bavail * st.f_frsize if st.f_blocks else None
+
+
+def archive_files(kind, w, c):
+    """Файлы набора — пути от cache: audio — звук всех списков данных (части, обучение, тесты), noise — шум, говор и
+    комнаты. Чужие папки вне cache (noise_dirs проверки на ПК) архив не берёт."""
+    lists = sorted((w / 'data').glob('*.jsonl')) + sorted((w / 'data' / 'parts').glob('*.jsonl')) if kind == 'audio' \
+        else [w / 'noise' / 'noise.jsonl', w / 'noise' / 'rir.jsonl']
+    out = set()
+    for f in lists:
+        if f.exists():
+            for r in jload(f):
+                rel = os.path.relpath(r['audio_filepath'], c)
+                if not rel.startswith('..'):
+                    out.add(rel)
+    return sorted(out)
+
+
+def shard_indexes(kind, w):
+    return [json.loads(f.read_text(encoding='utf-8')) for f in sorted((w / 'shards').glob(f'{kind}-*.json'))]
+
+
+def pack_set(kind, cfg, w, c):
+    """Набор — архивом на Диск: части tar по shard_gb, а не россыпь файлов (Диск в Colab медлен на множестве мелких).
+    Список частей с размером каждого файла пишется последним — он же метка «готово». Что уже в архиве, второй раз не
+    кладётся: добавленное ляжет отдельным архивом рядом."""
+    stage = 'data' if kind == 'audio' else 'noise'
+    files = archive_files(kind, w, c)
+    if not files:
+        log(f'архив {kind}: класть нечего — нет списков этапа {stage}')
+        return
+    have = {r for idx in shard_indexes(kind, w) for s in idx['shards'] for r, _ in s['files']}
+    todo = [r for r in files if r not in have]
+    if not todo:
+        log(f'архив {kind}: уже на Диске — {len(files)} файлов')
+        return
+    miss = [r for r in todo if not (c / r).exists()]
+    if miss:
+        raise SystemExit(f'архив {kind}: на этой машине нет {len(miss)} файлов из {len(todo)} (например {miss[0]}) — '
+                         f'сначала этап {stage}')
+    sizes = [(r, (c / r).stat().st_size) for r in todo]
+    total = sum(n for _, n in sizes)
+    free = drive_free(w)                              # 0 — Диск не сказал квоту: пусть решит сама запись
+    if free and free < total + 2 ** 30:
+        raise SystemExit(f'архив {kind}: на Диске свободно {free / 2 ** 30:.1f} ГБ, а нужно {total / 2 ** 30:.1f} ГБ')
+    groups, size, limit = [[]], 0, cfg['shard_gb'] * 2 ** 30
+    for r, n in sizes:
+        if groups[-1] and size + n > limit:
+            groups.append([])
+            size = 0
+        groups[-1].append((r, n))
+        size += n
+    key = hashlib.sha1('\n'.join(todo).encode('utf-8')).hexdigest()[:10]
+    d, lists = w / 'shards', c / 'shard-lists'
+    d.mkdir(parents=True, exist_ok=True)
+    lists.mkdir(parents=True, exist_ok=True)
+    log(f'архив {kind}: {len(todo)} файлов, {total / 2 ** 30:.2f} ГБ → {d}, частей {len(groups)}')
+    shards, done, t0 = [], 0, time.time()
+    for k, g in enumerate(groups):
+        name = f'{kind}-{key}-{k:03d}.tar'
+        lst = lists / f'{name}.txt'
+        lst.write_text(''.join(r + '\n' for r, _ in g), encoding='utf-8')
+        subprocess.run(['tar', '-cf', str(d / f'{name}.part'), '-C', str(c), '--verbatim-files-from', '-T', str(lst)],
+                       check=True)
+        os.replace(d / f'{name}.part', d / name)
+        size = sum(n for _, n in g)
+        done += size
+        shards.append(dict(name=name, bytes=size, files=[[r, n] for r, n in g]))
+        log(f'  архив {kind}: часть {k + 1} из {len(groups)} — {done / 2 ** 30:.2f} из {total / 2 ** 30:.2f} ГБ, '
+            f'{time.time() - t0:.0f} с')
+    idx = d / f'{kind}-{key}.json'
+    with open(f'{idx}.tmp', 'w', encoding='utf-8') as f:
+        json.dump(dict(kind=kind, key=key, files=len(todo), bytes=total, made=time.strftime('%Y-%m-%d %H:%M:%S'),
+                       shards=shards), f, ensure_ascii=False)
+    os.replace(f'{idx}.tmp', idx)
+    log(f'архив {kind}: готов — {idx.name}, {total / 2 ** 30:.2f} ГБ за {time.time() - t0:.0f} с')
+
+
+def unpack_set(kind, w, c):
+    """Набор из архива на Диске — на диск машины Colab, если его файлов здесь нет (новая машина): минуты вместо часов
+    потока с Hugging Face и загрузки MUSAN. Размер каждого файла сверяется со списком архива."""
+    need = {r for r in archive_files(kind, w, c) if not (c / r).exists()}
+    if not need:
+        return
+    n, got, t0 = 0, 0, time.time()
+    for idx in shard_indexes(kind, w):
+        for s in idx['shards']:
+            names = {r for r, _ in s['files']}
+            if not need & names:
+                continue
+            for attempt in range(3):                  # Диск в Colab изредка отвечает ошибкой ввода-вывода — повтор
+                res = subprocess.run(['tar', '-xf', str(w / 'shards' / s['name']), '-C', str(c)])
+                if res.returncode == 0:
+                    break
+                log(f'  архив {kind}: {s["name"]} не распаковался (код {res.returncode}) — повтор')
+                time.sleep(15)
+            bad = [r for r, size in s['files'] if not (c / r).exists() or (c / r).stat().st_size != size]
+            if bad:
+                raise SystemExit(f'архив {kind}: {s["name"]} — {len(bad)} файлов нет или не того размера (например '
+                                 f'{bad[0]}). Переименуйте папку falar-parakeet/shards на Диске: архив соберётся заново')
+            need -= names
+            n += 1
+            got += s['bytes']
+            log(f'  архив {kind}: {s["name"]} — {got / 2 ** 30:.2f} ГБ, {time.time() - t0:.0f} с')
+    if n:
+        log(f'архив {kind}: с Диска — частей {n}, {got / 2 ** 30:.2f} ГБ за {time.time() - t0:.0f} с'
+            + (f'; ещё {len(need)} файлов в архиве нет — их соберёт этап' if need else ''))
+
+
+def base_model(cfg):
+    """Исходная модель — файлом .nemo с Диска (WORK/base): новая машина не качает её с Hugging Face, и все сеансы
+    учат и сравнивают одну и ту же ревизию. Свой путь к .nemo — как есть."""
+    b = str(cfg['base'])
+    if os.path.exists(b):
+        return b
+    w, _ = paths(cfg)
+    name = b.rsplit('/', 1)[-1] + '.nemo'
+    dst = w / 'base' / name
+    if not dst.exists():
+        from huggingface_hub import hf_hub_download
+        src = hf_hub_download(b, name)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, f'{dst}.part')
+        os.replace(f'{dst}.part', dst)
+        log(f'исходная модель — на Диск: {dst} ({dst.stat().st_size / 2 ** 30:.2f} ГБ)')
+    return str(dst)
+
+
+def pack(cfg):
+    """Звук, шум и исходная модель — на Google Диск (правило владельца 03.11: всё для обучения — сначала на Диск)."""
+    w, c = paths(cfg)
+    for kind in ('audio', 'noise'):
+        pack_set(kind, cfg, w, c)
+    base_model(cfg)
+    log('на Диске:', w / 'shards')
 
 
 # ---------------------------------------------------------------- обучение
@@ -786,7 +940,7 @@ def train(cfg):
         return
     d = w / 'data'
     torch.manual_seed(cfg['seed'])
-    model = load_model(cfg['base'])
+    model = load_model(base_model(cfg))
     bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
     with open_dict(model.cfg):
         model.cfg.train_ds = ds_cfg(d / 'train.jsonl', cfg, True, w)
@@ -969,7 +1123,7 @@ def _hyps(cfg, tag):
     w, _ = paths(cfg)
     out = w / 'eval'
     rows = jload(out / 'sets.jsonl')
-    model = load_model(cfg['base'] if tag == 'base' else w / 'model' / 'parakeet-ft.nemo')
+    model = load_model(base_model(cfg) if tag == 'base' else w / 'model' / 'parakeet-ft.nemo')
     texts = transcribe(model, [r['audio_filepath'] for r in rows], cfg['asr_batch'])
     res = {}
     for r, t in zip(rows, texts):
@@ -978,7 +1132,7 @@ def _hyps(cfg, tag):
     log(f'ответы {tag}: {len(rows)} фраз')
 
 
-STAGES = dict(data=data, labels=labels, noise=noise, train=train, evaluate=evaluate, export=export)
+STAGES = dict(data=data, noise=noise, pack=pack, labels=labels, train=train, evaluate=evaluate, export=export)
 
 
 def main():
