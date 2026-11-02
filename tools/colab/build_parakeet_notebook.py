@@ -47,6 +47,9 @@ Golos), слова берутся из разметки, а знаки и заг
    контрольные точки обучения (по ~7 ГБ — на Google Диск они не пишутся) лежат на диске машины Colab, поэтому после
    обрыва этап данных скачает звук заново, а оборвавшееся обучение начнётся сначала.
 
+**Журналы:** вывод каждого этапа пишется ещё и в `falar-parakeet/logs/<этап>.log` на Диске. Если этап упадёт, «Выполнить
+всё» остановится на нём, а журнал останется, даже если закрыть Colab.
+
 **Место на Google Диске:** около 3,5 ГБ (дообученная модель 2,5 ГБ, выгрузка 0,65 ГБ, списки фраз и таблица).
 
 **Время на A100, примерно:**
@@ -75,7 +78,8 @@ SETTINGS = dict(
     lr=3e-5,
 )
 import json
-json.dump(dict(SETTINGS, profile=PROFILE), open('/content/parakeet_cfg.json', 'w'), ensure_ascii=False)"""
+json.dump(dict(SETTINGS, profile=PROFILE), open('/content/parakeet_cfg.json', 'w'), ensure_ascii=False)
+WORK = SETTINGS['work']   # журналы этапов — в WORK/logs на Диске: вывод не теряется, если закрыть Colab"""
 
 ENV = f"""import os, shutil, subprocess
 gpu = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'], capture_output=True,
@@ -84,6 +88,10 @@ print('Видеокарта:', gpu or 'нет', '· ядер процессор�
 assert gpu, 'нужна видеокарта: Среда выполнения → Сменить среду выполнения → A100 GPU или L4'
 from google.colab import drive
 drive.mount('/content/drive')
+# numba (потеря TDT) — с NVVM того же CUDA, что у драйвера Colab: системный, а не случайный из пакетов
+if os.path.isdir('/usr/local/cuda'):
+    os.environ.setdefault('CUDA_HOME', '/usr/local/cuda')
+print('CUDA_HOME =', os.environ.get('CUDA_HOME', '(нет)'))
 # NeMo — в своём окружении Python 3.12: в Colab новее Python, и не всё из NeMo под него собрано
 if not os.path.exists('{VENV}/bin/python'):
     !pip -q install uv
@@ -139,8 +147,11 @@ def build():
     for i, (name, text) in enumerate(STAGES):
         # «!» не останавливает «Выполнить всё», если команда упала: тогда следующие этапы шли впустую и ставили
         # зелёные галочки (Colab, 02.11). Проверка кода выхода останавливает прогон на упавшем этапе.
-        cells += [md(text), code(f'!{VENV}/bin/python /content/parakeet_ft.py {name} --cfg /content/parakeet_cfg.json\n'
-                                 f"assert _exit_code == 0, 'этап {name} упал — ошибка в выводе выше; «Выполнить всё» остановлено'")]
+        # вывод — и сюда, и в WORK/logs/<этап>.log на Диске (pipefail: код выхода — у самого этапа, а не у tee)
+        cells += [md(text), code(f'!mkdir -p "{{WORK}}/logs" && bash -c "set -o pipefail; {VENV}/bin/python -u /content/parakeet_ft.py '
+                                 f'{name} --cfg /content/parakeet_cfg.json 2>&1 | tee -a \'{{WORK}}/logs/{name}.log\'"\n'
+                                 f"assert _exit_code == 0, f'этап {name} упал — ошибка в выводе выше и в {{WORK}}/logs/{name}.log; "
+                                 f"«Выполнить всё» остановлено'")]
     cells += [code("import json\nfrom IPython.display import Markdown, display\n"
                    "w = json.load(open('/content/parakeet_cfg.json'))['work']\n"
                    "display(Markdown(open(f'{w}/eval/summary.md', encoding='utf-8').read()))\n"

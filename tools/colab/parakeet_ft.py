@@ -75,7 +75,7 @@ CFG = dict(
 # 150 и fp16; smoke — проверка всего пути на малых данных (минуты).
 PROFILES = dict(
     a100_80=dict(batch_duration=900),
-    a100_40=dict(batch_duration=500),
+    a100_40=dict(batch_duration=400),
     l4=dict(batch_duration=200),
     t4=dict(batch_duration=150, max_steps=3000),
     smoke=dict(hours=dict(coraa=0.15, mupe=0.15, golos_far=0.15, sova=0.1, fleurs_ru=0), test_n=30, dev_n=15, max_steps=20,
@@ -636,11 +636,32 @@ def ds_cfg(manifest, cfg, train, w):
     return OmegaConf.create(d)
 
 
+def env_report():
+    """Версии и пути — в журнал до обучения: в Colab ошибка с первого шага иначе неотличима от нехватки памяти."""
+    import numba
+    import torch
+    lines = [f'torch {torch.__version__} (CUDA {torch.version.cuda}), numba {numba.__version__}, '
+             f'CUDA_HOME={os.environ.get("CUDA_HOME", "")}']
+    if torch.cuda.is_available():
+        p = torch.cuda.get_device_properties(0)
+        lines.append(f'видеокарта {p.name}, {p.total_memory / 2 ** 30:.1f} ГБ, sm_{p.major}{p.minor}')
+    try:
+        from numba import cuda
+        from numba.cuda.cudadrv import libs, nvvm
+        lines.append(f'драйвер CUDA {cuda.cudadrv.driver.driver.get_version()}, NVVM {nvvm.NVVM().get_version()} '
+                     f'({libs.get_cudalib("nvvm")}), libdevice {libs.get_libdevice()}')
+    except Exception as e:                            # без NVVM потеря TDT не скомпилируется
+        lines.append(f'numba CUDA: ОШИБКА {type(e).__name__}: {e}')
+    for line in lines:
+        log(line)
+
+
 def train(cfg):
     import lightning.pytorch as pl
     import torch
     from omegaconf import OmegaConf, open_dict
     w, c = paths(cfg)
+    env_report()
     out = w / 'model' / 'parakeet-ft.nemo'
     if out.exists():
         log('обучение уже сделано:', out)
