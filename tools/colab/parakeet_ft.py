@@ -392,9 +392,76 @@ def fleurs(lang_code, split, cfg, c, hours=None, n=None):
     return rows
 
 
+def restore_stream(src, split, rows, cfg, c):
+    """Звука нет (новая машина Colab: диск прежней пропал вместе с ней), а список фраз на Диске есть. Поток с тем же
+    seed идёт в том же порядке: номер строки потока — тот же файл. Пишутся только недостающие, длительность каждого
+    сверяется со списком — иначе ошибка, а не тихая подмена звука под чужой текст."""
+    import multiprocessing as mp
+    from collections import deque
+    from concurrent.futures import ProcessPoolExecutor
+    need = {int(Path(r['audio_filepath']).stem): r for r in rows if not os.path.exists(r['audio_filepath'])}
+    if not need:
+        return
+    last, workers = max(need), cfg['data_workers'] or os.cpu_count() or 2
+    log(f'{src}/{split}: восстанавливаю звук — {len(need)} файлов из {len(rows)} (на диске машины Colab их нет)')
+    bad, done, t0, q = 0, 0, time.time(), deque()
+
+    def check(block):
+        nonlocal bad, done
+        while q and (block or q[0][1].done()):
+            row, fut = q.popleft()
+            dur = fut.result()
+            done += 1
+            if dur is None or abs(dur - row['duration']) > 0.05:
+                bad += 1
+            if not block:
+                continue
+            if len(q) < workers * 4:
+                break
+    with ProcessPoolExecutor(workers, mp_context=mp.get_context('spawn')) as pool:
+        for i, r in enumerate(_stream(SOURCES[src][0], split, cfg['seed'], cfg['stream_buffer'])):
+            if i in need:
+                q.append((need[i], pool.submit(_audio_job, (need[i]['audio_filepath'], r['audio'], 0.0, 1e9))))
+                check(len(q) >= workers * 8)
+            if i >= last:
+                break
+            if time.time() - t0 > 60:
+                t0 = time.time()
+                log(f'  {src}/{split}: восстановлено {done} из {len(need)} (поток — строка {i} из ~{last})')
+        while q:
+            check(True)
+    left = sum(1 for r in rows if not os.path.exists(r['audio_filepath']))
+    if bad or left:
+        raise SystemExit(f'{src}/{split}: поток с тем же seed дал другой звук (не совпали по длительности {bad}, нет файлов '
+                         f'{left}). Удалите папку data в falar-parakeet на Диске и запустите снова: данные соберутся с нуля')
+    log(f'{src}/{split}: звук восстановлен — {len(need)} файлов, длительности совпали')
+
+
+def restore_audio(cfg, out, c):
+    """Части, уже собранные на Диске: если их звука нет на этой машине — восстановить (FLEURS — тем же выбором по
+    таблице, потоки Hugging Face — тем же порядком)."""
+    for f in sorted((out / 'parts').glob('*.jsonl')):
+        rows = jload(f)
+        miss = sum(1 for r in rows if not os.path.exists(r['audio_filepath']))
+        if not miss:
+            continue
+        key = f.stem                                  # coraa_train, golos_far_test, fleurs_ru_train …
+        src, split = key.rsplit('_', 1)
+        if src.startswith('fleurs_'):
+            code = {'fleurs_ru': 'ru_ru', 'fleurs_pt': 'pt_br'}[src]
+            log(f'{key}: восстанавливаю звук — {miss} файлов (на диске машины Colab их нет)')
+            again = fleurs(code, split, cfg, c, hours=cfg['hours'].get(src) if split == 'train' else None,
+                           n=cfg['test_n'] if split == 'test' else None)
+            if [r['audio_filepath'] for r in again] != [r['audio_filepath'] for r in rows]:
+                raise SystemExit(f'{key}: выбор FLEURS разошёлся со списком на Диске — удалите папку data и запустите снова')
+        else:
+            restore_stream(src, SOURCES[src][1] if split == 'train' else SOURCES[src][2], rows, cfg, c)
+
+
 def data(cfg):
     w, c = paths(cfg)
     out = w / 'data'
+    restore_audio(cfg, out, c)                         # новая машина Colab: звук собранных частей — заново
     if (out / 'raw_train.jsonl').exists():
         log('данные уже собраны:', out)
         return
@@ -537,9 +604,13 @@ def noise(cfg):
     import soundfile as sf
     w, c = paths(cfg)
     d = w / 'noise'
-    if (d / 'noise.jsonl').exists() and (d / 'rir.jsonl').exists():
+    def files_ok(manifest):
+        return manifest.exists() and all(os.path.exists(r['audio_filepath']) for r in jload(manifest))
+    if files_ok(d / 'noise.jsonl') and files_ok(d / 'rir.jsonl'):
         log('шум уже готов')
         return
+    if (d / 'noise.jsonl').exists():
+        log('списки шума на Диске есть, а файлов на этой машине нет (новая машина Colab) — скачиваю заново')
     rirs = c / 'RIRS_NOISES'
     if cfg['rir_src'] == 'rirs' and not rirs.exists():
         arc = None
@@ -656,6 +727,32 @@ def env_report():
         log(line)
 
 
+def progress_callback(every=50):
+    """Строка хода раз в every шагов и val_wer после проверки — вместо полосы прогресса: она пишет обновление на
+    каждом шаге, и журнал на Диске вырастал до мегабайтов."""
+    import lightning.pytorch as pl
+
+    class Progress(pl.Callback):
+        def __init__(self):
+            self.t0 = time.time()
+
+        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            s = trainer.global_step
+            if s % every == 0 and s:
+                loss = outputs.get('loss') if isinstance(outputs, dict) else outputs
+                loss = float(loss.detach()) if hasattr(loss, 'detach') else float('nan')
+                lr = trainer.optimizers[0].param_groups[0]['lr']
+                el = time.time() - self.t0
+                log(f'шаг {s} из {trainer.max_steps}: потеря {loss:.3f}, lr {lr:.2e}, {el / 60:.0f} мин, '
+                    f'осталось ~{el / s * (trainer.max_steps - s) / 60:.0f} мин')
+
+        def on_validation_epoch_end(self, trainer, pl_module):
+            m = trainer.callback_metrics
+            if 'val_wer' in m:
+                log(f'проверка на шаге {trainer.global_step}: val_wer {float(m["val_wer"]):.4f}')
+    return Progress()
+
+
 def train(cfg):
     import lightning.pytorch as pl
     import torch
@@ -692,7 +789,8 @@ def train(cfg):
                          max_steps=cfg['max_steps'], val_check_interval=cfg['val_every'], check_val_every_n_epoch=None,
                          limit_train_batches=cfg['val_every'], log_every_n_steps=50, gradient_clip_val=cfg['grad_clip'],
                          use_distributed_sampler=False, enable_checkpointing=False, logger=False,
-                         num_sanity_val_steps=0)
+                         num_sanity_val_steps=0, enable_progress_bar=False,
+                         callbacks=[progress_callback(max(1, min(50, cfg['max_steps'] // 10)))])
     from nemo.utils.exp_manager import exp_manager
     exp_manager(trainer, OmegaConf.create(dict(
         exp_dir=str(ckpt), name='ckpt', create_tensorboard_logger=False, create_checkpoint_callback=True,
@@ -870,12 +968,27 @@ def main():
     ap.add_argument('--cfg-json', help=argparse.SUPPRESS)
     ap.add_argument('--tag', help=argparse.SUPPRESS)
     a = ap.parse_args()
-    if a.stage == '_hyps':
-        return _hyps(json.loads(a.cfg_json), a.tag)
-    over = json.loads(Path(a.cfg).read_text(encoding='utf-8')) if a.cfg else {}
-    cfg = with_profile(dict(CFG, **over, _set=tuple(over)), over.get('profile', a.profile))
-    log('этап', a.stage, '· профиль', cfg['profile'])
-    STAGES[a.stage](cfg)
+    try:
+        if a.stage == '_hyps':
+            _hyps(json.loads(a.cfg_json), a.tag)
+        else:
+            over = json.loads(Path(a.cfg).read_text(encoding='utf-8')) if a.cfg else {}
+            cfg = with_profile(dict(CFG, **over, _set=tuple(over)), over.get('profile', a.profile))
+            log('этап', a.stage, '· профиль', cfg['profile'])
+            STAGES[a.stage](cfg)
+    except SystemExit as e:
+        if e.code not in (None, 0):
+            print(e.code if isinstance(e.code, str) else f'выход {e.code}', file=sys.stderr, flush=True)
+            os._exit(1)
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush(); sys.stderr.flush()
+        os._exit(1)
+    # выход сразу, без обхода нитей: у потоков datasets при обычном завершении Python падал «PyGILState_Release»
+    # (код 134) уже после сделанной работы, и ноутбук остановил бы «Выполнить всё» на успешном этапе
+    sys.stdout.flush(); sys.stderr.flush()
+    os._exit(0)
 
 
 if __name__ == '__main__':
