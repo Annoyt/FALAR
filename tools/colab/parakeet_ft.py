@@ -49,7 +49,8 @@ CFG = dict(
     base='nvidia/parakeet-tdt-0.6b-v3',
     seed=1,
     # данные: часов по источникам (обучение)
-    hours=dict(coraa=70, mupe=70, golos_far=60, fleurs_ru=8),
+    hours=dict(coraa=70, mupe=70, golos_far=60, sova=50, fleurs_ru=8),   # Golos farfield — всё, что есть (~10 ч)
+    ru_min_share=0.33,           # русского в обучении не меньше этой доли часов — повтором фраз (иначе забывается)
     test_n=400,                  # фраз в каждом отложенном тесте
     fleurs_tests=True,           # тесты FLEURS pt-BR и ru (архивы ~0,5 ГБ)
     dev_n=200,                   # фраз проверки при обучении — на язык
@@ -70,13 +71,14 @@ CFG = dict(
     export_fp32=False,           # True — ещё и fp32 (2,4 ГБ) рядом с int8
 )
 
-# Объём по видеокарте: A100 80 ГБ — пачки по 900 с звука, 40 ГБ — 500, T4 (16 ГБ, без bf16) — 150 и fp16;
-# smoke — проверка всего пути на малых данных (минуты).
+# Объём по видеокарте: A100 80 ГБ — пачки по 900 с звука, 40 ГБ — 500, L4 и A10 (24 ГБ) — 200, T4 (16 ГБ, без bf16) —
+# 150 и fp16; smoke — проверка всего пути на малых данных (минуты).
 PROFILES = dict(
     a100_80=dict(batch_duration=900),
     a100_40=dict(batch_duration=500),
+    l4=dict(batch_duration=200),
     t4=dict(batch_duration=150, max_steps=3000),
-    smoke=dict(hours=dict(coraa=0.15, mupe=0.15, golos_far=0.15, fleurs_ru=0), test_n=30, dev_n=15, max_steps=20,
+    smoke=dict(hours=dict(coraa=0.15, mupe=0.15, golos_far=0.15, sova=0.1, fleurs_ru=0), test_n=30, dev_n=15, max_steps=20,
                val_every=10, warmup=5, babble_n=10, batch_duration=8, max_sec=8.0, num_workers=2, fleurs_tests=False,
                stream_buffer=50, asr_batch=4),
 )
@@ -129,7 +131,7 @@ def paths(cfg):
 
 
 def gpu_profile():
-    """Профиль по видеокарте: a100_80, a100_40, t4; None — видеокарты нет."""
+    """Профиль по видеокарте: a100_80, a100_40, l4 (24 ГБ), t4; None — видеокарты нет."""
     try:
         import torch
     except ImportError:
@@ -139,7 +141,7 @@ def gpu_profile():
     gb = torch.cuda.get_device_properties(0).total_memory / 2 ** 30
     if torch.cuda.get_device_capability()[0] < 8:
         return 't4'
-    return 'a100_80' if gb > 60 else 'a100_40'
+    return 'a100_80' if gb > 60 else 'a100_40' if gb > 30 else 'l4' if gb > 18 else 't4'
 
 
 def with_profile(cfg, profile='auto'):
@@ -265,12 +267,18 @@ SOURCES = {
     'coraa': ('Racoci/CORAA-v1.1', 'train', 'test', 'pt', 'text', False, coraa_ok),
     'mupe': ('nilc-nlp/CORAA-MUPE-ASR', 'train', 'test', 'pt', 'original_text', True, None),
     'golos_far': ('bond005/sberdevices_golos_100h_farfield', 'train', 'test', 'ru', 'transcription', False, None),
+    'sova': ('bond005/sova_rudevices', 'train', 'test', 'ru', 'transcription', False, None),
 }
 
 
 def _audio_job(job):
-    """В процессе пула: звук строки → FLAC 16 кГц, если длительность годится. Возвращает длительность или None."""
+    """В процессе пула: звук строки → FLAC 16 кГц, если длительность годится. Возвращает длительность или None.
+    Уже записанный файл не разбирается: длительность — из его заголовка (повторный запуск после обрыва)."""
     path, audio, lo, hi = job
+    if audio is None:
+        import soundfile as sf
+        dur = sf.info(path).duration
+        return dur if lo <= dur <= hi else None
     x, sr = _decode(audio)
     dur = len(x) / sr
     if not lo <= dur <= hi:
@@ -284,10 +292,14 @@ def _audio_job(job):
 def take_stream(src, split, cfg, c, hours=None, n=None):
     """Строки источника до нужного объёма: часов (обучение) или фраз (тест). Поток читается здесь, разбор звука и
     запись FLAC — в пуле процессов (на 200 ч звука в одном процессе ушли бы часы)."""
+    import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
     name, _, _, lang, field, pnc, ok = SOURCES[src]
     rows, total, pending = [], 0.0, []
     workers = cfg['data_workers'] or os.cpu_count() or 2
+    last = [time.time(), 0]                            # строка хода — раз в минуту
+    log(f'{src}/{split}: читаю поток {name}, нужно {f"{hours} ч" if hours is not None else f"{n} фраз"}; '
+        f'процессов разбора звука {workers}')
 
     def enough():
         return (hours is not None and total >= hours * 3600) or (n is not None and len(rows) >= n)
@@ -305,10 +317,12 @@ def take_stream(src, split, cfg, c, hours=None, n=None):
             if dur is not None and not enough():
                 rows.append(dict(row, duration=round(dur, 3)))
                 total += dur
-                if len(rows) % 2000 == 0:
-                    log(f'  {src}/{split}: {len(rows)} фраз, {total / 3600:.1f} ч')
+            if time.time() - last[0] > 60:
+                last[0] = time.time()
+                log(f'  {src}/{split}: {len(rows)} фраз, {total / 3600:.2f} ч')
 
-    with ProcessPoolExecutor(workers) as pool:
+    # spawn, а не fork: поток datasets держит свои нити, а fork посреди них может замереть навсегда
+    with ProcessPoolExecutor(workers, mp_context=mp.get_context('spawn')) as pool:
         for i, r in enumerate(_stream(name, split, cfg['seed'], cfg['stream_buffer'])):
             if enough():
                 break
@@ -319,7 +333,7 @@ def take_stream(src, split, cfg, c, hours=None, n=None):
             if len(words_norm(text)) < 1:
                 continue
             p = c / 'audio' / f'{src}-{split}' / f'{i:07d}.flac'
-            fut = pool.submit(_audio_job, (str(p), r['audio'], cfg['min_sec'], cfg['max_sec']))
+            fut = pool.submit(_audio_job, (str(p), None if p.exists() else r['audio'], cfg['min_sec'], cfg['max_sec']))
             pending.append((fut, dict(audio_filepath=str(p), text=text, lang=lang, src=src, pnc=pnc)))
             collect(len(pending) >= workers * 8)
         while pending and not enough():
@@ -340,31 +354,41 @@ def fleurs(lang_code, split, cfg, c, hours=None, n=None):
     lang = lang_code[:2]
     tsv = hf_hub_download('google/fleurs', f'data/{lang_code}/{split}.tsv', repo_type='dataset')
     arc = hf_hub_download('google/fleurs', f'data/{lang_code}/audio/{split}.tar.gz', repo_type='dataset')
-    meta = {}
+    # таблица: id, файл, исходный текст, нормализованный, по буквам, число отсчётов (16 кГц), пол
+    meta = []
     for line in open(tsv, encoding='utf-8'):
         p = line.rstrip('\n').split('\t')
-        if len(p) > 2:
-            meta[p[1]] = p[2]                         # имя файла → исходный текст (raw_transcription)
-    rows, total = [], 0.0
-    rng = random.Random(cfg['seed'])
-    with tarfile.open(arc) as tf:
-        members = [m for m in tf.getmembers() if m.isfile() and os.path.basename(m.name) in meta]
-        rng.shuffle(members)
-        for m in members:
-            text = drop_fillers(meta[os.path.basename(m.name)].strip(), lang)
-            import soundfile as sf
-            x, sr = sf.read(io.BytesIO(tf.extractfile(m).read()), dtype='float32')
-            dur = len(x) / sr
-            if not text or not cfg['min_sec'] <= dur <= cfg['max_sec']:
-                continue
-            p = c / 'audio' / f'fleurs_{lang}-{split}' / (os.path.basename(m.name).rsplit('.', 1)[0] + '.flac')
-            if not p.exists():
-                _write_flac(p, x, sr)
-            rows.append(dict(audio_filepath=str(p), duration=round(dur, 3), text=text, lang=lang, src=f'fleurs_{lang}', pnc=True))
+        if len(p) >= 7 and p[5].isdigit():
+            text = drop_fillers(p[2].strip(), lang)
+            dur = int(p[5]) / SR
+            if text and cfg['min_sec'] <= dur <= cfg['max_sec']:
+                meta.append((p[1], text, dur))
+    random.Random(cfg['seed']).shuffle(meta)
+    pick, total = {}, 0.0                            # выбор — по таблице, до чтения звука
+    for name, text, dur in meta:
+        if (hours is not None and total >= hours * 3600) or (n is not None and len(pick) >= n):
+            break
+        if name not in pick:
+            pick[name] = (text, dur)
             total += dur
-            if (hours is not None and total >= hours * 3600) or (n is not None and len(rows) >= n):
+    # tar.gz — только подряд: чтение вразнобой распаковывает архив каждый раз с начала (в Colab 01.11 — часы)
+    import soundfile as sf
+    got = {}
+    with tarfile.open(arc, mode='r|gz') as tf:
+        for m in tf:
+            base = os.path.basename(m.name)
+            if not m.isfile() or base not in pick:
+                continue
+            p = c / 'audio' / f'fleurs_{lang}-{split}' / (base.rsplit('.', 1)[0] + '.flac')
+            if not p.exists():
+                x, sr = sf.read(io.BytesIO(tf.extractfile(m).read()), dtype='float32')
+                _write_flac(p, x, sr)
+            got[base] = p
+            if len(got) == len(pick):                 # всё нужное найдено — дальше архив не читаем
                 break
-    log(f'fleurs_{lang}/{split}: {len(rows)} фраз, {total / 3600:.2f} ч')
+    rows = [dict(audio_filepath=str(got[name]), duration=round(dur, 3), text=text, lang=lang, src=f'fleurs_{lang}', pnc=True)
+            for name, (text, dur) in pick.items() if name in got]
+    log(f'fleurs_{lang}/{split}: {len(rows)} фраз, {sum(r["duration"] for r in rows) / 3600:.2f} ч')
     return rows
 
 
@@ -374,19 +398,32 @@ def data(cfg):
     if (out / 'raw_train.jsonl').exists():
         log('данные уже собраны:', out)
         return
+
+    def part(key, fn):
+        """Источник целиком — на Диск, как только собран: после обрыва он не собирается заново."""
+        f = out / 'parts' / f'{key}.jsonl'
+        if f.exists():
+            rows = jload(f)
+            log(f'{key}: уже собран — {len(rows)} фраз')
+            return rows
+        rows = fn()
+        jdump(rows, f)
+        return rows
+
     h = cfg['hours']
     train = []
-    for src in ('coraa', 'mupe', 'golos_far'):
+    for src in SOURCES:
         if h.get(src):
-            train += take_stream(src, SOURCES[src][1], cfg, c, hours=h[src])
+            train += part(f'{src}_train', lambda: take_stream(src, SOURCES[src][1], cfg, c, hours=h[src]))
     if h.get('fleurs_ru'):
-        train += fleurs('ru_ru', 'train', cfg, c, hours=h['fleurs_ru'])
+        train += part('fleurs_ru_train', lambda: fleurs('ru_ru', 'train', cfg, c, hours=h['fleurs_ru']))
     tests = {}
-    for src in ('coraa', 'mupe', 'golos_far'):
-        tests[src] = take_stream(src, SOURCES[src][2], cfg, c, n=cfg['test_n'])
+    for src in SOURCES:
+        if h.get(src):
+            tests[src] = part(f'{src}_test', lambda: take_stream(src, SOURCES[src][2], cfg, c, n=cfg['test_n']))
     if cfg['fleurs_tests']:
-        tests['fleurs_pt'] = fleurs('pt_br', 'test', cfg, c, n=cfg['test_n'])
-        tests['fleurs_ru'] = fleurs('ru_ru', 'test', cfg, c, n=cfg['test_n'])
+        tests['fleurs_pt'] = part('fleurs_pt_test', lambda: fleurs('pt_br', 'test', cfg, c, n=cfg['test_n']))
+        tests['fleurs_ru'] = part('fleurs_ru_test', lambda: fleurs('ru_ru', 'test', cfg, c, n=cfg['test_n']))
     for name, rows in tests.items():
         jdump(rows, out / f'raw_test_{name}.jsonl')
     jdump(train, out / 'raw_train.jsonl')
@@ -414,11 +451,17 @@ def load_model(name_or_path, device='cuda'):
     return m
 
 
-def transcribe(model, files, batch=32):
-    out = model.transcribe([str(f) for f in files], batch_size=batch, verbose=False)
-    if isinstance(out, tuple):                       # старые версии: (лучшие, все)
-        out = out[0]
-    return [(o.text if hasattr(o, 'text') else str(o)).strip() for o in out]
+def transcribe(model, files, batch=32, part=2000):
+    """Распознать файлы; кусками по part — со строкой хода (на 150 тыс. фраз иначе тишина на четверть часа)."""
+    res, t0 = [], time.time()
+    for k in range(0, len(files), part):
+        out = model.transcribe([str(f) for f in files[k:k + part]], batch_size=batch, verbose=False)
+        if isinstance(out, tuple):                   # старые версии: (лучшие, все)
+            out = out[0]
+        res += [(o.text if hasattr(o, 'text') else str(o)).strip() for o in out]
+        if len(files) > part:
+            log(f'  распознано {len(res)} из {len(files)} ({time.time() - t0:.0f} с)')
+    return res
 
 
 def label_rows(rows, texts, cfg):
@@ -465,7 +508,18 @@ def labels(cfg):
     rng.shuffle(tr)
     dev = [r for lang in ('pt', 'ru') for r in [x for x in tr if x['lang'] == lang][:cfg['dev_n']]]
     held = {r['audio_filepath'] for r in dev}
-    jdump([r for r in tr if r['audio_filepath'] not in held], d / 'train.jsonl')
+    tr = [r for r in tr if r['audio_filepath'] not in held]
+    # русского заметно меньше португальского: без повтора модель его забывает (шаг 16а — TAGARELA)
+    hrs = {lang: sum(r['duration'] for r in tr if r['lang'] == lang) / 3600 for lang in ('pt', 'ru')}
+    share = cfg['ru_min_share']
+    k = 1
+    if hrs['ru'] > 0 and hrs['ru'] / (hrs['ru'] + hrs['pt']) < share:
+        k = min(4, math.ceil(share * hrs['pt'] / ((1 - share) * hrs['ru'])))
+        tr += [r for r in tr if r['lang'] == 'ru'] * (k - 1)
+    rng.shuffle(tr)
+    log(f'обучение: pt {hrs["pt"]:.1f} ч, ru {hrs["ru"]:.1f} ч × {k} (повтор) → доля ru '
+        f'{k * hrs["ru"] / (k * hrs["ru"] + hrs["pt"]):.0%}')
+    jdump(tr, d / 'train.jsonl')
     jdump(dev, d / 'dev.jsonl')                       # одна выборка на оба языка — одна метрика val_wer
 
 

@@ -25,8 +25,10 @@ parakeet-tdt-0.6b-v3 — распознаватель речи Falar, один �
 **Данные — открытые; разговоры владельца сюда не попадают.**
 - Португальский: CORAA v1.1 (только pt-BR, без замечаний оценщиков; CC BY-NC-ND 4.0) и CORAA-MUPE (интервью со
   знаками).
-- Русский: Golos farfield (дальний микрофон, лицензия Сбера) и FLEURS ru (CC BY 4.0).
-- Отложенные тесты: CORAA, MUPE, FLEURS pt-BR и ru, Golos farfield.
+- Русский: Golos farfield (дальний микрофон, лицензия Сбера, ~10 ч), SOVA RuDevices (речь на устройствах, CC BY 4.0)
+  и FLEURS ru (CC BY 4.0). Русского меньше португальского, поэтому его фразы повторяются, пока его не станет треть
+  часов обучения: иначе модель его забывает.
+- Отложенные тесты: CORAA, MUPE, FLEURS pt-BR и ru, Golos farfield, SOVA.
 - Шум: MUSAN (CC BY 4.0), комнаты RIRS_NOISES (Apache-2.0).
 
 parakeet пишет со знаками и заглавными, и это нельзя потерять: от знаков зависит перевод. Где в данных их нет (CORAA,
@@ -38,7 +40,8 @@ Golos), слова берутся из разметки, а знаки и заг
 до/после в `falar-parakeet/eval/summary.md`.
 
 **Как запустить**
-1. Среда выполнения → Сменить среду выполнения → **A100 GPU** (и «Высокий объём RAM», если предложит).
+1. Среда выполнения → Сменить среду выполнения → **A100 GPU** (или **L4** — пачки сами станут меньше, всё вдвое дольше)
+   и «Высокий объём RAM», если предложит.
 2. Среда выполнения → **Выполнить всё**. Colab попросит доступ к Google Диску: итоги этапов сохраняются туда.
 3. Вкладку не закрывать. Если сессия оборвётся — снова «Выполнить всё»: готовые этапы пропускаются. Звук и
    контрольные точки обучения (по ~7 ГБ — на Google Диск они не пишутся) лежат на диске машины Colab, поэтому после
@@ -67,7 +70,7 @@ SETTINGS = """# Объём — по видеокарте сам (PROFILE='auto')
 PROFILE = 'auto'
 SETTINGS = dict(
     work='/content/drive/MyDrive/falar-parakeet',   # итоги этапов — на Google Диске
-    hours=dict(coraa=70, mupe=70, golos_far=60, fleurs_ru=8),   # часов обучения по источникам
+    hours=dict(coraa=70, mupe=70, golos_far=60, sova=50, fleurs_ru=8),   # часов обучения по источникам
     max_steps=5000,
     lr=3e-5,
 )
@@ -78,7 +81,7 @@ ENV = f"""import os, shutil, subprocess
 gpu = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'], capture_output=True,
                      text=True).stdout.strip() if shutil.which('nvidia-smi') else ''
 print('Видеокарта:', gpu or 'нет', '· ядер процессора:', os.cpu_count())
-assert gpu, 'нужна видеокарта: Среда выполнения → Сменить среду выполнения → A100 GPU'
+assert gpu, 'нужна видеокарта: Среда выполнения → Сменить среду выполнения → A100 GPU или L4'
 from google.colab import drive
 drive.mount('/content/drive')
 # NeMo — в своём окружении Python 3.12: в Colab новее Python, и не всё из NeMo под него собрано
@@ -89,8 +92,10 @@ if not os.path.exists('{VENV}/bin/python'):
 !{VENV}/bin/python -c "import torch, nemo; print('NeMo', nemo.__version__, '· torch', torch.__version__, '· CUDA', torch.cuda.is_available())\""""
 
 STAGES = [
-    ('data', '## 4. Данные\nCORAA (только pt-BR, без замечаний оценщиков), CORAA-MUPE, Golos farfield, FLEURS ru — потоком '
-     'с Hugging Face; звук — 16 кГц FLAC на диск машины Colab. Отложенные тесты — из своих частей каждого набора.'),
+    ('data', '## 4. Данные\nCORAA (только pt-BR, без замечаний оценщиков), CORAA-MUPE, Golos farfield, SOVA, FLEURS ru — потоком '
+     'с Hugging Face; звук — 16 кГц FLAC на диск машины Colab. Отложенные тесты — из своих частей каждого набора. '
+     'Каждый собранный источник сразу ложится на Диск: после обрыва он не собирается заново, а уже записанный звук '
+     'не разбирается. Строка хода — раз в минуту.'),
     ('labels', '## 5. Разметка\nparakeet распознаёт каждую фразу. Где в данных нет знаков, слова берутся из разметки, а '
      'знаки и заглавные — из его ответа. Фраза отбрасывается, если он расходится с разметкой больше чем на половину '
      'слов или пишет цифрами то, что в разметке словами.'),
