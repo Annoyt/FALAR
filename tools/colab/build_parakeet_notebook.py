@@ -137,7 +137,10 @@ def build():
              md('## 3. Код конвейера\nТот же файл, что `tools/colab/parakeet_ft.py` в репозитории Falar.'),
              code('%%writefile /content/parakeet_ft.py\n' + module.rstrip('\n'))]
     for i, (name, text) in enumerate(STAGES):
-        cells += [md(text), code(f'!{VENV}/bin/python /content/parakeet_ft.py {name} --cfg /content/parakeet_cfg.json')]
+        # «!» не останавливает «Выполнить всё», если команда упала: тогда следующие этапы шли впустую и ставили
+        # зелёные галочки (Colab, 02.11). Проверка кода выхода останавливает прогон на упавшем этапе.
+        cells += [md(text), code(f'!{VENV}/bin/python /content/parakeet_ft.py {name} --cfg /content/parakeet_cfg.json\n'
+                                 f"assert _exit_code == 0, 'этап {name} упал — ошибка в выводе выше; «Выполнить всё» остановлено'")]
     cells += [code("import json\nfrom IPython.display import Markdown, display\n"
                    "w = json.load(open('/content/parakeet_cfg.json'))['work']\n"
                    "display(Markdown(open(f'{w}/eval/summary.md', encoding='utf-8').read()))\n"
