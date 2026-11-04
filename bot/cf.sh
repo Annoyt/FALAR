@@ -23,6 +23,11 @@ setv() {   # заменить или добавить KEY=VALUE, права 600
   printf '%s=%s\n' "$1" "$2" >> "$t"; chmod 600 "$t"; mv "$t" "$ENV"
 }
 username() { node cf/tg.mjs getMe 2>/dev/null | sed -n 's/.*"username": "\(.*\)".*/\1/p'; }
+# wrangler.jsonc собирает deploy; секретам (owner, github) он тоже нужен — в свежей рабочей копии его нет (04.11:
+# «Required Worker name missing», токен остался только в bot.env).
+cfg() { [ -f wrangler.jsonc ] && return 0; local id; id=$(get CF_D1_ID)
+  [ -n "$id" ] || { echo "нет CF_D1_ID в $ENV — сначала bash bot/cf.sh deploy" >&2; exit 1; }
+  sed "s/__D1_ID__/$id/" wrangler.template.jsonc > wrangler.jsonc; }
 
 case "${1:-}" in
 login)
@@ -82,7 +87,7 @@ deploy)
   ;;
 owner)
   [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "Нужно число: bash bot/cf.sh owner 123456789" >&2; exit 1; }
-  setv FALAR_BOT_OWNER "$2"
+  setv FALAR_BOT_OWNER "$2"; cfg
   node cf/secrets.mjs | $W secret bulk > /dev/null && echo "Разработчик: $2 — бот теперь пересылает сообщения вам"
   ;;
 status)
@@ -94,7 +99,8 @@ github)
   # Сводка скачиваний (handlers/scheduled) ходит в API GitHub без токена: 60 запросов в час на адрес, а адреса
   # у Cloudflare общие. Если бот пишет, что лимит кончился, — токен даёт 5000 в час и ничего не разрешает.
   echo "Токен GitHub только для чтения: github.com/settings/personal-access-tokens/new →"
-  echo "Repository access: «Public repositories», права не нужны → Generate token."
+  echo "Repository access: «Only select repositories» → Annoyt/FALAR; Repository permissions → «Administration»: Read-only"
+  echo "(клоны и просмотры репозитория в сводке «Аналитика»; менять он ничего не может) → Generate token."
   read -rsp "Вставьте токен (ввод не виден): " RAW; echo
   T=$(printf '%s' "$RAW" | grep -oE 'github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}' | head -1); unset RAW
   [ -n "$T" ] || { echo "Токен не найден во вставленном: нужна строка вида github_pat_… или ghp_…" >&2; exit 1; }
@@ -103,7 +109,7 @@ github)
     t=$(mktemp "$ENV.XXXX"); grep -v '^GITHUB_TOKEN=' "$ENV" > "$t" || true; chmod 600 "$t"; mv "$t" "$ENV"
     echo "GitHub не принял токен — проверьте и повторите." >&2; exit 1
   fi
-  node cf/secrets.mjs | $W secret bulk > /dev/null && echo "Токен GitHub сохранён и передан боту: $lim запросов в час"
+  cfg; node cf/secrets.mjs | $W secret bulk > /dev/null && echo "Токен GitHub сохранён и передан боту: $lim"
   ;;
 *)
   sed -n '2,11p' "$0"; exit 1 ;;

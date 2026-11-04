@@ -9,4 +9,9 @@ const r = await fetch('https://api.github.com/rate_limit', {
   headers: { 'user-agent': 'falar-feedback-bot', accept: 'application/vnd.github+json', authorization: 'Bearer ' + env.GITHUB_TOKEN },
 });
 if (r.status !== 200) { console.error('GitHub ответил ' + r.status); process.exit(1); }
-console.log((await r.json()).resources.core.limit);
+const lim = (await r.json()).resources.core.limit;
+// Клоны и просмотры для сводки «Аналитика» — только с доступом «Administration: read» к репозиторию.
+const t = await fetch('https://api.github.com/repos/Annoyt/FALAR/traffic/clones', {
+  headers: { 'user-agent': 'falar-feedback-bot', accept: 'application/vnd.github+json', authorization: 'Bearer ' + env.GITHUB_TOKEN },
+});
+console.log(lim + ' запросов в час; клоны и просмотры репозитория — ' + (t.status === 200 ? 'видны' : 'не видны (' + t.status + ': нужен доступ «Administration: read» к Annoyt/FALAR)'));
