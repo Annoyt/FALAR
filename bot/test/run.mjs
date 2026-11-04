@@ -324,15 +324,41 @@ eq(S.growth({ 'v1/Falar.apk': 5, 'v2/Falar.apk': 2, 'v1/latest.json': 3 }, { 'v1
   { 'Falar.apk': 4, 'Falar-slim.apk': 0, 'latest.json': 0 }, 'A5 прирост: новый выпуск — с нуля, перезалитый файл — не минус');
 eq([S.period(24 * 3600), S.period(17 * 3600), S.period(49 * 3600), S.period(60)], ['за сутки', 'за 17 ч', 'за 2 сут.', 'за 1 ч'], 'A6 срок словами');
 let txt = S.report(sn, null, at(3, 16));
-eq(txt.split('\n').slice(0, 3), ['📊 GitHub · 03.10 · первая сводка', 'Всего с 0.28.0: APK 6, облегчённый 1, проверок обновлений 6',
+eq(txt.split('\n').slice(0, 3), ['📊 GitHub · 03.10 · первая сводка', 'Всего с 0.28.0: APK 6, облегчённый 1',
   'Выпуск 0.29.0 от 03.10: APK 2, облегчённый 0'], 'A7 первая сводка: всего и последний выпуск');
 ok(/каждый день около 09:00/.test(txt) && /примерно сколько копий/.test(txt), 'A7 когда дальше и как читать');
 const list2 = [REL('v0.29.0', '2026-10-03T08:00:00Z', [5, 1, 4]), REL('v0.28.0', '2026-10-02T07:00:00Z', [3, 1, 9])];
 txt = S.report(S.snapshot(list2), { at: at(3, 9), counts: sn.counts }, at(4, 9));
-eq(txt.split('\n').slice(0, 3), ['📊 GitHub · 04.10 · за сутки', 'APK скачали: +3 (облегчённый: +1)',
-  'Проверок обновлений: +7 — примерно столько копий Falar было в сети'], 'A8 сводка за сутки');
+eq(txt.split('\n').slice(0, 4), ['📊 GitHub · 04.10 · за сутки', 'APK скачали: +3 (облегчённый: +1) — выпуск 0.29.0',
+  'Проверок обновлений: +3 — примерно столько копий Falar было в сети',
+  '#роботы старые выпуски: +4 файла из 1 выпуска — так качают роботы и зеркала, не люди'], 'A8 сводка за сутки: свой выпуск отдельно от старых');
 txt = S.report(S.snapshot(list2), { at: at(3, 16), counts: sn.counts }, at(4, 9));
-eq([txt.split('\n')[0], txt.split('\n')[2]], ['📊 GitHub · 04.10 · за 17 ч', 'Проверок обновлений: +7'], 'A8 не сутки — срок словами, без «столько копий»');
+eq([txt.split('\n')[0], txt.split('\n')[2]], ['📊 GitHub · 04.10 · за 17 ч', 'Проверок обновлений: +3'], 'A8 не сутки — срок словами, без «столько копий»');
+// старые выпуски — роботы: 31.10.2026 каждый файл всех выпусков скачали по разу, а сводка насчитала +24 «проверки»
+const RL = (tag, n, date) => REL(tag, date || '2026-10-01T00:00:00Z', n);
+const snapBefore = S.snapshot([RL('v0.35.1', [10, 5, 30], '2026-10-30T09:00:00Z'), RL('v0.35.0', [3, 1, 4]), RL('v0.21.0', [7, 2, 9])]);
+const bulk = S.snapshot([RL('v0.35.1', [11, 6, 33], '2026-10-30T09:00:00Z'), RL('v0.35.0', [4, 2, 5]), RL('v0.21.0', [8, 3, 10])]);
+let sp = S.split(bulk, { latest: snapBefore.latest, counts: snapBefore.counts });
+eq([sp.live, sp.old, [...sp.oldReleases]], [{ 'Falar.apk': 1, 'Falar-slim.apk': 1, 'latest.json': 3 }, 6, ['v0.35.0', 'v0.21.0']],
+  'S1 свой выпуск — люди и проверки, старые — отдельно');
+const nw = S.snapshot([RL('v0.36.0', [2, 1, 1], '2026-11-04T08:00:00Z'), RL('v0.35.1', [12, 6, 35], '2026-10-30T09:00:00Z')]);
+sp = S.split(nw, { latest: bulk.latest, counts: bulk.counts });
+eq([sp.live['Falar.apk'], sp.live['latest.json'], sp.old], [3, 3, 0], 'S1 выпуск сменился за сутки — и новый, и прежний свои');
+txt = S.report(bulk, { at: at(30, 9), counts: snapBefore.counts, latest: snapBefore.latest }, at(31, 9));
+ok(txt.includes('Проверок обновлений: +3 —') && txt.includes('#роботы старые выпуски: +6 файлов из 2 выпусков'), 'S2 массовое скачивание старых — строкой #роботы, не проверками');
+eq([S.plural(1, 'файл', 'файла', 'файлов'), S.plural(3, 'файл', 'файла', 'файлов'), S.plural(11, 'файл', 'файла', 'файлов'),
+  S.plural(22, 'файл', 'файла', 'файлов'), S.plural(45, 'файл', 'файла', 'файлов')], ['файл', 'файла', 'файлов', 'файла', 'файлов'], 'S3 склонение');
+// репозиторий: клоны и просмотры за последний полный день по UTC
+const REPO_ = { forks: 1, stars: 0, watchers: 0, clones: [['2026-10-30', 22, 10], ['2026-10-31', 130, 23], ['2026-11-01', 5, 2]],
+  views: [['2026-10-31', 0, 0], ['2026-11-01', 0, 0]] };
+eq(S.repoLine(REPO_, { forks: 0, stars: 0 }, Date.UTC(2026, 10, 1, 4) / 1000),
+  '#роботы Репозиторий за 31.10: клонов 130 (мест 23), просмотров 0 — без просмотров страниц, копируют роботы · форков 1 (+1), звёзд 0',
+  'S4 клоны без просмотров — роботы; форк — с приростом; сегодняшний неполный день не берётся');
+eq(S.repoLine({ ...REPO_, views: [['2026-10-31', 4, 2]] }, REPO_, Date.UTC(2026, 10, 1, 4) / 1000),
+  'Репозиторий за 31.10: клонов 130 (мест 23), просмотров 4 · форков 1, звёзд 0', 'S4 есть просмотры — без пометки');
+ok(/не видны: токену GitHub нужен доступ «Administration: read»/.test(S.repoLine({ forks: 0, stars: 0, traffic: 403 }, undefined, at(1, 9))), 'S4 нет доступа к клонам — подсказка в первый раз');
+eq(S.repoLine({ forks: 0, stars: 0, traffic: 403 }, { forks: 0, stars: 0 }, at(1, 9)), 'Репозиторий: форков 0, звёзд 0', 'S4 потом — без подсказки');
+eq(S.repoLine(null, null, 0), null, 'S4 нет сведений — нет строки');
 eq(S.delayed(at(4, 12), { status: 403, limited: true }, false),
   '📊 Сводка за 04.10 задерживается: GitHub не отдал счётчики (HTTP 403, лимит запросов без токена). Пробую каждый час.\n' +
   'Чтобы не зависеть от лимита — токен GitHub только для чтения: bash bot/cf.sh github', 'A9 лимит без токена — почему и как помочь');
@@ -359,8 +385,8 @@ const an = thread();
 s = sent(cs, 'sendMessage');
 eq(s.map((c) => [c.params.chat_id, c.params.message_thread_id]), [[GROUP, an]], 'A10 первая сводка — в «Аналитику»');
 ok(s[0].params.text.startsWith('📊 GitHub · 03.10 · первая сводка'), 'A10 текст первой сводки');
-ok(gh.length === 1 && gh[0].url === 'https://api.github.com/repos/Annoyt/FALAR/releases?per_page=100&page=1' &&
-  gh[0].headers['user-agent'] === 'falar-feedback-bot' && !('authorization' in gh[0].headers), 'A10 один запрос: адрес, user-agent, без токена');
+ok(gh[0].url === 'https://api.github.com/repos/Annoyt/FALAR/releases?per_page=100&page=1' && gh[1].url === 'https://api.github.com/repos/Annoyt/FALAR' &&
+  gh[0].headers['user-agent'] === 'falar-feedback-bot' && !('authorization' in gh[0].headers), 'A10 запросы: выпуски, потом репозиторий; user-agent, без токена');
 eq(sdk.rows('SELECT day, at FROM stats'), [{ day: '2026-10-03', at: at(3, 16) }], 'A10 снимок дня — в базе');
 gh.length = 0; NOW = at(3, 17); await daily();
 eq([calls().length, gh.length], [0, 0], 'A11 в тот же день — ни GitHub, ни сообщений');
@@ -368,7 +394,7 @@ NOW = at(4, 8); await daily();
 eq([calls().length, gh.length], [0, 0], 'A11 назавтра до 9:00 — рано');
 ghList = list2; NOW = at(4, 9); await daily();
 s = sent(calls(), 'sendMessage');
-eq(s.map((c) => c.params.text.split('\n').slice(0, 2)), [['📊 GitHub · 04.10 · за 17 ч', 'APK скачали: +3 (облегчённый: +1)']], 'A12 назавтра в 9:05 — прирост с 16:05 вчера');
+eq(s.map((c) => c.params.text.split('\n').slice(0, 2)), [['📊 GitHub · 04.10 · за 17 ч', 'APK скачали: +3 (облегчённый: +1) — выпуск 0.29.0']], 'A12 назавтра в 9:05 — прирост с 16:05 вчера');
 eq(sdk.rows('SELECT day FROM stats ORDER BY day').map((r) => r.day), ['2026-10-03', '2026-10-04'], 'A12 второй снимок');
 ghFail = 403; NOW = at(5, 9); await daily();
 eq([calls().length, sdk.rows('SELECT count(*) AS n FROM stats')[0].n], [0, 2], 'A13 GitHub отказал в 9:05 — молча и без снимка, попробует через час');
@@ -396,6 +422,21 @@ owner.setOwner(OWNER);
 sdk.api.fail('sendMessage', 'Forbidden: bot was kicked from the supergroup chat', 403);
 await daily();
 eq(calls().map((c) => [c.method, c.params.chat_id]), [['sendMessage', GROUP], ['sendMessage', OWNER]], 'A18 в группу не вышло (не топик) — в личку');
+// репозиторий: открытые сведения и трафик (поддельный GitHub отвечает по адресу)
+globalThis.fetch = async (url, o) => {
+  gh.push({ url, headers: o.headers });
+  const J = (x, st = 200) => ({ status: st, headers: { get: () => null }, json: async () => x });
+  if (url.endsWith('/repos/Annoyt/FALAR')) return J({ forks_count: 2, stargazers_count: 1, subscribers_count: 0 });
+  if (url.endsWith('/traffic/clones')) return J({ count: 9, uniques: 3, clones: [{ timestamp: '2026-10-08T00:00:00Z', count: 7, uniques: 3 }, { timestamp: '2026-10-09T00:00:00Z', count: 2, uniques: 1 }] });
+  if (url.endsWith('/traffic/views')) return J({ count: 0, uniques: 0, views: [] });
+  return J(list2);
+};
+calls(); NOW = at(9, 9); await daily();
+s = sent(calls(), 'sendMessage');
+ok(s.length === 1 && s[0].params.text.includes('#роботы Репозиторий за 08.10: клонов 7 (мест 3), просмотров 0') && s[0].params.text.includes('форков 2, звёзд 1'),
+  'S5 сводка: строка репозитория (последний полный день UTC, без просмотров — роботы)');
+eq(JSON.parse(sdk.rows("SELECT data FROM stats WHERE day = '2026-10-09'")[0].data).repo.clones, [['2026-10-08', 7, 3], ['2026-10-09', 2, 1]],
+  'S5 клоны по дням — в снимок дня: история дольше 14 дней GitHub');
 globalThis.fetch = fetch0; NOW = SAVED_NOW;
 
 // ---- телеметрия: статистика и звук из приложения по согласию (lib/telemetry, handlers/telemetry, /del)

@@ -63,6 +63,46 @@ export function growth(cur, prev) {
   return g;
 }
 
+/** Прирост «своих» выпусков отдельно от старых. Свои — последний и тот, что был последним в прошлый раз: туда
+ *  приходят люди (кнопка сайта ведёт на последний выпуск) и обновления (приложение спрашивает latest.json
+ *  последнего). Старые качают роботы, архиваторы и зеркала: 31.10.2026 каждый файл всех 22 выпусков скачали
+ *  ровно по разу, и сводка насчитала +24 «проверки» — в тот же день репозиторий клонировали 130 раз из 23 мест
+ *  при нуле просмотров страниц. */
+export function split(cur, prev) {
+  const own = new Set([cur.latest && cur.latest.tag, prev && prev.latest && prev.latest.tag].filter(Boolean));
+  const out = { live: zero(), old: 0, oldReleases: new Set() };
+  for (const [k, v] of Object.entries(cur.counts || {})) {
+    const tag = k.slice(0, k.lastIndexOf('/')), file = fileOf(k);
+    const d = Math.max(0, v - ((prev && prev.counts && prev.counts[k]) || 0));
+    if (!d || !(file in out.live)) continue;
+    if (own.has(tag)) out.live[file] += d; else { out.old += d; out.oldReleases.add(tag); }
+  }
+  return out;
+}
+
+/** 1 файл, 2 файла, 5 файлов. */
+export function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+}
+
+/** Репозиторий: клоны и просмотры за последний полный день по UTC (GitHub хранит их 14 дней — снимок дня держит
+ *  дольше), форки, звёзды. Клоны без просмотров страниц — копируют роботы. Клоны и просмотры читаются, только если
+ *  токену дан доступ «Administration: read»; нет — один раз подсказка. */
+export function repoLine(repo, prevRepo, now) {
+  if (!repo) return null;
+  const today = new Date(now * 1000).toISOString().slice(0, 10);
+  const lastFull = (a) => (Array.isArray(a) ? a.filter((x) => x[0] < today).slice(-1)[0] : null);
+  const dd = (day) => day.slice(8, 10) + '.' + day.slice(5, 7);
+  const delta = (k) => (prevRepo && typeof prevRepo[k] === 'number' && repo[k] !== prevRepo[k] ? ' (' + (repo[k] > prevRepo[k] ? '+' : '') + (repo[k] - prevRepo[k]) + ')' : '');
+  const own = 'форков ' + repo.forks + delta('forks') + ', звёзд ' + repo.stars + delta('stars');
+  const c = lastFull(repo.clones), v = lastFull(repo.views);
+  if (!c) return 'Репозиторий: ' + own + (prevRepo === undefined && repo.traffic ? ' (клоны и просмотры не видны: токену GitHub нужен доступ «Administration: read» к ' + REPO + ')' : '');
+  const vv = v && v[0] === c[0] ? v : [c[0], 0, 0];
+  return (c[1] > 0 && vv[1] === 0 ? '#роботы ' : '') + 'Репозиторий за ' + dd(c[0]) + ': клонов ' + c[1] + ' (мест ' + c[2] + '), просмотров ' +
+    vv[1] + (c[1] > 0 && vv[1] === 0 ? ' — без просмотров страниц, копируют роботы' : '') + ' · ' + own;
+}
+
 /** «за сутки» (20–28 ч), «за 17 ч», «за 2 сут.». */
 export function period(sec) {
   const h = Math.round(sec / 3600);
@@ -76,23 +116,27 @@ const ver = (tag) => String(tag || '').replace(/^v/, '');
 /** Текст сводки. prev — прошлый снимок {at, counts} или null: тогда это первая сводка. */
 export function report(cur, prev, now) {
   const t = totals(cur.counts), c = cur.counts;
-  const all = 'Всего с ' + ver(cur.since) + ': APK ' + t[APK] + ', облегчённый ' + t[SLIM] + ', проверок обновлений ' + t[CHECK];
+  // latest.json в «Всего» не идёт: его скачивания у старых выпусков — роботы, не проверки обновлений (split).
+  const all = 'Всего с ' + ver(cur.since) + ': APK ' + t[APK] + ', облегчённый ' + t[SLIM];
   const rel = cur.latest
     ? 'Выпуск ' + ver(cur.latest.tag) + ' от ' + ddmm(cur.latest.at) + ': APK ' + (c[cur.latest.tag + '/' + APK] || 0) +
       ', облегчённый ' + (c[cur.latest.tag + '/' + SLIM] || 0)
     : null;
+  const repo = repoLine(cur.repo, prev ? prev.repo : undefined, now);
   if (!prev) {
-    return ['📊 GitHub · ' + ddmm(now) + ' · первая сводка', all, rel,
+    return ['📊 GitHub · ' + ddmm(now) + ' · первая сводка', all, rel, repo,
       'Дальше — каждый день около ' + pad(REPORT_HOUR) + ':00: что прибавилось за сутки.',
       'APK качают с сайта и при обновлении из приложения: полный — кнопкой «Скачать для Android», облегчённый — ссылкой внизу страницы. ' +
       'Проверку обновлений каждая копия Falar делает сама раз в сутки: прирост за день — примерно сколько копий было в сети.',
     ].filter(Boolean).join('\n');
   }
-  const g = growth(c, prev.counts), p = period(now - prev.at);
+  const sp = split(cur, prev), g = sp.live, p = period(now - prev.at), k = sp.oldReleases.size;
   return ['📊 GitHub · ' + ddmm(now) + ' · ' + p,
-    'APK скачали: +' + g[APK] + ' (облегчённый: +' + g[SLIM] + ')',
+    'APK скачали: +' + g[APK] + ' (облегчённый: +' + g[SLIM] + ')' + (cur.latest ? ' — выпуск ' + ver(cur.latest.tag) : ''),
     'Проверок обновлений: +' + g[CHECK] + (p === 'за сутки' ? ' — примерно столько копий Falar было в сети' : ''),
-    all, rel,
+    sp.old ? '#роботы старые выпуски: +' + sp.old + ' ' + plural(sp.old, 'файл', 'файла', 'файлов') + ' из ' + k + ' ' +
+      plural(k, 'выпуска', 'выпусков', 'выпусков') + ' — так качают роботы и зеркала, не люди' : null,
+    repo, all, rel,
   ].filter(Boolean).join('\n');
 }
 

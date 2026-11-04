@@ -103,13 +103,13 @@ reset
 sched() { curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$WP/__scheduled?cron=5+*+*+*+*"; }
 r=$(sched); for i in $(seq 20); do [ "$(js "c.length")" != 0 ] && break; sleep 0.3; done
 an=$(sql "SELECT value FROM settings WHERE key = 'topic:-100500:analytics'" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8'))[0].value)")
-chk '[ "$r" = 200 ] && [ "$(curl -s http://127.0.0.1:$TG/gh/calls | node -e "const c = JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")); console.log(c.map(x => x.url + \" \" + x.ua + \" \" + x.auth).join())")" = "/repos/Annoyt/FALAR/releases?per_page=100&page=1 falar-feedback-bot null" ]' "W14 запуск по расписанию — один запрос к GitHub: адрес, user-agent, без токена"
+chk '[ "$r" = 200 ] && [ "$(curl -s http://127.0.0.1:$TG/gh/calls | node -e "const c = JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")); console.log(c.map(x => x.url + \" \" + x.ua + \" \" + x.auth).join())")" = "/repos/Annoyt/FALAR/releases?per_page=100&page=1 falar-feedback-bot null,/repos/Annoyt/FALAR falar-feedback-bot null" ]' "W14 запуск по расписанию — к GitHub: выпуски, потом репозиторий; user-agent, без токена"
 chk '[ "$(js "c.map(x => [x.method, x.params.chat_id, x.params.message_thread_id, x.params.text.split(\"\\n\")[0].replace(/ · .*/, \"\")])")" = "[[\"sendMessage\",-100500,$an,\"📊 GitHub\"]]" ]' "W15 сводка — в топик «Аналитика» ($an)"
-chk '[ "$(js "c[0].params.text.split(\"\\n\")[1]")" = "Всего с 0.28.0: APK 5, облегчённый 0, проверок обновлений 6" ]' "W15 счёт по файлам выпусков"
+chk '[ "$(js "c[0].params.text.split(\"\\n\")[1]")" = "Всего с 0.28.0: APK 5, облегчённый 0" ]' "W15 счёт по файлам выпусков"
 chk '[ "$(sql "SELECT count(*) AS n FROM stats")" = "[{\"n\":1}]" ]' "W16 снимок дня — в D1"
 reset
 r=$(sched); sleep 1
-chk '[ "$r" = 200 ] && [ "$(js "c.length")" = 0 ] && [ "$(curl -s http://127.0.0.1:$TG/gh/calls | node -e "console.log(JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")).length)")" = 1 ]' "W17 второй запуск в тот же день — ни GitHub, ни сообщений"
+chk '[ "$r" = 200 ] && [ "$(js "c.length")" = 0 ] && [ "$(curl -s http://127.0.0.1:$TG/gh/calls | node -e "console.log(JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")).length)")" = 2 ]' "W17 второй запуск в тот же день — ни GitHub, ни сообщений"
 echo "== телеметрия из приложения (по согласию)"
 app() { curl -s -o "$TMP/app.out" -w '%{http_code}' -X POST -H 'content-type: application/json' ${3:+-H "$3"} --data-binary "@$2" "http://127.0.0.1:$WP/$1"; }
 cat > "$TMP/pkt.json" <<'JSON'
