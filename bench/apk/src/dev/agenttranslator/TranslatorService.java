@@ -2044,8 +2044,23 @@ public class TranslatorService extends Service {
       if (!a.isEmpty() && !c.isEmpty() && low.contains(" " + Phrasebook.norm(a) + " ") && n++ < 8)
         b.append(a).append(" translates to ").append(c).append('\n');
     }
+    // Глоссарий прошлых разговоров — в оставшиеся места, пары своего разговора важнее. Новый разговор начинается
+    // с пустого глоссария, а термины у одних и тех же людей повторяются: на разговорах владельца это дало
+    // pt→ru +0,018 COMET на фразах с такими терминами (results/2026-11-01-mt-cloud-memory.md, шаг 2).
+    StringBuilder past = new StringBuilder();
+    if (chats != null && n < 8) {
+      Set<String> own = new HashSet<>();
+      for (String[] t : chats.terms()) own.add(Phrasebook.norm(t[0]));
+      for (String[] p : Chats.matching(chats.pastTerms(), src, text, own, 8 - n)) {
+        b.append(p[0]).append(" translates to ").append(p[1]).append('\n');
+        past.append(past.length() == 0 ? "" : "; ").append(p[0]).append(" → ").append(p[1]);
+      }
+    }
+    lastPastTerms = past.toString();
     return b.toString();
   }
+  /** Пары прошлых разговоров в последней подсказке — для журнала уточнителя. */
+  volatile String lastPastTerms = "";
   /** Тема для подсказки: от облака, а без неё — механическая выжимка из частых слов разговора. */
   String topicLine() {
     if (chats == null) return "";
@@ -2120,6 +2135,7 @@ public class TranslatorService extends Service {
           int idx = indexOf(h, tn); if (idx < 0) continue;
           String tgt = tn.dir.substring(3);
           String tm = terms(tn.dir, tn.asr), tp = memo.isEmpty() ? "" : memo + "\n";
+          if (!lastPastTerms.isEmpty()) log("📚 #" + tn.n + " термины прошлых разговоров: " + lastPastTerms);
           // Бюджет из окна модели: без него длинные реплики переполняли окно, сервер отказывал,
           // и уточнитель замолкал навсегда. Старое — в памяти разговора, свежее — в пределах бюджета.
           int budget = Brief.budget(llmCpt, tn.asr.length(), tm.length(), tp.length());
