@@ -8,7 +8,9 @@ import org.json.*;
  *  Сколько реплик берётся в разбор и почему остальные — нет; сколько карточек даёт нынешний разбор (Cards) и
  *  сколько вышло бы на экран; сколько словосочетаний из 2–5 слов набралось бы по предложенному правилу.
  *  Сами сочетания — в файл рядом с данными (private/…), не в вывод.
- *    bash bench/apk/cards_sim.sh <каталог files телефона> [файл сочетаний] */
+ *    bash bench/apk/cards_sim.sh <каталог files телефона> [файл сочетаний]
+ *  Выборка для проверки перевода (results/2026-11-05-learn-cards.md): -Dsample=N -Dseed=5 -Dsampleout=<набор.json> —
+ *  N случайных сочетаний (от 2 раз) с предложением-примером, набор в виде data/test_set.json для MtRun. */
 public class CardsSim {
   public static void main(String[] a) throws Exception {
     File files = new File(a[0]);
@@ -64,8 +66,10 @@ public class CardsSim {
     // улучшенный перевод). Раз на предложение. Правило: хотя бы одно значимое слово, на служебном не кончается;
     // встречалось в двух разговорах и больше. Вложенное (короче) убирается, если почти всегда (≥ 60 %) стоит в длинном.
     Map<String, Integer> cnt = new HashMap<>(); Map<String, Set<Long>> inChats = new HashMap<>(); Map<String, Set<String>> who = new HashMap<>();
+    Map<String, String[]> example = new HashMap<>();              // сочетание → {предложение, его перевод из разговора}
     int sents = 0;
-    for (Cards.Turn t : turns) for (String s : Cards.split(t.pt)) {
+    for (Cards.Turn t : turns) { String[] ps = Cards.split(t.pt), rs = Cards.split(t.ru); for (int si = 0; si < ps.length; si++) {
+      String s = ps[si], sru = ps.length == rs.length ? rs[si] : t.ru;
       String key = Phrasebook.norm(s); if (key.isEmpty()) continue;
       String[] tok = key.split(" "); sents++;
       Set<String> seen = new HashSet<>();
@@ -77,8 +81,12 @@ public class CardsSim {
         cnt.merge(g, 1, Integer::sum);
         inChats.computeIfAbsent(g, x -> new HashSet<>()).add(t.chat);
         who.computeIfAbsent(g, x -> new HashSet<>()).add(t.heard ? "h" : "o");
+        // пример — предложение собеседника, где перевод предложения известен; иначе какое есть
+        String[] ex = example.get(g);
+        boolean better = ex == null || "o".equals(ex[2]) && t.heard;
+        if (better) example.put(g, new String[]{s, sru, t.heard ? "h" : "o"});
       }
-    }
+    } }
     int[] minN = {2, 3};
     StringBuilder dump = new StringBuilder();
     for (int mn : minN) {
@@ -102,6 +110,20 @@ public class CardsSim {
         if (mn == 2) dump.append(keep.get(g)).append('\t').append(inChats.get(g).size()).append('\t').append(g).append('\n');
       }
       int tot = byLen[2] + byLen[3] + byLen[4] + byLen[5];
+      String out = System.getProperty("sampleout");
+      if (mn == 2 && out != null) {
+        List<String> pool = new ArrayList<>();
+        for (String g : keep.keySet()) if (!drop.contains(g)) pool.add(g);
+        Collections.sort(pool);
+        Collections.shuffle(pool, new Random(Long.getLong("seed", 5)));
+        JSONArray set = new JSONArray();
+        for (String g : pool.subList(0, Math.min(Integer.getInteger("sample", 100), pool.size()))) {
+          String[] ex = example.get(g);
+          set.put(new JSONObject().put("pt", g).put("ru", ex[1]).put("n", keep.get(g)).put("chats", inChats.get(g).size()).put("ex", ex[0]).put("heard", "h".equals(ex[2])));
+        }
+        java.nio.file.Files.write(new File(out).toPath(), new JSONObject().put("pt_to_ru", set).toString(1).getBytes("UTF-8"));
+        System.out.println("выборка " + set.length() + " из " + pool.size() + " — в " + out);
+      }
       System.out.printf("сочетания от %d раз в 2+ разговорах: %d — из 2 слов %d, 3 — %d, 4 — %d, 5 — %d; только у собеседника %d, и у вас, и у него %d (предложений %d)%n",
           mn, tot, byLen[2], byLen[3], byLen[4], byLen[5], heardOnly, both, sents);
     }
