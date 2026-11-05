@@ -82,7 +82,7 @@ Pode falar · слушаю португальский	Pode falar · ouvindo port
  · по-португальски	 · em português
 Кого назвать?	Quem nomear?
 Забыть голоса разговора?	Esquecer as vozes da conversa?
-Слепки голосов (%d) удалятся с телефона. Реплики останутся с подписями. Пока каждый снова не скажет фразу кнопкой FALAR, слушание ничего переводить не будет.	As impressões de voz (%d) serão apagadas do telefone. As falas continuam com os nomes. Até cada um dizer de novo uma frase com o botão FALAR, a escuta não vai traduzir nada.
+Слепки голосов (%d) удалятся с телефона. Реплики останутся с подписями. Пока голоса не запомнятся снова, слушание переводит только чёткую речь.	As impressões de voz (%d) serão apagadas do telefone. As falas continuam com os nomes. Até as vozes serem memorizadas de novo, a escuta traduz só a fala nítida.
 забыть	esquecer
 Например: хозяйка квартиры Мария (женщина) показывает мне квартиру; договорились о 2500 реалах в месяц	Por exemplo: a dona do apartamento, Maria (mulher), me mostra o apartamento; combinamos 2500 reais por mês
 Кто с кем говорит, где, о чём договорились, имена — с этим перевод точнее. Вписанное вами автоматика не меняет; пустое поле вернёт ей память.	Quem fala com quem, onde, o que foi combinado, nomes — com isso a tradução fica mais precisa. O que você escrever a automação não muda; campo vazio devolve a memória para ela.
@@ -401,7 +401,7 @@ Pode falar · здесь появится перевод	Pode falar · a traduç
 вывеска, меню, скрин: текст читается на телефоне, перевод — поверх фото	placa, cardápio, print: o texto é lido no telefone, a tradução aparece sobre a foto
 переводит заново с учётом разговора: род, отсылки, термины; нужен сильный телефон	traduz de novo levando em conta a conversa: gênero, referências, termos; precisa de um telefone potente
 пересмотр разговора бесплатными моделями OpenRouter, названия разговоров; нужен ключ	revisão da conversa por modelos gratuitos do OpenRouter, nomes das conversas; precisa de chave
-слушание переводит только голоса разговора — тех, кто сказал фразу кнопкой FALAR; чужие обрывки вокруг — нет	a escuta traduz só as vozes da conversa — de quem disse uma frase com o botão FALAR; trechos de outras pessoas por perto, não
+у каждого голоса свой номер; слушание переводит голоса разговора и чёткую речь рядом, тихие обрывки вокруг — нет	cada voz tem seu número; a escuta traduz as vozes da conversa e a fala nítida por perto; trechos baixos ao redor, não
 теряется меньше фраз и в тишине, и в шуме; сильный шумодав включается сам, когда вокруг шумно	perde menos frases no silêncio e no barulho; a redução forte liga sozinha quando o ambiente está barulhento
 190 тыс. готовых пар фраз из Tatoeba: частые фразы переводятся мгновенно	190 mil pares de frases prontos do Tatoeba: frases comuns são traduzidas na hora
 устаревших выброшено %d · 	descartados por obsoletos %d · 
@@ -416,7 +416,7 @@ Pode falar · здесь появится перевод	Pode falar · a traduç
 транскрипция скрыта · касание вернёт	transcrição oculta · toque para mostrar
 улучшить нельзя: %s	não dá para melhorar: %s
 Кто говорит — пока не ясно.	Quem fala — ainda não está claro.
-\nГолосов в разговоре нет: пусть каждый скажет фразу кнопкой FALAR — тогда слушание переводит только их.	\nSem vozes na conversa: cada pessoa diz uma frase com o botão FALAR — aí a escuta traduz só essas vozes.
+\nГолосов в разговоре пока нет: номер получит каждый, кто скажет фразу кнопкой FALAR или две чёткие фразы рядом.	\nAinda não há vozes na conversa: ganha um número quem disser uma frase com o botão FALAR ou duas frases nítidas por perto.
 \nИмена: 	\nNomes: 
 \n\nКлючевые детали — пока нет.	\n\nDetalhes-chave — ainda não há.
 \n\nКлючевые детали:\n	\n\nDetalhes-chave:\n
@@ -574,6 +574,7 @@ Android 16 больше не предупреждает при установк�
 Фразу из «Слов» можно сказать самим: Falar покажет цветом, какие слова он понял.	Você mesmo pode dizer uma frase de «Palavras»: o Falar mostra em cores quais palavras entendeu.
 Выученное повторяется на слух или вслух: через день, три дня, неделю и три недели.	O que você aprendeu é revisado de ouvido ou em voz alta: depois de um dia, três dias, uma semana e três semanas.
 Каждый собеседник говорит фразу кнопкой FALAR, и слушание переводит только голоса разговора.	Cada interlocutor diz uma frase com o botão FALAR, e a escuta traduz só as vozes da conversa.
+Слушание переводит и тех, кто не нажимал FALAR, если речь чёткая; у каждого — свой номер.	A escuta traduz também quem não apertou FALAR, se a fala for nítida; cada um tem seu número.
 Над репликами подписано, кто говорит: «Собеседник 1», «Собеседник 2» или имя.	Acima das falas aparece quem está falando: «Interlocutor 1», «Interlocutor 2» ou o nome.
 Озвучку из динамика можно перебить: телефон замолкает и слушает. Чужие голоса её не обрывают.	A voz do alto-falante pode ser interrompida: o telefone se cala e ouve. Vozes de outras pessoas não a interrompem.
 Если двое говорят подряд, каждого Falar переводит отдельно.	Se duas pessoas falam em seguida, o Falar traduz cada uma separadamente.

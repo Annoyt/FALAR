@@ -137,13 +137,37 @@ public class Chats {
    *  номер после всех, что уже встречались в репликах: номера забытых голосов не переиспользуются,
    *  иначе «собеседник 1» в старых репликах и новый «собеседник 1» были бы разными людьми. */
   public synchronized Voices.Voice enroll(float[] e, String lang, long at) {
+    Voices.Voice v = voices.enroll(e, lang, at, nextVoice());
+    placeFirst(v); save(); return v;
+  }
+  /** Номер для нового голоса: после всех голосов и всех номеров в репликах. */
+  int nextVoice() {
     int next = voices.maxN();
     for (int k = 0; k < turns.length(); k++) {
       JSONObject x = turns.optJSONObject(k); String w = x == null ? "" : x.optString("who", "");
       if (w.matches("\\d{1,4}")) next = Math.max(next, Integer.parseInt(w));
     }
-    Voices.Voice v = voices.enroll(e, lang, at, next + 1);
-    save(); return v;
+    return next + 1;
+  }
+  /** Слушание: принятый кусок голоса v (null — новый человек) — в голоса текущего разговора (Voices.heard).
+   *  Файл здесь не пишется: реплика ложится следом (addTurn) и пишет его сама. Номер, который голос получил
+   *  сейчас, ставится и его первой реплике. */
+  public synchronized Voices.Voice heard(float[] e, Voices.Voice v, String lang, long at) {
+    Voices.Voice r = voices.heard(e, v, lang, at, nextVoice());
+    placeFirst(r); return r;
+  }
+  /** Голос получил номер — его первой реплике слушания тоже (метка first). Номер ставится один раз: реплики
+   *  уже нет — метка всё равно снимается. true — подпись поставлена. */
+  boolean placeFirst(Voices.Voice v) {
+    if (v == null || v.n <= 0 || v.first == 0) return false;
+    long at = v.first; v.first = 0;
+    for (int k = turns.length() - 1; k >= 0; k--) {
+      JSONObject x = turns.optJSONObject(k);
+      if (x == null || x.optLong("at", -1) != at) continue;
+      if (!x.optString("who", "").isEmpty()) return false;       // подпись уже есть — не трогаем
+      try { x.put("who", String.valueOf(v.n)); return true; } catch (JSONException e) { return false; }
+    }
+    return false;
   }
   /** Номер голоса у реплики текущего разговора по её метке: голос фразы кнопкой узнаётся уже после
    *  того, как реплика легла, — перевод отпечатка не ждёт. false — такой реплики уже нет. */
@@ -609,7 +633,7 @@ public class Chats {
       if (topic.isEmpty()) o.remove("topic"); else o.put("topic", topic);
       if (memo.isEmpty()) { o.remove("memo"); o.remove("memoBy"); } else o.put("memo", memo).put("memoBy", memoBy);
       if (terms.length() == 0) o.remove("terms"); else o.put("terms", terms);
-      if (voices.isEmpty()) o.remove("voices"); else o.put("voices", voices.toJson());
+      if (voices.none()) o.remove("voices"); else o.put("voices", voices.toJson());
       write(file(current), o.toString());
     } catch (Exception ignore) {}
   }

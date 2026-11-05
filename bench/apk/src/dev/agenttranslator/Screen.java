@@ -118,13 +118,13 @@ final class Screen {
    *  names — {португальское, русское}. */
   static String memoText(String who, List<String[]> names, String memo) { return memoText(who, "", false, names, memo); }
   /** С голосами разговора: speakers (Memo.speakers — сколько говорит и строка на каждого) — вместо строки
-   *  «кто говорит». Голосов нет, а модуль «Отпечаток голоса» включён — одна строка, как их завести. */
+   *  «кто говорит». Голосов нет, а модуль «Отпечаток голоса» включён — одна строка, как они заводятся. */
   static String memoText(String who, String speakers, boolean speakerModule, List<String[]> names, String memo) {
     StringBuilder b = new StringBuilder();
     if (speakers != null && !speakers.isEmpty()) b.append(speakers);
     else {
       b.append(who == null || who.isEmpty() ? L.t("Кто говорит — пока не ясно.") : who);
-      if (speakerModule) b.append(L.t("\nГолосов в разговоре нет: пусть каждый скажет фразу кнопкой FALAR — тогда слушание переводит только их."));
+      if (speakerModule) b.append(L.t("\nГолосов в разговоре пока нет: номер получит каждый, кто скажет фразу кнопкой FALAR или две чёткие фразы рядом."));
     }
     if (names != null && !names.isEmpty()) {
       b.append(L.t("\nИмена: "));

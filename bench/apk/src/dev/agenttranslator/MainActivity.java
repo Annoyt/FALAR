@@ -695,11 +695,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         .setItems(items, (d, w) -> nameVoiceDialog(vs.get(w))).setNegativeButton(L.t("отмена"), null).show();
   }
   /** Забыть голоса разговора: слепок — биометрия человека, стереть его можно всегда. Реплики остаются
-   *  с прежними подписями; слушание снова ждёт фразу кнопкой FALAR. */
+   *  с прежними подписями; слушание переводит чёткую речь, пока голоса не запомнятся снова. */
   void forgetVoicesDialog(int n) {
     new android.app.AlertDialog.Builder(this).setTitle(L.t("Забыть голоса разговора?"))
         .setMessage(L.f("Слепки голосов (%d) удалятся с телефона. Реплики останутся с подписями. "
-                  + "Пока каждый снова не скажет фразу кнопкой FALAR, слушание ничего переводить не будет.", n))
+                  + "Пока голоса не запомнятся снова, слушание переводит только чёткую речь.", n))
         .setPositiveButton(L.t("забыть"), (d, w) -> { if (svc != null) { svc.forgetVoices(); showLastTurn(); refreshHist(); } })
         .setNegativeButton(L.t("отмена"), null).show();
   }
