@@ -50,10 +50,12 @@ public class CardsSim {
       if (ss.length > 0 && all) corp++; else turns.add(t);
     }
     System.out.printf("фраз корпуса для сверки %d; реплик целиком из корпуса (прогоны стенда) — %d, не в счёт%n", corpus.size(), corp);
+    long bt = System.nanoTime();
     Cards.Result r = Cards.build(turns, learn.stop, 2, new HashSet<>());
+    System.out.printf("разбор на столе — %d мс%n", (System.nanoTime() - bt) / 1000000);
     int w3 = 0, w2 = 0, ch = 0, ch3 = 0;
     for (Cards.Card c : r.words) { if (c.n >= 3) w3++; if (c.n >= 2) w2++; if (c.kind == Cards.CHUNK) { ch++; if (c.n >= 3) ch3++; } }
-    System.out.printf("нынешний разбор: реплик %d, предложений %d; слов и связок %d (потолок %d), из них от 3 раз %d (экран — до 200), от 2 раз %d; связок %d (от 3 раз %d); фраз %d%n",
+    System.out.printf("нынешний разбор: реплик %d, предложений %d; слов и связок %d (потолок %d), из них от 3 раз %d, от 2 раз %d; связок %d (от 3 раз %d); фраз %d%n",
         r.turns, r.sentences, r.words.size(), Cards.MAX_CARDS, w3, w2, ch, ch3, r.phrases.size());
 
     // Всего значимых слов в разговорах — до потолка карточек

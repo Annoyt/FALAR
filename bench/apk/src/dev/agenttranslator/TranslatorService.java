@@ -1385,6 +1385,7 @@ public class TranslatorService extends Service {
     boolean on = pt || ru;
     getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("lpt", pt).putBoolean("lru", ru).apply();
     setVad(on);
+    if (!on) cardsSoon(true);                  // разговор кончился — «Слова» пересчитаются в затишье
     log(!on ? "⏹ не слушаю, микрофон отпущен"
             : (pt && ru ? "▶ слушаю оба языка, направление по реплике"
                         : "▶ слушаю только " + (pt ? "португальский" : "русский")));
@@ -3469,10 +3470,17 @@ public class TranslatorService extends Service {
 
   /** «Слова» и «Фразы» (Learn.buildCards, Cards): посчитать карточки в затишье и сразу перевести недостающее —
    *  слова и связки (word_ru), предложения примеров, не сопоставленные с переводом реплики (sent_ru); всё по
-   *  одному и тоже в затишье. done — экрану: после разбора и ещё раз, если что-то перевелось. Повторный
-   *  вызов, пока прежний ждёт затишья, ничего не добавляет. */
+   *  одному и тоже в затишье. done — экрану: после разбора и ещё раз, если что-то перевелось; null — пересчёт
+   *  в фоне (cardsSoon), а открытый экран всё равно узнает (cardsDone). Повторный вызов, пока прежний ждёт
+   *  затишья, ничего не добавляет. */
   final java.util.concurrent.atomic.AtomicBoolean cardsQueued = new java.util.concurrent.atomic.AtomicBoolean(false);
+  /** Экран «Слов», который ждёт пересчёта; снимается, когда экран уходит (MainActivity.unbindSvc). */
+  volatile Runnable cardsDone;
+  /** Переводов слов за один пересчёт — не больше: очередь «Слов» одна, и следующий пересчёт не ждёт часами,
+   *  пока переведутся все 1000+ слов. Остальные — в следующий раз, самые частые — первыми. */
+  static final int CARDS_TR_PASS = 150;
   public void refreshCards(Runnable done) {
+    if (done != null) cardsDone = done;
     if (learn == null || !cardsQueued.compareAndSet(false, true)) return;
     learnIo.submit(() -> {
       try {
@@ -3482,12 +3490,24 @@ public class TranslatorService extends Service {
         long t = System.nanoTime(); Cards.Result r = l.buildCards();
         log(String.format(Locale.ROOT, "📗 «Слова»: слов и связок %d, фраз %d — из %d реплик, %d предложений, за %d мс",
             r.words.size(), r.phrases.size(), r.turns, r.sentences, (System.nanoTime() - t) / 1000000));
-        if (done != null) main.post(done);
-        List<Cards.Card> top = new ArrayList<>(r.words.subList(0, Math.min(200, r.words.size()))); top.addAll(r.phrases);
-        int n = translateQuiet(l.missingCardRu(top), true) + translateQuiet(l.missingSentRu(top, 60), false);
-        if (n > 0) { log("📗 переведено для «Слов»: " + n); if (done != null) main.post(done); }
+        Runnable d = cardsDone; if (d != null) main.post(d);
+        List<Cards.Card> top = new ArrayList<>();
+        for (Cards.Card c : r.words) if (c.n >= 2) top.add(c);          // все, что экран может показать (порог от 2)
+        top.addAll(r.phrases);
+        List<String> miss = l.missingCardRu(top);
+        int n = translateQuiet(miss.subList(0, Math.min(CARDS_TR_PASS, miss.size())), true) + translateQuiet(l.missingSentRu(top, 60), false);
+        if (n > 0) { log("📗 переведено для «Слов»: " + n + (miss.size() > CARDS_TR_PASS ? " · остальные " + (miss.size() - CARDS_TR_PASS) + " — в следующий пересчёт" : "")); d = cardsDone; if (d != null) main.post(d); }
       } catch (InterruptedException e) { cardsQueued.set(false); }
     });
+  }
+  /** «Слова» пересчитываются и сами, после разговора, а не только при открытии вкладки (владелец 05.11): на Redmi
+   *  после 17.10 пересчётов не было ни одного, хотя в разговорах прибавилось 1627 реплик. Раз в CARDS_EVERY новых
+   *  реплик и когда слушание выключают; сам пересчёт ждёт затишья и идёт фоном (learnIo). */
+  static final int CARDS_EVERY = 10;
+  int turnsSinceCards = 0;
+  void cardsSoon(boolean now) {
+    if (!now && ++turnsSinceCards < CARDS_EVERY) return;
+    turnsSinceCards = 0; refreshCards(null);
   }
   /** Перевести список в затишье, по одному: words — слова и связки (word_ru), иначе предложения (sent_ru). */
   int translateQuiet(List<String> list, boolean words) throws InterruptedException {
@@ -4655,6 +4675,7 @@ public class TranslatorService extends Service {
         if (standNow()) tj.put("stand", 1);
         // Всегда по номеру, снятому до распознавания: разговор могли сменить и во время озвучки выше.
         boolean ok = chats.addTurn(chatId, tj);
+        cardsSoon(false);
         if (!ok) chats.add(tj);                     // прежний разговор был пуст и удалён при уходе — реплике негде лечь, кроме текущего
         if (clip != null) saveClip(pcm, sr, new File(chats.audio(), clip));
         if (!ok) {
