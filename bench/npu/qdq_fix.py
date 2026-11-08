@@ -21,7 +21,12 @@
    q·kᵀ и внимание·v во всех 24 слоях. Здесь их второй (in1) или оба входа переквантуются в uint8 на том же
    диапазоне, что был в 16 битах (шаг ×257).
 
-  qdq_fix.py IN_DIR OUT_DIR [--bias] [--float-length] [--a8-matmul in1|both]   # IN_DIR: model.onnx + model.data от AI Hub
+5. --pos-per-tensor: для HTP v69 (8 Gen 1). Постоянный 4D-множитель позиционного внимания (p = linear_pos(pos_emb),
+   [1, 8, 128, 207]) квантователь AI Hub квантует int8 поканально по оси 3. Такой MatMul v69 считает неверно: на S22
+   выход /layers.0/self_attn/MatMul — cos 0,03 к S25, при всех предыдущих отводах ≥ 0,9998 (aihub_taps.py). Здесь —
+   один шаг на весь тензор (наибольший из канальных, ноль 0); ошибка множителя ~1 % (худший слой 3 %).
+
+  qdq_fix.py IN_DIR OUT_DIR [--bias] [--float-length] [--a8-matmul in1|both] [--pos-per-tensor]
   qdq_fix.py --check-length OUT_DIR    # путь длины отдельно на ПК (ORT) для всех фраз корпуса против fp32-эталона
   qdq_fix.py --io-params DIR           # сетка uint16 входа и выхода (для вывода со сборкой --quantize_io)
 
@@ -191,6 +196,33 @@ def a8_matmul(g, init, base, which):
     return done
 
 
+def pos_per_tensor(g, init, base):
+    """Постоянные >2D-входы MatMul, квантованные поканально, — на один шаг (наибольший из канальных)."""
+    prod = {o: n for n in g.node for o in n.output}
+    done = 0
+    for mm in [n for n in g.node if n.op_type == "MatMul"]:
+        dq = prod.get(mm.input[1])
+        q = prod.get(dq.input[0]) if dq is not None and dq.op_type == "DequantizeLinear" else None
+        if q is None or q.op_type != "QuantizeLinear" or q.input[0] not in init or len(init[q.input[0]].dims) <= 2:
+            continue
+        s = value(init, dq.input[1], base)
+        zp = value(init, dq.input[2], base)
+        if s.ndim == 0:
+            continue
+        if np.any(zp != 0):
+            sys.exit(f"{mm.name}: ноль не 0 — не симметричное квантование, не трогаю")
+        b = mm.name.strip("/").replace("/", "_") + "_falar_pt"
+        g.initializer.extend([numpy_helper.from_array(np.array(s.max(), np.float32), b + "_scale"),
+                              numpy_helper.from_array(np.array(0, zp.dtype), b + "_zp")])
+        for n in (q, dq):
+            n.input[1], n.input[2] = b + "_scale", b + "_zp"
+            keep = [a for a in n.attribute if a.name != "axis"]
+            del n.attribute[:]
+            n.attribute.extend(keep)
+        done += 1
+    return done
+
+
 def add_bias(g, init, base):
     prod = {o: n for n in g.node for o in n.output}
     new_nodes, n_fixed = [], 0
@@ -295,6 +327,7 @@ def main():
     ap.add_argument("--bias", action="store_true")
     ap.add_argument("--float-length", action="store_true")
     ap.add_argument("--a8-matmul", choices=["in1", "both"])
+    ap.add_argument("--pos-per-tensor", action="store_true")
     ap.add_argument("--check-length", metavar="DIR")
     ap.add_argument("--io-params", metavar="DIR")
     a = ap.parse_args()
@@ -309,6 +342,9 @@ def main():
     print(f"длина: точная сетка у {fix_length(g, init)} узлов Q/DQ")
     if a.bias:
         print(f"смещения: добавлено у {add_bias(g, init, src)} свёрток")
+    if a.pos_per_tensor:
+        print(f"позиционный множитель: один шаг на тензор у {pos_per_tensor(g, init, src)} MatMul")
+        init = {i.name: i for i in g.initializer}   # новые шаги — тоже константы (для поиска «активация × активация»)
     if a.a8_matmul:
         print(f"uint8: {a8_matmul(g, init, src, a.a8_matmul)} MatMul «активация × активация» (входы: {a.a8_matmul})")
     if a.float_length:

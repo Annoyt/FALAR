@@ -156,11 +156,15 @@ def compare(a):
             print(f"{j['device']}: вывод не прошёл — {st.message[:300]}")
             continue
         o = hub.get_job(j["infer"]).download_output_data()
+        # AI Hub переименовывает выходы по порядку: output_0, output_1 — модели, дальше отводы в порядке taps.json;
+        # значения приходят уже в float (если вдруг uint16 — возвращаем в float по сетке отвода)
         deq = {}
-        for k, v in o.items():
-            arr = [np.asarray(t) for t in v]
-            if k in taps and arr[0].dtype == np.uint16:
+        for i, k in enumerate(taps):
+            arr = [np.asarray(t) for t in o[f"output_{i + 2}"]]
+            if arr[0].dtype == np.uint16:
                 arr = [(t.astype(np.float32) - taps[k]["zp"]) * taps[k]["scale"] for t in arr]
+            if list(arr[0].shape) != taps[k]["shape"]:
+                sys.exit(f"output_{i + 2}: форма {list(arr[0].shape)}, а у {taps[k]['tensor']} {taps[k]['shape']}")
             deq[k] = [np.asarray(t, np.float32) for t in arr]
         outs[j["device"]] = deq
     if len(outs) < 2:
