@@ -155,7 +155,10 @@ def collect(a):
                     if o.dtype == np.uint16:   # сборка с --quantize_io: выход в сетке output_0 модели
                         o = (o.astype(np.float32) - run["qio"]["out"][1]) * run["qio"]["out"][0]
                     o = np.asarray(o, np.float32).reshape(1024, -1)
-                    L = int(np.asarray(outs[lkey][i]).ravel()[0]) if lkey else o.shape[1]
+                    lv = np.asarray(outs[lkey][i]).ravel()[0] if lkey else o.shape[1]
+                    if lkey and outs[lkey][i].dtype == np.uint16:   # qdq_fix.py --float-length + --quantize_io
+                        lv = (float(lv) - 2) * 0.5
+                    L = int(np.rint(lv))
                     o.tofile(d / f"{n}.f32")
                     (d / f"{n}.len").write_text(str(L))
                 r = subprocess.run([str(P / ".stand/venv-qnn/bin/python"), "-I", str(Path(__file__).with_name("asr_wer.py")), str(d)],

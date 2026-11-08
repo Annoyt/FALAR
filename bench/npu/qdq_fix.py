@@ -10,9 +10,11 @@
    (v73, v68) падает: «preprocessPerChannel: No bias info». Нулевое смещение в fp32-модели AI Hub выбрасывает при своей
    сборке, поэтому оно добавляется прямо в QDQ.
 
-3. --float-length: вход length сразу float32, Cast из int64 убирается. На v73/v68 QAIRT не берёт float-выход Cast
-   («Tensor '/pre_encode/Cast_output_0…' has a floating-point type»). С --quantize_io вход length тогда — uint16 в той же
-   точной сетке: q = 2 × длина + 2.
+3. --float-length: путь длины без целых чисел, иначе QAIRT на v73/v68 оставляет на его концах float-тензоры
+   («Tensor '/pre_encode/Cast_output_0…' / '…Floor_2…dequantized_FLOAT_32' has a floating-point type»).
+   Вход length — float32 (Cast из int64 убран). Выход output_1 — сама длина в точной сетке (два Cast в целое убраны).
+   Маска «кадр < длины» считается сравнением в той же сетке: arange 0…103 — константа в сетке.
+   С --quantize_io вход и выход длины — uint16: q = 2 × длина + 2.
 
   qdq_fix.py IN_DIR OUT_DIR [--bias] [--float-length]   # IN_DIR: model.onnx + model.data от AI Hub; data — жёсткая ссылка
   qdq_fix.py --check-length OUT_DIR    # путь длины отдельно на ПК (ORT) для всех фраз корпуса против fp32-эталона
@@ -94,7 +96,9 @@ def fix_length(g, init):
 
 
 def float_length(g):
-    """Вход length сразу float32: Cast(int64 → float) убирается, его потребители берут вход напрямую."""
+    """Путь длины без целых: вход и выход длины — float32 в точной сетке, маска — сравнение в сетке."""
+    s, z = "falar_len_step", "falar_len_zero"
+    # вход: Cast(int64 → float) убирается, его потребители берут вход напрямую
     cast = next(n for n in g.node if n.op_type == "Cast" and n.input[0] == "length")
     for n in g.node:
         for k, i in enumerate(n.input):
@@ -102,6 +106,40 @@ def float_length(g):
                 n.input[k] = "length"
     g.node.remove(cast)
     next(i for i in g.input if i.name == "length").type.tensor_type.elem_type = TensorProto.FLOAT
+    # выход: output_1 ← Cast(int64) ← Cast(int32) ← DequantizeLinear (длина в сетке); оба Cast убираются
+    prod = {o: n for n in g.node for o in n.output}
+    c1 = prod["output_1"]
+    c2 = prod[c1.input[0]]
+    dq = prod[c2.input[0]]
+    if (c1.op_type, c2.op_type, dq.op_type) != ("Cast", "Cast", "DequantizeLinear"):
+        sys.exit(f"output_1: ждал Cast ← Cast ← DequantizeLinear, а там {c1.op_type} ← {c2.op_type} ← {dq.op_type}")
+    dq.output[0] = "output_1"
+    g.node.remove(c1)
+    g.node.remove(c2)
+    next(o for o in g.output if o.name == "output_1").type.tensor_type.elem_type = TensorProto.FLOAT
+    # маска: Less(arange int64, Unsqueeze(output_1)) → Less(arange в сетке, Unsqueeze(output_1) в сетке)
+    init = {i.name: i for i in g.initializer}
+    for u in [n for n in g.node if "output_1" in n.input]:
+        k = list(g.node).index(u)
+        uq, ud = u.output[0] + "_falar_q", u.output[0] + "_falar_dq"
+        less = [n for n in g.node if u.output[0] in n.input]
+        g.node.insert(k + 1, helper.make_node("QuantizeLinear", [u.output[0], s, z], [uq], name=uq))
+        g.node.insert(k + 2, helper.make_node("DequantizeLinear", [uq, s, z], [ud], name=ud))
+        for n in less:
+            if n.op_type not in ("Less", "Greater", "LessOrEqual", "GreaterOrEqual", "Equal"):
+                sys.exit(f"длину берёт {n.op_type} {n.name} — не сравнение, не знаю, как перевести в сетку")
+            for j, i in enumerate(n.input):
+                if i == u.output[0]:
+                    n.input[j] = ud
+                elif i in init:
+                    a = numpy_helper.to_array(init[i]).astype(np.float32)
+                    if np.any(a != np.round(a * 2) / 2) or a.min() < -1:
+                        sys.exit(f"{i}: константа не в сетке шага 0,5")
+                    c = i.strip("/").replace("/", "_") + "_falar_f"
+                    g.initializer.append(numpy_helper.from_array(a, c))
+                    g.node.insert(0, helper.make_node("DequantizeLinear", [c + "_q", s, z], [c + "_dq"], name=c + "_dq"))
+                    g.node.insert(0, helper.make_node("QuantizeLinear", [c, s, z], [c + "_q"], name=c + "_q"))
+                    n.input[j] = c + "_dq"
 
 
 def add_bias(g, init, base):
@@ -134,59 +172,57 @@ def add_bias(g, init, base):
 
 
 def check_length(model_dir):
-    """Собрать подграф length → output_1 (скаляры, без весов) и прогнать на ORT для всех длин корпуса."""
+    """Подграф length → output_1 (и маска /Less, если есть) без весов — на ORT для всех длин корпуса и 1…832."""
     import onnxruntime as ort
     m = onnx.load(str(Path(model_dir) / "model.onnx"), load_external_data=False)
     g = m.graph
     init = {i.name: i for i in g.initializer}
     prod = {o: n for n in g.node for o in n.output}
-    path = length_path(g)
-    need, extra = set(), []
-    for n in path:
-        for i in n.input:
-            if i in init or i == "length":
-                continue
-            if i not in {o for p in path for o in p.output}:
-                extra.append(prod[i])
-    nodes = []
-    for n in extra + path:
-        if not any(n is x for x in nodes):
-            nodes.append(n)
-    for n in nodes:
-        need.update(i for i in n.input if i in init)
-    # вход Q у констант — тоже константа; соберём цепочки до инициализаторов
-    changed = True
-    while changed:
-        changed = False
-        for n in list(nodes):
-            for i in n.input:
-                if i and i not in init and i != "length" and i not in {o for p in nodes for o in p.output}:
-                    nodes.insert(0, prod[i])
-                    changed = True
-        for n in nodes:
-            need.update(i for i in n.input if i in init)
-    inits = [inline(init[nm], model_dir) for nm in need]
-    cast = [n for n in path if n.op_type == "Cast"][-1]
-    to = next(a.i for a in cast.attribute if a.name == "to")
+    pos = {id(n): k for k, n in enumerate(g.node)}
+    outs = ["output_1"] + (["/Less_output_0"] if "/Less_output_0" in prod else [])
+    need, todo, nodes = set(), list(outs), {}
+    while todo:
+        x = todo.pop()
+        if x in init:
+            need.add(x)
+        elif x in prod and id(prod[x]) not in nodes:
+            nodes[id(prod[x])] = prod[x]
+            todo.extend(i for i in prod[x].input if i)
     ltype = next(i for i in g.input if i.name == "length").type.tensor_type.elem_type
     ldt = np.float32 if ltype == TensorProto.FLOAT else np.int64
-    sub = helper.make_graph(nodes, "len", [helper.make_tensor_value_info("length", ltype, [1])],
-                            [helper.make_tensor_value_info(cast.output[0], to, [1])], inits)
+    otype = next(o for o in g.output if o.name == "output_1").type.tensor_type.elem_type
+    vi = [helper.make_tensor_value_info("output_1", otype, [1])]
+    if len(outs) > 1:
+        vi.append(helper.make_tensor_value_info(outs[1], TensorProto.BOOL, None))
+    sub = helper.make_graph(sorted(nodes.values(), key=lambda n: pos[id(n)]), "len",
+                            [helper.make_tensor_value_info("length", ltype, [1])], vi,
+                            [inline(init[nm], model_dir) for nm in need])
     sm = helper.make_model(sub, opset_imports=m.opset_import, ir_version=m.ir_version)
     so = ort.SessionOptions()
     so.intra_op_num_threads = 1
     sess = ort.InferenceSession(sm.SerializeToString(), so, providers=["CPUExecutionProvider"])
+
+    def run(T):
+        r = sess.run(None, {"length": np.array([T], ldt)})
+        L = int(np.rint(np.asarray(r[0]).ravel()[0]))
+        mask_ok = True
+        if len(r) > 1:
+            mk = np.asarray(r[1]).ravel()
+            mask_ok = bool(np.array_equal(mk, np.arange(mk.size) < L))
+        return L, mask_ok
+
     bad = 0
     lines = [l.split("\t") for l in (FEAT / "list.tsv").read_text().splitlines() if l.strip()]
     for name, T in lines:
-        got = int(sess.run(None, {"length": np.array([int(T)], ldt)})[0][0])
+        got, mask_ok = run(int(T))
         ref = int((REF / f"{name}.len").read_text())
-        bad += got != ref
-        if got != ref and bad <= 5:
-            print(f"  {name}: {T} кадров → {got}, а fp32 даёт {ref}")
-    print(f"длина: {len(lines) - bad}/{len(lines)} совпадают с fp32; все длины 1…832: ", end="")
+        bad += got != ref or not mask_ok
+        if (got != ref or not mask_ok) and bad <= 5:
+            print(f"  {name}: {T} кадров → {got}{'' if mask_ok else ', маска не та'}, а fp32 даёт {ref}")
+    print(f"длина{' и маска' if len(outs) > 1 else ''}: {len(lines) - bad}/{len(lines)} совпадают с fp32; "
+          f"все длины 1…832: ", end="")
     exp = lambda t: int(np.floor((np.floor((np.floor((t - 1) / 2 + 1) - 1) / 2 + 1) - 1) / 2 + 1))
-    wrong = [t for t in range(1, 833) if int(sess.run(None, {"length": np.array([t], ldt)})[0][0]) != exp(t)]
+    wrong = [t for t in range(1, 833) if run(t) != (exp(t), True)]
     print("все верны" if not wrong else f"неверно {len(wrong)}, первые {wrong[:8]}")
     return 1 if bad or wrong else 0
 
@@ -225,7 +261,7 @@ def main():
         print(f"смещения: добавлено у {add_bias(g, init, src)} свёрток")
     if a.float_length:
         float_length(g)
-        print("длина: вход float32, Cast из int64 убран")
+        print("длина: вход и выход float32 в точной сетке, маска — сравнением в сетке (Cast в целые убраны)")
     dst.mkdir(parents=True, exist_ok=True)
     data = dst / "model.data"
     if not data.exists():
