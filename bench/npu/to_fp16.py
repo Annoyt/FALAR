@@ -14,7 +14,13 @@ from onnx import TensorProto
 from onnxconverter_common import float16
 
 m = onnx.load(sys.argv[1])
-m16 = float16.convert_float_to_float16(m, keep_io_types=True)
+# Больше 2 ГБ (fp32 parakeet — 2,4 ГБ) protobuf не сериализует, а вывод типов в конвертере сериализует модель:
+# тогда без него — типы промежуточных тензоров потом выведет ORT (value_info ниже всё равно очищается).
+try:
+    big = m.ByteSize() > 2_000_000_000
+except Exception:  # EncodeError: больше 2 ГБ не может даже посчитать размер
+    big = True
+m16 = float16.convert_float_to_float16(m, keep_io_types=True, disable_shape_infer=big)
 outs = {o.name for o in m16.graph.output}
 fixed = 0
 for n in m16.graph.node:

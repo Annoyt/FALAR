@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 
-N = Path(os.path.expanduser("~/.cache/falar-stand/npu/parakeet"))
+N = Path("/home/not_me/antigravity-workspace/agentstuff/agenttranslator/.stand/npu/parakeet")
 CORPUS = Path("/home/not_me/antigravity-workspace/agentstuff/agenttranslator/bench/air/corpus")
 vocab = {}
 for line in open(N / "vocab.txt", encoding="utf-8"):
