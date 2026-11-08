@@ -16,7 +16,12 @@
    Маска «кадр < длины» считается сравнением в той же сетке: arange 0…103 — константа в сетке.
    С --quantize_io вход и выход длины — uint16: q = 2 × длина + 2.
 
-  qdq_fix.py IN_DIR OUT_DIR [--bias] [--float-length]   # IN_DIR: model.onnx + model.data от AI Hub; data — жёсткая ссылка
+4. --a8-matmul in1|both: для HTP v68 (778G, 888). Там произведение двух 16-битных активаций не собирается
+   («Failed to validate op /layers.0/self_attn/MatMul_1 … has incorrect Value 68, expected >= 73»). Таких MatMul 48:
+   q·kᵀ и внимание·v во всех 24 слоях. Здесь их второй (in1) или оба входа переквантуются в uint8 на том же
+   диапазоне, что был в 16 битах (шаг ×257).
+
+  qdq_fix.py IN_DIR OUT_DIR [--bias] [--float-length] [--a8-matmul in1|both]   # IN_DIR: model.onnx + model.data от AI Hub
   qdq_fix.py --check-length OUT_DIR    # путь длины отдельно на ПК (ORT) для всех фраз корпуса против fp32-эталона
   qdq_fix.py --io-params DIR           # сетка uint16 входа и выхода (для вывода со сборкой --quantize_io)
 
@@ -147,6 +152,45 @@ def float_length(g):
     g.value_info.extend(keep)
 
 
+def a8_matmul(g, init, base, which):
+    """Входы MatMul «активация × активация» переквантовать из uint16 в uint8 на том же диапазоне."""
+    prod = {o: n for n in g.node for o in n.output}
+    memo = {}
+
+    def static(x):
+        if x not in memo:
+            p = prod.get(x)
+            memo[x] = x in init or (p is not None and all(static(i) for i in p.input if i))
+        return memo[x]
+
+    done, cache = 0, {}
+    for mm in [n for n in g.node if n.op_type == "MatMul"]:
+        if static(mm.input[0]) or static(mm.input[1]):
+            continue
+        for k in ((1,) if which == "in1" else (0, 1)):
+            x = mm.input[k]
+            dq = prod.get(x)
+            if dq is None or dq.op_type != "DequantizeLinear":
+                sys.exit(f"{mm.name}: вход {k} не из DequantizeLinear")
+            if x not in cache:
+                s16 = float(value(init, dq.input[1], base))
+                z16 = int(value(init, dq.input[2], base))
+                if value(init, dq.input[2], base).dtype != np.uint16:
+                    sys.exit(f"{x}: ждал uint16")
+                b = x.strip("/").replace("/", "_") + "_falar_a8"
+                g.initializer.extend([numpy_helper.from_array(np.array(s16 * 257, np.float32), b + "_scale"),
+                                      numpy_helper.from_array(np.array(int(round(z16 / 257)), np.uint8), b + "_zp")])
+                at = list(g.node).index(mm)
+                g.node.insert(at, helper.make_node("DequantizeLinear", [b + "_q", b + "_scale", b + "_zp"], [b + "_dq"],
+                                                   name=b + "_dq"))
+                g.node.insert(at, helper.make_node("QuantizeLinear", [x, b + "_scale", b + "_zp"], [b + "_q"],
+                                                   name=b + "_q"))
+                cache[x] = b + "_dq"
+            mm.input[k] = cache[x]
+        done += 1
+    return done
+
+
 def add_bias(g, init, base):
     prod = {o: n for n in g.node for o in n.output}
     new_nodes, n_fixed = [], 0
@@ -250,6 +294,7 @@ def main():
     ap.add_argument("dst", nargs="?")
     ap.add_argument("--bias", action="store_true")
     ap.add_argument("--float-length", action="store_true")
+    ap.add_argument("--a8-matmul", choices=["in1", "both"])
     ap.add_argument("--check-length", metavar="DIR")
     ap.add_argument("--io-params", metavar="DIR")
     a = ap.parse_args()
@@ -264,6 +309,8 @@ def main():
     print(f"длина: точная сетка у {fix_length(g, init)} узлов Q/DQ")
     if a.bias:
         print(f"смещения: добавлено у {add_bias(g, init, src)} свёрток")
+    if a.a8_matmul:
+        print(f"uint8: {a8_matmul(g, init, src, a.a8_matmul)} MatMul «активация × активация» (входы: {a.a8_matmul})")
     if a.float_length:
         float_length(g)
         print("длина: вход и выход float32 в точной сетке, маска — сравнением в сетке (Cast в целые убраны)")
