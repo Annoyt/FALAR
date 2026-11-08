@@ -71,15 +71,25 @@ def make(a):
     m = onnx.load(str(src / "model.onnx"), load_external_data=False)
     g = m.graph
     init = {i.name: i for i in g.initializer}
+    # формы отводов — из вывода форм (AI Hub требует у выходов графа тип с формой)
+    vi = {v.name: v for v in onnx.shape_inference.infer_shapes(m, check_type=True, strict_mode=True).graph.value_info}
     taps = {}
     for t, dq in taps_list(g):
-        g.output.append(helper.make_tensor_value_info(dq.output[0], TensorProto.FLOAT, None))
-        taps[dq.output[0]] = {"tensor": t, "scale": float(value(init, dq.input[1], src)),
-                              "zp": int(value(init, dq.input[2], src))}
+        o = dq.output[0]
+        if o not in vi or not vi[o].type.tensor_type.HasField("shape"):
+            sys.exit(f"{o}: форма неизвестна")
+        out = onnx.ValueInfoProto()
+        out.CopyFrom(vi[o])
+        g.output.append(out)
+        taps[o] = {"tensor": t, "scale": float(value(init, dq.input[1], src)), "zp": int(value(init, dq.input[2], src)),
+                   "shape": [d.dim_value for d in out.type.tensor_type.shape.dim]}
     keep = [v for v in g.value_info if v.name not in taps]   # выход графа не должен дублироваться в value_info
     del g.value_info[:]
     g.value_info.extend(keep)
     onnx.shape_inference.infer_shapes(m, check_type=True, strict_mode=True)
+    bad = [o.name for o in g.output if not o.type.tensor_type.HasField("shape")]
+    if bad:
+        sys.exit(f"у выходов нет формы: {bad[:3]}")
     dst.mkdir(parents=True, exist_ok=True)
     if not (dst / "model.data").exists():
         (dst / "model.data").hardlink_to(src / "model.data")
