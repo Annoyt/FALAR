@@ -5,12 +5,12 @@
 Повод: на Galaxy S22 (8 Gen 1, HTP v69) выход parakeet w8a16 испорчен (cos 0,62 к fp32), та же модель верна на v68,
 v73 и v79. Отводы: выходы свёрток предкодировщика, все блоки первого слоя, выход каждого из 24 слоёв.
 
-  aihub_taps.py make IN_DIR OUT_DIR                 # QDQ (после qdq_fix.py --float-length) → то же + отводы, taps.json
+  aihub_taps.py make IN_DIR OUT_DIR                 # QDQ (после qdq_fix.py --float-length) → то же + отводы
   aihub_taps.py submit OUT_DIR --model-id ID --devices "ЭТАЛОН;ПРОВЕРЯЕМЫЙ" [--clips 6]
   aihub_taps.py compare RUN.json                    # cos и относительная ошибка по отводам: проверяемый против эталона
 
 Сборка как у основной модели: precompiled_qnn_onnx, --quantize_io, длина float32 (вход uint16 2·L+2). Выходы-отводы
-тогда uint16 в сетке своего DequantizeLinear; сетки — в taps.json. Только публичные признаки корпуса.
+тогда uint16 в сетке своего DequantizeLinear; сетки — в КАТАЛОГ.taps.json рядом с моделью. Только публичные признаки корпуса.
 """
 import argparse
 import json
@@ -57,6 +57,11 @@ def taps_list(g):
     return out
 
 
+def taps_file(model_dir):
+    """Сетки отводов — рядом с каталогом модели: в самом каталоге AI Hub принимает только .onnx/.data/.encodings/.bin."""
+    return model_dir.parent / f"{model_dir.name}.taps.json"
+
+
 def make(a):
     import onnx
     from onnx import helper, TensorProto
@@ -79,7 +84,7 @@ def make(a):
     if not (dst / "model.data").exists():
         (dst / "model.data").hardlink_to(src / "model.data")
     onnx.save(m, str(dst / "model.onnx"))
-    (dst / "taps.json").write_text(json.dumps(taps, ensure_ascii=False, indent=1))
+    taps_file(dst).write_text(json.dumps(taps, ensure_ascii=False, indent=1))
     print(f"отводов {len(taps)} → {dst}")
 
 
@@ -130,7 +135,7 @@ def submit(a):
 def compare(a):
     import qai_hub as hub
     run = json.loads(Path(a.run).read_text())
-    taps = json.loads((Path(run["dir"]) / "taps.json").read_text())
+    taps = json.loads(taps_file(Path(run["dir"])).read_text())
     outs = {}
     for j in run["jobs"]:
         if "infer" not in j:
