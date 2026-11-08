@@ -118,13 +118,13 @@ final class Screen {
    *  names — {португальское, русское}. */
   static String memoText(String who, List<String[]> names, String memo) { return memoText(who, "", false, names, memo); }
   /** С голосами разговора: speakers (Memo.speakers — сколько говорит и строка на каждого) — вместо строки
-   *  «кто говорит». Голосов нет, а модуль «Отпечаток голоса» включён — одна строка, как их завести. */
+   *  «кто говорит». Голосов нет, а модуль «Отпечаток голоса» включён — одна строка, как они заводятся. */
   static String memoText(String who, String speakers, boolean speakerModule, List<String[]> names, String memo) {
     StringBuilder b = new StringBuilder();
     if (speakers != null && !speakers.isEmpty()) b.append(speakers);
     else {
       b.append(who == null || who.isEmpty() ? L.t("Кто говорит — пока не ясно.") : who);
-      if (speakerModule) b.append(L.t("\nГолосов в разговоре нет: пусть каждый скажет фразу кнопкой FALAR — тогда слушание переводит только их."));
+      if (speakerModule) b.append(L.t("\nГолосов в разговоре пока нет: номер получит каждый, кто скажет фразу кнопкой FALAR или две чёткие фразы рядом."));
     }
     if (names != null && !names.isEmpty()) {
       b.append(L.t("\nИмена: "));
@@ -144,7 +144,7 @@ final class Screen {
   /** Пункты — на языке надписей; окно узнаёт их по тем же L.t(константа), а не по русскому началу. */
   static List<String> memoMore(int voices, boolean byUser, int names, int terms) {
     List<String> m = new ArrayList<>();
-    if (voices > 0) { m.add(L.t(NAME_VOICE)); m.add(L.t(FORGET_VOICES) + " (" + voices + ")"); }
+    if (voices > 0) { if (Voices.SHOW_NUMBERS) m.add(L.t(NAME_VOICE)); m.add(L.t(FORGET_VOICES) + " (" + voices + ")"); }
     if (byUser) m.add(L.t(MEMO_BACK));
     if (names > 0) m.add(L.t(ADD_NAMES) + " (" + names + ")");
     if (terms > 0) m.add(L.t(FORGET_TERMS) + " (" + terms + ")");
@@ -213,20 +213,25 @@ final class Screen {
   /** Кто сказал пример: собеседник с номером голоса, голос не определён (разговор назван — с его именем), вы. */
   static String exampleWho(boolean heard, String who, String chatName) {
     if (!heard) return L.t("вы сказали");
-    if (who != null && who.matches("\\d{1,4}")) return L.f("Собеседник %s", who);
+    if (who != null && who.matches("\\d{1,4}")) return Voices.SHOW_NUMBERS ? L.f("Собеседник %s", who) : L.t("собеседник");
     return chatName == null || chatName.trim().isEmpty() ? L.t("голос не определён") : L.f("голос не определён · %s", chatName.trim());
   }
 
   /** Сводка голосов фразы: «Собеседник 1 ×2 · Собеседник 3 ×1 · вы ×1» — по убыванию, неизвестные голоса вместе. */
   static String voicesLine(Map<String, Integer> v) {
-    List<Map.Entry<String, Integer>> l = new ArrayList<>(v.entrySet());
+    Map<String, Integer> by = new java.util.LinkedHashMap<>();      // номера скрыты — все голоса разговора вместе
+    for (Map.Entry<String, Integer> e : v.entrySet()) {
+      String k = e.getKey();
+      String who = Voices.OWNER.equals(k) ? L.t("вы") : k != null && k.matches("\\d{1,4}")
+          ? (Voices.SHOW_NUMBERS ? L.f("Собеседник %s", k) : L.t("собеседник")) : L.t("голос не определён");
+      by.merge(who, e.getValue(), Integer::sum);
+    }
+    List<Map.Entry<String, Integer>> l = new ArrayList<>(by.entrySet());
     l.sort((a, b) -> b.getValue() - a.getValue());
     StringBuilder s = new StringBuilder();
     for (Map.Entry<String, Integer> e : l) {
-      String k = e.getKey();
-      String who = Voices.OWNER.equals(k) ? L.t("вы") : k != null && k.matches("\\d{1,4}") ? L.f("Собеседник %s", k) : L.t("голос не определён");
       if (s.length() > 0) s.append(" · ");
-      s.append(who).append(" ×").append(e.getValue());
+      s.append(e.getKey()).append(" ×").append(e.getValue());
     }
     return s.toString();
   }

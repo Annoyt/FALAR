@@ -11,12 +11,17 @@
 #  V2 ещё фраза того же человека — тот же голос, в слепке две фразы;
 #  V3 фраза другого человека по-русски — «собеседник 2», русский;
 #  V4 слушание (feedwav — тот же путь, что у живого микрофона): фразы голосов 1 и 2 переведены с их
-#     номерами; фразы третьего человека, не говорившего кнопкой, не переведены и в разговор не легли;
-#  V5 разговор без голосов: слушание ничего не переводит и пишет, что нужна фраза кнопкой FALAR;
+#     номерами; третий человек кнопкой не говорил, но речь чёткая — его фразы тоже переведены, и номер
+#     у него свой, 3: со второй фразы, первой — задним числом (владелец 05.11);
+#  V5 разговор без голосов: чёткая фраза незнакомого переведена без номера, голос ждёт второй фразы;
+#  V10 решение по голосу без нарезки (segwav с заданным фоном): нечёткая речь в разговоре без голосов
+#     не переводится; чёткая — переводится, голос без номера; вторая фраза того же человека, даже
+#     нечёткая, узнаётся по нему и даёт номер 1 обеим репликам; нечёткий чужой голос — не переводится;
 #  V6 модуль «Отпечаток голоса» выключен — слушание переводит всех, как до 0.27.
 #
 # Голоса — живые люди из Tatoeba (bench/air/corpus; стендовые записи, в сборку не идут), трое разных
-# дикторов. Синтезированный голос для отпечатка не годится (results/2026-09-12-asr-upgrade.md).
+# дикторов. Метки голосов — на языке надписей Falar: «собеседник 1» или «interlocutor 1» (05.11 надписи на Redmi
+# были португальскими, и V1–V3 проваливались на одном языке метки). Синтезированный голос для отпечатка не годится (results/2026-09-12-asr-upgrade.md).
 #
 # Данные владельца не трогаются: тестовые разговоры — отдельными файлами «ТЕСТ голоса…» с самым
 # свежим временем, в конце удаляются; выученное, словари, свои слова, пины — из снимка; модули — как
@@ -166,6 +171,10 @@ def speech(x, f=320):
     n = len(x) // f; e = 20 * np.log10(np.array([np.sqrt(np.mean(x[i*f:(i+1)*f] ** 2)) for i in range(n)]) + 1e-9)
     k = np.where(e > e.max() - 35)[0]; return x[max(0, k[0] - 2) * f:min(n, k[-1] + 3) * f]
 wr('vt_two.wav', np.concatenate([sil(1.0), speech(rd(A[7])), speech(rd(B[12])), sil(0.3)]))   # как режет нарезка: подпор 1 с, хвост 0,3 с
+# V10 — куски как после нарезки. Эталон на столе (tools/voiceprint_ref.py, сами записи): C2 и C1 — 0,76 друг к
+# другу; A8 к ним — 0,21–0,22. В V4 у C1 и C3 — 0,50, а к голосам A и B — не выше 0,36.
+seg = lambda p: np.concatenate([sil(1.0), speech(rd(p)), sil(0.3)])
+wr('vt_C2.wav', seg(C[2])); wr('vt_C1.wav', seg(C[1])); wr('vt_A8.wav', seg(A[8]))
 with open(f'{D}/feed.tsv', 'w', encoding='utf-8') as f:
     for who, p in feed: f.write(who + '\t' + open(p + '.txt', encoding='utf-8').read().strip() + '\n')
     f.write('none\t' + open(A[5] + '.txt', encoding='utf-8').read().strip() + '\n')
@@ -173,7 +182,7 @@ with open(f'{D}/feed.tsv', 'w', encoding='utf-8') as f:
     f.write('two_a\t' + open(A[7] + '.txt', encoding='utf-8').read().strip() + '\n')
     f.write('two_b\t' + open(B[12] + '.txt', encoding='utf-8').read().strip() + '\n')
 EOF
-WAVS="vt_A1.wav vt_A2.wav vt_B1.wav vt_feed.wav vt_none.wav vt_off.wav vt_two.wav vt_gold.json"
+WAVS="vt_A1.wav vt_A2.wav vt_B1.wav vt_feed.wav vt_none.wav vt_off.wav vt_two.wav vt_C2.wav vt_C1.wav vt_A8.wav vt_gold.json"
 GOLD=$R/bench/apk/test/voiceprint_golden.json
 cp "$GOLD" "$D/vt_gold.json"
 for w in $("$PY" -c "import json,sys; print(' '.join(o['wav'] for o in json.load(open(sys.argv[1]))))" "$GOLD"); do cp "$R/$w" "$D/"; WAVS="$WAVS $(basename $w)"; done
@@ -198,8 +207,8 @@ if [ -z "$(sh "ls $M/$SPK 2>/dev/null")" ]; then
   [ -f "$R/models/$SPK" ] || { say "нет models/$SPK в проекте — не начинаю"; exit 1; }
   sh "mkdir -p $M/speaker"; $ADB push "$R/models/$SPK" "$M/$SPK" >/dev/null 2>&1 && SPKPUSHED=1 && say "  модель отпечатка привезена из проекта"
 fi
-TID=$(date +%s%3N); TID2=$((TID + 1)); TID3=$((TID + 2))
-{ echo "snap $SNAP"; echo "mods $MODS"; echo "chats $TID $TID2 $TID3"; echo "wavs $WAVS"; echo "spkpushed $SPKPUSHED"; } > "$PEND"
+TID=$(date +%s%3N); TID2=$((TID + 1)); TID3=$((TID + 2)); TID4=$((TID + 3))
+{ echo "snap $SNAP"; echo "mods $MODS"; echo "chats $TID $TID2 $TID3 $TID4"; echo "wavs $WAVS"; echo "spkpushed $SPKPUSHED"; } > "$PEND"
 say "  $(ls "$SNAP" | tr '\n' ' ')· модули [$MODS]"
 for w in $WAVS; do $ADB push "$D/$w" "$F/$w" >/dev/null 2>&1 || { say "запись $w не легла на телефон"; exit 1; }; done
 
@@ -238,21 +247,21 @@ ptt() { local m l; m=$(mark); launch --es testwav "$F/$1" --es ptt 1; l=$(wl "$m
   local tl vl; tl=$(since "$m" | grep -n -m1 -E '^[0-9:.]+ #[0-9]+ ' | cut -d: -f1); vl=$(since "$m" | grep -n -m1 -E '🎤 (новый голос|голос узнан)' | cut -d: -f1)
   [ -n "$tl" ] && [ -n "$vl" ] && [ "$tl" -lt "$vl" ] && echo " [реплика раньше голоса]" || echo " [голос раньше реплики или строк нет]"; }
 l=$(ptt vt_A1.wav); say "  $l"
-printf '%s' "$l" | grep -q "новый голос: собеседник 1 (pt)" && res 0 "V1 первый голос — собеседник 1, португальский" || res 1 "V1 ${l:-нет строки}"
+printf '%s' "$l" | grep -qE "новый голос: (собеседник|interlocutor) 1 \(pt\)" && res 0 "V1 первый голос — собеседник 1, португальский" || res 1 "V1 ${l:-нет строки}"
 printf '%s' "$l" | grep -q "реплика раньше голоса" && res 0 "V1 перевод не ждал отпечатка: реплика в журнале раньше голоса" || res 1 "V1 порядок строк: голос не после реплики"
 sleep 2
 eq=$(cj "$TID" "len(o['turns']), o['turns'][-1].get('who'), [(v['n'], v['lang'], v['k'], len(v['e'])) for v in o.get('voices', [])]")
 [ "$eq" = "1 1 [(1, 'pt', 1, 512)]" ] && res 0 "V1 номер у реплики, слепок в файле разговора (512 чисел)" || res 1 "V1 в файле: $eq"
 l=$(ptt vt_A2.wav); say "  $l"
-printf '%s' "$l" | grep -q "голос узнан: собеседник 1" && res 0 "V2 вторая фраза — тот же голос" || res 1 "V2 ${l:-нет строки}"
+printf '%s' "$l" | grep -qE "голос узнан: (собеседник|interlocutor) 1 " && res 0 "V2 вторая фраза — тот же голос" || res 1 "V2 ${l:-нет строки}"
 sleep 2
 eq=$(cj "$TID" "o['turns'][-1].get('who'), [(v['n'], v['k']) for v in o.get('voices', [])]")
 [ "$eq" = "1 [(1, 2)]" ] && res 0 "V2 в слепке две фразы" || res 1 "V2 в файле: $eq"
 l=$(ptt vt_B1.wav); say "  $l"
-printf '%s' "$l" | grep -q "новый голос: собеседник 2 (ru)" && res 0 "V3 другой человек по-русски — собеседник 2" || res 1 "V3 ${l:-нет строки}"
+printf '%s' "$l" | grep -qE "новый голос: (собеседник|interlocutor) 2 \(ru\)" && res 0 "V3 другой человек по-русски — собеседник 2" || res 1 "V3 ${l:-нет строки}"
 sleep 2
 
-say "== V4: слушание — переводятся только голоса разговора"
+say "== V4: слушание — голоса разговора со своими номерами, и третий человек, раз речь чёткая"
 n0=$(cj "$TID" "len(o['turns'])")
 m=$(mark); launch --es listen both; sleep 2; launch --es feedwav "$F/vt_feed.wav"
 wl "$m" 'подача закончена' 120 >/dev/null; sleep 8
@@ -260,6 +269,7 @@ L=$(since "$m")
 skips=$(printf '%s\n' "$L" | grep -c '🎤 чужой голос')
 say "  ждал отпечаток перед переводом, мс: $(printf '%s\n' "$L" | sed -n 's/.*ждал \([0-9]*\) мс.*/\1/p' | tr '\n' ' ')· сам отпечаток, мс: $(printf '%s\n' "$L" | sed -n 's/.*отпечаток \([0-9]*\) мс.*/\1/p' | tr '\n' ' ')"
 say "  чужой голос: $skips · $(printf '%s\n' "$L" | grep -E '🎤 чужой голос' | sed 's/.*ближе всех/ближе всех/' | tr '\n' ';')"
+say "  незнакомый, но чёткий: $(printf '%s\n' "$L" | grep -c 'голос незнакомый, но чёткий') · номер со второй фразы: $(printf '%s\n' "$L" | grep -c 'вторая фраза — ')"
 cj "$TID" "'\n'.join((t.get('who','-') + '\t' + t['src']) for t in o['turns'][$n0:])" > "$D/got.tsv"
 sed 's/^/  реплика: /' "$D/got.tsv"
 "$PY" - "$D/feed.tsv" "$D/got.tsv" > "$D/v4" <<'EOF'
@@ -267,19 +277,21 @@ import sys, re, difflib
 want = [l.rstrip('\n').split('\t') for l in open(sys.argv[1], encoding='utf-8')][:5]
 got = [l.rstrip('\n').split('\t', 1) for l in open(sys.argv[2], encoding='utf-8') if '\t' in l]
 norm = lambda s: re.sub(r'[^\w ]', '', s.lower())
-num = {'A': '1', 'B': '2'}
-ok_turns = bad = 0
+num = {'A': '1', 'B': '2', 'C': '3'}
+ok_turns = bad = c_turns = 0
 for who, src in got:
     best = max(want, key=lambda w: difflib.SequenceMatcher(None, norm(w[1]), norm(src)).ratio())
     r = difflib.SequenceMatcher(None, norm(best[1]), norm(src)).ratio()
-    if best[0] == 'C' or r < 0.5 or num.get(best[0]) != who: bad += 1
-    else: ok_turns += 1
-print(ok_turns, bad, sum(1 for w in want if w[0] != 'C'))
+    if r < 0.5 or num.get(best[0]) != who: bad += 1
+    else: ok_turns += 1; c_turns += best[0] == 'C'
+print(ok_turns, bad, len(want), c_turns)
 EOF
-read okn badn need < "$D/v4"
-[ "${badn:-1}" = 0 ] && res 0 "V4 ни одной реплики третьего человека и ни одной с чужим номером" || res 1 "V4 неверных реплик: $badn"
-[ "${okn:-0}" -ge $((need - 1)) ] && res 0 "V4 голоса разговора переведены со своими номерами: $okn из $need" || res 1 "V4 переведено голосов разговора: $okn из $need"
-[ "$skips" -ge 1 ] && res 0 "V4 чужие обрывки отброшены по голосу: $skips" || res 1 "V4 строк «чужой голос» нет"
+read okn badn need cn < "$D/v4"
+[ "${badn:-1}" = 0 ] && res 0 "V4 ни одной реплики без своего номера или с чужим" || res 1 "V4 неверных реплик: $badn"
+[ "${okn:-0}" -ge $((need - 1)) ] && res 0 "V4 переведены со своими номерами: $okn из $need" || res 1 "V4 переведено со своими номерами: $okn из $need"
+[ "${cn:-0}" -ge 2 ] && res 0 "V4 третий человек без кнопки — номер 3, и первой его реплике тоже ($cn реплики)" || res 1 "V4 реплик третьего человека с номером 3: ${cn:-0}"
+eq=$(cj "$TID" "sorted((v['n'], v.get('heard', False)) for v in o.get('voices', []))")
+[ "$eq" = "[(1, False), (2, False), (3, True)]" ] && res 0 "V4 в файле — голос 3, заведённый слушанием, ждущих нет" || res 1 "V4 голоса в файле: $eq"
 
 say "== V7: двое подряд в одном куске — разрез по голосам, каждый кусок своим языком"
 # Кусок подаётся прямо в решение по голосу (--es segwav), мимо нарезки: её разрез от прогона к прогону
@@ -311,8 +323,8 @@ if ! asleep && focus | grep -q "$PKG/"; then
   T=$(sh "uiautomator dump /sdcard/falar-vt.xml >/dev/null; cat /sdcard/falar-vt.xml; rm -f /sdcard/falar-vt.xml" | "$PY" -c "
 import re,sys,html
 print('\n'.join(html.unescape(t) for t in re.findall(r'text=\"([^\"]*)\"', sys.stdin.read()) if t))")
-  printf '%s\n' "$T" | grep -qx 'Собеседник 2' && res 0 "V8 над текущей репликой — «Собеседник 2»" || res 1 "V8 подписи «Собеседник 2» нет: $(printf '%s' "$T" | head -c 300 | tr '\n' '|')"
-  printf '%s\n' "$T" | grep -qx 'Собеседник 1' && res 0 "V8 в карточках — «Собеседник 1»" || res 1 "V8 подписи «Собеседник 1» в карточках нет"
+  printf '%s\n' "$T" | grep -qxE '(Собеседник|Interlocutor) 2' && res 0 "V8 над текущей репликой — «Собеседник 2»" || res 1 "V8 подписи «Собеседник 2» нет: $(printf '%s' "$T" | head -c 300 | tr '\n' '|')"
+  printf '%s\n' "$T" | grep -qxE '(Собеседник|Interlocutor) 1' && res 0 "V8 в карточках — «Собеседник 1»" || res 1 "V8 подписи «Собеседник 1» в карточках нет"
 else sk "V8 экран погашен или впереди не Falar ($(focus | sed 's/.*{//; s/}.*//'))"; fi
 
 say "== V9: заглушка микрофона — ровно на время звучания, а не дольше"
@@ -331,9 +343,30 @@ say "== V5: разговор без голосов"
 $ADB push "$D/t2.json" "$F/chats/$TID2.json" >/dev/null 2>&1
 m=$(mark); launch --es openchat "$TID2"; sleep 2; launch --es feedwav "$F/vt_none.wav"
 wl "$m" 'подача закончена' 60 >/dev/null; sleep 6
-l=$(since "$m" | grep -m1 'в разговоре ещё нет голосов')
-[ -n "$l" ] && res 0 "V5 слушание просит фразу кнопкой FALAR" || res 1 "V5 строки о голосах нет"
-[ "$(cj "$TID2" "len(o['turns'])")" = 0 ] && res 0 "V5 в разговор ничего не легло" || res 1 "V5 реплики: $(cj "$TID2" "[t['src'] for t in o['turns']]")"
+l=$(since "$m" | grep -m1 'голос незнакомый, но чёткий'); say "  ${l:-нет строки}"
+[ -n "$l" ] && res 0 "V5 голосов нет, но речь чёткая — переводится" || res 1 "V5 строки «незнакомый, но чёткий» нет"
+eq=$(cj "$TID2" "len(o['turns']) > 0 and all(not t.get('who') for t in o['turns']), [(v['n'], v.get('heard', False)) for v in o.get('voices', [])]")
+[ "$eq" = "True [(0, True)]" ] && res 0 "V5 реплика без номера, голос ждёт второй фразы" || res 1 "V5 в файле: $eq"
+
+say "== V10: решение по голосу без нарезки — чёткая речь, вторая фраза, нечёткий чужой"
+# segwav — кусок прямо в решение по голосу; segnoise — уровень фона нарезки, дБ: −70 — речь на 40+ дБ громче
+# фона (чёткая), −20 — ниже фона (нечёткая).
+"$PY" -c "import json; json.dump({'id': $TID4, 'name': 'ТЕСТ голоса 4', 'named': True, 'saved': $TID4, 'turns': []}, open('$D/t4.json','w',encoding='utf-8'), ensure_ascii=False)"
+$ADB push "$D/t4.json" "$F/chats/$TID4.json" >/dev/null 2>&1
+seg() { local m; m=$(mark); launch "--es segwav $F/$1 --es segnoise $2"; wl "$m" "$3" 60; sleep 4; }
+launch --es openchat "$TID4"; sleep 2
+l=$(seg vt_C2.wav -20 'голосов в разговоре нет, а речь нечёткая|#[0-9]+ '); say "  ${l:-нет строки}"
+printf '%s' "$l" | grep -q 'речь нечёткая' && res 0 "V10 голосов нет, речь нечёткая — не переводится" || res 1 "V10 нечёткая без голосов: ${l:-нет строки}"
+[ "$(cj "$TID4" "len(o['turns'])")" = 0 ] && res 0 "V10 в разговор ничего не легло" || res 1 "V10 реплики: $(cj "$TID4" "[t['src'] for t in o['turns']]")"
+l=$(seg vt_C2.wav -70 'голос незнакомый, но чёткий|чужой голос|речь нечёткая'); say "  ${l:-нет строки}"
+eq=$(cj "$TID4" "len(o['turns']), o['turns'][-1].get('who', '-') if o['turns'] else '', [(v['n'], v.get('heard', False), v['k']) for v in o.get('voices', [])]")
+[ "$eq" = "1 - [(0, True, 1)]" ] && res 0 "V10 чёткая — переведена без номера, голос ждёт второй фразы" || res 1 "V10 чёткая: $eq"
+l=$(seg vt_C1.wav -20 'вторая фраза — |чужой голос|голос незнакомый'); say "  ${l:-нет строки}"
+eq=$(cj "$TID4" "len(o['turns']), [t.get('who', '-') for t in o['turns']], [(v['n'], v.get('heard', False), v['k']) for v in o.get('voices', [])], any('first' in v for v in o.get('voices', []))")
+[ "$eq" = "2 ['1', '1'] [(1, True, 2)] False" ] && res 0 "V10 вторая фраза, хоть и нечёткая, узнана по голосу — номер 1 обеим репликам" || res 1 "V10 вторая фраза: $eq"
+l=$(seg vt_A8.wav -20 'чужой голос|голос незнакомый|речь нечёткая'); say "  ${l:-нет строки}"
+printf '%s' "$l" | grep -q 'чужой голос' && res 0 "V10 нечёткий чужой голос — не переводится" || res 1 "V10 нечёткий чужой: ${l:-нет строки}"
+[ "$(cj "$TID4" "len(o['turns'])")" = 2 ] && res 0 "V10 реплик по-прежнему две" || res 1 "V10 реплики: $(cj "$TID4" "[t['src'] for t in o['turns']]")"
 
 say "== V6: модуль выключен — слушание как до 0.27"
 "$PY" -c "import json; json.dump({'id': $TID3, 'name': 'ТЕСТ голоса 3', 'named': True, 'saved': $TID3, 'turns': []}, open('$D/t3.json','w',encoding='utf-8'), ensure_ascii=False)"

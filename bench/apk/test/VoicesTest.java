@@ -125,6 +125,42 @@ public class VoicesTest {
     Voices lw = new Voices(); lw.enroll(a, "pt", 0, 1); lw.enroll(b, "ru", 0, 2);
     eq(Arrays.toString(lw.labels(Arrays.asList(a, a2, ab, c))), "[1, 1, 2, 0]", "W6 окно — ближайшему от 0,35, иначе никому");
 
+    // Голоса слушания без кнопки (владелец 05.11): чёткий незнакомый голос — голос без номера, номер — со второй фразы
+    Voices hv = new Voices();
+    ok(hv.none() && hv.isEmpty(), "H1 голосов нет вовсе");
+    Voices.Voice h1 = hv.heard(b, null, "pt", 500, 1);
+    ok(h1.n == 0 && h1.heard && h1.first == 500 && "pt".equals(h1.lang), "H1 новый человек — голос без номера, метка его первой реплики");
+    ok(!hv.none() && hv.isEmpty() && hv.size() == 0 && hv.waiting() == 1 && hv.all().isEmpty(), "H1 ждёт второй фразы: голосов с номером нет");
+    Voices.Match hm = hv.bestHeard(v(0.31, 0.95, 0, 0));
+    ok(hm.v == h1 && hm.hit() && Math.abs(hm.thr - Voices.hear(1)) < 1e-6, "H2 слушание сравнивает и с ждущим, порог — по его слепку");
+    ok(hv.best(b, true).v == null && hv.best(b).v == null, "H2 подписи, разрез двоих и перебивание — только голоса с номером");
+    ok(!hv.bestHeard(c).hit(), "H2 непохожий на ждущего — не он");
+    Voices.Voice h1b = hv.heard(v(0.31, 0.95, 0, 0), h1, "pt", 600, 1);
+    ok(h1b == h1 && h1.n == 1 && h1.k == 2 && hv.size() == 1 && hv.waiting() == 0 && hv.get(1) == h1, "H3 вторая фраза — номер 1, слепок из двух");
+    eq(h1.first, 500L, "H3 метку первой реплики снимает разговор, когда ставит ей номер (Chats.placeFirst)");
+    Voices fv = new Voices(); Voices.Voice f1 = fv.enroll(a, "ru", 0, 1);
+    ok(fv.heard(a2, f1, "ru", 700, 2) == f1 && f1.k == 2 && Voices.cos(f1.print(), a2) > Voices.cos(a, a2) && fv.waiting() == 0,
+        "H4 голос кнопки подстраивается под кусок слушания (П3 замера 05.11)");
+    Voices nv = new Voices(); nv.enroll(a, "pt", 0, 1);
+    Voices.Voice w2 = nv.heard(c, null, "pt", 800, 2);
+    nv.heard(c, w2, "pt", 900, 5);
+    eq(w2.n, 5, "H5 номер ждущему — после всех, что встречались в репликах (next)");
+    Voices kv = new Voices(); Voices.Voice kw = kv.heard(c, null, "pt", 1000, 1);
+    Voices.Voice kf = kv.enroll(c, "pt", 1100, 1);
+    ok(kf == kw && kw.n == 1 && kv.waiting() == 0 && kv.size() == 1, "H6 фраза кнопкой того, кто ждал второй фразы, — его голос, с номером");
+    Voices gv = new Voices(); Voices.Voice gw = gv.heard(c, null, "pt", 1, 1);
+    eq(gv.clear(), 0, "H7 забыть: голосов с номером не было"); ok(gv.none(), "H7 ждущих тоже нет");
+    Voices.Voice gn = gv.heard(c, gw, "pt", 2, 1);
+    ok(gn != gw && gn.n == 0 && gv.waiting() == 1, "H7 кусок забытого голоса — новый человек, без номера");
+    Voices jv = new Voices(); jv.enroll(a, "ru", 0, 1); jv.heard(c, null, "pt", 1234, 2);
+    JSONArray ja = jv.toJson();
+    Voices jr = Voices.fromJson(ja);
+    ok(jr.size() == 1 && jr.waiting() == 1 && jr.wait.get(0).first == 1234 && jr.wait.get(0).heard && Voices.cos(jr.wait.get(0).print(), c) > 0.9999,
+        "H8 ждущий голос — в файл и обратно");
+    int numbered = 0; for (int i = 0; i < ja.length(); i++) if (ja.getJSONObject(i).optInt("n", 0) > 0) numbered++;
+    eq(numbered, 1, "H8 у ждущего n = 0: прежние версии его пропускают");
+    eq(Voices.fromJson(new JSONArray().put(new JSONObject().put("n", 0).put("e", new JSONArray("[1,0,0,0]")))).waiting(), 0, "H8 n = 0 без heard — битая запись");
+
     // Общий файл голосов прежних версий: удаляется, а в журнал — сколько в нём было
     java.io.File md = java.nio.file.Files.createTempDirectory("voices").toFile(), pf = new java.io.File(md, "speaker_profiles.json");
     eq(Voices.retireOld(md)[0], -1, "V16 файла нет — нечего удалять");

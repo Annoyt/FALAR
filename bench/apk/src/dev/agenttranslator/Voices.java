@@ -18,6 +18,15 @@ import org.json.*;
  *  Хранится в файле разговора (поле `voices`) и удаляется вместе с ним: слепок — биометрия
  *  человека, который мог и не знать, что его записывают. Общего хранилища голосов больше нет.
  *
+ *  Без кнопки (владелец 05.11, results/2026-11-05-voices-public.md). В живых разговорах собеседники кнопку не
+ *  нажимали, и слушание отбросило 2102 куска при 1171 принятом. Теперь чёткую речь незнакомого голоса
+ *  тоже переводим — на CLEAR_DB громче фона, — и человек становится голосом разговора (heard).
+ *  Номер такой голос получает со второй своей фразы, а первой его фразе номер ставится задним числом
+ *  (first). Голос, услышанный один раз, так и остаётся без номера. Тогда номеров примерно столько,
+ *  сколько людей. Слепок каждого голоса подстраивается под его принятые фразы слушания — и у голоса
+ *  кнопки тоже. На 21 записи комнаты номер верный у 77 % фраз в тишине и у 62 % в шуме, «под номером
+ *  другого» — 5 %, если кнопкой говорил собеседник; без кнопки — 74 и 53 %, «под номером другого» 8–10 %.
+ *
  *  Без Android, проверяется на столе (bench/apk/test/VoicesTest.java). */
 public class Voices {
   /** Фраза кнопкой — голос уже известного, если косинус к его слепку не ниже; иначе голос новый.
@@ -46,10 +55,24 @@ public class Voices {
   public static final String OWNER = "owner";
   /** Знаков после запятой в файле: отпечаток единичной длины, 512 чисел; пятый знак косинус уже не меняет. */
   static final double ROUND = 1e5;
+  /** Слушание: незнакомый голос всё же переводится, если речь на столько дБ громче фона (segDb − segNoiseDb).
+   *  На POCO (живые разговоры, 20–22.10) принятые куски — 17,8 дБ медиана, нижняя четверть от 12,1; отброшенные как
+   *  «чужой голос» — 7,9 дБ. На 21 записи комнаты так проходит 91–93 % фраз в тишине и 65–79 % в шуме. Фон
+   *  даёт 1–2 лишних текста на 10 минут. */
+  public static final double CLEAR_DB = 12;
+  /** Номера и имена голосов — на экране. 09.11 живые разговоры (ветка asr-confidence, results/2026-10-27-
+   *  asr-confidence.md, шаг 18, пункт 4, и шаг 19): в людном месте номер верен в 57 % реплик, каждая четвёртая —
+   *  под номером другого; другие отпечатки и их сочетания не помогли. Владелец 09.11: «B выпустить, номера скрыть».
+   *  Номера считаются как прежде — для слушания, разреза двоих, перебивания и журнала; не видны только на экране. */
+  public static final boolean SHOW_NUMBERS = false;
 
   public static class Voice {
-    /** Номер в разговоре: «собеседник n». */
-    public final int n;
+    /** Номер в разговоре: «собеседник n»; 0 — голос слушания ждёт второй фразы, номера пока нет. */
+    public int n;
+    /** Голос заведён слушанием (чёткая речь без кнопки), а не фразой кнопкой FALAR. */
+    public boolean heard;
+    /** Метка (at) реплики, которой номер ещё не поставлен: первая фраза голоса слушания; 0 — такой нет. */
+    public long first;
     /** Язык фраз кнопкой: ru или pt; ru, pt — сколько их было на каждом. */
     public String lang; public int ru, pt;
     /** Сколько фраз в слепке (не больше K). */
@@ -68,10 +91,20 @@ public class Voices {
     public float[] print() { return e; }
   }
 
+  /** Голоса с номером. */
   final List<Voice> list = new ArrayList<>();
+  /** Голоса слушания, услышанные один раз: ждут второй фразы. Их не видно ни в подписях, ни в
+   *  «Памяти разговора», но с ними сравнивается каждый кусок слушания. */
+  final List<Voice> wait = new ArrayList<>();
 
+  /** Сколько голосов с номером. */
   public synchronized int size() { return list.size(); }
+  /** Голосов с номером нет. Ждущие номера — не в счёт. */
   public synchronized boolean isEmpty() { return list.isEmpty(); }
+  /** Голосов нет вовсе, и ждущих номера тоже. */
+  public synchronized boolean none() { return list.isEmpty() && wait.isEmpty(); }
+  /** Сколько голосов ждут второй фразы. */
+  public synchronized int waiting() { return wait.size(); }
   public synchronized List<Voice> all() { return new ArrayList<>(list); }
   public synchronized Voice get(int n) { for (Voice v : list) if (v.n == n) return v; return null; }
   /** Голос по полю реплики `who` («2»); null — у реплики голоса нет или он забыт. */
@@ -100,33 +133,55 @@ public class Voices {
   }
   /** Ближайший с учётом порогов: у каждого голоса свой порог (по числу фраз в слепке), выигрывает
    *  тот, у кого запас над своим порогом больше. listen — слушание (hear), иначе фраза кнопкой (same). */
-  public synchronized Match best(float[] e, boolean listen) {
+  public synchronized Match best(float[] e, boolean listen) { return best(e, listen, list); }
+  Match best(float[] e, boolean listen, List<Voice> among) {
     Voice b = null, s = null; float bm = -9, sm = -9, bs = 0, ss = 0, bt = Float.NaN;
-    if (e != null) for (Voice v : list) {
+    if (e != null) for (Voice v : among) {
       float c = cos(e, v.e), t = listen ? hear(v.k) : same(v.k), mg = c - t;
       if (mg > bm) { s = b; sm = bm; ss = bs; b = v; bm = mg; bs = c; bt = t; } else if (mg > sm) { s = v; sm = mg; ss = c; }
     }
     return new Match(b, bs, s, ss, bt);
   }
 
+  /** Слушание: ближайший по запасу над своим порогом (hear) среди всех голосов — и ждущих номера тоже. */
+  public synchronized Match bestHeard(float[] e) { return best(e, true, everyone()); }
+  List<Voice> everyone() { List<Voice> a = new ArrayList<>(list); a.addAll(wait); return a; }
+
   /** Фраза кнопкой FALAR: чей это голос. Совпал с известным — он, и его слепок подстраивается под
-   *  фразу; не совпал ни с кем — новый голос с номером next. e — отпечаток единичной длины. */
+   *  фразу; не совпал ни с кем — новый голос с номером next. e — отпечаток единичной длины. Совпал с
+   *  голосом слушания, ждущим номера, — тот получает номер (а его первая реплика — см. first). */
   public synchronized Voice enroll(float[] e, String lang, long at, int next) {
     if (e == null) return null;
-    Match m = best(e, false);
-    if (m.hit()) { fold(m.v, e); m.v.count(lang); return m.v; }
+    Match m = best(e, false, everyone());
+    if (m.hit()) { fold(m.v, e); m.v.count(lang); if (m.v.n == 0) number(m.v, next); return m.v; }
     Voice v = new Voice(Math.max(next, maxN() + 1), lang, e.clone(), at);
     list.add(v);
     return v;
   }
+  /** Слушание: принятый кусок голоса v (null — человек новый). Слепок подстраивается под кусок, как под
+   *  фразу кнопкой, — и у голоса кнопки тоже. Новый человек — голос без номера (heard, first = at); вторая
+   *  его фраза даёт номер next. Голос v, забытый за это время, — тоже новый. e — отпечаток единичной длины. */
+  public synchronized Voice heard(float[] e, Voice v, String lang, long at, int next) {
+    if (e == null) return v;
+    if (v == null || !list.contains(v) && !wait.contains(v)) {
+      Voice w = new Voice(0, lang, e.clone(), at);
+      w.heard = true; w.first = at; wait.add(w);
+      return w;
+    }
+    fold(v, e); v.count(lang);
+    if (v.n == 0) number(v, next);
+    return v;
+  }
+  /** Ждущий голос получает номер — следующий после всех, что были. */
+  void number(Voice v, int next) { wait.remove(v); v.n = Math.max(next, maxN() + 1); list.add(v); }
   static void fold(Voice v, float[] e) {
     float[] o = new float[e.length];
     for (int i = 0; i < e.length; i++) o[i] = v.e[i] * v.k + e[i];
     v.e = unit(o); v.k = Math.min(K, v.k + 1);
   }
 
-  /** Забыть все голоса разговора; сколько было. */
-  public synchronized int clear() { int n = list.size(); list.clear(); return n; }
+  /** Забыть все голоса разговора, и ждущие номера тоже; сколько было с номером. */
+  public synchronized int clear() { int n = list.size(); list.clear(); wait.clear(); return n; }
 
   /** Имя вписал человек — автоматика его больше не меняет; пустое имя возвращает номер. */
   public synchronized boolean name(int n, String name, String by) {
@@ -244,11 +299,14 @@ public class Voices {
     return (float) s;
   }
 
+  /** Ждущие номера — с n = 0 и heard: прежние версии такие записи пропускают. */
   public synchronized JSONArray toJson() throws JSONException {
     JSONArray a = new JSONArray();
-    for (Voice v : list) {
+    for (Voice v : everyone()) {
       JSONArray e = new JSONArray(); for (float x : v.e) e.put(Math.round(x * ROUND) / ROUND);
       JSONObject o = new JSONObject().put("n", v.n).put("lang", v.lang).put("ru", v.ru).put("pt", v.pt).put("k", v.k).put("at", v.at).put("e", e);
+      if (v.heard) o.put("heard", true);
+      if (v.first != 0) o.put("first", v.first);
       if (!v.name.isEmpty()) o.put("name", v.name).put("nameBy", v.nameBy);
       if (!v.says.isEmpty()) o.put("says", v.says);
       a.put(o);
@@ -262,7 +320,8 @@ public class Voices {
     int dim = -1;
     for (int i = 0; i < a.length(); i++) {
       JSONObject o = a.optJSONObject(i); JSONArray e = o == null ? null : o.optJSONArray("e");
-      if (e == null || e.length() == 0 || o.optInt("n", 0) <= 0) continue;
+      int n = o == null ? -1 : o.optInt("n", 0);
+      if (e == null || e.length() == 0 || n < 0 || n == 0 && !o.optBoolean("heard", false)) continue;
       if (dim < 0) dim = e.length(); else if (e.length() != dim) continue;
       float[] f = new float[e.length()];
       for (int k = 0; k < f.length; k++) f[k] = (float) e.optDouble(k, 0);
@@ -271,7 +330,8 @@ public class Voices {
       v.lang = o.optString("lang", v.lang);
       v.name = o.optString("name", ""); v.nameBy = v.name.isEmpty() ? "" : o.optString("nameBy", "auto");
       v.says = o.optString("says", "");
-      if (vs.get(v.n) == null) vs.list.add(v);
+      v.heard = o.optBoolean("heard", false); v.first = o.optLong("first", 0);
+      if (v.n == 0) vs.wait.add(v); else if (vs.get(v.n) == null) vs.list.add(v);
     }
     return vs;
   }

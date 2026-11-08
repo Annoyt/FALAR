@@ -172,6 +172,25 @@ public class ChatsTest {
     ok(!sw.setWho(8_000, "1"), "C31 реплики с такой меткой нет — false");
     Chats sw2 = new Chats(sw.dir.getParentFile()); sw2.open(sw.current);
     eq(sw2.all().get(0)[7], "1", "C31 и в файле");
+    // голос слушания без кнопки (владелец 05.11): первая реплика — без номера, вторая даёт номер и ей, и первой
+    Chats hw = new Chats(tmp());
+    Voices.Voice h0 = hw.heard(new float[]{0, 1, 0}, null, "pt", 1_000);        // как в приложении: голос — до реплики
+    hw.add("pt2ru", "Pode sentar", "Можно сесть", null, 1_000);
+    ok(h0.n == 0 && hw.all().get(0)[7].isEmpty() && hw.voices.isEmpty(), "C32 первая фраза незнакомого — без номера");
+    Chats hr = new Chats(hw.dir.getParentFile()); hr.open(hw.current);
+    eq(hr.voices.waiting() + " " + hr.voices.size(), "1 0", "C32 ждущий голос — в файле разговора");
+    Voices.Voice h1 = hw.heard(new float[]{0, 1, 0}, h0, "pt", 2_000);
+    hw.add("pt2ru", "Já volto", "Сейчас вернусь", String.valueOf(h1.n), 2_000);
+    eq(h1.n + " " + hw.all().get(0)[7] + " " + hw.all().get(1)[7], "1 1 1", "C33 вторая фраза — номер 1, и первой реплике тоже");
+    eq(h1.first, 0L, "C33 метка первой реплики снята");
+    Chats hr2 = new Chats(hw.dir.getParentFile()); hr2.open(hw.current);
+    eq(hr2.all().get(0)[7] + " " + hr2.voices.size() + " " + hr2.voices.waiting(), "1 1 0", "C33 и в файле");
+    Chats hx = new Chats(tmp());
+    hx.add("pt2ru", "Oi", "Привет", null, 5_000);
+    Voices.Voice x0 = hx.heard(new float[]{1, 0, 0}, null, "pt", 6_000);
+    hx.add("pt2ru", "Tchau", "Пока", null, 6_000);
+    Voices.Voice x1 = hx.heard(new float[]{1, 0, 0}, x0, "pt", 7_000);
+    eq(x1.n + " " + hx.all().get(0)[7] + "|" + hx.all().get(1)[7], "1 |1", "C34 номер — только первой реплике этого голоса, не соседней");
     // старый файл без поля voices читается как раньше
     Chats o = new Chats(tmp());
     JSONObject old = new JSONObject().put("id", 42).put("name", "Старый").put("turns", new JSONArray().put(Chats.turn("pt2ru", "Oi", "Привет", "собеседник", 1)));
