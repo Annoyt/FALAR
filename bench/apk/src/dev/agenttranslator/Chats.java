@@ -18,7 +18,8 @@ import org.json.*;
  *  Кроме реплик разговор держит **тему** (`topic`, короткая строка от облака) и **глоссарий**
  *  (`terms`, пары слов от облака или инструктивной модели): они нужны уточнителю и следующему
  *  облачному запросу, а не OPUS-MT, до которого подсказки не доходят. Оба поля необязательные —
- *  старый файл без них читается как раньше.
+ *  старый файл без них читается как раньше. Облачные пары других разговоров уточнитель тоже видит
+ *  (pastTerms): новый разговор начинается с пустого глоссария, а термины у одних и тех же людей повторяются.
  *
  *  **Память** (`memo`, `memoBy`) — ключевые детали разговора для уточнителя: роли, место,
  *  договорённости. Пишет её облачный пересмотр, дополняя прежнюю, или человек; написанное
@@ -598,6 +599,64 @@ public class Chats {
     return added;
   }
   public synchronized int clearTerms() { int n = terms.length(); terms = new JSONArray(); save(); return n; }
+
+  /** Кэш пар глоссария по имени файла: {время изменения, размер, пары}. Разбирается только изменившийся файл. */
+  final Map<String, Object[]> termsCache = new HashMap<>();
+
+  /** Глоссарий прошлых разговоров — пары {pt, ru} всех разговоров, кроме текущего. Повтор по португальской
+   *  стороне — пара более нового разговора на месте прежней. Пары уточнителя на телефоне (by=llm) не берутся:
+   *  проверены только облачные (results/2026-11-01-mt-cloud-memory.md, шаг 2: pt→ru +0,018 COMET на фразах
+   *  с такими терминами). */
+  public synchronized List<String[]> pastTerms() {
+    Map<String, String[]> out = new LinkedHashMap<>();
+    File[] fs = dir.listFiles((d, n) -> n.endsWith(".json"));
+    if (fs == null) return new ArrayList<>();
+    Arrays.sort(fs, Comparator.comparingLong(Chats::idOf));   // от старых к новым: новый перекрывает
+    Set<String> seen = new HashSet<>();
+    for (File f : fs) {
+      seen.add(f.getName());
+      if (idOf(f) == current) continue;
+      Object[] c = termsCache.get(f.getName());
+      if (c == null || (Long) c[0] != f.lastModified() || (Long) c[1] != f.length()) {
+        List<String[]> pairs = new ArrayList<>();
+        try {
+          JSONArray t = new JSONObject(read(f)).optJSONArray("terms");
+          for (int k = 0; t != null && k < t.length(); k++) {
+            JSONObject x = t.optJSONObject(k);
+            if (x == null || BY_LLM.equals(x.optString("src", ""))) continue;
+            String pt = x.optString("pt", "").trim(), ru = x.optString("ru", "").trim();
+            if (!pt.isEmpty() && !ru.isEmpty()) pairs.add(new String[]{pt, ru});
+          }
+        } catch (Exception ignore) {}
+        c = new Object[]{f.lastModified(), f.length(), pairs};
+        termsCache.put(f.getName(), c);
+      }
+      @SuppressWarnings("unchecked") List<String[]> pairs = (List<String[]>) c[2];
+      for (String[] p : pairs) out.put(Phrasebook.norm(p[0]), p);
+    }
+    termsCache.keySet().retainAll(seen);
+    return new ArrayList<>(out.values());
+  }
+
+  /** Номер разговора по имени файла; чужое имя — по времени изменения. */
+  static long idOf(File f) {
+    try { return Long.parseLong(f.getName().substring(0, f.getName().length() - 5)); } catch (Exception e) { return f.lastModified(); }
+  }
+
+  /** Пары {pt, ru}, чья сторона исходника стоит в тексте целыми словами, — как подсказка уточнителю
+   *  (TranslatorService.terms): по порядку, без пар с португальской стороной из skip (Phrasebook.norm), не больше
+   *  max. Пара на выходе — {сторона исходника, перевод}. */
+  static List<String[]> matching(List<String[]> pairs, String src, String text, Set<String> skip, int max) {
+    List<String[]> out = new ArrayList<>();
+    String low = " " + Phrasebook.norm(text) + " ";
+    for (String[] t : pairs) {
+      if (out.size() >= max) break;
+      if (skip != null && skip.contains(Phrasebook.norm(t[0]))) continue;
+      String a = src.equals("pt") ? t[0] : t[1], c = src.equals("pt") ? t[1] : t[0];
+      if (!a.isEmpty() && !c.isEmpty() && low.contains(" " + Phrasebook.norm(a) + " ")) out.add(new String[]{a, c});
+    }
+    return out;
+  }
 
   /** Записать ключевые детали. Написанное человеком автоматика не перезаписывает; пустая строка
    *  от человека возвращает память автоматике. false — не записано: защищено или не изменилось. */
