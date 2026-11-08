@@ -72,14 +72,16 @@ def submit(a):
     path = OUT / "runs" / f"{time.strftime('%Y%m%d-%H%M%S')}-{a.label}.json"
     m_npu = model_ref(a.npu_model)
     m_cpu = None if a.cpu_model == "none" else model_ref(a.cpu_model)
-    names, data = dataset()
-    ds = None if a.no_infer else (hub.get_dataset(a.dataset) if a.dataset else hub.upload_dataset(data, name="falar-corpus-162"))
+    specs = dict(SPECS, length=((1,), "float32")) if a.float_length else SPECS
+    names, data = dataset(length_dtype=np.float32 if a.float_length else np.int32)
+    ds = None if a.no_infer else (hub.get_dataset(a.dataset) if a.dataset else hub.upload_dataset(
+        data, name="falar-corpus-162" + ("-flen" if a.float_length else "")))
     run.update(names=names, npu_model=m_npu.model_id, cpu_model=m_cpu.model_id if m_cpu else None,
                dataset=ds.dataset_id if ds else None)
     print(f"модели: NPU {m_npu.model_id}, CPU {run['cpu_model']}, данные {run['dataset']}", flush=True)
     for d in devs:
         j = {"device": d.name}
-        cj = hub.submit_compile_job(model=m_npu, device=d, name=f"falar parakeet {a.label}", input_specs=SPECS,
+        cj = hub.submit_compile_job(model=m_npu, device=d, name=f"falar parakeet {a.label}", input_specs=specs,
                                     calibration_data=hub.get_dataset(a.calib_dataset) if a.calib_dataset else None,
                                     options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io " + a.compile_opts)
         j["npu_compile"] = cj.job_id
@@ -221,8 +223,10 @@ def infer_qio(a):
     names, data = dataset()
     s, z = qin
     x = [np.clip(np.rint(v / s) + z, 0, 65535).astype(np.uint16) for v in data["audio_signal"]]
-    ds = hub.get_dataset(a.dataset) if a.dataset else hub.upload_dataset({"audio_signal": x, "length": data["length"]},
-                                                                          name="falar-corpus-162-u16")
+    # после qdq_fix.py --float-length длина тоже квантуется: точная сетка пути длины, шаг 0,5, ноль 2
+    ln = [(2 * v + 2).astype(np.uint16) for v in data["length"]] if a.float_length else data["length"]
+    ds = hub.get_dataset(a.dataset) if a.dataset else hub.upload_dataset(
+        {"audio_signal": x, "length": ln}, name="falar-corpus-162-u16" + ("-flen" if a.float_length else ""))
     run.update(qio={"in": qin, "out": qout, "dataset": ds.dataset_id})
     print(f"вход uint16 шаг {s:.6g} ноль {z}; выход шаг {qout[0]:.6g} ноль {qout[1]}; данные {ds.dataset_id}", flush=True)
     for j in run["jobs"]:
@@ -245,6 +249,7 @@ def main():
     d.add_argument("--grep", default="")
     s = sub.add_parser("submit")
     s.add_argument("--devices", required=True)
+    s.add_argument("--float-length", action="store_true", help="модель после qdq_fix.py --float-length: длина — float32")
     s.add_argument("--npu-model", default=str(NPU_MODEL))
     s.add_argument("--cpu-model", default=str(CPU_MODEL))
     s.add_argument("--dataset", default="")
@@ -267,6 +272,7 @@ def main():
     i.add_argument("run")
     i.add_argument("--qdq", required=True, help="каталог QDQ-модели (model.onnx + model.data), из которой собрано")
     i.add_argument("--dataset", default="", help="ID уже загруженных uint16-признаков")
+    i.add_argument("--float-length", action="store_true", help="модель после qdq_fix.py --float-length: длина — uint16 2·L+2")
     a = ap.parse_args()
     return {"devices": devices, "submit": submit, "collect": collect, "quantize": quantize, "infer-qio": infer_qio}[a.cmd](a)
 
