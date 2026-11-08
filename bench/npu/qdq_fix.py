@@ -113,6 +113,7 @@ def float_length(g):
     dq = prod[c2.input[0]]
     if (c1.op_type, c2.op_type, dq.op_type) != ("Cast", "Cast", "DequantizeLinear"):
         sys.exit(f"output_1: ждал Cast ← Cast ← DequantizeLinear, а там {c1.op_type} ← {c2.op_type} ← {dq.op_type}")
+    stale = {cast.output[0], c2.output[0], dq.output[0]}   # тензоры, которых больше нет или у которых другой тип
     dq.output[0] = "output_1"
     g.node.remove(c1)
     g.node.remove(c2)
@@ -123,6 +124,7 @@ def float_length(g):
         k = list(g.node).index(u)
         uq, ud = u.output[0] + "_falar_q", u.output[0] + "_falar_dq"
         less = [n for n in g.node if u.output[0] in n.input]
+        stale.add(u.output[0])   # Unsqueeze теперь float
         g.node.insert(k + 1, helper.make_node("QuantizeLinear", [u.output[0], s, z], [uq], name=uq))
         g.node.insert(k + 2, helper.make_node("DequantizeLinear", [uq, s, z], [ud], name=ud))
         for n in less:
@@ -140,6 +142,9 @@ def float_length(g):
                     g.node.insert(0, helper.make_node("DequantizeLinear", [c + "_q", s, z], [c + "_dq"], name=c + "_dq"))
                     g.node.insert(0, helper.make_node("QuantizeLinear", [c, s, z], [c + "_q"], name=c + "_q"))
                     n.input[j] = c + "_dq"
+    keep = [v for v in g.value_info if v.name not in stale]   # иначе вывод форм видит старый int64
+    del g.value_info[:]
+    g.value_info.extend(keep)
 
 
 def add_bias(g, init, base):
@@ -262,6 +267,8 @@ def main():
     if a.float_length:
         float_length(g)
         print("длина: вход и выход float32 в точной сетке, маска — сравнением в сетке (Cast в целые убраны)")
+    # так же проверяет AI Hub при загрузке; веса для вывода форм не нужны
+    onnx.shape_inference.infer_shapes(m, check_type=True, strict_mode=True)
     dst.mkdir(parents=True, exist_ok=True)
     data = dst / "model.data"
     if not data.exists():
