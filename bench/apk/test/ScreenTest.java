@@ -107,7 +107,8 @@ public class ScreenTest {
     eq(Screen.memoMore(false, 0, 0), Collections.emptyList(), "M4 нечего делать — «ещё…» нет");
     eq(Screen.memoMore(true, 2, 3), Arrays.asList("вернуть память автоматике", "добавить имена в свои слова (2)", "забыть подсказки разговора (3)"), "M4 всё, что есть");
     eq(Screen.memoMore(false, 1, 0), Collections.singletonList("добавить имена в свои слова (1)"), "M4 вернуть — только свою");
-    eq(Screen.memoMore(2, false, 0, 1), Arrays.asList("назвать собеседника…", "забыть голоса разговора (2)", "забыть подсказки разговора (1)"), "M5 голоса разговора — первыми");
+    eq(Screen.memoMore(2, false, 0, 1), Voices.SHOW_NUMBERS ? Arrays.asList("назвать собеседника…", "забыть голоса разговора (2)", "забыть подсказки разговора (1)")
+        : Arrays.asList("забыть голоса разговора (2)", "забыть подсказки разговора (1)"), "M5 голоса разговора — первыми; номера скрыты — назвать некого, забыть можно");
     eq(Screen.memoText("Кто говорит: по-португальски — женщина.", "Говорят двое.\n• Собеседник 1 — по-русски\n• Ана (собеседник 2) — по-португальски", true, new ArrayList<>(), ""),
        "Говорят двое.\n• Собеседник 1 — по-русски\n• Ана (собеседник 2) — по-португальски\n\nКлючевые детали — пока нет.", "M6 собеседники вместо строки «кто говорит»");
     eq(Screen.memoText("", "", true, new ArrayList<>(), ""),
@@ -173,12 +174,15 @@ public class ScreenTest {
     eq(Screen.audioLine(true, 12, 400_000), "включено · 12 реплик, 0.4 МБ", "A2 двенадцать реплик");
     eq(Screen.audioLine(false, 3, 90_000), "выключено · хранится с прошлого раза: 3 реплики, 0.1 МБ", "A3 выключили — записанное осталось");
     // «Слова» шага 2: кто сказал пример, голоса фразы, выделение слова в предложении, подсказка вкладки
-    eq(Screen.exampleWho(true, "2", "Анна"), "Собеседник 2", "B1 голос узнан — номер");
+    eq(Screen.exampleWho(true, "2", "Анна"), Voices.SHOW_NUMBERS ? "Собеседник 2" : "собеседник", "B1 голос узнан — номер (скрыт с 09.11: «собеседник»)");
     eq(Screen.exampleWho(true, "", "Анна"), "голос не определён · Анна", "B1 голос не узнан — с разговором");
     eq(Screen.exampleWho(true, "", " "), "голос не определён", "B1 разговор без имени");
     eq(Screen.exampleWho(false, "", "Анна"), "вы сказали", "B1 своя реплика");
     java.util.Map<String, Integer> vv = new java.util.LinkedHashMap<>(); vv.put("1", 1); vv.put("owner", 3); vv.put("", 2);
-    eq(Screen.voicesLine(vv), "вы ×3 · голос не определён ×2 · Собеседник 1 ×1", "B2 голоса фразы — по убыванию");
+    eq(Screen.voicesLine(vv), Voices.SHOW_NUMBERS ? "вы ×3 · голос не определён ×2 · Собеседник 1 ×1"
+        : "вы ×3 · голос не определён ×2 · собеседник ×1", "B2 голоса фразы — по убыванию");
+    java.util.Map<String, Integer> v2 = new java.util.LinkedHashMap<>(); v2.put("1", 2); v2.put("3", 2); v2.put("owner", 3);
+    if (!Voices.SHOW_NUMBERS) eq(Screen.voicesLine(v2), "собеседник ×4 · вы ×3", "B2 номера скрыты — голоса разговора вместе");
     eq(java.util.Arrays.toString(Screen.highlight("Espera um pouquinho, já volto.", "um pouquinho")), "[7, 19]", "B3 связка выделена без запятой");
     eq(java.util.Arrays.toString(Screen.highlight("Fala UM POUQUINHO mais", "um pouquinho")), "[5, 17]", "B3 регистр не мешает");
     eq(java.util.Arrays.toString(Screen.highlight("Vou pra casa.", "para")), "[4, 7]", "B3 «pra» = «para»");

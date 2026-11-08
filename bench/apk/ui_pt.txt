@@ -574,7 +574,7 @@ Android 16 больше не предупреждает при установк�
 Фразу из «Слов» можно сказать самим: Falar покажет цветом, какие слова он понял.	Você mesmo pode dizer uma frase de «Palavras»: o Falar mostra em cores quais palavras entendeu.
 Выученное повторяется на слух или вслух: через день, три дня, неделю и три недели.	O que você aprendeu é revisado de ouvido ou em voz alta: depois de um dia, três dias, uma semana e três semanas.
 Каждый собеседник говорит фразу кнопкой FALAR, и слушание переводит только голоса разговора.	Cada interlocutor diz uma frase com o botão FALAR, e a escuta traduz só as vozes da conversa.
-Слушание переводит и тех, кто не нажимал FALAR, если речь чёткая; у каждого — свой номер.	A escuta traduz também quem não apertou FALAR, se a fala for nítida; cada um tem seu número.
+Слушание переводит и тех, кто не нажимал FALAR, если их речь чёткая.	A escuta traduz também quem não apertou FALAR, se a fala for nítida.
 Над репликами подписано, кто говорит: «Собеседник 1», «Собеседник 2» или имя.	Acima das falas aparece quem está falando: «Interlocutor 1», «Interlocutor 2» ou o nome.
 Озвучку из динамика можно перебить: телефон замолкает и слушает. Чужие голоса её не обрывают.	A voz do alto-falante pode ser interrompida: o telefone se cala e ouve. Vozes de outras pessoas não a interrompem.
 Если двое говорят подряд, каждого Falar переводит отдельно.	Se duas pessoas falam em seguida, o Falar traduz cada uma separadamente.

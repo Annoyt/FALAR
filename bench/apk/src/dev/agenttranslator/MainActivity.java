@@ -431,20 +431,20 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     int color; String text;
     if (last != null && Chats.VOICE.equals(last[8]) && !who.matches("\\d{1,4}")) { color = Look.GOLD; text = L.t(me ? "голосовое · по-русски" : "голосовое · по-португальски"); }
     else if (Voices.OWNER.equals(who)) { color = Look.PLUM; text = L.t(last != null && Chats.PHOTO.equals(last[8]) ? "владелец телефона · снимок" : "владелец телефона"); }
-    else if (who.matches("\\d{1,4}")) { int n = Integer.parseInt(who); color = look.voice(n); text = cap(svc.chats.voices.label(who)); }
+    else if (Voices.SHOW_NUMBERS && who.matches("\\d{1,4}")) { int n = Integer.parseInt(who); color = look.voice(n); text = cap(svc.chats.voices.label(who)); }
     else { color = me ? Look.PLUM : Look.GOLD; text = L.t(me ? "вы · по-португальски" : "собеседник"); }
     android.graphics.drawable.GradientDrawable dot = round(color, 4, 0);
     dot.setBounds(0, 0, dp(8), dp(8));
     whoLbl.setCompoundDrawables(dot, null, null, null);
     whoLbl.setText(text);
-    if (v != null) whoLbl.setOnClickListener(x -> nameVoiceDialog(v));
+    if (v != null && Voices.SHOW_NUMBERS) whoLbl.setOnClickListener(x -> nameVoiceDialog(v));
   }
   /** Подпись последней реплики словами: голос разговора, владелец телефона или пусто — голоса нет. */
   String lastWhoLabel() {
     if (svc == null || svc.chats == null) return "";
     String[] last = svc.chats.turn(svc.chats.size() - 1);
     String who = last == null || last.length < 8 ? "" : last[7];
-    return Voices.OWNER.equals(who) || who.matches("\\d{1,4}") ? svc.chats.voices.label(who) : "";
+    return Voices.OWNER.equals(who) || Voices.SHOW_NUMBERS && who.matches("\\d{1,4}") ? svc.chats.voices.label(who) : "";
   }
   static String cap(String s) { return s == null || s.isEmpty() ? "" : Character.toUpperCase(s.charAt(0)) + s.substring(1); }
   /** Как зовут собеседника N: имя вместо номера — в репликах, в «Памяти разговора» и для облака.
@@ -667,7 +667,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Имена из разговора — рядом с тем, кто говорит; добавить их в свои слова — «ещё…».
     final java.util.List<String[]> names = new java.util.ArrayList<>(svc.pendingNames);
     TextView tv = new TextView(this);
-    tv.setText(Screen.memoText(svc.whoLine(), Memo.speakers(c.dialog(), c.voices), svc.mod(Modules.SPEAKER), names, c.memo));
+    tv.setText(Screen.memoText(svc.whoLine(), Voices.SHOW_NUMBERS ? Memo.speakers(c.dialog(), c.voices) : "",
+        Voices.SHOW_NUMBERS && svc.mod(Modules.SPEAKER), names, c.memo));
     tv.setTextSize(15); tv.setPadding(48, 24, 48, 8); tv.setTextIsSelectable(true);
     ScrollView sv = new ScrollView(this); sv.addView(tv);
     final java.util.List<String> more = Screen.memoMore(voices.size(), Chats.BY_USER.equals(c.memoBy), names.size(), c.terms().size());
@@ -778,7 +779,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         LinearLayout bub = new LinearLayout(MainActivity.this);
         bub.setOrientation(LinearLayout.VERTICAL); bub.setPadding(dp(12), dp(8), dp(12), dp(9));
         // Кто сказал — подписью цвета его голоса: в разговоре бывает и трое, и по-португальски двое.
-        String lbl = svc == null || svc.chats == null ? "" : svc.chats.voices.label(owner && t[7].isEmpty() ? Voices.OWNER : t[7]);
+        String lbl = svc == null || svc.chats == null || !Voices.SHOW_NUMBERS && t[7].matches("\\d{1,4}") ? ""
+            : svc.chats.voices.label(owner && t[7].isEmpty() ? Voices.OWNER : t[7]);
         if (!lbl.isEmpty()) {
           TextView wl = new TextView(MainActivity.this); wl.setText(cap(lbl)); wl.setTextSize(11);
           wl.setTextColor(t[7].matches("\\d{1,4}") ? look.voice(Integer.parseInt(t[7])) : look.soft);
