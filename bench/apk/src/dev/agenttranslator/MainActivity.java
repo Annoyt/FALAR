@@ -2159,7 +2159,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final java.util.Set<String> known = new java.util.HashSet<>(svc.learn.knownList());
     java.util.List<Cards.Card> words = new java.util.ArrayList<>(), phrases = new java.util.ArrayList<>(), kn = new java.util.ArrayList<>();
     if (r != null) {
-      for (Cards.Card c : r.words) if (known.contains(c.key)) kn.add(c); else if (c.n >= wordsMin && words.size() < 200) words.add(c);
+      for (Cards.Card c : r.words) if (known.contains(c.key)) kn.add(c); else if (c.n >= wordsMin) words.add(c);   // все от порога (владелец 05.11)
       for (Cards.Card c : r.phrases) if (known.contains(c.key)) kn.add(c); else if (c.n >= phrasesMin) phrases.add(c);
       java.util.Set<String> have = new java.util.HashSet<>(); for (Cards.Card c : kn) have.add(c.key);
       for (String k : known) if (!have.contains(k)) kn.add(new Cards.Card(k, Cards.WORD));   // известное, которого в разговорах больше нет
@@ -2802,7 +2802,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   void bindSvc() { if (!bound) { bound = bindService(new Intent(this, TranslatorService.class), conn, Context.BIND_AUTO_CREATE); } }
   void unbindSvc() {
     if (!bound) return;
-    if (svc != null) { svc.setListener(null); }
+    if (svc != null) { svc.setListener(null); svc.cardsDone = null; }
     try { unbindService(conn); } catch (Throwable ignore) {}
     bound = false; svc = null;
   }

@@ -24,7 +24,10 @@
 #  L5 экран «Слов»: вкладки «Слова · N», «Фразы · N», «Знаю · N», карточка «Повторение» со строкой сроков;
 #     «на слух» — «Понял / Не понял», «вслух» — «Держите и говорите / Не знаю» (или «всё» на сегодня), и ни
 #     один ответ не записан — у известного владельца те же «помню / забыл / когда»;
+#  L7 «Слова» пересчитываются сами (владелец 05.11): после слушания — без открытия вкладки, в затишье; на экране
+#     все слова от порога — не обрезано до 200, если в разговорах их больше (в вывод — только числа);
 #  L6 Falar не падал (logcat).
+# Надписи экрана сверяются на обоих языках Falar: русском и португальском (05.11 на Redmi стояли португальские).
 #
 # Голоса — живые записи Tatoeba (bench/air/corpus; в сборку не идут). Данные владельца не трогаются:
 # тестовый разговор «ТЕСТ слова» — отдельным файлом с самым свежим временем, в конце удаляется вместе со своим
@@ -44,8 +47,10 @@ PY=$R/.venv/bin/python; [ -x "$PY" ] || PY=python3
 pass=0; fail=0
 say() { printf '%s\n' "$*"; }
 res() { if [ "$1" = 0 ]; then pass=$((pass+1)); say "PASS $2"; else fail=$((fail+1)); say "FAIL $2"; fi; }
+sk() { say "ПРОПУСК $1"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }
 mark() { sh "wc -l < $LOG" | awk '{print $1+0}'; }
+since() { sh "tail -n +$(($1+1)) $LOG"; }
 wl() { local i l; for i in $(seq "$3"); do l=$(sh "tail -n +$(($1+1)) $LOG | grep -E -m1 -- '$2'"); [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }; sleep 1; done; return 1; }
 focus() { sh "dumpsys window" | grep -m1 mCurrentFocus; }
 asleep() { sh "dumpsys power" | grep -qE 'mWakefulness=(Asleep|Dozing)'; }
@@ -263,21 +268,21 @@ words() {   # открыть «Слова» стендом и вернуть с�
   local m l i
   for i in 1 2 3 4 5 6; do
     m=$(mark); launch "$@"; l=$(wl "$m" '🧪 «Слова»:' 20)
-    case "$l" in *"Разбираю разговоры"*|"") sleep 5;; *) printf '%s' "$l"; return 0;; esac
+    case "$l" in *"Разбираю разговоры"*|*"Analisando as conversas"*|"") sleep 5;; *) printf '%s' "$l"; return 0;; esac
   done; printf '%s' "$l"
 }
 l=$(words --es words words --es review close)
 fails=""
-for want in "Слова · " "Фразы · " "Знаю · " "Повторение"; do case "$l" in *"$want"*) ;; *) fails="$fails «$want»";; esac; done
-printf '%s' "$l" | grep -qE 'Пора повторить: [0-9]+|На сегодня всё|Отмечайте «знаю»' || fails="$fails «строка сроков»"
+for want in "Слова · |Palavras · " "Фразы · |Frases · " "Знаю · |Já sei · " "Повторение|Revisão"; do printf '%s' "$l" | grep -qE "$want" || fails="$fails «${want%%|*}»"; done
+printf '%s' "$l" | grep -qE 'Пора повторить: [0-9]+|На сегодня всё|Отмечайте «знаю»|Hora de revisar: [0-9]+|Por hoje é só|Marque «já sei»' || fails="$fails «строка сроков»"
 [ -z "$fails" ] && res 0 "L5 вкладки со счётом, «Повторение» и строка сроков" || res 1 "L5 нет:$fails"
 l=$(words --es review ear)
-if printf '%s' "$l" | grep -q 'Понял' && printf '%s' "$l" | grep -q 'Не понял'; then res 0 "L5 на слух: «Понял / Не понял»"
-elif printf '%s' "$l" | grep -qE 'На сегодня всё|В этом режиме — всё|нечего повторять'; then res 0 "L5 на слух: на сегодня повторять нечего"
+if printf '%s' "$l" | grep -qE 'Понял|Entendi' && printf '%s' "$l" | grep -qE 'Не понял|Não entendi'; then res 0 "L5 на слух: «Понял / Не понял»"
+elif printf '%s' "$l" | grep -qE 'На сегодня всё|В этом режиме — всё|нечего повторять|Por hoje é só|Nada mais neste modo|nada para revisar'; then res 0 "L5 на слух: на сегодня повторять нечего"
 else res 1 "L5 на слух: ни кнопок ответа, ни «всё»"; fi
 l=$(words --es review say)
-if printf '%s' "$l" | grep -q 'Держите и говорите' && printf '%s' "$l" | grep -q 'Не знаю'; then res 0 "L5 вслух: «Держите и говорите / Не знаю»"
-elif printf '%s' "$l" | grep -qE 'На сегодня всё|В этом режиме — всё|нечего повторять'; then res 0 "L5 вслух: на сегодня повторять нечего"
+if printf '%s' "$l" | grep -qE 'Держите и говорите|Segure e fale' && printf '%s' "$l" | grep -qE 'Не знаю|Não sei'; then res 0 "L5 вслух: «Держите и говорите / Не знаю»"
+elif printf '%s' "$l" | grep -qE 'На сегодня всё|В этом режиме — всё|нечего повторять|Por hoje é só|Nada mais neste modo|nada para revisar'; then res 0 "L5 вслух: на сегодня повторять нечего"
 else res 1 "L5 вслух: ни кнопки, ни «всё»"; fi
 words --es review close >/dev/null
 $ADB pull "$F/known_words.json" "$D/known_after.json" >/dev/null 2>&1
@@ -292,6 +297,18 @@ print('same' if a == b else 'изменилось: %d ключей' % sum(1 for 
 EOF
 )
 [ "$v" = same ] && res 0 "L5 ответов не записано — известное владельца как было" || res 1 "L5 известное: $v"
+
+say "== L7: «Слова» сами — пересчёт после слушания, на экране все слова от порога"
+m=$(mark); launch --es listen both; sleep 3; launch --es listen off
+wl "$m" '⏹ не слушаю' 30 >/dev/null; m2=$(since "$m" | grep -n -m1 '⏹ не слушаю' | cut -d: -f1); m=$((m + ${m2:-0}))
+l=$(wl "$m" '📗 «Слова»: слов и связок' 90)
+n=$(printf '%s' "$l" | sed -n 's/.*слов и связок \([0-9]*\), фраз \([0-9]*\) — из \([0-9]*\) реплик.* за \([0-9]*\) мс.*/\1 \2 \3 \4/p')
+say "  пересчёт после слушания (слов и связок, фраз, реплик, мс): ${n:-нет строки}"
+[ -n "$n" ] && res 0 "L7 после слушания «Слова» пересчитались сами, вкладку не открывали" || res 1 "L7 пересчёта после слушания нет за 90 с"
+shown=$(words --es words words | sed -n -E 's/.*(Слова|Palavras) · ([0-9]+).*/\2/p'); all=${n%% *}
+if [ "${all:-0}" -ge 400 ]; then
+  [ "${shown:-0}" -gt 200 ] && res 0 "L7 на экране слов от порога — $shown, не обрезано до 200 (всего слов и связок $all)" || res 1 "L7 на экране ${shown:-?} слов при $all"
+else sk "L7 слов и связок в разговорах ${all:-?} — потолок 200 так не проверить"; fi
 
 say "== L6: Falar не падал"
 crash=$($ADB shell "logcat -d -v time -t '$T0'" 2>/dev/null | tr -d '\r' | grep -A3 'FATAL EXCEPTION' | grep -A1 'Process: app.falar' | grep -vE 'Process:|^--' | head -1 | cut -c1-160)
