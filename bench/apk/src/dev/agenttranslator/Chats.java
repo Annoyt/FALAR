@@ -18,7 +18,8 @@ import org.json.*;
  *  Кроме реплик разговор держит **тему** (`topic`, короткая строка от облака) и **глоссарий**
  *  (`terms`, пары слов от облака или инструктивной модели): они нужны уточнителю и следующему
  *  облачному запросу, а не OPUS-MT, до которого подсказки не доходят. Оба поля необязательные —
- *  старый файл без них читается как раньше.
+ *  старый файл без них читается как раньше. Облачные пары других разговоров уточнитель тоже видит
+ *  (pastTerms): новый разговор начинается с пустого глоссария, а термины у одних и тех же людей повторяются.
  *
  *  **Память** (`memo`, `memoBy`) — ключевые детали разговора для уточнителя: роли, место,
  *  договорённости. Пишет её облачный пересмотр, дополняя прежнюю, или человек; написанное
@@ -137,13 +138,37 @@ public class Chats {
    *  номер после всех, что уже встречались в репликах: номера забытых голосов не переиспользуются,
    *  иначе «собеседник 1» в старых репликах и новый «собеседник 1» были бы разными людьми. */
   public synchronized Voices.Voice enroll(float[] e, String lang, long at) {
+    Voices.Voice v = voices.enroll(e, lang, at, nextVoice());
+    placeFirst(v); save(); return v;
+  }
+  /** Номер для нового голоса: после всех голосов и всех номеров в репликах. */
+  int nextVoice() {
     int next = voices.maxN();
     for (int k = 0; k < turns.length(); k++) {
       JSONObject x = turns.optJSONObject(k); String w = x == null ? "" : x.optString("who", "");
       if (w.matches("\\d{1,4}")) next = Math.max(next, Integer.parseInt(w));
     }
-    Voices.Voice v = voices.enroll(e, lang, at, next + 1);
-    save(); return v;
+    return next + 1;
+  }
+  /** Слушание: принятый кусок голоса v (null — новый человек) — в голоса текущего разговора (Voices.heard).
+   *  Файл здесь не пишется: реплика ложится следом (addTurn) и пишет его сама. Номер, который голос получил
+   *  сейчас, ставится и его первой реплике. */
+  public synchronized Voices.Voice heard(float[] e, Voices.Voice v, String lang, long at) {
+    Voices.Voice r = voices.heard(e, v, lang, at, nextVoice());
+    placeFirst(r); return r;
+  }
+  /** Голос получил номер — его первой реплике слушания тоже (метка first). Номер ставится один раз: реплики
+   *  уже нет — метка всё равно снимается. true — подпись поставлена. */
+  boolean placeFirst(Voices.Voice v) {
+    if (v == null || v.n <= 0 || v.first == 0) return false;
+    long at = v.first; v.first = 0;
+    for (int k = turns.length() - 1; k >= 0; k--) {
+      JSONObject x = turns.optJSONObject(k);
+      if (x == null || x.optLong("at", -1) != at) continue;
+      if (!x.optString("who", "").isEmpty()) return false;       // подпись уже есть — не трогаем
+      try { x.put("who", String.valueOf(v.n)); return true; } catch (JSONException e) { return false; }
+    }
+    return false;
   }
   /** Номер голоса у реплики текущего разговора по её метке: голос фразы кнопкой узнаётся уже после
    *  того, как реплика легла, — перевод отпечатка не ждёт. false — такой реплики уже нет. */
@@ -575,6 +600,64 @@ public class Chats {
   }
   public synchronized int clearTerms() { int n = terms.length(); terms = new JSONArray(); save(); return n; }
 
+  /** Кэш пар глоссария по имени файла: {время изменения, размер, пары}. Разбирается только изменившийся файл. */
+  final Map<String, Object[]> termsCache = new HashMap<>();
+
+  /** Глоссарий прошлых разговоров — пары {pt, ru} всех разговоров, кроме текущего. Повтор по португальской
+   *  стороне — пара более нового разговора на месте прежней. Пары уточнителя на телефоне (by=llm) не берутся:
+   *  проверены только облачные (results/2026-11-01-mt-cloud-memory.md, шаг 2: pt→ru +0,018 COMET на фразах
+   *  с такими терминами). */
+  public synchronized List<String[]> pastTerms() {
+    Map<String, String[]> out = new LinkedHashMap<>();
+    File[] fs = dir.listFiles((d, n) -> n.endsWith(".json"));
+    if (fs == null) return new ArrayList<>();
+    Arrays.sort(fs, Comparator.comparingLong(Chats::idOf));   // от старых к новым: новый перекрывает
+    Set<String> seen = new HashSet<>();
+    for (File f : fs) {
+      seen.add(f.getName());
+      if (idOf(f) == current) continue;
+      Object[] c = termsCache.get(f.getName());
+      if (c == null || (Long) c[0] != f.lastModified() || (Long) c[1] != f.length()) {
+        List<String[]> pairs = new ArrayList<>();
+        try {
+          JSONArray t = new JSONObject(read(f)).optJSONArray("terms");
+          for (int k = 0; t != null && k < t.length(); k++) {
+            JSONObject x = t.optJSONObject(k);
+            if (x == null || BY_LLM.equals(x.optString("src", ""))) continue;
+            String pt = x.optString("pt", "").trim(), ru = x.optString("ru", "").trim();
+            if (!pt.isEmpty() && !ru.isEmpty()) pairs.add(new String[]{pt, ru});
+          }
+        } catch (Exception ignore) {}
+        c = new Object[]{f.lastModified(), f.length(), pairs};
+        termsCache.put(f.getName(), c);
+      }
+      @SuppressWarnings("unchecked") List<String[]> pairs = (List<String[]>) c[2];
+      for (String[] p : pairs) out.put(Phrasebook.norm(p[0]), p);
+    }
+    termsCache.keySet().retainAll(seen);
+    return new ArrayList<>(out.values());
+  }
+
+  /** Номер разговора по имени файла; чужое имя — по времени изменения. */
+  static long idOf(File f) {
+    try { return Long.parseLong(f.getName().substring(0, f.getName().length() - 5)); } catch (Exception e) { return f.lastModified(); }
+  }
+
+  /** Пары {pt, ru}, чья сторона исходника стоит в тексте целыми словами, — как подсказка уточнителю
+   *  (TranslatorService.terms): по порядку, без пар с португальской стороной из skip (Phrasebook.norm), не больше
+   *  max. Пара на выходе — {сторона исходника, перевод}. */
+  static List<String[]> matching(List<String[]> pairs, String src, String text, Set<String> skip, int max) {
+    List<String[]> out = new ArrayList<>();
+    String low = " " + Phrasebook.norm(text) + " ";
+    for (String[] t : pairs) {
+      if (out.size() >= max) break;
+      if (skip != null && skip.contains(Phrasebook.norm(t[0]))) continue;
+      String a = src.equals("pt") ? t[0] : t[1], c = src.equals("pt") ? t[1] : t[0];
+      if (!a.isEmpty() && !c.isEmpty() && low.contains(" " + Phrasebook.norm(a) + " ")) out.add(new String[]{a, c});
+    }
+    return out;
+  }
+
   /** Записать ключевые детали. Написанное человеком автоматика не перезаписывает; пустая строка
    *  от человека возвращает память автоматике. false — не записано: защищено или не изменилось. */
   public synchronized boolean setMemo(String text, String by) {
@@ -609,7 +692,7 @@ public class Chats {
       if (topic.isEmpty()) o.remove("topic"); else o.put("topic", topic);
       if (memo.isEmpty()) { o.remove("memo"); o.remove("memoBy"); } else o.put("memo", memo).put("memoBy", memoBy);
       if (terms.length() == 0) o.remove("terms"); else o.put("terms", terms);
-      if (voices.isEmpty()) o.remove("voices"); else o.put("voices", voices.toJson());
+      if (voices.none()) o.remove("voices"); else o.put("voices", voices.toJson());
       write(file(current), o.toString());
     } catch (Exception ignore) {}
   }

@@ -172,6 +172,25 @@ public class ChatsTest {
     ok(!sw.setWho(8_000, "1"), "C31 реплики с такой меткой нет — false");
     Chats sw2 = new Chats(sw.dir.getParentFile()); sw2.open(sw.current);
     eq(sw2.all().get(0)[7], "1", "C31 и в файле");
+    // голос слушания без кнопки (владелец 05.11): первая реплика — без номера, вторая даёт номер и ей, и первой
+    Chats hw = new Chats(tmp());
+    Voices.Voice h0 = hw.heard(new float[]{0, 1, 0}, null, "pt", 1_000);        // как в приложении: голос — до реплики
+    hw.add("pt2ru", "Pode sentar", "Можно сесть", null, 1_000);
+    ok(h0.n == 0 && hw.all().get(0)[7].isEmpty() && hw.voices.isEmpty(), "C32 первая фраза незнакомого — без номера");
+    Chats hr = new Chats(hw.dir.getParentFile()); hr.open(hw.current);
+    eq(hr.voices.waiting() + " " + hr.voices.size(), "1 0", "C32 ждущий голос — в файле разговора");
+    Voices.Voice h1 = hw.heard(new float[]{0, 1, 0}, h0, "pt", 2_000);
+    hw.add("pt2ru", "Já volto", "Сейчас вернусь", String.valueOf(h1.n), 2_000);
+    eq(h1.n + " " + hw.all().get(0)[7] + " " + hw.all().get(1)[7], "1 1 1", "C33 вторая фраза — номер 1, и первой реплике тоже");
+    eq(h1.first, 0L, "C33 метка первой реплики снята");
+    Chats hr2 = new Chats(hw.dir.getParentFile()); hr2.open(hw.current);
+    eq(hr2.all().get(0)[7] + " " + hr2.voices.size() + " " + hr2.voices.waiting(), "1 1 0", "C33 и в файле");
+    Chats hx = new Chats(tmp());
+    hx.add("pt2ru", "Oi", "Привет", null, 5_000);
+    Voices.Voice x0 = hx.heard(new float[]{1, 0, 0}, null, "pt", 6_000);
+    hx.add("pt2ru", "Tchau", "Пока", null, 6_000);
+    Voices.Voice x1 = hx.heard(new float[]{1, 0, 0}, x0, "pt", 7_000);
+    eq(x1.n + " " + hx.all().get(0)[7] + "|" + hx.all().get(1)[7], "1 |1", "C34 номер — только первой реплике этого голоса, не соседней");
     // старый файл без поля voices читается как раньше
     Chats o = new Chats(tmp());
     JSONObject old = new JSONObject().put("id", 42).put("name", "Старый").put("turns", new JSONArray().put(Chats.turn("pt2ru", "Oi", "Привет", "собеседник", 1)));
@@ -234,6 +253,46 @@ public class ChatsTest {
     q.newChat("");
     ok(q.current >= t0 + 200, "C39 номер нового разговора свободен: " + (q.current - t0));
     eq(q.load(t0 + 1).getJSONArray("turns").length(), 1, "C39 существующий разговор не затёрт");
+
+    // глоссарий прошлых разговоров: облачные пары всех разговоров, кроме текущего; новый перекрывает старый
+    Chats gl = new Chats(tmp());
+    gl.add("pt2ru", "Preciso comprar a passagem de ônibus", "Мне нужно купить билет на автобус", null, 30_000);
+    gl.addTerms(Arrays.asList(new String[]{"passagem de ônibus", "билет на автобус"}, new String[]{"rodoviária", "автовокзал"}), Chats.BY_CLOUD);
+    gl.addTerms(Collections.singletonList(new String[]{"troco", "сдача"}), Chats.BY_LLM);
+    long g1 = gl.current;
+    ok(gl.pastTerms().isEmpty(), "G1 свой разговор — не прошлый");
+    gl.newChat("");
+    gl.add("pt2ru", "Bom dia", "Доброе утро", null, 31_000);
+    List<String[]> pt = gl.pastTerms();
+    eq(pt.size(), 2, "G1 пары прошлого разговора, кроме пар уточнителя");
+    eq(pt.get(0)[0] + "=" + pt.get(0)[1], "passagem de ônibus=билет на автобус", "G1 первая пара");
+    gl.addTerms(Collections.singletonList(new String[]{"rodoviária", "вокзал"}), Chats.BY_CLOUD);   // свой разговор
+    eq(gl.pastTerms().size(), 2, "G2 пары текущего разговора в прошлые не идут");
+    gl.newChat("");
+    gl.add("pt2ru", "Oi", "Привет", null, 32_000);
+    gl.addTerms(Collections.singletonList(new String[]{"Passagem de ônibus!", "автобусный билет"}), Chats.BY_CLOUD);
+    gl.newChat("");
+    pt = gl.pastTerms();
+    eq(pt.size(), 2, "G2 повтор по португальской стороне — одна пара: " + pt.size());
+    String all = ""; for (String[] x : pt) all += x[0] + "=" + x[1] + ";";
+    ok(all.contains("Passagem de ônibus!=автобусный билет;") && all.contains("rodoviária=вокзал;"), "G2 побеждает более новый разговор: " + all);
+    // правка старого разговора видна сразу: файл изменился — разобран заново
+    org.json.JSONObject o1 = gl.load(g1);
+    o1.getJSONArray("terms").put(new org.json.JSONObject().put("pt", "plataforma").put("ru", "платформа").put("src", Chats.BY_CLOUD));
+    File f1 = new File(gl.dir, g1 + ".json");
+    Files.write(f1.toPath(), o1.toString().getBytes("UTF-8")); f1.setLastModified(f1.lastModified() + 2000);
+    eq(gl.pastTerms().size(), 3, "G3 изменённый файл разобран заново");
+    // подбор к фразе: сторона исходника целыми словами; свои пары — мимо; не больше max
+    List<String[]> m = Chats.matching(gl.pastTerms(), "pt", "Amanhã, passagem de ônibus na rodoviária.", null, 8);
+    eq(m.size(), 2, "G4 в фразе две пары");
+    eq(m.get(0)[0] + "→" + m.get(0)[1], "Passagem de ônibus!→автобусный билет", "G4 сторона исходника — португальская");
+    eq(Chats.matching(gl.pastTerms(), "pt", "Amanhã, passagem de ônibus na rodoviária.", null, 1).size(), 1, "G4 не больше max");
+    eq(Chats.matching(gl.pastTerms(), "pt", "As plataformas estão cheias", null, 8).size(), 0, "G4 часть слова — не термин");
+    Set<String> own = new HashSet<>(Collections.singletonList(Phrasebook.norm("rodoviária")));
+    eq(Chats.matching(gl.pastTerms(), "pt", "Passagem de ônibus na rodoviária", own, 8).size(), 1, "G4 пара своего разговора важнее");
+    List<String[]> rr = Chats.matching(gl.pastTerms(), "ru", "Завтра автобусный билет на автовокзале", null, 8);
+    eq(rr.size() == 1 ? rr.get(0)[0] + "→" + rr.get(0)[1] : "" + rr.size(), "автобусный билет→Passagem de ônibus!", "G5 русская сторона — исходник ru2pt");
+    eq(Chats.matching(gl.pastTerms(), "ru", "Купили автобусные билеты", null, 8).size(), 0, "G5 другое окончание не находится (как в замере)");
 
     // звук пишется в фоне после реплики: реплику удалили раньше, чем он записан, — запись его не оставит
     Chats w = new Chats(tmp()); w.audio().mkdirs();
