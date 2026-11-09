@@ -132,6 +132,54 @@ def synthetic(out):
     g.save(g.op("LayerNormalization", [x, g.c(1 + w(D)), g.c(w(D))], axis=-1, epsilon=1e-5), out)
 
 
+def layouts(out):
+    """Обходы для свёрток (09.11: и NHWC, и NCHW ломаются на переходах 3D↔4D через Unsqueeze/Squeeze)."""
+    g = G("q01_conv_4d_in", x_shape=(1, 1, 832, 128))     # чистый 4D-вход: 3×3 шаг 2 + Relu
+    g.save(g.op("Relu", [g.op("Conv", ["X", g.c(w(256, 1, 3, 3, s=0.3)), g.c(w(256))], kernel_shape=[3, 3], strides=[2, 2], pads=[1, 1, 1, 1])]), out)
+
+    g = G("q02_conv_reshape_in", x_shape=(1, 832, 128))    # 3D → Reshape → 4D (вместо Unsqueeze)
+    x = g.op("Reshape", ["X", g.c([1, 1, 832, 128], np.int64)])
+    g.save(g.op("Relu", [g.op("Conv", [x, g.c(w(256, 1, 3, 3, s=0.3)), g.c(w(256))], kernel_shape=[3, 3], strides=[2, 2], pads=[1, 1, 1, 1])]), out)
+
+    g = G("q03_dw_4d_in", x_shape=(1, D, 1, T))            # depthwise 1×9 на чистом 4D
+    g.save(g.op("Conv", ["X", g.c(w(D, 1, 1, 9, s=0.2)), g.c(w(D))], kernel_shape=[1, 9], pads=[0, 4, 0, 4], group=D), out)
+
+    g = G("q04_dw_reshape_nhwc")                           # [1,T,C] → Reshape [1,1,T,C] → Transpose → dw → обратно
+    x = g.op("MatMul", ["X", g.c(w(D, D))])
+    x = g.op("Transpose", [g.op("Reshape", [x, g.c([1, 1, T, D], np.int64)])], perm=[0, 3, 1, 2])          # [1,C,1,T]
+    x = g.op("Conv", [x, g.c(w(D, 1, 1, 9, s=0.2)), g.c(w(D))], kernel_shape=[1, 9], pads=[0, 4, 0, 4], group=D)
+    g.save(g.op("Reshape", [g.op("Transpose", [x], perm=[0, 2, 3, 1]), g.c([1, T, D], np.int64)]), out)
+
+    g = G("q05_dw_shiftsum")                               # depthwise без свёртки: Pad по времени + 9 сдвигов × вес
+    x = g.op("MatMul", ["X", g.c(w(D, D))])
+    xp = g.op("Pad", [x, g.c([0, 4, 0, 0, 4, 0], np.int64), g.c(np.float32(0))], mode="constant")      # [1,T+8,C]
+    kw = w(9, D, s=0.2)
+    acc = None
+    for k in range(9):
+        sl = g.op("Slice", [xp, g.c([k], np.int64), g.c([k + T], np.int64), g.c([1], np.int64)])
+        t = g.op("Mul", [sl, g.c(kw[k])])
+        acc = t if acc is None else g.op("Add", [acc, t])
+    g.save(g.op("Add", [acc, g.c(w(D))]), out)
+
+    g = G("q06_pointwise_glu_mm")                          # точечная свёртка как MatMul по времени + GLU по последней оси
+    x = g.op("Add", [g.op("MatMul", ["X", g.c(w(D, 2 * D))]), g.c(w(2 * D))])
+    a, b = g.ops("Split", [x, g.c([D, D], np.int64)], 2, axis=-1)
+    g.save(g.op("Mul", [a, g.op("Sigmoid", [b])]), out)
+
+
+def const_bmm(out):
+    """MatMul с постоянным 4D-множителем (позиционная часть внимания: (q + bias_v) @ p, p [1,8,128,207]) — дополнение
+    раскладывает его на FULLY_CONNECTED по головам + CONCATENATION; слой 0 на POCO 09.11 расходился с процессором."""
+    def heads(g, x):
+        return g.op("Transpose", [g.op("Reshape", [x, g.c([1, T, H, DK], np.int64)])], perm=[0, 2, 1, 3])
+    pos = w(1, H, DK, 2 * T - 1, s=0.5)
+    g = G("p12_const_bmm")
+    g.save(g.op("MatMul", [heads(g, g.op("MatMul", ["X", g.c(w(D, D))])), g.c(pos)]), out)
+    g = G("p13_const_bmm_zero")                            # обход: p + ноль со входа — множитель уже не постоянный
+    g.inputs.append(helper.make_tensor_value_info("Z", TensorProto.FLOAT, [1]))
+    g.save(g.op("MatMul", [heads(g, g.op("MatMul", ["X", g.c(w(D, D))])), g.op("Add", [g.c(pos), "Z"])]), out)
+
+
 def real(out):
     """Настоящие куски кодировщика с нашими весами: pre_encode и слой 0 (вход слоя и маски — входы куска)."""
     from onnx.external_data_helper import load_external_data_for_model
@@ -165,7 +213,13 @@ def real(out):
         print(name, "узлов", len(nodes), f"{(out / f'{name}.onnx').stat().st_size / 1e6:.0f} МБ")
 
     cut("r01_pre_encode", {"audio_signal": [1, 128, 832]}, {ln0: [1, T, D]})
-    cut("r02_layer0", {ln0: [1, T, D], "mtk_matt": [1, 1, T, T], "mtk_bias": [1, 1, T, T], "mtk_vconv": [1, 1, T]}, {ln1: [1, T, D]})
+    cut("r02_layer0", {ln0: [1, T, D], "mtk_matt": [1, 1, T, T], "mtk_bias": [1, 1, T, T], "mtk_vcol": [1, T, 1]}, {ln1: [1, T, D]})
+    # подблоки слоя 0 (остаток: Add — после FF1, Add_1 — после внимания, Add_2 — после conv, Add_3 — после FF2)
+    a = [f"/layers.0/Add{k}_output_0" for k in ("", "_1", "_2")]
+    cut("r03_ff1", {ln0: [1, T, D]}, {a[0]: [1, T, D]})
+    cut("r04_att", {a[0]: [1, T, D], "mtk_matt": [1, 1, T, T], "mtk_bias": [1, 1, T, T]}, {a[1]: [1, T, D]})
+    cut("r05_conv", {a[1]: [1, T, D], "mtk_vcol": [1, T, 1]}, {a[2]: [1, T, D]})
+    cut("r06_ff2_out", {a[2]: [1, T, D]}, {ln1: [1, T, D]})
 
 
 def main():
@@ -175,6 +229,8 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     synthetic(out)
+    layouts(out)
+    const_bmm(out)
     real(out)
     for f in sorted(out.glob("*.onnx")):
         print(f.name, f"{f.stat().st_size / 1e6:.1f} МБ")

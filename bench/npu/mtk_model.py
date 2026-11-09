@@ -95,7 +95,9 @@ def build(out):
 
     r = onnx.load(str(out / "encoder-npu.onnx"), load_external_data=False)
     float_masks(r, out)
+    conv_time_major(r)
     conv2d(r)
+    reshape_rank_ops(r)
     onnx.save(r, str(out / "encoder-npu.onnx"))      # только граф: веса остаются в encoder-npu.onnx.data
     report(out / "encoder-npu.onnx", r)
 
@@ -118,7 +120,7 @@ def float_masks(m, base):
     Исходно (NeMo, после свёртки постоянных): Lf = длина после сжатия в 8 раз (Floor_2, float) → Cast int →
     valid[1,104] = Less(0..103, Lf); свёртка: Where(Not valid, 0, X); внимание: m = valid_i ∧ valid_j ∧ C
     (C — постоянная окна внимания), Where(¬m, −10000, S) до softmax и Where(¬m, 0, P) после.
-    Здесь: v = Clip(Lf − r, 0, 1) (длины целые — ровно 0 или 1); X·v; S·m + (m − 1)·10000; P·m. Длина на выходе —
+    Здесь: v = Relu(Lf − r) − Relu(Lf − r − 1) (длины целые — ровно 0 или 1); X·v; S·m + (m − 1)·10000; P·m. Длина на выходе —
     сам Lf (float), путь длины — без int64. Для целых длин результат тот же до бита, кроме S·m (ровно −10000 → то же)."""
     g = m.graph
     init = {i.name: i for i in g.initializer}
@@ -148,8 +150,11 @@ def float_masks(m, base):
 
     mk = []
     mk.append(helper.make_node("Sub", [floor, c("mtk_range", rng.astype(np.float32))], ["mtk_v0"], name="mtk_v0"))
-    mk.append(helper.make_node("Clip", ["mtk_v0", c("mtk_zero", np.array(0, np.float32)), c("mtk_one", np.array(1, np.float32))],
-                               ["mtk_valid"], name="mtk_valid"))                                   # [1, T]
+    # Clip(0, 1) дополнение берёт только с границами [0, 6] или [−1, 1] — поэтому Relu(x) − Relu(x − 1): для целых то же
+    mk.append(helper.make_node("Relu", ["mtk_v0"], ["mtk_r0"], name="mtk_r0"))
+    mk.append(helper.make_node("Sub", ["mtk_v0", c("mtk_one", np.array(1, np.float32))], ["mtk_v1"], name="mtk_v1"))
+    mk.append(helper.make_node("Relu", ["mtk_v1"], ["mtk_r1"], name="mtk_r1"))
+    mk.append(helper.make_node("Sub", ["mtk_r0", "mtk_r1"], ["mtk_valid"], name="mtk_valid"))          # [1, T]
     mk.append(helper.make_node("Reshape", ["mtk_valid", c("mtk_sh_conv", np.array([1, 1, T], np.int64))], ["mtk_vconv"], name="mtk_vconv"))
     mk.append(helper.make_node("Reshape", ["mtk_valid", c("mtk_sh_col", np.array([1, T, 1], np.int64))], ["mtk_vcol"], name="mtk_vcol"))
     mk.append(helper.make_node("Mul", ["mtk_vcol", "mtk_vconv"], ["mtk_m2"], name="mtk_m2"))           # [1, T, T]
@@ -202,6 +207,82 @@ def float_masks(m, base):
     print("маски во float:", dict(kinds), "; окно внимания", "всё" if ctxm.all() else "с ограничением")
 
 
+def conv_time_major(m, T=F // 8, C=1024):
+    """Модуль свёртки conformer'а — по времени [1, T, C], без трёхмерных [1, C, T] между 4D-свёртками. На POCO 09.11
+    так собранный модуль (Transpose → Conv 1×1 → Split по каналам → … → Transpose) Neuron считал неверно: разница
+    1780 при размахе 2010 (mtk_ops.py r05), хотя по отдельности FF, внимание и depthwise-свёртка в форме NHWC верны.
+    Здесь: точечные свёртки — Gemm(transB=1) (FULLY_CONNECTED берёт веса [out, in] как есть — байты весов те же);
+    GLU — Split по последней оси; маска — mtk_vcol [1, T, 1]; depthwise 1×9 — Reshape [1,1,T,C] → Transpose в NCHW →
+    Conv → Transpose → Reshape (как проба q04, верна на NPU). Явный Pad свёртки — в её pads."""
+    g = m.graph
+    init = {i.name: i for i in g.initializer}
+    by = {n.name: n for n in g.node}
+    shapes = {}
+
+    def cs(name, arr):
+        if name not in shapes:
+            g.initializer.append(numpy_helper.from_array(np.array(arr, np.int64), name))
+            shapes[name] = True
+        return name
+
+    drop, new_at, k = set(), {}, 0
+    for L in range(64):
+        pre = f"/layers.{L}/conv/"
+        if pre + "pointwise_conv1/Conv" not in by:
+            break
+        n = {s: by[pre + s] for s in ("Transpose", "pointwise_conv1/Conv", "Split", "Sigmoid", "Mul", "Where_m",
+                                      "depthwise_conv/Pad", "depthwise_conv/Conv", "activation/Sigmoid",
+                                      "activation/Mul", "pointwise_conv2/Conv", "Transpose_1")}
+        x = n["Transpose"].input[0]                                   # выход LayerNorm, [1, T, C]
+        out = n["Transpose_1"].output[0]
+        w1, w2, wd = (init[n[s].input[1]] for s in ("pointwise_conv1/Conv", "pointwise_conv2/Conv", "depthwise_conv/Conv"))
+        assert len(n["pointwise_conv1/Conv"].input) == 2 and len(n["pointwise_conv2/Conv"].input) == 2, "у точечных свёрток есть смещение"
+        bd = n["depthwise_conv/Conv"].input[2]
+        pads = numpy_helper.to_array(init[n["depthwise_conv/Pad"].input[1]])
+        assert list(pads) == [0, 0, 4, 0, 0, 4] and list(wd.dims) == [C, 1, 9], (pads, wd.dims)
+        C2 = w1.dims[0]
+        w1.dims[:] = [C2, C]                                         # [2C, C, 1] → [2C, C]: те же байты
+        w2.dims[:] = [C, C]
+        wd.dims[:] = [C, 1, 1, 9]
+        t = lambda s: f"{pre}tm_{s}"
+        nodes = [
+            helper.make_node("Reshape", [x, cs("mtk_sh_tc", [T, C])], [t("x2")], name=t("x2")),
+            helper.make_node("Gemm", [t("x2"), w1.name], [t("p1")], name=t("pw1"), transB=1),
+            helper.make_node("Reshape", [t("p1"), cs("mtk_sh_1t2c", [1, T, C2])], [t("p1r")], name=t("p1r")),
+            helper.make_node("Split", [t("p1r"), cs("mtk_split_cc", [C2 // 2, C2 // 2])], [t("a"), t("b")], name=t("glu_split"), axis=-1),
+            helper.make_node("Sigmoid", [t("b")], [t("sb")], name=t("glu_sig")),
+            helper.make_node("Mul", [t("a"), t("sb")], [t("g")], name=t("glu")),
+            helper.make_node("Mul", [t("g"), "mtk_vcol"], [t("gm")], name=t("mask")),
+            helper.make_node("Reshape", [t("gm"), cs("mtk_sh_11tc", [1, 1, T, C])], [t("h4")], name=t("h4")),
+            helper.make_node("Transpose", [t("h4")], [t("hn")], name=t("to_nchw"), perm=[0, 3, 1, 2]),
+            helper.make_node("Conv", [t("hn"), wd.name, bd], [t("d")], name=t("dw"), kernel_shape=[1, 9], pads=[0, 4, 0, 4], group=C),
+            helper.make_node("Transpose", [t("d")], [t("dh")], name=t("to_nhwc"), perm=[0, 2, 3, 1]),
+            helper.make_node("Reshape", [t("dh"), cs("mtk_sh_1tc", [1, T, C])], [t("dt")], name=t("dt")),
+            helper.make_node("Sigmoid", [t("dt")], [t("sd")], name=t("swish_sig")),
+            helper.make_node("Mul", [t("dt"), t("sd")], [t("s")], name=t("swish")),
+            helper.make_node("Reshape", [t("s"), "mtk_sh_tc"], [t("s2")], name=t("s2")),
+            helper.make_node("Gemm", [t("s2"), w2.name], [t("p2")], name=t("pw2"), transB=1),
+            helper.make_node("Reshape", [t("p2"), "mtk_sh_1tc"], [out], name=t("out")),
+        ]
+        drop |= {v.name for v in n.values()}
+        new_at[n["Transpose"].name] = nodes
+        k += 1
+    res = []
+    for nd in g.node:
+        if nd.name in new_at:
+            res.extend(new_at[nd.name])
+        elif nd.name not in drop:
+            res.append(nd)
+    del g.node[:]
+    g.node.extend(res)
+    used = {i for nd in g.node for i in nd.input}
+    left = [i for i in g.initializer if i.name in used]
+    del g.initializer[:]
+    g.initializer.extend(left)
+    del g.value_info[:]
+    print(f"модуль свёртки по времени: {k} слоёв")
+
+
 def conv2d(m):
     """Conv1D → Conv2D высотой 1: у дополнения NeuroPilot только двумерная свёртка («Only conv 2d is supported»,
     журнал POCO 09.11), а в каждом слое conformer'а их три (pointwise 1, depthwise 9, pointwise 2) — 72 узла.
@@ -235,6 +316,32 @@ def conv2d(m):
     g.node.extend(out)
     del g.value_info[:]
     print(f"свёртки 1D → 2D: {k1}")
+
+
+def reshape_rank_ops(m):
+    """Unsqueeze/Squeeze → Reshape с постоянной формой. Дополнение NeuroPilot теряет измерение на Unsqueeze/Squeeze
+    рядом со свёрткой: вход DEPTHWISE_CONV_2D выходил [104, 1, 1024] при выходе [1, 1, 104, 1024], и Neuron отвергал
+    всю часть графа (POCO 09.11, mtk_ops.py p06/p07/p09); через Reshape та же свёртка проходит (q02, q04)."""
+    from onnx import shape_inference
+    mi = shape_inference.infer_shapes(m)
+    shapes = {v.name: [d.dim_value for d in v.type.tensor_type.shape.dim]
+              for v in list(mi.graph.value_info) + list(mi.graph.output) + list(mi.graph.input)}
+    k = 0
+    for i, n in enumerate(m.graph.node):
+        if n.op_type not in ("Unsqueeze", "Squeeze"):
+            continue
+        shp = shapes.get(n.output[0])
+        assert shp and all(d > 0 for d in shp), f"{n.name}: форма выхода неизвестна ({shp})"
+        name = f"mtk_shape_{k}"
+        k += 1
+        m.graph.initializer.append(numpy_helper.from_array(np.array(shp, np.int64), name))
+        m.graph.node[i].CopyFrom(helper.make_node("Reshape", [n.input[0], name], list(n.output), name=n.name + "_r"))
+    used = {i for n in m.graph.node for i in n.input}
+    left = [i for i in m.graph.initializer if i.name in used]
+    del m.graph.initializer[:]
+    m.graph.initializer.extend(left)
+    del m.graph.value_info[:]
+    print(f"Unsqueeze/Squeeze → Reshape: {k}")
 
 
 def to_fp16(src, dst):

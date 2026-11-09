@@ -3,6 +3,7 @@
 # NeuroPilot (библиотеки — как в mtk_asr_device.sh, уже на телефоне в /data/local/tmp/falar-mtk-asr). Итог — по строке
 # на модель: OK (сборка, прогон NPU и процессора, разница) или FAIL (ошибка), и что дополнение взяло на NPU.
 #   bash bench/npu/mtk_ops_device.sh SERIAL [ключ=значение,…]     # по умолчанию NEURON_FLAG_USE_FP16=1
+#   PROBE_ONLY='p0[679].*|r.*' bash …                             # только эти модели
 set -e
 S=$1; [ -n "$S" ] || { echo "нужен SERIAL"; exit 2; }
 OPTS=${2:-NEURON_FLAG_USE_FP16=1}
@@ -23,7 +24,7 @@ for f in $OPS/*.onnx; do
 done
 say "модели на телефоне: $(sh "ls $D/ops | wc -l"); параметры: $OPTS"
 LOG=$OUT/probe-$(date +%Y%m%d-%H%M%S).txt
-sh "cd $D && CLASSPATH=$D/ops-classes.dex LD_LIBRARY_PATH=$D app_process $D dev.agenttranslator.MtkOpProbe $D/ops \
+sh "cd $D && CLASSPATH=$D/ops-classes.dex LD_LIBRARY_PATH=$D PROBE_ONLY='$PROBE_ONLY' app_process $D dev.agenttranslator.MtkOpProbe $D/ops \
     $D/libonnxruntime_providers_neuropilot.so '$OPTS'" > $LOG 2>&1 || true
 grep -E "^== |^OK |^FAIL |GetCapability|Some ops not supported|Exception" $LOG | cut -c1-230
 say "полный вывод → $LOG"
