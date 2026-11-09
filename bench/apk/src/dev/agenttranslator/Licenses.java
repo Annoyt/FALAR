@@ -13,17 +13,20 @@ import java.util.function.Function;
  *  модели и у каждой .so есть строка здесь. */
 final class Licenses {
   static final String MIT = "MIT", APACHE = "Apache-2.0", GPL3 = "GPL-3.0-or-later", CC_BY_4 = "CC-BY-4.0",
-      CC_BY_2_FR = "CC-BY-2.0-FR";
+      CC_BY_2_FR = "CC-BY-2.0-FR", QUALCOMM = "Qualcomm AI Stack License";
 
   /** Часть приложения. role и changed — надписи (L.k, переводятся при показе); files — пути models/manifest.json
    *  (начало пути) и библиотеки APK («lib:» и начало имени), которые эта часть объясняет. */
   static final class Part {
     final String role, what, who, license, url, changed, copyright;
     final String[] files;
+    /** Только в сборке с NPU (библиотеки QNN в APK, модуль npu): в обычной этой части нет и строки тоже. */
+    boolean npu;
     Part(String role, String what, String who, String license, String url, String changed, String copyright, String... files) {
       this.role = role; this.what = what; this.who = who; this.license = license; this.url = url;
       this.changed = changed; this.copyright = copyright; this.files = files;
     }
+    Part npu() { npu = true; return this; }
   }
 
   static final String ESPEAK_SRC = "https://github.com/csukuangfj/espeak-ng/archive/ed530aa113046142eb5115cf2fc9157854d0ffe1.zip",
@@ -77,6 +80,15 @@ final class Licenses {
     new Part(L.k("Уточнение перевода"), "llama.cpp, ggml", "The ggml authors", MIT,
         "https://github.com/ggml-org/llama.cpp", "", "Copyright (c) 2023-2026 The ggml authors",
         "lib:libllama", "lib:libggml", "lib:libmtmd"),
+    new Part(L.k("Распознавание на NPU"), "parakeet-tdt-0.6b-v3 (NPU, w8a16)", "NVIDIA", CC_BY_4,
+        "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3", L.k("квантовано для NPU (Qualcomm AI Hub, правки Falar)"), "",
+        "npu/encoder").npu(),
+    new Part(L.k("Распознавание на NPU"), "nemo128.onnx", "Ilya Stupakov (onnx-asr)", MIT,
+        "https://github.com/istupakov/onnx-asr", "", "Copyright (c) 2025 Ilya Stupakov",
+        "npu/nemo128").npu(),
+    new Part(L.k("Распознавание на NPU"), "Qualcomm AI Runtime (QNN) 2.42", "Qualcomm Technologies, Inc.", QUALCOMM,
+        "https://softwarecenter.qualcomm.com/catalog/item/Qualcomm_AI_Runtime_Community", "", "",
+        "lib:libQnn").npu(),
   };
 
   /** Своё (models/manifest.json: license=project) — без строки. */
@@ -101,10 +113,15 @@ final class Licenses {
 
   /** Весь текст экрана: части, ссылки на лицензии CC и исходники GPL, затем тексты MIT, Apache 2.0 и GPL 3.0.
    *  asset — чтение файла из assets (в тесте — из bench/apk). */
-  static String text(Function<String, String> asset) {
+  static String text(Function<String, String> asset) { return text(asset, false); }
+
+  /** qnn — сборка с библиотеками Qualcomm (NPU): тогда ещё части NPU, лицензия Qualcomm AI Stack и их NOTICE
+   *  (assets/licenses/qualcomm — build.sh NPU=1 кладёт их из скачанного QAIRT SDK, в репозиторий они не идут). */
+  static String text(Function<String, String> asset, boolean qnn) {
     StringBuilder b = new StringBuilder();
     b.append(L.t("Чужие модели и библиотеки в Falar и их лицензии:"));
     for (Part p : PARTS) {
+      if (p.npu && !qnn) continue;
       b.append("\n\n• ").append(L.t(p.role)).append(": ").append(p.what).append(" — ").append(p.who).append(". ")
           .append(licenseName(p.license)).append('.');
       if (!p.changed.isEmpty()) b.append(' ').append(L.f("Изменено: %s.", L.t(p.changed)));
@@ -117,10 +134,14 @@ final class Licenses {
     b.append("\n\n").append(L.t("Исходный код eSpeak NG, собранный в эту версию:")).append('\n').append(ESPEAK_SRC)
         .append("\n").append(L.t("sherpa-onnx и правка Falar:")).append('\n').append(SHERPA_SRC).append('\n').append(FALAR_PATCH);
     b.append("\n\n———— MIT License ————\n");
-    for (Part p : PARTS) if (MIT.equals(p.license)) b.append('\n').append(p.copyright).append(" — ").append(p.what);
+    for (Part p : PARTS) if (MIT.equals(p.license) && (qnn || !p.npu)) b.append('\n').append(p.copyright).append(" — ").append(p.what);
     b.append("\n\n").append(asset.apply("licenses/MIT.txt").trim());
     b.append("\n\n———— Apache License 2.0 ————\n\n").append(asset.apply("licenses/Apache-2.0.txt").trim());
     b.append("\n\n———— GNU General Public License v3.0 ————\n\n").append(asset.apply("licenses/GPL-3.0.txt").trim());
+    if (qnn) {
+      b.append("\n\n———— Qualcomm AI Stack License ————\n\n").append(asset.apply("licenses/qualcomm/AI-Stack-License.txt").trim());
+      b.append("\n\n———— Qualcomm AI Runtime: NOTICE ————\n\n").append(asset.apply("licenses/qualcomm/NOTICE.txt").trim());
+    }
     return b.toString();
   }
 }

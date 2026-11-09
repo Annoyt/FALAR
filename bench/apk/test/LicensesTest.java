@@ -55,11 +55,14 @@ public class LicensesTest {
     ok(mit.trim().startsWith("Permission is hereby granted") && mit.contains("THE SOFTWARE IS PROVIDED \"AS IS\"") && !mit.contains("Copyright"),
         "Л3 MIT — текст без чужой строки авторских прав");
 
-    String t = Licenses.text(asset);
+    String t = Licenses.text(asset), tq = Licenses.text(asset, true);
     for (Licenses.Part p : Licenses.PARTS) {
-      ok(t.contains(p.what) && t.contains(p.who) && t.contains(p.url), "Л4 часть в тексте: " + p.what);
-      if (Licenses.MIT.equals(p.license)) ok(!p.copyright.isEmpty() && t.contains(p.copyright), "Л4 строка авторских прав MIT: " + p.what);
+      ok(tq.contains(p.what) && tq.contains(p.who) && tq.contains(p.url), "Л4 часть в тексте сборки с NPU: " + p.what);
+      if (!p.npu) ok(t.contains(p.what) && t.contains(p.who) && t.contains(p.url), "Л4 часть в тексте обычной сборки: " + p.what);
+      if (Licenses.MIT.equals(p.license)) ok(!p.copyright.isEmpty() && tq.contains(p.copyright), "Л4 строка авторских прав MIT: " + p.what);
     }
+    ok(!t.contains("Qualcomm") && !t.contains("nemo128"), "Л4 в обычной сборке нет частей NPU");
+    ok(tq.contains("Qualcomm AI Stack License") && tq.contains("licenses/qualcomm") == false, "Л4 в сборке с NPU — лицензия Qualcomm");
     ok(t.contains(Licenses.ESPEAK_SRC) && t.contains(Licenses.SHERPA_SRC) && t.contains(Licenses.FALAR_PATCH), "Л4 исходники GPL названы");
     ok(t.contains("creativecommons.org/licenses/by/4.0") && t.contains("creativecommons.org/licenses/by/2.0/fr"), "Л4 ссылки на CC BY");
     ok(t.contains("TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION") && t.contains("Version 3, 29 June 2007"), "Л4 тексты лицензий в экране");

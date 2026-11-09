@@ -63,6 +63,10 @@ public class Engine {
   final File m; final Log log;
   public OfflineRecognizer asrPt, asrMulti; public OnlineRecognizer asrRu; public OfflineTts ttsRu, ttsPt; public Vad vad;
   public OfflineSpeechDenoiser denoiser; public volatile boolean denoiseOn = false;
+  /** Распознавание на NPU Snapdragon (Npu, NpuAsr): поднимается в фоне после загрузки (startNpu); пока его нет,
+   *  он выключен или фраза длиннее окна 8,3 с — sherpa на процессоре, как раньше. npuState — что с ним, словами. */
+  public volatile NpuAsr npu; public volatile boolean npuOn = false; public volatile String npuState = "";
+  public volatile long npuMs, npuCalls;
   public String asrName = "";
   OrtEnvironment env; final Map<String, OrtSession[]> mt = new HashMap<>(); final Map<String, SpmTokenizer> tok = new HashMap<>();
   public long loadAsrMs, loadMtMs, loadTtsMs;
@@ -265,8 +269,37 @@ public class Engine {
     for (int k = 0; k < p.length; k++) p[k] = (float) Math.exp(logProbs[k]);
     return p;
   }
+  /** Поднять распознавание на NPU (долго при первом запуске: граф QNN собирается на телефоне, потом — из ctx). */
+  public void startNpu(java.io.File libDir, java.io.File ctx) {
+    long t = System.nanoTime();
+    try {
+      Npu.adspPath(libDir);
+      NpuAsr n = new NpuAsr(new java.io.File(m, "asr_multi"), new java.io.File(m, "npu"), Npu.qnnOptions(libDir), ctx);
+      npu = n; npuState = n.how;
+      log.log("⚡ NPU готов за " + (System.nanoTime() - t) / 1_000_000 + " мс (" + n.how + ")");
+    } catch (Throwable e) {
+      npuState = "error"; log.log("⚡ NPU не поднялся, распознаёт процессор: " + e);
+    }
+  }
+  /** Распознать на NPU; null — его нет, выключен, фраза длиннее окна или ошибка (тогда NPU выключается до перезапуска). */
+  Asr npuAsr(float[] s, int sr) {
+    NpuAsr n = npu;
+    if (n == null || !npuOn || sr != 16000) return null;
+    long t = System.nanoTime();
+    try {
+      NpuAsr.Result r = n.run(s);
+      if (r == null) return null;
+      npuMs += (System.nanoTime() - t) / 1_000_000; npuCalls++;
+      return new Asr(r.text.trim(), r.tokens, r.times, r.durs, probs(r.logProbs, r.tokens));
+    } catch (Throwable e) {
+      npu = null; npuState = "error"; log.log("⚡ NPU сбился, дальше распознаёт процессор: " + e);
+      try { n.close(); } catch (Throwable ignore) {}
+      return null;
+    }
+  }
   public Asr asrFull(String lang, float[] s, int sr) {
     OfflineRecognizer off = asrMulti != null ? asrMulti : (lang.equals("pt") ? asrPt : null);
+    if (asrMulti != null && !(denoiseOn && denoiser != null)) { Asr a = npuAsr(s, sr); if (a != null) return a; }
     if (off == null || denoiseOn && denoiser != null) return new Asr(asr(lang, s, sr), null, null, null, null);
     OfflineStream st = off.createStream();              // поток освобождается и при исключении (пустой вход его бросает)
     try { st.acceptWaveform(s, sr); off.decode(st); OfflineRecognizerResult r = off.getResult(st);
@@ -276,6 +309,7 @@ public class Engine {
   public String asr(String lang, float[] s, int sr) {
     if (denoiseOn && denoiser != null) { float[] c = denoise(s, sr); if (c != null && c.length > 0) { s = c; sr = denoiser.getSampleRate(); } }
     OfflineRecognizer off = asrMulti != null ? asrMulti : (lang.equals("pt") ? asrPt : null);
+    if (asrMulti != null) { Asr a = npuAsr(s, sr); if (a != null) return a.text; }
     if (off != null) { OfflineStream st = off.createStream(); try { st.acceptWaveform(s, sr); off.decode(st); return off.getResult(st).getText().trim(); } finally { st.release(); } }
     OnlineStream st = asrRu.createStream();
     try { st.acceptWaveform(s, sr); st.acceptWaveform(new float[sr / 2], sr); st.inputFinished();

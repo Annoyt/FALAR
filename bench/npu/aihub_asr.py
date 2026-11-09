@@ -37,7 +37,7 @@ OUT = P / ".stand/npu/aihub"
 F = 832
 SPECS = {"audio_signal": ((1, 128, F), "float32"), "length": ((1,), "int64")}
 # precompiled — контекст QNN собирает AI Hub; onnx — модель как есть, граф QNN собирает ONNX Runtime на телефоне
-# (так будет в приложении): тогда --infer-opts="--compute_unit npu --onnx_execution_providers qnn"
+# (так будет в приложении): тогда --infer-opts="--onnx_execution_providers qnn"
 RUNTIMES = {"precompiled": "precompiled_qnn_onnx", "onnx": "onnx"}
 
 
@@ -264,7 +264,7 @@ def main():
     s.add_argument("--no-infer", action="store_true")
     s.add_argument("--compile-opts", default="", help="добавить к сборке под NPU: --compile-opts=\"--quantize_io …\"")
     s.add_argument("--runtime", default="precompiled", choices=sorted(RUNTIMES), help="onnx — граф собирает ORT с QNN на телефоне")
-    s.add_argument("--infer-opts", default="", help="параметры вывода и профиля, напр. \"--compute_unit npu --onnx_execution_providers qnn\"")
+    s.add_argument("--infer-opts", default="", help="параметры вывода и профиля, напр. \"--onnx_execution_providers qnn\" (вместе с --compute_unit AI Hub не принимает)")
     s.add_argument("--calib-dataset", default="", help="калибровка для --quantize_full_type (квантует сам QAIRT)")
     q = sub.add_parser("quantize")
     q.add_argument("--calib", type=int, default=40)

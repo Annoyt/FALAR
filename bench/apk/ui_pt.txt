@@ -718,3 +718,13 @@ Falar больше не закрывается сам, когда к нему в
 Лицензии Creative Commons:	Licenças Creative Commons:
 Исходный код eSpeak NG, собранный в эту версию:	Código-fonte do eSpeak NG compilado nesta versão:
 sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
+Экспериментальное	Experimental
+Распознавание на NPU	Reconhecimento na NPU
+быстрее на Snapdragon · Qualcomm не советует для биометрии и обучения	mais rápido no Snapdragon · a Qualcomm não recomenda para biometria e ensino
+Ограничения	Restrições
+В Falar есть библиотеки Qualcomm для NPU. Законы США об экспорте запрещают передавать их в регионы под полным эмбарго (в лицензии Qualcomm названы Крым, так называемые ДНР и ЛНР, Куба, Иран, КНДР и Сирия) — пользоваться Falar там нельзя. Не используйте Falar для слежки и опознания людей.	O Falar contém bibliotecas da Qualcomm para a NPU. As leis de exportação dos EUA proíbem levá-las a regiões sob embargo total (a licença da Qualcomm cita a Crimeia, as chamadas RPD e RPL, Cuba, Irã, Coreia do Norte e Síria) — não é permitido usar o Falar nesses lugares. Não use o Falar para vigiar ou identificar pessoas.
+не Snapdragon	não é Snapdragon
+в этой сборке нет библиотек NPU	esta versão não tem as bibliotecas da NPU
+нет модели NPU	falta o modelo da NPU
+готовится	preparando
+квантовано для NPU (Qualcomm AI Hub, правки Falar)	quantizado para a NPU (Qualcomm AI Hub, ajustes do Falar)

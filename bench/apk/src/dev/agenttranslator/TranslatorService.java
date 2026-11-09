@@ -450,6 +450,29 @@ public class TranslatorService extends Service {
       worker.submit(() -> loadTtsLate(rest, nStages, askedTts));
     } catch (Throwable t) { Log.e(TAG, "init", t); status(L.f(L.k("Ошибка: %s"), t)); Engine.stage = null; Engine.asrUp = null; loading = false; ttsLoading = false; busy("load", null, 0, 0); }
   }
+  /** Распознавание на NPU Snapdragon (Npu, NpuAsr; «Экспериментальное», владелец 09.11: по умолчанию включено, где
+   *  возможно). Своим потоком после загрузки всего остального: граф QNN при первом запуске собирается десятки секунд,
+   *  очередь фраз его не ждёт, до тех пор распознаёт процессор. Собранный граф — в no_backup: не уезжает ни в облачную
+   *  копию, ни на другой телефон (там другое поколение NPU). */
+  void startNpu() {
+    final Engine e = eng; if (e == null || e.npu != null) return;
+    final File lib = new File(getApplicationInfo().nativeLibraryDir);
+    String why = Npu.unavailable(Npu.snapdragon(), lib, modelsDir);
+    e.npuOn = getSharedPreferences("at", MODE_PRIVATE).getBoolean(Npu.PREF, true);
+    if (why != null) { e.npuState = why; return; }
+    if (!e.npuOn) { e.npuState = L.k("выключено"); return; }
+    e.npuState = L.k("готовится");
+    log("⚡ NPU: собираю граф (первый раз — до нескольких минут), пока распознаёт процессор");
+    Thread t = new Thread(() -> e.startNpu(lib, new File(getNoBackupFilesDir(), "npu/encoder-ctx.onnx")), "npu");
+    t.setPriority(Thread.MIN_PRIORITY); t.start();
+  }
+  /** Переключатель «Распознавание на NPU». */
+  public void setNpu(boolean on) {
+    getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean(Npu.PREF, on).apply();
+    Engine e = eng; if (e == null) return;
+    e.npuOn = on; log("⚡ NPU " + (on ? "включён" : "выключен") + (e.npu == null ? "" : " · фраз на NPU " + e.npuCalls));
+    if (on && e.npu == null && !"готовится".equals(e.npuState)) startNpu();
+  }
   /** Озвучка — после остального и после сказанного: фразы в очереди перевода (они встают за этой задачей —
    *  она уходит в конец очереди за ними), фраза, которую ещё говорят, и не нарезанный звук идут вперёд. Иначе
    *  фраза, законченная сразу после загрузки перевода, ждала бы голоса 2,8 с (прогон 03.10: перевод на 11,2 с при
@@ -473,6 +496,7 @@ public class TranslatorService extends Service {
     getSharedPreferences("at", MODE_PRIVATE).edit().putString("load_ms", eng.loadAsrMs + "," + eng.loadMtMs + "," + eng.loadTtsMs + "," + restMs).apply();
     busy("load", null, 0, 0);
     notify(L.f("Готов. %s", pb.stats()));
+    startNpu();
     maybeAutoUpgrade("");
   }
   /** Настройки звука — до микрофона: слушание открывается раньше моделей, и нарезка того, что сказали во
