@@ -53,10 +53,12 @@ class G:
         self.nodes.append(helper.make_node(op, ins, outs, name=f"{op}_{self.k}", **attrs))
         return outs
 
-    def save(self, y, out):
+    def save(self, y, out, opset=None):
+        if opset is None:
+            opset = 21 if any(n.op_type in ("QuantizeLinear", "DequantizeLinear") for n in self.nodes) else 17
         g = helper.make_graph(self.nodes, self.name, self.inputs,
                               [helper.make_tensor_value_info(y, TensorProto.FLOAT, None)], self.inits)
-        m = helper.make_model(g, opset_imports=[helper.make_opsetid("", 17)], ir_version=8)
+        m = helper.make_model(g, opset_imports=[helper.make_opsetid("", opset)], ir_version=10 if opset >= 21 else 8)
         m = onnx.shape_inference.infer_shapes(m)
         onnx.checker.check_model(m)
         onnx.save(m, str(out / f"{self.name}.onnx"))
@@ -180,6 +182,37 @@ def const_bmm(out):
     g.save(g.op("MatMul", [heads(g, g.op("MatMul", ["X", g.c(w(D, D))])), g.op("Add", [g.c(pos), "Z"])]), out)
 
 
+def qdq_probes(out):
+    """w8a16 по правилам MediaTek: веса int8 симметрично по каналам, активации int16 симметрично — без нулевых точек
+    (у дополнения нули читаются только int8/uint8/int32; QuantizeLinear-21 с output_dtype=INT16), и запасной w8a8."""
+    def qd(g, x, s, dt):                                    # Q → DQ активации, симметрично, без нулевой точки
+        q = g.op("QuantizeLinear", [x, g.c(np.float32(s))], output_dtype=dt)
+        return g.op("DequantizeLinear", [q, g.c(np.float32(s))])
+
+    def wq(g, wf):                                          # веса [K, N] → int8 по столбцам (ось 1), нули int8
+        sc = (np.abs(wf).max(axis=0) / 127).astype(np.float32)
+        q = np.clip(np.rint(wf / sc), -127, 127).astype(np.int8)
+        return g.op("DequantizeLinear", [g.c(q), g.c(sc), g.c(np.zeros(wf.shape[1], np.int8))], axis=1)
+
+    for name, dt, amax in (("p14_w8a16_fc", TensorProto.INT16, 32767), ("p15_w8a8_fc", TensorProto.INT8, 127)):
+        g = G(name)
+        x = qd(g, "X", 5.0 / amax, dt)
+        y = g.op("MatMul", [x, wq(g, w(D, FF))])
+        g.save(qd(g, y, 3.0 / amax, dt), out)
+    g = G("p17_w8a8u_fc")                                   # стандартный QDQ: активации uint8 с нулём 128, веса int8
+    def qdu(g, x, s):
+        q = g.op("QuantizeLinear", [x, g.c(np.float32(s)), g.c(np.uint8(128))])
+        return g.op("DequantizeLinear", [q, g.c(np.float32(s)), g.c(np.uint8(128))])
+    y = g.op("MatMul", [qdu(g, "X", 5.0 / 127), wq(g, w(D, FF))])
+    g.save(qdu(g, y, 3.0 / 127), out)
+    g = G("p16_w8a16_mixed")                               # квантованный FC → float LayerNorm → квантованный FC
+    y = g.op("MatMul", [qd(g, "X", 5.0 / 32767, TensorProto.INT16), wq(g, w(D, D))])
+    y = g.op("LayerNormalization", [g.op("DequantizeLinear", [g.op("QuantizeLinear", [y, g.c(np.float32(3.0 / 32767))], output_dtype=TensorProto.INT16), g.c(np.float32(3.0 / 32767))]),
+                                     g.c(1 + w(D)), g.c(w(D))], axis=-1, epsilon=1e-5)
+    y = g.op("MatMul", [qd(g, y, 6.0 / 32767, TensorProto.INT16), wq(g, w(D, D))])
+    g.save(qd(g, y, 3.0 / 32767, TensorProto.INT16), out, opset=21)
+
+
 def real(out):
     """Настоящие куски кодировщика с нашими весами: pre_encode и слой 0 (вход слоя и маски — входы куска)."""
     from onnx.external_data_helper import load_external_data_for_model
@@ -225,13 +258,16 @@ def real(out):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(OUT))
+    ap.add_argument("--no-real", action="store_true", help="без настоящих кусков кодировщика (нужна модель fp32)")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     synthetic(out)
     layouts(out)
     const_bmm(out)
-    real(out)
+    qdq_probes(out)
+    if "--no-real" not in sys.argv:
+        real(out)
     for f in sorted(out.glob("*.onnx")):
         print(f.name, f"{f.stat().st_size / 1e6:.1f} МБ")
     return 0
