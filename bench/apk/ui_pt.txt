@@ -695,3 +695,4 @@ Falar больше не закрывается сам, когда к нему в
 Слова, которые Falar расслышал неуверенно, подчёркнуты цветом — их стоит переспросить.	Palavras que o Falar ouviu sem certeza aparecem sublinhadas em cor — vale a pena perguntar de novo.
 Уточнитель больше не подменяет перевод реплики переводом соседних.	O refinador não troca mais a tradução de uma fala pela das falas vizinhas.
 Перевод помнит термины из прошлых разговоров, если облако их уже переводило.	A tradução lembra os termos de conversas anteriores que a nuvem já traduziu.
+Установка с нуля снова скачивает распознавание речи.	A instalação do zero volta a baixar o reconhecimento de fala.
