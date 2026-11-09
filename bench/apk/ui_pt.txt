@@ -724,9 +724,16 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 быстрее на Snapdragon · Qualcomm не советует для биометрии и обучения	mais rápido no Snapdragon · a Qualcomm não recomenda para biometria e ensino
 Ограничения	Restrições
 В Falar есть библиотеки Qualcomm для NPU. Законы США об экспорте запрещают передавать их в регионы под полным эмбарго (в лицензии Qualcomm названы Крым, так называемые ДНР и ЛНР, Куба, Иран, КНДР и Сирия) — пользоваться Falar там нельзя. Не используйте Falar для слежки и опознания людей.	O Falar contém bibliotecas da Qualcomm para a NPU. As leis de exportação dos EUA proíbem levá-las a regiões sob embargo total (a licença da Qualcomm cita a Crimeia, as chamadas RPD e RPL, Cuba, Irã, Coreia do Norte e Síria) — não é permitido usar o Falar nesses lugares. Não use o Falar para vigiar ou identificar pessoas.
-не Snapdragon	não é Snapdragon
 в этой сборке нет библиотек NPU	esta versão não tem as bibliotecas da NPU
 нет модели NPU	falta o modelo da NPU
 готовится	preparando
 квантовано для NPU (Qualcomm AI Hub, правки Falar)	quantizado para a NPU (Qualcomm AI Hub, ajustes do Falar)
 ждёт свободной памяти	aguardando memória livre
+не Snapdragon и не MediaTek	nem Snapdragon nem MediaTek
+на MediaTek: меньше расход батареи и нагрев, точнее	no MediaTek: menos gasto de bateria e calor, mais preciso
+не справляется с моделью	não dá conta do modelo
+сбой при прошлой сборке графа	falha na última montagem do grafo
+квантовано для NPU MediaTek (правки Falar)	quantizado para a NPU MediaTek (alterações do Falar)
+правки Falar: 16-битные активации	alterações do Falar: ativações de 16 bits
+лицензия не указана	licença não indicada
+этот чип MediaTek не проверен	este chip MediaTek não foi testado

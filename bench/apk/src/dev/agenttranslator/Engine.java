@@ -274,11 +274,15 @@ public class Engine {
   public void startNpu(java.io.File libDir, java.io.File ctx) {
     long t = System.nanoTime();
     try {
-      Npu.adspPath(libDir);
-      java.util.Map<String, String> opts = Npu.qnnOptions(libDir);
-      NpuAsr n = new NpuAsr(new java.io.File(m, "asr_multi"), new java.io.File(m, "npu"), opts, ctx);
+      Npu.Chip chip = Npu.chip();
+      java.util.Map<String, String> opts;
+      if (chip == Npu.Chip.MEDIATEK) opts = Npu.neuronOptions(libDir);
+      else { Npu.adspPath(libDir); opts = Npu.qnnOptions(libDir); }
+      String model = new java.io.File(Npu.model(chip)).getName();
+      NpuAsr n = new NpuAsr(new java.io.File(m, "asr_multi"), new java.io.File(m, "npu"), model, opts, ctx);
       long probe = n.probeMs();
-      // Порог: NPU — 14–90 мс на окно (AI Hub, 8 телефонов); процессор с этой моделью — 2,3 с (A52s, RTL 09.11)
+      // Порог: NPU — 14–90 мс на окно (AI Hub, 8 телефонов), MediaTek ~150 мс (POCO 10.11); процессор с этой моделью —
+      // 1,5–2,3 с (A52s RTL 09.11, POCO)
       if (probe > NPU_PROBE_MAX_MS) {
         n.close(); npuState = "error";
         log.log("⚡ NPU не взял граф (пробный прогон " + probe + " мс, " + opts.getOrDefault("htp_arch", "поколение не задано")

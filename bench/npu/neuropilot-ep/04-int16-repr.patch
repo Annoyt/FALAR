@@ -1,0 +1,11 @@
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.cc b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.cc
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.cc	2026-11-10 00:15:15.979089205 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.cc	2026-11-10 00:15:16.029078904 +0500
+@@ -249,6 +249,7 @@
+     case onnx::TensorProto::FLOAT16:
+     case onnx::TensorProto::UINT8:
+     case onnx::TensorProto::INT8:
++    case onnx::TensorProto::INT16:   // Falar patch: symmetric 16-bit activations (A16W8) between Q/DQ nodes
+     case onnx::TensorProto::INT32:
+     case onnx::TensorProto::BOOL:
+       return true;

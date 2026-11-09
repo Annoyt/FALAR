@@ -13,7 +13,7 @@ import java.util.function.Function;
  *  модели и у каждой .so есть строка здесь. */
 final class Licenses {
   static final String MIT = "MIT", APACHE = "Apache-2.0", GPL3 = "GPL-3.0-or-later", CC_BY_4 = "CC-BY-4.0",
-      CC_BY_2_FR = "CC-BY-2.0-FR", QUALCOMM = "Qualcomm AI Stack License";
+      CC_BY_2_FR = "CC-BY-2.0-FR", QUALCOMM = "Qualcomm AI Stack License", NONE = "none";
 
   /** Часть приложения. role и changed — надписи (L.k, переводятся при показе); files — пути models/manifest.json
    *  (начало пути) и библиотеки APK («lib:» и начало имени), которые эта часть объясняет. */
@@ -22,11 +22,16 @@ final class Licenses {
     final String[] files;
     /** Только в сборке с NPU (библиотеки QNN в APK, модуль npu): в обычной этой части нет и строки тоже. */
     boolean npu;
+    /** Только в сборке с NPU MediaTek (build.sh MTK=1: дополнение NeuroPilot в APK, модель encoder-mtk). */
+    boolean mtk;
     Part(String role, String what, String who, String license, String url, String changed, String copyright, String... files) {
       this.role = role; this.what = what; this.who = who; this.license = license; this.url = url;
       this.changed = changed; this.copyright = copyright; this.files = files;
     }
     Part npu() { npu = true; return this; }
+    Part mtk() { mtk = true; return this; }
+    /** Показывать ли в этой сборке. */
+    boolean in(boolean qnn, boolean withMtk) { return (!npu && !mtk) || (npu && qnn) || (mtk && withMtk); }
   }
 
   static final String ESPEAK_SRC = "https://github.com/csukuangfj/espeak-ng/archive/ed530aa113046142eb5115cf2fc9157854d0ffe1.zip",
@@ -82,13 +87,25 @@ final class Licenses {
         "lib:libllama", "lib:libggml", "lib:libmtmd"),
     new Part(L.k("Распознавание на NPU"), "parakeet-tdt-0.6b-v3 (NPU, w8a16)", "NVIDIA", CC_BY_4,
         "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3", L.k("квантовано для NPU (Qualcomm AI Hub, правки Falar)"), "",
-        "npu/encoder").npu(),
+        "npu/encoder-npu").npu(),
     new Part(L.k("Распознавание на NPU"), "nemo128.onnx", "Ilya Stupakov (onnx-asr)", MIT,
         "https://github.com/istupakov/onnx-asr", "", "Copyright (c) 2025 Ilya Stupakov",
         "npu/nemo128").npu(),
     new Part(L.k("Распознавание на NPU"), "Qualcomm AI Runtime (QNN) 2.42", "Qualcomm Technologies, Inc.", QUALCOMM,
         "https://softwarecenter.qualcomm.com/catalog/item/Qualcomm_AI_Runtime_Community", "", "",
         "lib:libQnn").npu(),
+    // MediaTek (ветка mtk-npu): своя модель A16W8 и своя сборка дополнения ORT для NeuroPilot с правками для int16
+    new Part(L.k("Распознавание на NPU"), "parakeet-tdt-0.6b-v3 (NPU MediaTek, A16W8)", "NVIDIA", CC_BY_4,
+        "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3", L.k("квантовано для NPU MediaTek (правки Falar)"), "",
+        "npu/encoder-mtk").mtk(),
+    new Part(L.k("Распознавание на NPU"), "nemo128.onnx", "Ilya Stupakov (onnx-asr)", MIT,
+        "https://github.com/istupakov/onnx-asr", "", "Copyright (c) 2025 Ilya Stupakov").mtk(),
+    new Part(L.k("Распознавание на NPU"), "ONNX Runtime NeuroPilot EP v0.3.0", "Microsoft", MIT,
+        "https://github.com/onnxruntime/onnxruntime-ep-neuropilot", L.k("правки Falar: 16-битные активации"),
+        "Copyright (c) Microsoft Corporation", "lib:libonnxruntime_providers_neuropilot").mtk(),
+    new Part(L.k("Распознавание на NPU"), "libneuron_op_capability.so (из выпуска ONNX Runtime NeuroPilot EP)", "MediaTek / Microsoft", NONE,
+        "https://github.com/onnxruntime/onnxruntime-ep-neuropilot/releases/tag/v0.3.0", "", "",
+        "lib:libneuron_op_capability").mtk(),
   };
 
   /** Своё (models/manifest.json: license=project) — без строки. */
@@ -107,6 +124,7 @@ final class Licenses {
       case CC_BY_2_FR: return "CC BY 2.0 FR";
       case GPL3: return "GNU GPL 3.0+";
       case APACHE: return "Apache 2.0";
+      case NONE: return L.t("лицензия не указана");
       default: return id;
     }
   }
@@ -117,11 +135,14 @@ final class Licenses {
 
   /** qnn — сборка с библиотеками Qualcomm (NPU): тогда ещё части NPU, лицензия Qualcomm AI Stack и их NOTICE
    *  (assets/licenses/qualcomm — build.sh NPU=1 кладёт их из скачанного QAIRT SDK, в репозиторий они не идут). */
-  static String text(Function<String, String> asset, boolean qnn) {
+  static String text(Function<String, String> asset, boolean qnn) { return text(asset, qnn, false); }
+
+  /** mtk — сборка с дополнением NeuroPilot (NPU MediaTek): ещё его части. */
+  static String text(Function<String, String> asset, boolean qnn, boolean mtk) {
     StringBuilder b = new StringBuilder();
     b.append(L.t("Чужие модели и библиотеки в Falar и их лицензии:"));
     for (Part p : PARTS) {
-      if (p.npu && !qnn) continue;
+      if (!p.in(qnn, mtk)) continue;
       b.append("\n\n• ").append(L.t(p.role)).append(": ").append(p.what).append(" — ").append(p.who).append(". ")
           .append(licenseName(p.license)).append('.');
       if (!p.changed.isEmpty()) b.append(' ').append(L.f("Изменено: %s.", L.t(p.changed)));
@@ -134,7 +155,7 @@ final class Licenses {
     b.append("\n\n").append(L.t("Исходный код eSpeak NG, собранный в эту версию:")).append('\n').append(ESPEAK_SRC)
         .append("\n").append(L.t("sherpa-onnx и правка Falar:")).append('\n').append(SHERPA_SRC).append('\n').append(FALAR_PATCH);
     b.append("\n\n———— MIT License ————\n");
-    for (Part p : PARTS) if (MIT.equals(p.license) && (qnn || !p.npu)) b.append('\n').append(p.copyright).append(" — ").append(p.what);
+    for (Part p : PARTS) if (MIT.equals(p.license) && p.in(qnn, mtk)) b.append('\n').append(p.copyright).append(" — ").append(p.what);
     b.append("\n\n").append(asset.apply("licenses/MIT.txt").trim());
     b.append("\n\n———— Apache License 2.0 ————\n\n").append(asset.apply("licenses/Apache-2.0.txt").trim());
     b.append("\n\n———— GNU General Public License v3.0 ————\n\n").append(asset.apply("licenses/GPL-3.0.txt").trim());

@@ -906,6 +906,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Сборка с NPU: в APK библиотеки Qualcomm (лицензия AI Stack) — их запреты и экспорт США (владелец 09.11: «пользоваться
     // там нельзя — мы не можем контролировать, где человек»). Без библиотек Qualcomm этой части нет.
     final boolean qnn = new java.io.File(getApplicationInfo().nativeLibraryDir, "libQnnHtp.so").exists();
+    final boolean mtk = new java.io.File(getApplicationInfo().nativeLibraryDir, Npu.MTK_EP).exists();
     if (qnn) aboutPart(b, L.t("Ограничения"), new String[]{
         L.t("В Falar есть библиотеки Qualcomm для NPU. Законы США об экспорте запрещают передавать их в регионы под полным "
             + "эмбарго (в лицензии Qualcomm названы Крым, так называемые ДНР и ЛНР, Куба, Иран, КНДР и Сирия) — пользоваться "
@@ -918,17 +919,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     aboutPart(b, L.t("Связь"), new String[]{
         L.t("Ошибки и идеи — «Написать разработчику» в настройках или Telegram @falar_tbot. Исходный код — github.com/Annoyt/FALAR.")});
     new android.app.AlertDialog.Builder(this).setTitle(L.t("О приложении")).setMessage(b).setPositiveButton(L.t("Понятно"), null)
-        .setNeutralButton(L.t("Лицензии"), (d, w) -> licensesDialog(qnn)).show();
+        .setNeutralButton(L.t("Лицензии"), (d, w) -> licensesDialog(qnn, mtk)).show();
   }
   /** «Лицензии»: авторы и лицензии чужих частей, исходники GPL, тексты лицензий (Licenses). */
-  void licensesDialog(boolean qnn) {
+  void licensesDialog(boolean qnn, boolean mtk) {
     String text = Licenses.text(name -> {
       try (java.io.InputStream in = getAssets().open(name)) {
         java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream(); byte[] buf = new byte[16384]; int n;
         while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
         return new String(o.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
       } catch (java.io.IOException e) { return ""; }
-    }, qnn);
+    }, qnn, mtk);
     TextView tv = new TextView(this); tv.setText(text); tv.setTextIsSelectable(true); tv.setTextSize(13);
     tv.setPadding(dp(20), dp(12), dp(20), dp(12)); android.text.util.Linkify.addLinks(tv, android.text.util.Linkify.WEB_URLS);
     android.widget.ScrollView sv = new android.widget.ScrollView(this); sv.addView(tv);
@@ -2488,11 +2489,15 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // ---- экспериментальное: распознавание на NPU (Npu; владелец 09.11 — по умолчанию включено там, где NPU есть,
     // строка только на Snapdragon). Совет Qualcomm не применять их библиотеки для биометрии и обучения — коротко
     // здесь, подробно в «О приложении» → «Лицензии». Группа та же, что у «Переспросить» (ветка repeat-ask).
-    if (Npu.snapdragon()) {
+    // MediaTek (ветка mtk-npu, POCO X7 Pro 10.11): та же скорость, что у процессора, но в 4,5 раза меньше энергии
+    // на фразу и без нагрева, качество — как у fp32 — строка только в сборке с дополнением NeuroPilot (MTK=1).
+    final boolean mtkLib = new java.io.File(getApplicationInfo().nativeLibraryDir, Npu.MTK_EP).exists();
+    if (Npu.snapdragon() || (Npu.mediatek() && mtkLib)) {
       LinearLayout c5 = r.group(v, L.t("Экспериментальное"));
       Switch swNpu = r.sw(); swNpu.setChecked(prefs.getBoolean(Npu.PREF, true));
-      r.row(c5, app.falar.R.drawable.ic_spark, L.t("Распознавание на NPU"),
-          L.t("быстрее на Snapdragon · Qualcomm не советует для биометрии и обучения"), swNpu);
+      r.row(c5, app.falar.R.drawable.ic_spark, L.t("Распознавание на NPU"), Npu.snapdragon()
+          ? L.t("быстрее на Snapdragon · Qualcomm не советует для биометрии и обучения")
+          : L.t("на MediaTek: меньше расход батареи и нагрев, точнее"), swNpu);
       swNpu.setOnCheckedChangeListener((b, on) -> { prefs.edit().putBoolean(Npu.PREF, on).apply(); if (svc != null) svc.setNpu(on); });
     }
 
