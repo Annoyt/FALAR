@@ -2523,6 +2523,8 @@ public class TranslatorService extends Service {
   /** Облегчённая сборка — та, в которой нет llama.cpp. Обновлять её полной нельзя: человек
    *  выбрал 22 МБ вместо 83 осознанно, и молча утянуть остальное было бы подменой выбора. */
   boolean slimBuild() { return !new File(getApplicationInfo().nativeLibraryDir, "libllama-server.so").exists(); }
+  /** Сборка с NPU (build.sh NPU=1): в APK библиотеки Qualcomm. */
+  boolean npuBuild() { return new File(getApplicationInfo().nativeLibraryDir, "libQnnHtp.so").exists(); }
   public int myCode() {
     try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode; } catch (Exception e) { return 0; }
   }
@@ -2640,7 +2642,7 @@ public class TranslatorService extends Service {
   JSONObject teleApp() throws JSONException {
     JSONArray m = new JSONArray();
     for (String x : modules) m.put(x);
-    return new JSONObject().put("name", myName()).put("code", myCode()).put("slim", slimBuild()).put("ui", L.lang).put("modules", m);
+    return new JSONObject().put("name", myName()).put("code", myCode()).put("slim", slimBuild()).put("npu", npuBuild()).put("ui", L.lang).put("modules", m);
   }
 
   /** Телефон без номера и имени владельца: модель, процессор, Android и прошивка, память, обработка звука. */
@@ -2708,7 +2710,7 @@ public class TranslatorService extends Service {
       try {
         if (!online()) { upd(L.t("нет сети — проверю позже")); return; }
         String base = updateBase == null || updateBase.isEmpty() ? Updates.LATEST : updateBase;
-        Updates.Info i = Updates.parse(get(base), slimBuild());
+        Updates.Info i = Updates.parse(get(base), slimBuild(), npuBuild());
         getSharedPreferences("at", MODE_PRIVATE).edit().putLong("update_check", System.currentTimeMillis()).apply();
         int my = myCode();
         if (Updates.newer(my, i)) {
