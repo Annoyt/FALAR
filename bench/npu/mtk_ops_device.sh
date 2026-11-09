@@ -4,6 +4,7 @@
 # на модель: OK (сборка, прогон NPU и процессора, разница) или FAIL (ошибка), и что дополнение взяло на NPU.
 #   bash bench/npu/mtk_ops_device.sh SERIAL [ключ=значение,…]     # по умолчанию NEURON_FLAG_USE_FP16=1
 #   PROBE_ONLY='p0[679].*|r.*' bash …                             # только эти модели
+#   EP_DIR=.stand/mtk-ep/v0.3.0-int16 bash …                       # своя сборка дополнения (neuropilot-ep/build.sh)
 set -e
 S=$1; [ -n "$S" ] || { echo "нужен SERIAL"; exit 2; }
 OPTS=${2:-NEURON_FLAG_USE_FP16=1}
@@ -13,7 +14,13 @@ ADB="${ADB_BIN:-$P/tools/platform-tools/adb} -s $S"; D=/data/local/tmp/falar-mtk
 OPS=$ST/npu/mtk/ops; OUT=$ST/npu/mtk/device/ops; mkdir -p $OUT/classes
 say() { echo "$(date +%T) $*"; }
 sh() { $ADB shell "$@" < /dev/null | tr -d '\r'; }
-[ "$(sh "ls $D/libonnxruntime_providers_neuropilot.so 2>/dev/null")" ] || { echo "сначала bench/npu/mtk_asr_device.sh (библиотеки)"; exit 2; }
+# библиотеки: ORT 1.29 из APK и дополнение из EP_DIR (выпуск v0.3.0 или своя сборка bench/npu/neuropilot-ep/build.sh)
+EP=${EP_DIR:-$ST/mtk-ep/v0.3.0}
+sh "mkdir -p $D"
+for f in $A/jni/arm64-v8a/libonnxruntime.so $A/jni/arm64-v8a/libonnxruntime4j_jni.so $EP/libonnxruntime_providers_neuropilot.so $EP/libneuron_op_capability.so; do
+  [ "$(sh "stat -c %s $D/$(basename $f) 2>/dev/null || echo 0")" = "$(stat -L -c %s $f)" ] || $ADB push $f $D/ >/dev/null
+done
+say "дополнение: $EP ($(sha256sum $EP/libonnxruntime_providers_neuropilot.so | cut -c1-12))"
 javac --release 11 -nowarn -cp "$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/NpuAsr.java $W/bench/npu/MtkOpProbe.java
 java -cp $P/tools/r8.jar com.android.tools.r8.D8 --release --min-api 28 --lib $P/tools/android.jar --output $OUT \
   $(find $OUT/classes -name '*.class') $A/libs/onnxruntime-1.29.0-classes.jar 2>&1 | grep -v -E "warning|Warning" || true

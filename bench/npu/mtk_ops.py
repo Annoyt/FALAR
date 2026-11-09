@@ -205,6 +205,32 @@ def qdq_probes(out):
         return g.op("DequantizeLinear", [q, g.c(np.float32(s)), g.c(np.uint8(128))])
     y = g.op("MatMul", [qdu(g, "X", 5.0 / 127), wq(g, w(D, FF))])
     g.save(qdu(g, y, 3.0 / 127), out)
+    def wq_rows(g, wf, axis=0):                          # веса [N, ...] → int8 по оси 0 (Gemm transB=1, Conv)
+        red = tuple(i for i in range(wf.ndim) if i != axis)
+        sc = (np.abs(wf).max(axis=red) / 127).astype(np.float32)
+        shp = [1] * wf.ndim; shp[axis] = -1
+        q = np.clip(np.rint(wf / sc.reshape(shp)), -127, 127).astype(np.int8)
+        return g.op("DequantizeLinear", [g.c(q), g.c(sc), g.c(np.zeros(wf.shape[axis], np.int8))], axis=axis), sc
+
+    def bq(g, b, s_in, s_w):                               # смещение int32 со шкалой s_in·s_w (как у квантователей ORT)
+        sc = (s_in * s_w).astype(np.float32)
+        return g.op("DequantizeLinear", [g.c(np.rint(b / sc).astype(np.int32)), g.c(sc), g.c(np.zeros(len(b), np.int32))], axis=0)
+
+    g = G("p18_w8a16_gemm")                                # Gemm transB=1 со смещением — точечные свёртки, выход pre_encode
+    s_in = np.float32(5.0 / 32767)
+    x = qd(g, g.op("Reshape", ["X", g.c([T, D], np.int64)]), s_in, TensorProto.INT16)
+    wdq, sw = wq_rows(g, w(2 * D, D))
+    y = g.op("Gemm", [x, wdq, bq(g, w(2 * D), s_in, sw)], transB=1)
+    g.save(qd(g, y, 3.0 / 32767, TensorProto.INT16), out)
+
+    g = G("p19_w8a16_dw")                                  # depthwise 1×9 в A16W8 (как в модуле свёртки по времени)
+    x = g.op("Transpose", [g.op("Reshape", [g.op("MatMul", ["X", g.c(w(D, D))]), g.c([1, 1, T, D], np.int64)])], perm=[0, 3, 1, 2])
+    x = qd(g, x, s_in, TensorProto.INT16)
+    wdq, sw = wq_rows(g, w(D, 1, 1, 9, s=0.2))
+    y = g.op("Conv", [x, wdq, bq(g, w(D), s_in, sw)], kernel_shape=[1, 9], pads=[0, 4, 0, 4], group=D)
+    y = qd(g, y, 3.0 / 32767, TensorProto.INT16)
+    g.save(g.op("Reshape", [g.op("Transpose", [y], perm=[0, 2, 3, 1]), g.c([1, T, D], np.int64)]), out)
+
     g = G("p16_w8a16_mixed")                               # квантованный FC → float LayerNorm → квантованный FC
     y = g.op("MatMul", [qd(g, "X", 5.0 / 32767, TensorProto.INT16), wq(g, w(D, D))])
     y = g.op("LayerNormalization", [g.op("DequantizeLinear", [g.op("QuantizeLinear", [y, g.c(np.float32(3.0 / 32767))], output_dtype=TensorProto.INT16), g.c(np.float32(3.0 / 32767))]),

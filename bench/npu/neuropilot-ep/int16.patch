@@ -1,0 +1,40 @@
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_builder_helpers.cc b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_builder_helpers.cc
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_builder_helpers.cc	2026-11-03 17:14:09.000000000 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_builder_helpers.cc	2026-11-09 23:32:41.198940525 +0500
+@@ -1210,7 +1210,9 @@
+       elem_type = ctx.GetElementType(name);
+     }
+ 
+-    if (elem_type != onnx::TensorProto::UINT8 && elem_type != onnx::TensorProto::INT8) {
++    // Falar patch: INT16 too — MediaTek symmetric 16-bit activations (TENSOR_QUANT16_SYMM, A16W8).
++    if (elem_type != onnx::TensorProto::UINT8 && elem_type != onnx::TensorProto::INT8 &&
++        elem_type != onnx::TensorProto::INT16) {
+       LOGS_NEURON(VERBOSE) << node.op_type() << " unsupported quant type "
+                            << GetTensorProtoDataTypeStr(elem_type) << " at index " << idx;
+       return false;
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/dequantizelinear_op_builder.cc b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/dequantizelinear_op_builder.cc
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/dequantizelinear_op_builder.cc	2026-11-03 17:14:09.000000000 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/dequantizelinear_op_builder.cc	2026-11-09 23:32:41.199259727 +0500
+@@ -70,6 +70,7 @@
+   if (!IsTypeSupported(node, ctx, 0, /*is_input*/ true,
+                        {onnx::TensorProto::INT8,
+                         onnx::TensorProto::UINT8,
++                        onnx::TensorProto::INT16,   // Falar patch: symmetric 16-bit activations
+                         onnx::TensorProto::INT32})) {
+     return false;
+   }
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/quantizelinear_op_builder.cc b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/quantizelinear_op_builder.cc
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/quantizelinear_op_builder.cc	2026-11-03 17:14:09.000000000 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/quantizelinear_op_builder.cc	2026-11-09 23:32:41.199169498 +0500
+@@ -73,8 +73,10 @@
+     return false;
+   }
+   // y (output 0): int8 or uint8
++  // Falar patch: + INT16 (symmetric, no zero point -> TENSOR_QUANT16_SYMM).
+   if (!IsTypeSupported(node, ctx, 0, /*is_input*/ false,
+-                       {onnx::TensorProto::INT8, onnx::TensorProto::UINT8})) {
++                       {onnx::TensorProto::INT8, onnx::TensorProto::UINT8,
++                        onnx::TensorProto::INT16})) {
+     return false;
+   }
+   return true;
