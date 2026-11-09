@@ -116,7 +116,10 @@ def quantize(pre, out, ncal):
                     nodes_to_exclude=excl, use_external_data_format=True, calibrate_method=CalibrationMethod.MinMax,
                     # без CalibMaxIntermediateOutputs: в ORT 1.30 он сбрасывает собранное, не посчитав диапазоны
                     # («No data is collected»); MinMax и так хранит лишь ReduceMin/ReduceMax — по два числа на тензор
-                    extra_options={"ActivationSymmetric": True, "WeightSymmetric": True, "UseQDQContribOps": False})
+                    # MinimumRealRange: у 5 тензоров калибровка дала диапазон 0 → шкала 0, Neuron такой операнд не
+                    # компилирует (POCO 10.11, «registered with scale 0 — invalid»)
+                    extra_options={"ActivationSymmetric": True, "WeightSymmetric": True, "UseQDQContribOps": False,
+                                   "MinimumRealRange": 1e-4})
     print(f"квантование ORT: {time.time() - t0:.0f} с ({ncal} фраз калибровки)")
     return raw / "encoder.onnx"
 

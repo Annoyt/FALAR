@@ -97,10 +97,10 @@ run() {
   rm -f $OUT/out-$1-$MODEL.txt $OUT/out-$1-$MODEL.txt.mem; touch $OUT/out-$1-$MODEL.txt
   guard $OUT/out-$1-$MODEL.txt & local gp=$!
   # PID оболочки = PID app_process (exec): по нему журнал только нашего процесса
-  sh "cd $D && export CLASSPATH=$D/classes.dex LD_LIBRARY_PATH=$D NPU_OPTS='$NPU_OPTS' NPU_LOG='$NPU_LOG'; echo PID \$\$; \
+  $ADB shell "cd $D && export CLASSPATH=$D/classes.dex LD_LIBRARY_PATH=$D NPU_OPTS='$NPU_OPTS' NPU_LOG='$NPU_LOG'; echo PID \$\$; \
       exec app_process $D dev.agenttranslator.NpuAsrPc $D/asr $D/npu $D/corpus $D/hyps-$1.tsv $EVERY \
-      $D/libonnxruntime_providers_neuropilot.so $D/encoder-ctx.onnx" >> $OUT/out-$1-$MODEL.txt 2>&1 || true
-  kill $gp 2>/dev/null; wait $gp 2>/dev/null
+      $D/libonnxruntime_providers_neuropilot.so $D/encoder-ctx.onnx" < /dev/null >> $OUT/out-$1-$MODEL.txt 2>&1 || true
+  kill $gp 2>/dev/null; wait $gp 2>/dev/null || true      # код убитого сторожа ≠ 0 — set -e не должен обрывать
   [ -s $OUT/out-$1-$MODEL.txt.mem ] && say "память телефона в прогоне: меньше всего $(sort -k2 -n $OUT/out-$1-$MODEL.txt.mem | head -1 | awk '{print int($2/1024)}') МБ свободно"
   grep -E 'RESULT|Exception|Error|error|at ai\.|at dev\.|Aborted|Killed' $OUT/out-$1-$MODEL.txt | head -20
   local pid; pid=$(sed -n 's/^PID \([0-9]*\).*/\1/p' $OUT/out-$1-$MODEL.txt | head -1)

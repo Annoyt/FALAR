@@ -6,7 +6,9 @@
 #   02-int16-cap.patch — у узлов с int16-квантованием не спрашивать закрытую libneuron_op_capability.so (у неё своя
 #     копия тех же проверок, POCO 09.11): решает Neuron — дополнение пробно компилирует каждую часть графа;
 #   03-int16-out.patch — выход квантованных MatMul/Gemm/Conv при int16 — TENSOR_QUANT16_SYMM (было всегда 8 бит:
-#     A16W8 упирался в ±127, на POCO выход = знак × 127 × шкала).
+#     A16W8 упирался в ±127, на POCO выход = знак × 127 × шкала);
+#   04-int16-repr.patch — int16 в IsRepresentableElementType (базовая проверка входа/выхода): без неё в настоящей
+#     модели 432 одиночных QuantizeLinear уходили на процессор и рвали граф на 217 частей (POCO 10.11).
 #
 # Исходники — архивы в .stand/mtk-ep/src (в репозиторий не кладём): ep/ep-v0.3.0.tar.gz, protobuf-cpp-3.21.12,
 # onnx e709452 (v1.18.0), GSL 4.0.0 — те же версии, что тянет его CMakeLists (FETCHCONTENT_SOURCE_DIR_*, без git).
