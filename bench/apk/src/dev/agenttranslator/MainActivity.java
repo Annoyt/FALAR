@@ -886,8 +886,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   void aboutDialog() {
     android.content.pm.PackageInfo pi = pkg(); String myVer = pi == null ? "" : pi.versionName;
     android.text.SpannableStringBuilder b = new android.text.SpannableStringBuilder();
-    b.append(L.f("Falar %s — переводчик разговора между бразильским португальским и русским. Распознавание речи, перевод "
-        + "и озвучка работают на телефоне, без интернета.", myVer));
+    b.append(L.f("Falar %s — переводчик разговора между бразильским португальским и русским. Он сделан, чтобы людям без "
+        + "общего языка было проще понимать друг друга. Распознавание речи, перевод и озвучка работают на телефоне, без интернета.", myVer));
     aboutPart(b, L.t("Что уходит в интернет"), new String[]{
         L.t("• Загрузка моделей и проверка обновлений — с GitHub и Hugging Face."),
         L.t("• Облачный пересмотр — только с вашим ключом OpenRouter и после вашего согласия."),
@@ -903,9 +903,29 @@ public class MainActivity extends Activity implements TranslatorService.Listener
             + "использования перевода и за решения, принятые на его основе."),
         L.t("Предупреждайте собеседника, что разговор переводит приложение. Храните и отправляйте звук собеседника "
             + "только с его согласия.")});
+    // Отпечаток голоса — что он делает и где лежит (владелец 09.11: описать в «О приложении»; модуль выключен по умолчанию)
+    aboutPart(b, L.t("🎤 Отпечаток голоса"), new String[]{
+        L.t("Если включить этот модуль, Falar различает голоса в разговоре, чтобы показывать, кто говорит. У голоса номер "
+            + "или имя — его вписываете вы, или оно прозвучало в разговоре. Отпечатки остаются на телефоне: в интернет и "
+            + "в облачную копию Google они не уходят. Выключается в «Модулях и файлах».")});
     aboutPart(b, L.t("Связь"), new String[]{
         L.t("Ошибки и идеи — «Написать разработчику» в настройках или Telegram @falar_tbot. Исходный код — github.com/Annoyt/FALAR.")});
-    new android.app.AlertDialog.Builder(this).setTitle(L.t("О приложении")).setMessage(b).setPositiveButton(L.t("Понятно"), null).show();
+    new android.app.AlertDialog.Builder(this).setTitle(L.t("О приложении")).setMessage(b).setPositiveButton(L.t("Понятно"), null)
+        .setNeutralButton(L.t("Лицензии"), (d, w) -> licensesDialog()).show();
+  }
+  /** «Лицензии»: авторы и лицензии чужих частей, исходники GPL, тексты лицензий (Licenses). */
+  void licensesDialog() {
+    String text = Licenses.text(name -> {
+      try (java.io.InputStream in = getAssets().open(name)) {
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream(); byte[] buf = new byte[16384]; int n;
+        while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+        return new String(o.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+      } catch (java.io.IOException e) { return ""; }
+    });
+    TextView tv = new TextView(this); tv.setText(text); tv.setTextIsSelectable(true); tv.setTextSize(13);
+    tv.setPadding(dp(20), dp(12), dp(20), dp(12)); android.text.util.Linkify.addLinks(tv, android.text.util.Linkify.WEB_URLS);
+    android.widget.ScrollView sv = new android.widget.ScrollView(this); sv.addView(tv);
+    new android.app.AlertDialog.Builder(this).setTitle(L.t("Лицензии")).setView(sv).setPositiveButton(L.t("Понятно"), null).show();
   }
   static void aboutPart(android.text.SpannableStringBuilder b, String head, String[] lines) {
     b.append("\n\n");

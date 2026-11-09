@@ -1,0 +1,126 @@
+package dev.agenttranslator;
+
+import java.util.function.Function;
+
+/** Авторы и лицензии частей Falar — экран «Лицензии» в «О приложении».
+ *
+ *  Лицензии чужих частей требуют показать их тому, кто получил приложение:
+ *  CC BY (parakeet, OPUS-MT, Tatoeba) — автора, ссылку на лицензию и что изменено; MIT — строку авторских прав
+ *  и текст; Apache-2.0 — текст; GPL-3.0 (espeak-ng: код в libsherpa-onnx-jni.so, данные произношения в модуле
+ *  озвучки) — текст и где взять исходники именно этой сборки. Тексты лицензий — дословно, в assets/licenses
+ *  (из bench/apk/licenses: GPL — COPYING espeak-ng, Apache — apache.org, MIT — LICENSE ONNX Runtime без строки
+ *  авторских прав). LicensesTest сверяет таблицу с models/manifest.json и с библиотеками APK: у каждого файла
+ *  модели и у каждой .so есть строка здесь. */
+final class Licenses {
+  static final String MIT = "MIT", APACHE = "Apache-2.0", GPL3 = "GPL-3.0-or-later", CC_BY_4 = "CC-BY-4.0",
+      CC_BY_2_FR = "CC-BY-2.0-FR";
+
+  /** Часть приложения. role и changed — надписи (L.k, переводятся при показе); files — пути models/manifest.json
+   *  (начало пути) и библиотеки APK («lib:» и начало имени), которые эта часть объясняет. */
+  static final class Part {
+    final String role, what, who, license, url, changed, copyright;
+    final String[] files;
+    Part(String role, String what, String who, String license, String url, String changed, String copyright, String... files) {
+      this.role = role; this.what = what; this.who = who; this.license = license; this.url = url;
+      this.changed = changed; this.copyright = copyright; this.files = files;
+    }
+  }
+
+  static final String ESPEAK_SRC = "https://github.com/csukuangfj/espeak-ng/archive/ed530aa113046142eb5115cf2fc9157854d0ffe1.zip",
+      SHERPA_SRC = "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+      FALAR_PATCH = "https://github.com/Annoyt/FALAR/tree/main/tools/sherpa-jni";
+
+  static final Part[] PARTS = {
+    new Part(L.k("Распознавание речи"), "parakeet-tdt-0.6b-v3", "NVIDIA", CC_BY_4,
+        "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3", L.k("переведено в ONNX и сжато до int8 (sherpa-onnx)"), "",
+        "asr_multi/"),
+    new Part(L.k("Перевод"), "opus-mt-tc-big-pt-zle, opus-mt-tc-big-zle-pt", "Helsinki-NLP, University of Helsinki", CC_BY_4,
+        "https://huggingface.co/Helsinki-NLP", L.k("переведено в ONNX"), "",
+        "mt/"),
+    new Part(L.k("Поиск речи"), "Silero VAD", "Silero Team", MIT,
+        "https://github.com/snakers4/silero-vad", "", "Copyright (c) 2020-present Silero Team",
+        "silero_vad.onnx"),
+    new Part(L.k("Шумоподавление"), "GTCRN", "Rong Xiaobin", MIT,
+        "https://github.com/Xiaobin-Rong/gtcrn", L.k("переведено в ONNX (sherpa-onnx)"), "Copyright (c) 2024 Rong Xiaobin",
+        "denoiser/"),
+    new Part(L.k("Отпечаток голоса"), "CAM++ (speech_campplus_sv_en_voxceleb_16k)", "3D-Speaker, Alibaba", APACHE,
+        "https://github.com/modelscope/3D-Speaker", L.k("переведено в ONNX (sherpa-onnx)"), "",
+        "speaker/"),
+    new Part(L.k("Уточнение перевода"), "Hy-MT2-1.8B", "Tencent", APACHE,
+        "https://huggingface.co/tencent/Hy-MT2-1.8B", "", "",
+        "llm/"),
+    new Part(L.k("Чтение снимков"), "PP-OCRv6 det, PP-OCRv5 latin rec", "PaddlePaddle", APACHE,
+        "https://github.com/PaddlePaddle/PaddleOCR", "", "",
+        "ocr/"),
+    new Part(L.k("Чтение снимков"), "RapidOCR", "RapidAI", APACHE,
+        "https://github.com/RapidAI/RapidOCR", L.k("переведено в ONNX"), "",
+        "ocr/rec"),
+    new Part(L.k("Озвучка"), "Piper: ru_RU-dmitri-medium, pt_BR-faber-medium", "Piper (rhasspy)", MIT,
+        "https://huggingface.co/rhasspy/piper-voices", L.k("данные для обучения голосов — CC0"), "Piper voices (rhasspy/piper-voices)",
+        "tts_"),
+    new Part(L.k("Озвучка: произношение"), "eSpeak NG", "eSpeak NG contributors", GPL3,
+        "https://github.com/espeak-ng/espeak-ng", "", "",
+        "tts_", "lib:libsherpa-onnx-jni"),
+    new Part(L.k("Озвучка: произношение"), "piper-phonemize", "Michael Hansen", MIT,
+        "https://github.com/rhasspy/piper-phonemize", "", "Copyright (c) 2023 Michael Hansen",
+        "lib:libsherpa-onnx-jni"),
+    new Part(L.k("Фразы и словарь снимков"), "Tatoeba", "Tatoeba contributors", CC_BY_2_FR,
+        "https://tatoeba.org", L.k("отобраны фразы и слова"), "",
+        "phrasebook_tatoeba", "common_words"),
+    new Part(L.k("Запуск моделей"), "ONNX Runtime", "Microsoft", MIT,
+        "https://github.com/microsoft/onnxruntime", "", "Copyright (c) Microsoft Corporation",
+        "lib:libonnxruntime"),
+    new Part(L.k("Распознавание, озвучка, отпечаток голоса"), "sherpa-onnx v1.13.8 (OpenFst, kaldi-native-fbank …)",
+        "Xiaomi Corporation, k2-fsa", APACHE,
+        SHERPA_SRC, L.k("добавлена уверенность распознавателя"), "",
+        "lib:libsherpa-onnx-jni"),
+    new Part(L.k("Уточнение перевода"), "llama.cpp, ggml", "The ggml authors", MIT,
+        "https://github.com/ggml-org/llama.cpp", "", "Copyright (c) 2023-2026 The ggml authors",
+        "lib:libllama", "lib:libggml", "lib:libmtmd"),
+  };
+
+  /** Своё (models/manifest.json: license=project) — без строки. */
+  static boolean own(String license) { return "project".equals(license); }
+
+  /** Чья строка объясняет файл манифеста или библиотеку APK (lib:имя.so). */
+  static java.util.List<Part> of(String file) {
+    java.util.List<Part> out = new java.util.ArrayList<>();
+    for (Part p : PARTS) for (String f : p.files) if (file.startsWith(f)) { out.add(p); break; }
+    return out;
+  }
+
+  static String licenseName(String id) {
+    switch (id) {
+      case CC_BY_4: return "CC BY 4.0";
+      case CC_BY_2_FR: return "CC BY 2.0 FR";
+      case GPL3: return "GNU GPL 3.0+";
+      case APACHE: return "Apache 2.0";
+      default: return id;
+    }
+  }
+
+  /** Весь текст экрана: части, ссылки на лицензии CC и исходники GPL, затем тексты MIT, Apache 2.0 и GPL 3.0.
+   *  asset — чтение файла из assets (в тесте — из bench/apk). */
+  static String text(Function<String, String> asset) {
+    StringBuilder b = new StringBuilder();
+    b.append(L.t("Чужие модели и библиотеки в Falar и их лицензии:"));
+    for (Part p : PARTS) {
+      b.append("\n\n• ").append(L.t(p.role)).append(": ").append(p.what).append(" — ").append(p.who).append(". ")
+          .append(licenseName(p.license)).append('.');
+      if (!p.changed.isEmpty()) b.append(' ').append(L.f("Изменено: %s.", L.t(p.changed)));
+      b.append('\n').append(p.url);
+    }
+    b.append("\n\n").append(L.t("Лицензии Creative Commons:"))
+        .append("\nCC BY 4.0 — https://creativecommons.org/licenses/by/4.0/")
+        .append("\nCC BY 2.0 FR — https://creativecommons.org/licenses/by/2.0/fr/")
+        .append("\nCC0 — https://creativecommons.org/publicdomain/zero/1.0/");
+    b.append("\n\n").append(L.t("Исходный код eSpeak NG, собранный в эту версию:")).append('\n').append(ESPEAK_SRC)
+        .append("\n").append(L.t("sherpa-onnx и правка Falar:")).append('\n').append(SHERPA_SRC).append('\n').append(FALAR_PATCH);
+    b.append("\n\n———— MIT License ————\n");
+    for (Part p : PARTS) if (MIT.equals(p.license)) b.append('\n').append(p.copyright).append(" — ").append(p.what);
+    b.append("\n\n").append(asset.apply("licenses/MIT.txt").trim());
+    b.append("\n\n———— Apache License 2.0 ————\n\n").append(asset.apply("licenses/Apache-2.0.txt").trim());
+    b.append("\n\n———— GNU General Public License v3.0 ————\n\n").append(asset.apply("licenses/GPL-3.0.txt").trim());
+    return b.toString();
+  }
+}

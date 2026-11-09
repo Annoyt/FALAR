@@ -46,6 +46,8 @@
 #            разрыв кадров закрывает кусок сейчас, предел длины режет по тихому кадру;
 #   Numbers — португальские числа словами для озвучки и транскрипции: числительные, род, деньги, время, проценты.
 #   VoiceMsg — голосовое из мессенджера: склейка кусков, длительность, файл, отправитель, куда «Отправить перевод…», пометка 🎙;
+#   Licenses — экран «Лицензии»: у каждой модели манифеста и библиотеки APK есть автор и лицензия, тексты дословны,
+#              исходники GPL (espeak-ng) названы;
 #   L — надписи по-португальски: выбор языка, у каждой надписи кода и пункта whatsnew.txt есть перевод в ui_pt.txt,
 #       вставки совпадают, лишних строк нет; в экранах нет русских строк мимо L.
 #   MicPair — два канала записи: копия одного микрофона или два разных, уровни, на сколько позже слышит правый.
@@ -93,9 +95,11 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/Numbers.java $A/test/NumbersTest.java \
   $A/src/dev/agenttranslator/VoiceMsg.java $A/test/VoiceMsgTest.java \
   $A/src/dev/agenttranslator/MicPair.java $A/test/MicPairTest.java \
-  $A/src/dev/agenttranslator/WordConf.java $A/test/WordConfTest.java
+  $A/src/dev/agenttranslator/WordConf.java $A/test/WordConfTest.java \
+  $A/src/dev/agenttranslator/Licenses.java $A/test/LicensesTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.LicensesTest "$R" "$A/jni/arm64-v8a" || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.UpdatesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.BriefTest || fail=1

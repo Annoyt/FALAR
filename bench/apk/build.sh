@@ -30,6 +30,9 @@ cp $R/data/ocr_words_pt.txt.gz $OUT/assets/ocr_words_pt.txt.gz
 cp $A/whatsnew.txt $OUT/assets/whatsnew.txt
 # Надписи по-португальски (L, UiLang): русская строка кода — ключ, перевод — после табуляции.
 cp $A/ui_pt.txt $OUT/assets/ui_pt.txt
+# Тексты лицензий чужих частей (Licenses, экран «Лицензии»): GPL 3.0 — eSpeak NG в мосте JNI и данных озвучки,
+# Apache 2.0, MIT. Дословно; авторы и что изменено — в Licenses.java.
+mkdir -p $OUT/assets/licenses && cp $A/licenses/*.txt $OUT/assets/licenses/
 # Шумодав нарезки «только при шуме» (DenoiseGate, GTCRN, MIT, 0,5 МБ) — в APK: включён у всех по умолчанию.
 # Файл из зеркала моделей (tools/models_fetch.py), сверяется с models/manifest.json: в APK — ровно проверенное.
 python3 - "$R/models/manifest.json" "$R/models/denoiser/gtcrn_simple.onnx" <<'PY'

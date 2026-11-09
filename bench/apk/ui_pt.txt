@@ -661,7 +661,7 @@ Falar обновляется сам: раз в сутки проверяет, н
 Раз в сутки Falar может отправлять разработчику анонимную статистику: модель телефона и версию Android, сколько фраз распозналось и сколько нет, фон вокруг, какой микрофон, скорость работы и сбои. Звук, тексты разговоров и номер телефона не уходят. Передумаете — переключатель «Статистика для разработчика» в настройках.	Uma vez por dia, o Falar pode enviar ao desenvolvedor estatísticas anônimas: modelo do telefone e versão do Android, quantas frases foram reconhecidas e quantas não, o ruído ao redor, qual microfone, a velocidade e as falhas. Áudio, textos das conversas e número de telefone não são enviados. Se mudar de ideia, use a opção «Estatísticas para o desenvolvedor» nas Configurações.
 не отправлять	não enviar
 подробнее	saiba mais
-Falar %s — переводчик разговора между бразильским португальским и русским. Распознавание речи, перевод и озвучка работают на телефоне, без интернета.	Falar %s — tradutor de conversas entre português do Brasil e russo. Reconhecimento de fala, tradução e voz funcionam no telefone, sem internet.
+Falar %s — переводчик разговора между бразильским португальским и русским. Он сделан, чтобы людям без общего языка было проще понимать друг друга. Распознавание речи, перевод и озвучка работают на телефоне, без интернета.	Falar %s — tradutor de conversas entre português do Brasil e russo. Foi feito para que pessoas sem um idioma em comum se entendam com mais facilidade. Reconhecimento de fala, tradução e voz funcionam no telefone, sem internet.
 Что уходит в интернет	O que vai para a internet
 • Загрузка моделей и проверка обновлений — с GitHub и Hugging Face.	• Download dos modelos e verificação de atualizações — do GitHub e do Hugging Face.
 • Облачный пересмотр — только с вашим ключом OpenRouter и после вашего согласия.	• Revisão na nuvem — só com a sua chave do OpenRouter e depois do seu consentimento.
@@ -695,3 +695,26 @@ Falar больше не закрывается сам, когда к нему в
 Слова, которые Falar расслышал неуверенно, подчёркнуты цветом — их стоит переспросить.	Palavras que o Falar ouviu sem certeza aparecem sublinhadas em cor — vale a pena perguntar de novo.
 Уточнитель больше не подменяет перевод реплики переводом соседних.	O refinador não troca mais a tradução de uma fala pela das falas vizinhas.
 Перевод помнит термины из прошлых разговоров, если облако их уже переводило.	A tradução lembra os termos de conversas anteriores que a nuvem já traduziu.
+Если включить этот модуль, Falar различает голоса в разговоре, чтобы показывать, кто говорит. У голоса номер или имя — его вписываете вы, или оно прозвучало в разговоре. Отпечатки остаются на телефоне: в интернет и в облачную копию Google они не уходят. Выключается в «Модулях и файлах».	Com este módulo ativado, o Falar distingue as vozes da conversa para mostrar quem está falando. Cada voz tem um número ou um nome — digitado por você ou dito na conversa. As impressões de voz ficam no telefone: não vão para a internet nem para o backup do Google na nuvem. Desative em «Módulos e arquivos».
+Лицензии	Licenças
+Распознавание речи	Reconhecimento de fala
+Поиск речи	Detecção de fala
+Шумоподавление	Redução de ruído
+Отпечаток голоса	Impressão de voz
+Уточнение перевода	Refinamento da tradução
+Чтение снимков	Leitura de fotos
+Озвучка: произношение	Narração: pronúncia
+Фразы и словарь снимков	Frases e dicionário de fotos
+Запуск моделей	Execução de modelos
+Распознавание, озвучка, отпечаток голоса	Reconhecimento, narração, impressão de voz
+переведено в ONNX и сжато до int8 (sherpa-onnx)	convertido para ONNX e comprimido para int8 (sherpa-onnx)
+переведено в ONNX	convertido para ONNX
+переведено в ONNX (sherpa-onnx)	convertido para ONNX (sherpa-onnx)
+данные для обучения голосов — CC0	dados de treino das vozes — CC0
+отобраны фразы и слова	frases e palavras selecionadas
+добавлена уверенность распознавателя	adicionada a confiança do reconhecedor
+Чужие модели и библиотеки в Falar и их лицензии:	Modelos e bibliotecas de terceiros no Falar e suas licenças:
+Изменено: %s.	Alterado: %s.
+Лицензии Creative Commons:	Licenças Creative Commons:
+Исходный код eSpeak NG, собранный в эту версию:	Código-fonte do eSpeak NG compilado nesta versão:
+sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
