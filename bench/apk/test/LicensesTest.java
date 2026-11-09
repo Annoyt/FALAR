@@ -55,13 +55,16 @@ public class LicensesTest {
     ok(mit.trim().startsWith("Permission is hereby granted") && mit.contains("THE SOFTWARE IS PROVIDED \"AS IS\"") && !mit.contains("Copyright"),
         "Л3 MIT — текст без чужой строки авторских прав");
 
-    String t = Licenses.text(asset), tq = Licenses.text(asset, true);
+    String t = Licenses.text(asset), tq = Licenses.text(asset, true), tm = Licenses.text(asset, false, true);
     for (Licenses.Part p : Licenses.PARTS) {
-      ok(tq.contains(p.what) && tq.contains(p.who) && tq.contains(p.url), "Л4 часть в тексте сборки с NPU: " + p.what);
-      if (!p.npu) ok(t.contains(p.what) && t.contains(p.who) && t.contains(p.url), "Л4 часть в тексте обычной сборки: " + p.what);
-      if (Licenses.MIT.equals(p.license)) ok(!p.copyright.isEmpty() && tq.contains(p.copyright), "Л4 строка авторских прав MIT: " + p.what);
+      String own = p.mtk ? tm : tq;                    // своя сборка части: MediaTek (MTK=1) или Snapdragon (NPU=1)
+      ok(own.contains(p.what) && own.contains(p.who) && own.contains(p.url), "Л4 часть в тексте своей сборки: " + p.what);
+      if (!p.npu && !p.mtk) ok(t.contains(p.what) && t.contains(p.who) && t.contains(p.url), "Л4 часть в тексте обычной сборки: " + p.what);
+      if (Licenses.MIT.equals(p.license)) ok(!p.copyright.isEmpty() && own.contains(p.copyright), "Л4 строка авторских прав MIT: " + p.what);
     }
-    ok(!t.contains("Qualcomm") && !t.contains("nemo128"), "Л4 в обычной сборке нет частей NPU");
+    ok(!t.contains("Qualcomm") && !t.contains("nemo128") && !t.contains("NeuroPilot"), "Л4 в обычной сборке нет частей NPU");
+    ok(!tm.contains("Qualcomm AI Stack License") && tm.contains("NeuroPilot") && !tq.contains("NeuroPilot"),
+        "Л4 сборка MediaTek — без Qualcomm, сборка Snapdragon — без NeuroPilot");
     ok(tq.contains("Qualcomm AI Stack License") && tq.contains("licenses/qualcomm") == false, "Л4 в сборке с NPU — лицензия Qualcomm");
     ok(t.contains(Licenses.ESPEAK_SRC) && t.contains(Licenses.SHERPA_SRC) && t.contains(Licenses.FALAR_PATCH), "Л4 исходники GPL названы");
     ok(t.contains("creativecommons.org/licenses/by/4.0") && t.contains("creativecommons.org/licenses/by/2.0/fr"), "Л4 ссылки на CC BY");

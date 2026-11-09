@@ -326,7 +326,7 @@ public class TranslatorService extends Service {
     modelsDir = new File(getExternalFilesDir(null), "models");
     // Каталог модели NPU создаёт само приложение: созданный по adb (владелец shell) оно не может ни читать, ни писать —
     // так модели стенда (bench/npu/npu_app_device.sh) кладутся в каталог приложения без смены прав (RTL их запрещает).
-    if (Npu.snapdragon()) new File(modelsDir, "npu").mkdirs();
+    if (Npu.chip() != null) new File(modelsDir, "npu").mkdirs();
     // Хранилище создаём здесь, а не в фоне: стендовые интенты (models/modelsbase) приходят сразу за onCreate.
     try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
     catch (Throwable t) { Log.e(TAG, "manifest", t); status(L.f("Ошибка манифеста моделей: %s", t)); return; }
@@ -460,17 +460,34 @@ public class TranslatorService extends Service {
   /** Первая сборка графа QNN — прирост памяти процесса до 1,6 ГБ (AI Hub 09.11, по телефонам 0,1–1,6), поэтому
    *  только при 2 ГБ свободных, иначе — через 10 минут снова. Из сохранённого графа — 0,4–1,3 с, без проверки. */
   static final long NPU_FIRST_BUILD_FREE = 2_000_000_000L;
-  volatile long npuFree = NPU_FIRST_BUILD_FREE;
+  /** MediaTek: первая сборка графа NeuroPilot частями — минус 1,7 ГБ свободной памяти (POCO X7 Pro 10.11; одной частью
+   *  телефон уходил в перезагрузку по нехватке памяти) — поэтому только при 3 ГБ свободных. */
+  static final long NPU_FIRST_BUILD_FREE_MTK = 3_000_000_000L;
+  volatile long npuFree = Npu.mediatek() ? NPU_FIRST_BUILD_FREE_MTK : NPU_FIRST_BUILD_FREE;
   /** Сколько фраз распознал NPU — в журнал первые три и каждая двадцатая: видно, что фразы идут через NPU и за сколько. */
   int npuPhrases;
   void startNpu() {
     final Engine e = eng; if (e == null || e.npu != null || "готовится".equals(e.npuState)) return;
     final File lib = new File(getApplicationInfo().nativeLibraryDir);
-    String why = Npu.unavailable(Npu.snapdragon(), lib, modelsDir);
+    final Npu.Chip chip = Npu.chip();
+    String why = Npu.unavailable(chip, lib, modelsDir);
     e.npuOn = getSharedPreferences("at", MODE_PRIVATE).getBoolean(Npu.PREF, true);
     if (why != null) { e.npuState = why; return; }
     if (!e.npuOn) { e.npuState = L.k("выключено"); return; }
-    final File ctx = new File(getNoBackupFilesDir(), "npu/encoder-ctx.onnx");
+    // Защита от повторов на телефонах, где NPU не справляется (Redmi Note 10 Pro, MT6891 / Neuron 5, 10.11: дополнение
+    // уронило всё приложение при создании сессии): «npu_fail» — граф не собрался на этой прошивке и версии Falar, больше
+    // не пробуем; «npu_try» — сборка начата и не закончилась (процесс упал или его убили) — тоже не пробуем.
+    final android.content.SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    final String id = android.os.Build.FINGERPRINT + "/" + myCode();
+    if (id.equals(sp.getString("npu_fail", ""))) { e.npuState = L.k("не справляется с моделью"); return; }
+    String tried = sp.getString("npu_try", "");
+    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
+    if (tries >= 1) {   // одного раза хватает: нативный сбой дополнения роняет весь процесс (Redmi, 10.11)
+      e.npuState = L.k("сбой при прошлой сборке графа");
+      log("⚡ NPU: прошлая сборка графа оборвалась — до обновления приложения распознаёт процессор");
+      return;
+    }
+    final File ctx = new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
     if (!ctx.exists()) {
       android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
       ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
@@ -483,7 +500,13 @@ public class TranslatorService extends Service {
     }
     e.npuState = L.k("готовится");
     log(ctx.exists() ? "⚡ NPU: поднимаю сохранённый граф" : "⚡ NPU: собираю граф (первый раз — до двух минут), пока распознаёт процессор");
-    Thread t = new Thread(() -> e.startNpu(lib, ctx), "npu");
+    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();      // commit: запись до возможного падения
+    Thread t = new Thread(() -> {
+      e.startNpu(lib, ctx);
+      android.content.SharedPreferences.Editor ed = sp.edit().remove("npu_try");
+      if ("error".equals(e.npuState)) { ed.putString("npu_fail", id); e.npuState = L.k("не справляется с моделью"); }
+      ed.apply();
+    }, "npu");
     t.setPriority(Thread.MIN_PRIORITY); t.start();
   }
   /** Переключатель «Распознавание на NPU». */
@@ -1095,6 +1118,10 @@ public class TranslatorService extends Service {
     // Стенд NPU: --es npu 1|0 — переключатель «Распознавание на NPU» (та же фраза на NPU и на процессоре);
     // --es npufree МБ — порог свободной памяти для первой сборки графа (по умолчанию 2000).
     if (i != null && i.hasExtra("npufree")) { npuFree = Long.parseLong(i.getStringExtra("npufree")) * 1_000_000L; log("⚡ стенд: порог памяти для сборки графа NPU — " + i.getStringExtra("npufree") + " МБ"); }
+    // --es npuany 1 — пробовать NPU и на непроверенном чипе MediaTek (Npu.MTK_OK); может уронить приложение
+    if (i != null && i.hasExtra("npuany")) { Npu.MTK_ANY = "1".equals(i.getStringExtra("npuany")); log("⚡ стенд: NPU на любом MediaTek — " + Npu.MTK_ANY); }
+    // --es npureset 1 — забыть «не справляется» и оборванные сборки графа (npu_fail, npu_try), попробовать снова
+    if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").apply(); log("⚡ стенд: NPU — пробовать снова"); }
     if (i != null && i.hasExtra("npu")) setNpu("1".equals(i.getStringExtra("npu")));
     if (i != null && i.hasExtra("bargedump")) { bargeDump = Integer.parseInt(i.getStringExtra("bargedump")); log("🗣 стенд: запишу совмещение на концах " + bargeDump + " фраз"); }
     if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
@@ -2537,6 +2564,8 @@ public class TranslatorService extends Service {
   boolean slimBuild() { return !new File(getApplicationInfo().nativeLibraryDir, "libllama-server.so").exists(); }
   /** Сборка с NPU (build.sh NPU=1): в APK библиотеки Qualcomm. */
   boolean npuBuild() { return new File(getApplicationInfo().nativeLibraryDir, "libQnnHtp.so").exists(); }
+  /** В сборке — дополнение NeuroPilot для NPU MediaTek (build.sh MTK=1). */
+  boolean mtkBuild() { return new File(getApplicationInfo().nativeLibraryDir, Npu.MTK_EP).exists(); }
   public int myCode() {
     try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode; } catch (Exception e) { return 0; }
   }

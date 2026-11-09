@@ -64,6 +64,11 @@ final class NpuAsr implements AutoCloseable {
    *  encoder-npu.onnx; qnn — параметры NPU (null — процессор): QNN или, с ключом EP_LIBRARY, дополнения ORT;
    *  ctx — куда сохранить собранный граф (null — не сохранять). */
   NpuAsr(File asrDir, File npuDir, Map<String, String> qnn, File ctx) throws OrtException, IOException {
+    this(asrDir, npuDir, "encoder-npu.onnx", qnn, ctx);
+  }
+
+  /** model — файл кодировщика в npuDir (Snapdragon — encoder-npu.onnx, MediaTek — encoder-mtk.onnx). */
+  NpuAsr(File asrDir, File npuDir, String modelName, Map<String, String> qnn, File ctx) throws OrtException, IOException {
     OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
     cpu.setIntraOpNumThreads(1);
     pre = env.createSession(new File(npuDir, "nemo128.onnx").getPath(), cpu);
@@ -71,7 +76,7 @@ final class NpuAsr implements AutoCloseable {
     join = env.createSession(new File(asrDir, "joiner.int8.onnx").getPath(), cpu);
     sym = tokens(new File(asrDir, "tokens.txt"));
     blank = sym.length - 1;
-    String model = new File(npuDir, "encoder-npu.onnx").getPath();
+    String model = new File(npuDir, modelName).getPath();
     OrtSession e = null; String h = "cpu";
     if (qnn == null) {
       e = env.createSession(model, cpu);
@@ -79,11 +84,19 @@ final class NpuAsr implements AutoCloseable {
       String kind = qnn.containsKey(EP_LIBRARY) ? "neuron" : "qnn";
       if (ctx != null && ctx.exists()) {
         try { e = env.createSession(ctx.getPath(), qnnOptions(env, qnn, null)); h = kind + "-ctx"; }
-        catch (OrtException x) { ctx.delete(); }
+        catch (OrtException x) { deleteCtx(ctx); }
       }
       if (e == null) { e = env.createSession(model, qnnOptions(env, qnn, ctx)); h = kind; }
     }
     enc = e; how = h;
+  }
+
+  /** Сохранённый граф и его части: у NeuroPilot с ep.context_embed_mode=0 рядом лежат «<имя>_neuron_N.bin». */
+  static void deleteCtx(File ctx) {
+    ctx.delete();
+    String stem = ctx.getName().replaceFirst("\\.onnx$", "") + "_neuron_";
+    File[] parts = ctx.getParentFile() == null ? null : ctx.getParentFile().listFiles((d, s) -> s.startsWith(stem) && s.endsWith(".bin"));
+    if (parts != null) for (File f : parts) f.delete();
   }
 
   static OrtSession.SessionOptions qnnOptions(OrtEnvironment env, Map<String, String> qnn, File saveCtx) throws OrtException {
