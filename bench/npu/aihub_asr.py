@@ -36,6 +36,9 @@ FEAT = P / ".stand/npu/asrfeat"
 OUT = P / ".stand/npu/aihub"
 F = 832
 SPECS = {"audio_signal": ((1, 128, F), "float32"), "length": ((1,), "int64")}
+# precompiled — контекст QNN собирает AI Hub; onnx — модель как есть, граф QNN собирает ONNX Runtime на телефоне
+# (так будет в приложении): тогда --infer-opts="--compute_unit npu --onnx_execution_providers qnn"
+RUNTIMES = {"precompiled": "precompiled_qnn_onnx", "onnx": "onnx"}
 
 
 def devices(a):
@@ -83,7 +86,8 @@ def submit(a):
         j = {"device": d.name}
         cj = hub.submit_compile_job(model=m_npu, device=d, name=f"falar parakeet {a.label}", input_specs=specs,
                                     calibration_data=hub.get_dataset(a.calib_dataset) if a.calib_dataset else None,
-                                    options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io " + a.compile_opts)
+                                    options=f"--target_runtime {RUNTIMES[a.runtime]} "
+                                    + ("--truncate_64bit_io " if a.runtime == "precompiled" else "") + a.compile_opts)
         j["npu_compile"] = cj.job_id
         if m_cpu is not None:
             cc = hub.submit_compile_job(model=m_cpu, device=d, name="falar parakeet cpu int8", input_specs=SPECS,
@@ -102,10 +106,10 @@ def submit(a):
         else:
             tm = cj.get_target_model()
             j["npu_profile"] = hub.submit_inference_job(model=tm, device=d, name="falar parakeet npu profile",
-                                                        profile=True).job_id
+                                                        profile=True, options=a.infer_opts).job_id
             if ds is not None:
                 j["npu_infer"] = hub.submit_inference_job(model=tm, device=d, inputs=ds, name="falar parakeet npu wer",
-                                                          profile=False).job_id
+                                                          profile=False, options=a.infer_opts).job_id
         if "cpu_compile" in j:
             cc = hub.get_job(j["cpu_compile"])
             st = cc.wait()
@@ -259,6 +263,8 @@ def main():
     s.add_argument("--label", default="fp16")
     s.add_argument("--no-infer", action="store_true")
     s.add_argument("--compile-opts", default="", help="добавить к сборке под NPU: --compile-opts=\"--quantize_io …\"")
+    s.add_argument("--runtime", default="precompiled", choices=sorted(RUNTIMES), help="onnx — граф собирает ORT с QNN на телефоне")
+    s.add_argument("--infer-opts", default="", help="параметры вывода и профиля, напр. \"--compute_unit npu --onnx_execution_providers qnn\"")
     s.add_argument("--calib-dataset", default="", help="калибровка для --quantize_full_type (квантует сам QAIRT)")
     q = sub.add_parser("quantize")
     q.add_argument("--calib", type=int, default=40)
