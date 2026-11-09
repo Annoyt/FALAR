@@ -44,10 +44,14 @@ public class NpuAsrPc {
          PrintWriter w = new PrintWriter(out, "UTF-8")) {
       System.out.println("RESULT загрузка " + (System.nanoTime() - t00) / 1_000_000 + " мс; кодировщик: " + r.how
           + ", токенов " + r.sym.length + ", пустой " + r.blank);
-      for (String lang : new String[]{"pt", "ru"}) {
+      // ASR_SECONDS — корпус по кругу, пока не выйдет время (bench/npu/mtk_power.sh: батарея и нагрев)
+      String secs = System.getenv("ASR_SECONDS");
+      long until = secs == null ? 0 : System.nanoTime() + Long.parseLong(secs) * 1_000_000_000L;
+      do for (String lang : new String[]{"pt", "ru"}) {
         File[] wavs = new File(corpus, lang).listFiles((d, s) -> s.endsWith(".wav"));
         Arrays.sort(wavs);
         for (File f : wavs) {
+          if (until != 0 && System.nanoTime() > until) break;
           if (n++ % every != 0) continue;
           float[] s = wav(f);
           long t0 = System.nanoTime();
@@ -59,7 +63,7 @@ public class NpuAsrPc {
           w.println(name + "\t" + res.text);
           done++;
         }
-      }
+      } while (until != 0 && System.nanoTime() < until);
     }
     System.out.printf("RESULT фраз %d (длиннее окна %d), первая %d мс, дальше %.1f мс на фразу (признаки + кодировщик + TDT) → %s%n",
         done, longer, first, ms / (double) Math.max(1, done + longer - 1), out);

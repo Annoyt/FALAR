@@ -29,11 +29,14 @@ public class SherpaAsrPc {
         .setOfflineModelConfig(mc).setDecodingMethod("greedy_search").build());
     System.out.println("RESULT загрузка " + (System.nanoTime() - t00) / 1_000_000 + " мс; sherpa int8, потоков " + threads);
     int n = 0, done = 0; long ms = 0, first = -1;
+    String secs = System.getenv("ASR_SECONDS");          // корпус по кругу заданное время (mtk_power.sh)
+    long until = secs == null ? 0 : System.nanoTime() + Long.parseLong(secs) * 1_000_000_000L;
     try (PrintWriter w = new PrintWriter(out, "UTF-8")) {
-      for (String lang : new String[]{"pt", "ru"}) {
+      do for (String lang : new String[]{"pt", "ru"}) {
         File[] wavs = new File(corpus, lang).listFiles((x, s) -> s.endsWith(".wav"));
         Arrays.sort(wavs);
         for (File f : wavs) {
+          if (until != 0 && System.nanoTime() > until) break;
           if (n++ % every != 0) continue;
           float[] s = NpuAsrPc.wav(f);
           long t0 = System.nanoTime();
@@ -47,7 +50,7 @@ public class SherpaAsrPc {
           w.println(lang + "_" + f.getName().replace(".wav", "") + "\t" + text);
           done++;
         }
-      }
+      } while (until != 0 && System.nanoTime() < until);
     }
     r.release();
     System.out.printf("RESULT фраз %d, первая %d мс, дальше %.1f мс на фразу (признаки + кодировщик + жадный поиск) → %s%n",
