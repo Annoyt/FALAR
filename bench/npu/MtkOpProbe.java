@@ -56,6 +56,13 @@ public class MtkOpProbe {
             d = Math.max(d, e); r = Math.max(r, Math.abs(ref[i]));
             if (masked && i / row < VALID) dv = Math.max(dv, e);
           }
+          if (System.getenv("PROBE_VALUES") != null) {    // характер ошибки: первые значения и наклон got ≈ k·ref
+            double sxy = 0, sxx = 0; int nz = 0;
+            for (int i = 0; i < ref.length; i++) { sxy += ref[i] * got[i]; sxx += ref[i] * ref[i]; if (got[i] == 0) nz++; }
+            StringBuilder b = new StringBuilder();
+            for (int i = 0; i < 6; i++) b.append(String.format(" %.4f/%.4f", ref[i], got[i]));
+            System.out.printf("VAL %s: процессор/NPU%s; наклон %.4g, нулей у NPU %d из %d%n", f.getName(), b, sxy / sxx, nz, ref.length);
+          }
           System.out.printf("OK %s: сборка %d мс, прогон %.2f мс (процессор %.2f мс), разница %.3g при размахе %.3g%s%n",
               f.getName(), build, best / 1000.0, cpuUs / 1000.0, d, r,
               masked ? String.format(" (в %d кадрах фразы — %.3g)", VALID, dv) : "");

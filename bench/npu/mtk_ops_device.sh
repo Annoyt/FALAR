@@ -31,7 +31,7 @@ for f in $OPS/*.onnx; do
 done
 say "модели на телефоне: $(sh "ls $D/ops | wc -l"); параметры: $OPTS"
 LOG=$OUT/probe-$(date +%Y%m%d-%H%M%S).txt
-sh "cd $D && CLASSPATH=$D/ops-classes.dex LD_LIBRARY_PATH=$D PROBE_ONLY='$PROBE_ONLY' app_process $D dev.agenttranslator.MtkOpProbe $D/ops \
+sh "cd $D && CLASSPATH=$D/ops-classes.dex LD_LIBRARY_PATH=$D PROBE_ONLY='$PROBE_ONLY' PROBE_VALUES='$PROBE_VALUES' app_process $D dev.agenttranslator.MtkOpProbe $D/ops \
     $D/libonnxruntime_providers_neuropilot.so '$OPTS'" > $LOG 2>&1 || true
-grep -E "^== |^OK |^FAIL |GetCapability|Some ops not supported|Exception" $LOG | cut -c1-230
+grep -E "^== |^OK |^FAIL |^VAL |GetCapability|Some ops not supported|Exception" $LOG | cut -c1-260
 say "полный вывод → $LOG"
