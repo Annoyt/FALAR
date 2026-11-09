@@ -728,3 +728,4 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 нет модели NPU	falta o modelo da NPU
 готовится	preparando
 квантовано для NPU (Qualcomm AI Hub, правки Falar)	quantizado para a NPU (Qualcomm AI Hub, ajustes do Falar)
+ждёт свободной памяти	aguardando memória livre

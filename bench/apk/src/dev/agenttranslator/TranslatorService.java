@@ -454,16 +454,30 @@ public class TranslatorService extends Service {
    *  возможно). Своим потоком после загрузки всего остального: граф QNN при первом запуске собирается десятки секунд,
    *  очередь фраз его не ждёт, до тех пор распознаёт процессор. Собранный граф — в no_backup: не уезжает ни в облачную
    *  копию, ни на другой телефон (там другое поколение NPU). */
+  /** Первая сборка графа QNN — прирост памяти процесса до 1,6 ГБ (AI Hub 09.11, по телефонам 0,1–1,6), поэтому
+   *  только при 2 ГБ свободных, иначе — через 10 минут снова. Из сохранённого графа — 0,4–1,3 с, без проверки. */
+  static final long NPU_FIRST_BUILD_FREE = 2_000_000_000L;
   void startNpu() {
-    final Engine e = eng; if (e == null || e.npu != null) return;
+    final Engine e = eng; if (e == null || e.npu != null || "готовится".equals(e.npuState)) return;
     final File lib = new File(getApplicationInfo().nativeLibraryDir);
     String why = Npu.unavailable(Npu.snapdragon(), lib, modelsDir);
     e.npuOn = getSharedPreferences("at", MODE_PRIVATE).getBoolean(Npu.PREF, true);
     if (why != null) { e.npuState = why; return; }
     if (!e.npuOn) { e.npuState = L.k("выключено"); return; }
+    final File ctx = new File(getNoBackupFilesDir(), "npu/encoder-ctx.onnx");
+    if (!ctx.exists()) {
+      android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+      ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
+      if (mi.availMem < NPU_FIRST_BUILD_FREE) {
+        e.npuState = L.k("ждёт свободной памяти");
+        log("⚡ NPU: для первой сборки графа нужно 2 ГБ свободной памяти, сейчас " + (mi.availMem >> 20) + " МБ — попробую через 10 минут");
+        main.postDelayed(this::startNpu, 10 * 60_000L);
+        return;
+      }
+    }
     e.npuState = L.k("готовится");
-    log("⚡ NPU: собираю граф (первый раз — до нескольких минут), пока распознаёт процессор");
-    Thread t = new Thread(() -> e.startNpu(lib, new File(getNoBackupFilesDir(), "npu/encoder-ctx.onnx")), "npu");
+    log(ctx.exists() ? "⚡ NPU: поднимаю сохранённый граф" : "⚡ NPU: собираю граф (первый раз — до двух минут), пока распознаёт процессор");
+    Thread t = new Thread(() -> e.startNpu(lib, ctx), "npu");
     t.setPriority(Thread.MIN_PRIORITY); t.start();
   }
   /** Переключатель «Распознавание на NPU». */
