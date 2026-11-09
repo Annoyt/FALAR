@@ -22,6 +22,10 @@ public class NpuAsrPc {
       qnn.put("backend_path", new File(a[5], "libQnnHtp.so").getPath());
       qnn.put("htp_performance_mode", "burst");
       qnn.put("htp_graph_finalization_optimization_mode", "3");
+      // NPU_QNN="ключ=значение,…" — подобрать параметры QNN на стенде (напр. htp_arch=68, soc_model=35)
+      String extra = System.getenv("NPU_QNN");
+      if (extra != null) for (String kv : extra.split(",")) { String[] p = kv.split("=", 2); if (p.length == 2) qnn.put(p[0].trim(), p[1].trim()); }
+      System.out.println("RESULT параметры QNN: " + qnn);
     }
     File ctx = a.length > 6 ? new File(a[6]) : null;
     int n = 0, done = 0, longer = 0; long ms = 0, first = -1;

@@ -324,6 +324,9 @@ public class TranslatorService extends Service {
   void init() {
     wl = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AT:pipeline"); wl.acquire();
     modelsDir = new File(getExternalFilesDir(null), "models");
+    // Каталог модели NPU создаёт само приложение: созданный по adb (владелец shell) оно не может ни читать, ни писать —
+    // так модели стенда (bench/npu/npu_app_device.sh) кладутся в каталог приложения без смены прав (RTL их запрещает).
+    if (Npu.snapdragon()) new File(modelsDir, "npu").mkdirs();
     // Хранилище создаём здесь, а не в фоне: стендовые интенты (models/modelsbase) приходят сразу за onCreate.
     try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
     catch (Throwable t) { Log.e(TAG, "manifest", t); status(L.f("Ошибка манифеста моделей: %s", t)); return; }
@@ -457,6 +460,9 @@ public class TranslatorService extends Service {
   /** Первая сборка графа QNN — прирост памяти процесса до 1,6 ГБ (AI Hub 09.11, по телефонам 0,1–1,6), поэтому
    *  только при 2 ГБ свободных, иначе — через 10 минут снова. Из сохранённого графа — 0,4–1,3 с, без проверки. */
   static final long NPU_FIRST_BUILD_FREE = 2_000_000_000L;
+  volatile long npuFree = NPU_FIRST_BUILD_FREE;
+  /** Сколько фраз распознал NPU — в журнал первые три и каждая двадцатая: видно, что фразы идут через NPU и за сколько. */
+  int npuPhrases;
   void startNpu() {
     final Engine e = eng; if (e == null || e.npu != null || "готовится".equals(e.npuState)) return;
     final File lib = new File(getApplicationInfo().nativeLibraryDir);
@@ -468,9 +474,9 @@ public class TranslatorService extends Service {
     if (!ctx.exists()) {
       android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
       ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
-      if (mi.availMem < NPU_FIRST_BUILD_FREE) {
+      if (mi.availMem < npuFree) {
         e.npuState = L.k("ждёт свободной памяти");
-        log("⚡ NPU: для первой сборки графа нужно 2 ГБ свободной памяти, сейчас " + (mi.availMem >> 20) + " МБ — попробую через 10 минут");
+        log("⚡ NPU: для первой сборки графа нужно " + (npuFree / 1_000_000) + " МБ свободной памяти, сейчас " + (mi.availMem >> 20) + " МБ — попробую через 10 минут");
         main.postDelayed(this::startNpu, 10 * 60_000L);
         return;
       }
@@ -609,9 +615,11 @@ public class TranslatorService extends Service {
     float[] use = asrFor(samples), fed = use;           // два микрофона: выровненная сумма той же длины (dualAsr)
     if (padMs > 0) { int pad = padMs * sr / 1000; fed = new float[pad + use.length];
       System.arraycopy(use, 0, fed, pad, use.length); }
-    long t0 = System.nanoTime(); Engine.Asr ar;
+    long t0 = System.nanoTime(); Engine.Asr ar; long npuBefore = en.npuCalls;
     synchronized (asrLock) { ar = en.asrFull(dir.substring(0, 2), fed, sr); }   // sherpa ресемплирует сам
     long ms = (System.nanoTime() - t0) / 1000000;
+    if (en.npuCalls > npuBefore && (++npuPhrases <= 3 || npuPhrases % 20 == 0))
+      log(String.format(Locale.ROOT, "⚡ фраза на NPU: %.1f с речи за %d мс (%d-я)", samples.length / (double) sr, ms, npuPhrases));
     if (!probsTold && ar.tokens != null && ar.tokens.length > 0) {   // с прежней библиотекой JNI пометок нет — видно по журналу
       probsTold = true;
       log(ar.probs != null ? "🔎 распознаватель отдаёт уверенность в словах — сомнительные помечаются"
@@ -1084,6 +1092,10 @@ public class TranslatorService extends Service {
     // маршрут не трогаются. Пишет files/aec_<cfg>.wav (16 кГц), aec_ref*.wav (что играли) и aec.json
     // (когда начали играть, метки времени записи и дорожки) — разбор на столе (tools/aec_eval.py,
     // tools/barge_eval.py). Слушание на время стенда выключается.
+    // Стенд NPU: --es npu 1|0 — переключатель «Распознавание на NPU» (та же фраза на NPU и на процессоре);
+    // --es npufree МБ — порог свободной памяти для первой сборки графа (по умолчанию 2000).
+    if (i != null && i.hasExtra("npufree")) { npuFree = Long.parseLong(i.getStringExtra("npufree")) * 1_000_000L; log("⚡ стенд: порог памяти для сборки графа NPU — " + i.getStringExtra("npufree") + " МБ"); }
+    if (i != null && i.hasExtra("npu")) setNpu("1".equals(i.getStringExtra("npu")));
     if (i != null && i.hasExtra("bargedump")) { bargeDump = Integer.parseInt(i.getStringExtra("bargedump")); log("🗣 стенд: запишу совмещение на концах " + bargeDump + " фраз"); }
     if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
       new Thread(() -> { try { aecStand(cfgs); } catch (Throwable t) { log("🔁 эхо-стенд: ошибка — " + t); } }, "aec").start(); }
