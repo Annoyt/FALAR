@@ -14,7 +14,11 @@
 # onnx e709452 (v1.18.0), GSL 4.0.0 — те же версии, что тянет его CMakeLists (FETCHCONTENT_SOURCE_DIR_*, без git).
 # Заголовки ORT 1.29 — из onnxruntime-android-qnn-1.29.0.aar (headers/). Закрытая libneuron_op_capability.so —
 # из выпуска v0.3.0 (.stand/mtk-ep/v0.3.0). NDK r27d. Тяжёлое — под .stand/heavy.lock, 3 потока (PC перегревается).
-#   bash bench/npu/neuropilot-ep/build.sh            # → .stand/mtk-ep/v0.3.0-int16/{libonnxruntime_providers_neuropilot.so, libneuron_op_capability.so}
+# Закрытая libneuron_op_capability.so не нужна (владелец 10.11: «Своя заглушка»): op_capability_stub.c — тот же ABI
+# из открытого заголовка дополнения; дополнение собирается против неё.
+#   bash bench/npu/neuropilot-ep/build.sh
+#     → .stand/mtk-ep/v0.3.0-int16-stub/ — дополнение + своя заглушка (для приложения: build.sh MTK_EP_DIR=…)
+#     → .stand/mtk-ep/v0.3.0-int16/      — то же дополнение + закрытая библиотека выпуска (для сравнения)
 set -e
 H=$(cd "$(dirname "$0")" && pwd)
 P=/home/not_me/antigravity-workspace/agentstuff/agenttranslator; E=$P/.stand/mtk-ep
@@ -30,11 +34,21 @@ for p in $H/*.patch; do
   echo "правка: $(basename $p)"
 done
 n=$(grep -rl "Falar patch" $S/src | wc -l); [ "$n" -gt 0 ] || { echo "правок в исходниках нет"; exit 1; }
+# своя заглушка libneuron_op_capability.so — до дополнения: оно собирается против неё (CMake требует файл в каталоге)
+STUB=$E/v0.3.0-int16-stub; mkdir -p $STUB
+TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
+$TC/aarch64-linux-android29-clang -shared -fPIC -O2 -fvisibility=hidden -DNEURON_CAP_BUILD_LIBRARY \
+  -I $S/src/neuron_plugin_ep/neuron_impl/op_capability_abi -Wl,-soname,libneuron_op_capability.so -Wl,--build-id \
+  -o $STUB/libneuron_op_capability.so $H/op_capability_stub.c
+$TC/llvm-strip --strip-unneeded $STUB/libneuron_op_capability.so
+k=$($TC/llvm-nm -D --defined-only $STUB/libneuron_op_capability.so | grep -c " T NeuronCap")
+[ "$k" = 6 ] || { echo "заглушка экспортирует $k функций NeuronCap* вместо 6"; exit 1; }
+echo "заглушка: 6 функций, $(stat -c %s $STUB/libneuron_op_capability.so) байт"
 flock $P/.stand/heavy.lock nice -n 10 bash -c "
   cmake -S $S -B $W/build -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=$S/cmake/toolchain-android.cmake -DANDROID_NDK_HOME=$NDK \
     -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-    -DORT_INCLUDE_DIR=$E/ort-headers -DNEURON_OP_CAPABILITY_LIB_DIR=$E/v0.3.0 \
+    -DORT_INCLUDE_DIR=$E/ort-headers -DNEURON_OP_CAPABILITY_LIB_DIR=$STUB \
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
     -DFETCHCONTENT_SOURCE_DIR_PROTOBUF=$E/src/protobuf/protobuf-3.21.12 \
     -DFETCHCONTENT_SOURCE_DIR_ONNX=$E/src/onnx/onnx-e709452ef2bbc1d113faf678c24e6d3467696e83 \
@@ -46,4 +60,5 @@ $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-unneeded -o $O
 strings -n 8 $OUT/libonnxruntime_providers_neuropilot.so | grep -q "closed capability check skipped" || { echo "в .so нет правки 02-int16-cap"; exit 1; }
 echo "файлов с правками: $n; sha256 $(sha256sum $OUT/libonnxruntime_providers_neuropilot.so | cut -c1-12)"
 cp $E/v0.3.0/libneuron_op_capability.so $OUT/
-ls -la $OUT
+cp $OUT/libonnxruntime_providers_neuropilot.so $STUB/
+ls -la $OUT $STUB
