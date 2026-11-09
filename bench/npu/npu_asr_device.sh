@@ -14,7 +14,7 @@ set -e
 S=$1; [ -n "$S" ] || { echo "нужен SERIAL"; exit 2; }
 P=/home/not_me/antigravity-workspace/agentstuff/agenttranslator; ST=$P/.stand
 W=$(cd "$(dirname "$0")/../.." && pwd); A=$W/bench/apk
-ADB="$P/tools/platform-tools/adb -s $S"; D=/data/local/tmp/falar-npu-asr
+ADB="${ADB_BIN:-$P/tools/platform-tools/adb} -s $S"; D=/data/local/tmp/falar-npu-asr
 Q=${QNN_DIR:-$ST/qnn-android}; OUT=$ST/npu/app/device; mkdir -p $OUT/classes
 say() { echo "$(date +%T) $*"; }
 sh() { $ADB shell "$@" < /dev/null | tr -d '\r'; }
@@ -35,13 +35,16 @@ java -cp $P/tools/r8.jar com.android.tools.r8.D8 --release --min-api 28 --lib $P
 sh "mkdir -p $D/asr $D/npu $D/corpus/pt $D/corpus/ru"
 push() { local t=$(date +%s.%N) bytes=0; for f in "${@:2}"; do $ADB push "$f" "$1/" >/dev/null; bytes=$((bytes + $(stat -L -c %s "$f"))); done
   say "залито в $1: $((bytes / 1048576)) МБ за $(echo "$(date +%s.%N) - $t" | bc | cut -c1-5) с"; }
+if [ -z "$PUSHED" ]; then
 push $D $OUT/classes.dex $Q/ort/libonnxruntime.so $Q/ort/libonnxruntime4j_jni.so $Q/qnn/libQnnHtp.so $Q/qnn/libQnnSystem.so \
   $Q/qnn/libQnnHtpPrepare.so $Q/qnn/libQnnHtpV${arch}Stub.so $Q/qnn/libQnnHtpV${arch}Skel.so
 push $D/asr $P/models/asr_multi/decoder.int8.onnx $P/models/asr_multi/joiner.int8.onnx $P/models/asr_multi/tokens.txt
 push $D/corpus/pt $W/bench/air/corpus/pt/*.wav
 push $D/corpus/ru $W/bench/air/corpus/ru/*.wav
 push $D/npu $ST/npu/parakeet/nemo128.onnx
-sh "[ -s $D/npu/encoder-npu.onnx ] && [ \$(stat -c %s $D/npu/encoder-npu.onnx) = $(stat -L -c %s $ST/npu/app/parakeet-encoder-npu.onnx) ]" \
+fi
+# код выхода — через echo: у `adb shell … | tr` он был бы кодом tr (всегда 0), и модель «уже была» на любом телефоне
+[ "$(sh "stat -c %s $D/npu/encoder-npu.onnx 2>/dev/null || echo 0")" = "$(stat -L -c %s $ST/npu/app/parakeet-encoder-npu.onnx)" ] \
   && say "модель NPU уже на телефоне" \
   || { t=$(date +%s.%N); $ADB push $ST/npu/app/parakeet-encoder-npu.onnx $D/npu/encoder-npu.onnx >/dev/null; say "модель NPU: $(echo "$(date +%s.%N) - $t" | bc | cut -c1-5) с"; }
 
