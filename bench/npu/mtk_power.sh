@@ -106,31 +106,41 @@ sample end >> $CSV
 
 $ST/venv-qnn/bin/python -I - "$CSV" "$OUT/out-$TAG-npu.txt" "$OUT/out-$TAG-cpu.txt" "$OUT/out-$TAG-npu2.txt" <<'PY'
 import re, sys
+# Счётчик заряда, пока телефон спит, обновляется пачками раз в 1–2 минуты (POCO 10.11): изменение, пришедшее в
+# начале режима, — расход предыдущего. Поэтому мощность — только по промежуткам между двумя обновлениями,
+# целиком лежащим внутри одного режима; фон — по таким же промежуткам покоя и остывания.
 rows = [l.split() for l in open(sys.argv[1]) if l.strip()]
-def num(x):
-    try: return float(x)
-    except ValueError: return float("nan")
-phr = {}
+phr, ms = {}, {}                                            # фраз и мс на фразу — из вывода обвязки
 for m, f in (("npu", sys.argv[2]), ("cpu", sys.argv[3]), ("npu2", sys.argv[4])):
     try:
         t = open(f, encoding="utf-8").read()
         g = re.search(r"фраз (\d+)", t); phr[m] = int(g.group(1)) if g else 0
-    except OSError: phr[m] = 0
-res = {}
-for m in ("idle", "npu", "cpu", "npu2"):
+        g = re.search(r"дальше ([\d,.]+) мс", t); ms[m] = float(g.group(1).replace(",", ".")) if g else float("nan")
+    except OSError:
+        phr[m], ms[m] = 0, float("nan")
+ups = []                                                    # (время, режим, мА·ч, мВ) — моменты смены счётчика
+prev = None
+for x in rows:
+    cc = float(x[2])
+    if prev is not None and cc != prev:
+        ups.append((float(x[0]), x[1], cc / 1000, float(x[3])))
+    prev = cc
+def power(modes):
+    q = t = 0.0; vs = []
+    for (t0, m0, c0, v0), (t1, m1, c1, v1) in zip(ups, ups[1:]):
+        if m0 in modes and m1 in modes and m0 == m1:
+            q += c0 - c1; t += t1 - t0; vs.append((v0 + v1) / 2)
+    return (q * (sum(vs) / len(vs)) / 1000 * 3600 / t, q, t) if t > 0 else (float("nan"), 0, 0)   # мА·ч·мВ/1000 = мВт·ч
+idle, qi, ti = power({"idle", "cool"})
+print(f"\nфон (покой и остывание): {idle:.0f} мВт ({qi:.0f} мА·ч за {ti:.0f} с между обновлениями счётчика)")
+print("режим   мощность  сверх фона  по счётчику     фраз/с   мДж/фразу   CPU °C        NPU °C        корпус °C")
+for m in ("npu", "cpu", "npu2"):
     r = [x for x in rows if x[1] == m]
     if len(r) < 2: continue
-    t = num(r[-1][0]) - num(r[0][0]); dq = (num(r[0][2]) - num(r[-1][2])) / 1000.0          # мА·ч
-    v = sum(num(x[3]) for x in r) / len(r) / 1000.0                                         # В
-    p = dq * v * 3600.0 / t if t > 0 else float("nan")                                      # мВт (мА·ч·В = мВт·ч)
-    temps = {k: (num(r[0][i]), max(num(x[i]) for x in r)) for k, i in (("CPU", 8), ("NPU", 9), ("корпус", 11), ("батарея", 12))}
-    res[m] = (t, dq, p, temps)
-idle = res.get("idle", (0, 0, float("nan"), {}))[2]
-print("\nрежим    время  заряд    мощность  сверх покоя  фраз   мДж/фразу   CPU °C        NPU °C        корпус °C")
-for m, (t, dq, p, temps) in res.items():
-    n = phr.get(m, 0); extra = p - idle
-    mj = extra * t / n if n else float("nan")
-    tt = "  ".join(f"{a:.1f}→{b:.1f}" for a, b in (temps["CPU"], temps["NPU"], temps["корпус"]))
-    print(f"{m:6} {t:5.0f} с {dq:5.1f} мА·ч {p:7.0f} мВт {extra:8.0f} мВт {n:6d} {mj:9.1f}   {tt}")
+    p, q, t = power({m})
+    rate = 1000.0 / ms[m] if ms.get(m) == ms.get(m) and ms.get(m) else float("nan")   # фраз/с во время распознавания
+    mj = (p - idle) / rate                                   # мВт / (фраз/с) = мДж на фразу
+    tt = "  ".join(f"{float(r[0][i]):.1f}→{max(float(x[i]) for x in r):.1f}" for i in (8, 9, 11))
+    print(f"{m:6} {p:7.0f} мВт {p - idle:7.0f} мВт  {q:4.0f} мА·ч/{t:4.0f} с  {rate:5.2f}  {mj:9.0f}   {tt}")
 PY
 say "итог → $LOG, замеры → $CSV"
