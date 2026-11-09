@@ -79,14 +79,19 @@ MAIN=$(cd "$(git -C $R rev-parse --git-common-dir)/.." && pwd)
 export QNN_DIR=${QNN_DIR:-$MAIN/.stand/qnn-android}
 export MTK_EP_DIR=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16}
 APKS="Falar.apk Falar-slim.apk"
-# Страница (docs/index.html, NPU_FROM) ведёт телефоны со Snapdragon на Falar-npu.apk начиная с этой версии: выпуск
-# без сборок с NPU с такой версии сломал бы им кнопку «Скачать».
+# Страница (docs/index.html, NPU_FROM) ведёт телефоны с NPU на Falar-npu.apk начиная с этой версии: выпуск
+# без сборок с NPU с такой версии сломал бы им кнопку «Скачать». По умолчанию сборки с NPU делаются ровно с NPU_FROM
+# (владелец 10.11: 0.37.0 — без них, пока озвучка с eSpeak NG под GPL лежит в одном APK с закрытыми библиотеками
+# Qualcomm); NPU_BUILDS=1 — собрать и раньше (выйдут файлами релиза, страница их не предложит).
 NPU_FROM=$(grep -o "NPU_FROM = '[0-9.]*'" $R/docs/index.html | grep -o "[0-9.]*" | tail -1)
 vnum() { echo "$1" | awk -F. '{print $1 * 1000000 + $2 * 1000 + $3}'; }
-if [ "${NPU_BUILDS:-1}" = 0 ] && [ -n "$NPU_FROM" ] && [ $(vnum $VER) -ge $(vnum $NPU_FROM) ]; then
+ONPAGE=$([ -n "$NPU_FROM" ] && [ $(vnum $VER) -ge $(vnum $NPU_FROM) ] && echo 1 || echo 0)
+NPU_BUILDS=${NPU_BUILDS:-$ONPAGE}
+if [ "$NPU_BUILDS" = 0 ] && [ "$ONPAGE" = 1 ]; then
   echo "NPU_BUILDS=0, а страница с $NPU_FROM предлагает Falar-npu.apk — поднимите NPU_FROM в docs/index.html или соберите с NPU"; exit 1
 fi
-if [ "${NPU_BUILDS:-1}" != 0 ]; then
+echo "  сборки с NPU: $([ "$NPU_BUILDS" = 0 ] && echo "нет (страница предлагает их с ${NPU_FROM:-—})" || echo да)"
+if [ "$NPU_BUILDS" != 0 ]; then
   [ -s $QNN_DIR/qnn/libQnnHtp.so ] || { echo "нет библиотек NPU в $QNN_DIR — bash bench/npu/fetch_qnn.sh (или NPU_BUILDS=0)"; exit 1; }
   MTKV=$([ "${NPU_MTK:-1}" = 0 ] || echo 1)
   [ -z "$MTKV" ] || [ -s $MTK_EP_DIR/libonnxruntime_providers_neuropilot.so ] \
@@ -106,7 +111,8 @@ done
 
 cd $A && sha256sum $APKS > SHA256SUMS.txt && cd $R
 FULL=$(du -h $A/Falar.apk | cut -f1); SLIMSZ=$(du -h $A/Falar-slim.apk | cut -f1)
-NPUSZ=$([ -s $A/Falar-npu.apk ] && du -h $A/Falar-npu.apk | cut -f1); SLIMNPUSZ=$([ -s $A/Falar-slim-npu.apk ] && du -h $A/Falar-slim-npu.apk | cut -f1)
+NPUSZ=; SLIMNPUSZ=        # только если сборки с NPU в этом выпуске: прежний Falar-npu.apk в каталоге не в счёт
+case " $APKS " in *" Falar-npu.apk "*) NPUSZ=$(du -h $A/Falar-npu.apk | cut -f1); SLIMNPUSZ=$(du -h $A/Falar-slim-npu.apk | cut -f1);; esac
 
 # latest.json — то, что приложение читает само, чтобы узнать о новой версии. Лежит среди файлов
 # релиза, адрес постоянный: releases/latest/download/latest.json. Номер сборки, размер и sha256

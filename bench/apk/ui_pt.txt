@@ -739,5 +739,4 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 этот чип MediaTek не проверен	este chip MediaTek não foi testado
 ⚡ Распознавание на NPU	⚡ Reconhecimento na NPU
 этот чип Snapdragon не проверен	este chip Snapdragon não foi testado
-Сборка с NPU: на Snapdragon распознаёт быстрее, на MediaTek бережёт батарею.	Versão com NPU: no Snapdragon reconhece mais rápido, no MediaTek poupa a bateria.
 В «О приложении» — авторы и лицензии моделей и библиотек Falar.	Em «Sobre o app» — autores e licenças dos modelos e bibliotecas do Falar.
