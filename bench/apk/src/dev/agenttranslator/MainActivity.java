@@ -2491,8 +2491,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // здесь, подробно в «О приложении» → «Лицензии». Группа та же, что у «Переспросить» (ветка repeat-ask).
     // MediaTek (ветка mtk-npu, POCO X7 Pro 10.11): та же скорость, что у процессора, но в 4,5 раза меньше энергии
     // на фразу и без нагрева, качество — как у fp32 — строка только в сборке с дополнением NeuroPilot (MTK=1).
-    final boolean mtkLib = new java.io.File(getApplicationInfo().nativeLibraryDir, Npu.MTK_EP).exists();
-    if (Npu.snapdragon() || (Npu.mediatek() && mtkLib)) {
+    // Строка — только там, где NPU возможен: сборка с библиотеками этого чипа и чип проверен (Npu.unsupported); в обычной
+    // сборке и на непроверенном чипе переключатель ничего бы не менял.
+    if (Npu.unsupported(Npu.chip(), Npu.socModel(), new java.io.File(getApplicationInfo().nativeLibraryDir)) == null) {
       LinearLayout c5 = r.group(v, L.t("Экспериментальное"));
       Switch swNpu = r.sw(); swNpu.setChecked(prefs.getBoolean(Npu.PREF, true));
       r.row(c5, app.falar.R.drawable.ic_spark, L.t("Распознавание на NPU"), Npu.snapdragon()

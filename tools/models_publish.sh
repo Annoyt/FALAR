@@ -22,6 +22,25 @@ done
 cp $R/bench/apk/phrasebook_seed.json $STAGE/phrasebook.json
 cp $R/data/tatoeba/phrasebook_tatoeba.tsv $R/data/common_words.txt $STAGE/
 cp $M/manifest.json $STAGE/manifest.json
+# Модели распознавания на NPU (модуль npu, с 0.37.0; приложение качает только модель своего чипа): кодировщик parakeet
+# для Snapdragon (bench/npu/app_model.py) и для MediaTek (bench/npu/mtk_quant.py, A16W8) и признаки nemo128 — из .stand
+# основной копии проекта. Выкладывается ровно то, что в манифесте: размер и sha256 сверяются до выкладки.
+MAIN=$(cd "$(git -C $R rev-parse --path-format=absolute --git-common-dir)/.." && pwd); NS=$MAIN/.stand/npu
+mkdir -p $STAGE/npu
+cp $NS/parakeet/nemo128.onnx $STAGE/npu/nemo128.onnx
+cp $NS/app/parakeet-encoder-npu.onnx $STAGE/npu/encoder-npu.onnx
+cp $NS/mtk/a16w8/encoder-npu.onnx $STAGE/npu/encoder-mtk.onnx
+python3 - "$M/manifest.json" "$STAGE" <<'PY2'
+import hashlib, json, os, sys
+m = json.load(open(sys.argv[1], encoding="utf-8"))
+for e in m["files"]:
+    if e.get("module") != "npu": continue
+    p = os.path.join(sys.argv[2], e["source"]["file"]); h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for c in iter(lambda: f.read(1 << 20), b""): h.update(c)
+    if os.path.getsize(p) != e["size"] or h.hexdigest() != e["sha256"]: sys.exit(f"{e['path']} разошёлся с манифестом — не выкладываю")
+print("модели NPU сверены с манифестом")
+PY2
 cat > $STAGE/README.md <<MD
 ---
 license: cc-by-4.0
@@ -35,6 +54,7 @@ tags: [translation, onnx, opus-mt, falar]
 - \`tts_ru.zip\`, \`tts_pt.zip\`: голоса Piper dmitri и faber из тарболов sherpa-onnx, перепакованы в zip — CC0;
 - \`phrasebook_tatoeba.tsv\`, \`common_words.txt\`: корпус фраз и частотный словарь, добытые из Tatoeba — CC-BY 2.0 FR;
 - \`phrasebook.json\`: затравка разговорника проекта;
+- \`npu/encoder-npu.onnx\`, \`npu/encoder-mtk.onnx\`: кодировщик nvidia/parakeet-tdt-0.6b-v3, квантованный для NPU Snapdragon (QDQ w8a16, Qualcomm AI Hub) и MediaTek (A16W8) — CC-BY-4.0, авторство NVIDIA; \`npu/nemo128.onnx\`: признаки NeMo из istupakov/onnx-asr — MIT, Copyright (c) 2025 Ilya Stupakov;
 - \`manifest.json\`: по нему приложение и \`tools/models_fetch.py\` собирают полный набор, включая модели из исходных репозиториев.
 MD
 du -sh $STAGE; find $STAGE -type f | sed "s|$STAGE/||"

@@ -330,6 +330,7 @@ public class TranslatorService extends Service {
     // Хранилище создаём здесь, а не в фоне: стендовые интенты (models/modelsbase) приходят сразу за onCreate.
     try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
     catch (Throwable t) { Log.e(TAG, "manifest", t); status(L.f("Ошибка манифеста моделей: %s", t)); return; }
+    store.npuFor(Npu.manifestChip(Npu.chip(), Npu.socModel(), new File(getApplicationInfo().nativeLibraryDir)));
     // Модули: выбор человека; до выбора (новая установка) — по умолчанию под этот телефон.
     SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
     String saved = sp.getString(PREF_MODULES, null);
@@ -342,7 +343,7 @@ public class TranslatorService extends Service {
       if (known == null || !modules.equals(was)) sp.edit().putString(PREF_MODULES, Modules.join(modules)).putString(PREF_KNOWN, String.join(",", Modules.CHOICE)).apply();
       for (String m : modules) if (!was.contains(m)) log("🧩 новый модуль включён: " + Modules.title(m) + " — выключить можно в «Модули и файлы»");
     }
-    modulesChosen = saved != null; store.modules = modules;
+    modulesChosen = saved != null; store.modules = storeModules();
     worker.submit(this::boot);
   }
   String readAsset(String name) throws java.io.IOException {
@@ -478,7 +479,7 @@ public class TranslatorService extends Service {
     // уронило всё приложение при создании сессии): «npu_fail» — граф не собрался на этой прошивке и версии Falar, больше
     // не пробуем; «npu_try» — сборка начата и не закончилась (процесс упал или его убили) — тоже не пробуем.
     final android.content.SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
-    final String id = android.os.Build.FINGERPRINT + "/" + myCode();
+    final String id = npuId();
     if (id.equals(sp.getString("npu_fail", ""))) { e.npuState = L.k("не справляется с моделью"); return; }
     String tried = sp.getString("npu_try", "");
     int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
@@ -509,9 +510,30 @@ public class TranslatorService extends Service {
     }, "npu");
     t.setPriority(Thread.MIN_PRIORITY); t.start();
   }
+  /** Прошивка и версия Falar: NPU, отказавший на них (npu_fail), до обновления одного или другого не пробуется. */
+  String npuId() { return android.os.Build.FINGERPRINT + "/" + myCode(); }
+  /** Модели NPU (модуль npu, 0,6 ГБ) нужны: на этом чипе в этой сборке NPU возможен (ModelStore.npuFor оставил их в
+   *  списке), переключатель «Распознавание на NPU» включён и NPU здесь не отказывал. Тогда они докачиваются в фоне, как
+   *  файлы включённых модулей (ModelStore.autos, по разрешённой сети), и NPU поднимается сам (reloadOptional). */
+  boolean npuWanted() {
+    if (store == null || store.bytes(Modules.NPU) == 0) return false;
+    SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    return sp.getBoolean(Npu.PREF, true) && !npuId().equals(sp.getString("npu_fail", ""));
+  }
+  /** Модули для хранилища: выбранные человеком и модели NPU, если нужны (npuWanted). */
+  Set<String> storeModules() {
+    Set<String> s = new LinkedHashSet<>(modules);
+    if (npuWanted()) s.add(Modules.NPU);
+    return s;
+  }
   /** Переключатель «Распознавание на NPU». */
   public void setNpu(boolean on) {
     getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean(Npu.PREF, on).apply();
+    if (store != null) {                               // модели NPU: включили — докачать (раз за включение), выключили — не качать
+      store.modules = storeModules();
+      if (on) autoFetchTried = false;
+      worker.submit(() -> { store.summarize(); if (on && eng != null) maybeAutoFetch(); });
+    }
     Engine e = eng; if (e == null) return;
     e.npuOn = on; log("⚡ NPU " + (on ? "включён" : "выключен") + (e.npu == null ? "" : " · фраз на NPU " + e.npuCalls));
     if (on && e.npu == null && !"готовится".equals(e.npuState)) startNpu();
@@ -1785,7 +1807,7 @@ public class TranslatorService extends Service {
     return b.toString();
   }
   void setModules(Set<String> s, String why) {
-    modules = new LinkedHashSet<>(s); store.modules = modules; modulesChosen = true; autoFetchTried = false;
+    modules = new LinkedHashSet<>(s); store.modules = storeModules(); modulesChosen = true; autoFetchTried = false;
     getSharedPreferences("at", MODE_PRIVATE).edit().putString(PREF_MODULES, Modules.join(modules)).putString(PREF_KNOWN, String.join(",", Modules.CHOICE)).apply();
     log("🧩 модули (" + why + "): " + modulesLine());
     worker.submit(store::summarize);                   // сверка может читать файлы — не на экранном потоке
@@ -2539,6 +2561,7 @@ public class TranslatorService extends Service {
       if (words != null && new File(modelsDir, "common_words.txt").exists()) { words.loadCommon(); log("📝 " + words.stats()); }
       if (chats != null) learn = new Learn(chats, modelsDir, getExternalFilesDir(null));
       if (new File(modelsDir, "denoiser").isDirectory() && eng.denoiser == null) log("🔇 шумоподавитель скачан — подключится после перезапуска приложения");
+      if (eng.npu == null) startNpu();                 // модели NPU докачались — граф собирается, пока распознаёт процессор
       status(L.f("Готово. %s", pb.stats()));
     } catch (Throwable t) { log("подключение скачанного: " + t); }
   }
@@ -2562,8 +2585,9 @@ public class TranslatorService extends Service {
   /** Облегчённая сборка — та, в которой нет llama.cpp. Обновлять её полной нельзя: человек
    *  выбрал 22 МБ вместо 83 осознанно, и молча утянуть остальное было бы подменой выбора. */
   boolean slimBuild() { return !new File(getApplicationInfo().nativeLibraryDir, "libllama-server.so").exists(); }
-  /** Сборка с NPU (build.sh NPU=1): в APK библиотеки Qualcomm. */
-  boolean npuBuild() { return new File(getApplicationInfo().nativeLibraryDir, "libQnnHtp.so").exists(); }
+  /** Сборка с NPU (build.sh NPU=1 и/или MTK=1): в APK библиотеки Qualcomm или дополнение NeuroPilot. По ней же
+   *  обновление берёт сборку с NPU (Updates.parse) — выпуск собирает их с обоими. */
+  boolean npuBuild() { return new File(getApplicationInfo().nativeLibraryDir, "libQnnHtp.so").exists() || mtkBuild(); }
   /** В сборке — дополнение NeuroPilot для NPU MediaTek (build.sh MTK=1). */
   boolean mtkBuild() { return new File(getApplicationInfo().nativeLibraryDir, Npu.MTK_EP).exists(); }
   public int myCode() {

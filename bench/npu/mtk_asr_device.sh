@@ -16,6 +16,7 @@
 #   EP_DIR=.stand/mtk-ep/v0.3.0-int16 MODEL=a16w8 …  # своя сборка дополнения (A16W8) и модель mtk_quant.py
 #   GUARD_MB=800 …                    # сторож памяти: меньше — процесс останавливается (по умолчанию 800 МБ)
 #   WARM=1 …                          # только прогон из сохранённого графа (первый уже был)
+#   ORT_DIR=.stand/qnn-android/ort DEV_DIR=/data/local/tmp/falar-mtk-combo …   # ядро ORT сборки выпуска (с QNN)
 #   CPU=1 bash bench/npu/mtk_asr_device.sh SERIAL [КАЖДАЯ_N]   # для сравнения — обычный путь приложения на
 #                                     # процессоре: sherpa-onnx, parakeet int8, 4 потока (SherpaAsrPc)
 #   bash bench/npu/mtk_asr_device.sh SERIAL clean
@@ -23,7 +24,10 @@ set -e
 S=$1; [ -n "$S" ] || { echo "нужен SERIAL"; exit 2; }
 P=/home/not_me/antigravity-workspace/agentstuff/agenttranslator; ST=$P/.stand
 W=$(cd "$(dirname "$0")/../.." && pwd); A=$W/bench/apk
-ADB="${ADB_BIN:-$P/tools/platform-tools/adb} -s $S"; D=/data/local/tmp/falar-mtk-asr
+ADB="${ADB_BIN:-$P/tools/platform-tools/adb} -s $S"; D=${DEV_DIR:-/data/local/tmp/falar-mtk-asr}
+# ORT_DIR — другое ядро ONNX Runtime (libonnxruntime.so и libonnxruntime4j_jni.so): у сборки выпуска с NPU оно с QNN
+# (.stand/qnn-android/ort) — так проверяется, что дополнение NeuroPilot работает и с ним (NPU=1 MTK=1)
+ORT=${ORT_DIR:-$A/jni/arm64-v8a}
 EP=${EP_DIR:-$ST/mtk-ep/v0.3.0}; MODEL=${MODEL:-fp16}; M=$ST/npu/mtk/$MODEL
 OUT=$ST/npu/mtk/device; mkdir -p $OUT/classes
 say() { echo "$(date +%T) $*"; }
@@ -49,7 +53,7 @@ push() { local t=$(date +%s.%N) bytes=0; for f in "${@:2}"; do $ADB push "$f" "$
   say "залито в $1: $((bytes / 1048576)) МБ за $(echo "$(date +%s.%N) - $t" | bc | cut -c1-5) с"; }
 push $D $OUT/classes.dex
 if [ -z "$PUSHED" ]; then
-  push $D $A/jni/arm64-v8a/libonnxruntime.so $A/jni/arm64-v8a/libonnxruntime4j_jni.so \
+  push $D $ORT/libonnxruntime.so $ORT/libonnxruntime4j_jni.so \
     $EP/libonnxruntime_providers_neuropilot.so $EP/libneuron_op_capability.so
   push $D/asr $P/models/asr_multi/decoder.int8.onnx $P/models/asr_multi/joiner.int8.onnx $P/models/asr_multi/tokens.txt
   push $D/corpus/pt $W/bench/air/corpus/pt/*.wav

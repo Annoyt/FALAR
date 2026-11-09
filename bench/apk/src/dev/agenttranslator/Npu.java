@@ -59,18 +59,32 @@ final class Npu {
     return snapdragon(android.os.Build.VERSION.SDK_INT, soc, android.os.Build.HARDWARE, android.os.Build.BOARD);
   }
 
-  /** Почему NPU сейчас нельзя (надпись L.k), или null. */
-  static String unavailable(boolean snapdragon, File libDir, File models) {
-    return unavailable(snapdragon ? Chip.SNAPDRAGON : null, libDir, models);
+  /** Модель чипа (Build.SOC_MODEL: «SM7325», «MT6899»); до Android 12 её нет — пусто. */
+  static String socModel() { return android.os.Build.VERSION.SDK_INT >= 31 ? android.os.Build.SOC_MODEL : ""; }
+
+  /** Чип, чью модель NPU этому телефону качать (поле chip у файлов модуля npu в models/manifest.json), или null —
+   *  NPU здесь не будет вовсе (unsupported), и модель на 0,6 ГБ не нужна. */
+  static String manifestChip(Chip c, String soc, File libDir) {
+    if (unsupported(c, soc, libDir) != null) return null;
+    return c == Chip.MEDIATEK ? "mediatek" : "qualcomm";
   }
 
-  static String unavailable(Chip c, File libDir, File models) {
+  /** Почему на этом телефоне в этой сборке NPU не будет при любой модели (надпись L.k), или null. Чип проверен:
+   *  Snapdragon — поколение HTP известно (htpArch: v68 и новее — для них библиотеки QNN 2.42), MediaTek — MTK_OK. */
+  static String unsupported(Chip c, String soc, File libDir) {
     if (c == null) return L.k("не Snapdragon и не MediaTek");
-    if (c == Chip.MEDIATEK && !mtkVerified(android.os.Build.VERSION.SDK_INT >= 31 ? android.os.Build.SOC_MODEL : ""))
-      return L.k("этот чип MediaTek не проверен");
+    if (c == Chip.MEDIATEK && !mtkVerified(soc)) return L.k("этот чип MediaTek не проверен");
+    if (c == Chip.SNAPDRAGON && htpArch(soc).isEmpty()) return L.k("этот чип Snapdragon не проверен");
     boolean libs = c == Chip.MEDIATEK ? new File(libDir, MTK_EP).exists() && new File(libDir, MTK_CAP).exists()
         : new File(libDir, "libQnnHtp.so").exists();
     if (!libs) return L.k("в этой сборке нет библиотек NPU");
+    return null;
+  }
+
+  /** Почему NPU сейчас нельзя (надпись L.k), или null. */
+  static String unavailable(Chip c, File libDir, File models) {
+    String why = unsupported(c, socModel(), libDir);
+    if (why != null) return why;
     if (!new File(models, model(c)).exists() || !new File(models, PRE).exists()) return L.k("нет модели NPU");
     return null;
   }
@@ -109,7 +123,7 @@ final class Npu {
   static Map<String, String> qnnOptions(File libDir) {
     Map<String, String> o = new HashMap<>();
     o.put("backend_path", new File(libDir, "libQnnHtp.so").getPath());
-    String arch = htpArch(android.os.Build.VERSION.SDK_INT >= 31 ? android.os.Build.SOC_MODEL : "");
+    String arch = htpArch(socModel());
     if (!arch.isEmpty()) o.put("htp_arch", arch);
     o.put("htp_performance_mode", "burst");
     o.put("htp_graph_finalization_optimization_mode", "3");

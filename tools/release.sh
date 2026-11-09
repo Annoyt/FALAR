@@ -70,11 +70,14 @@ gh release view "$TAG" -R $REPO >/dev/null 2>&1 && { echo "релиз $TAG уж�
 echo "== сборка $VER"
 bash $A/build.sh >/dev/null
 SLIM=1 bash $A/build.sh >/dev/null
-# Сборки с NPU для Snapdragon (владелец 09.11: «сборка с и без, страница помогает выбрать»): те же две, но с ORT
-# с QNN и библиотеками Qualcomm (лицензия AI Stack — только внутри приложения). Библиотеки — bench/npu/fetch_qnn.sh,
-# по умолчанию в .stand/qnn-android основной копии проекта. NPU_BUILDS=0 — выпуск без них (по слову владельца).
+# Сборки с NPU (владелец 09.11: «сборка с и без, страница помогает выбрать»; 10.11 — «с функциями для mediatek и
+# qualcom»): те же две, но с ORT с QNN и библиотеками Qualcomm (лицензия AI Stack — только внутри приложения) и с
+# дополнением ORT для NeuroPilot (MediaTek). Библиотеки Qualcomm — bench/npu/fetch_qnn.sh, по умолчанию в
+# .stand/qnn-android основной копии проекта; дополнение — bench/npu/neuropilot-ep/build.sh, в .stand/mtk-ep/v0.3.0-int16.
+# NPU_BUILDS=0 — выпуск без сборок с NPU, NPU_MTK=0 — сборки с NPU только для Snapdragon (по слову владельца).
 MAIN=$(cd "$(git -C $R rev-parse --git-common-dir)/.." && pwd)
 export QNN_DIR=${QNN_DIR:-$MAIN/.stand/qnn-android}
+export MTK_EP_DIR=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16}
 APKS="Falar.apk Falar-slim.apk"
 # Страница (docs/index.html, NPU_FROM) ведёт телефоны со Snapdragon на Falar-npu.apk начиная с этой версии: выпуск
 # без сборок с NPU с такой версии сломал бы им кнопку «Скачать».
@@ -85,8 +88,11 @@ if [ "${NPU_BUILDS:-1}" = 0 ] && [ -n "$NPU_FROM" ] && [ $(vnum $VER) -ge $(vnum
 fi
 if [ "${NPU_BUILDS:-1}" != 0 ]; then
   [ -s $QNN_DIR/qnn/libQnnHtp.so ] || { echo "нет библиотек NPU в $QNN_DIR — bash bench/npu/fetch_qnn.sh (или NPU_BUILDS=0)"; exit 1; }
-  NPU=1 bash $A/build.sh >/dev/null
-  NPU=1 SLIM=1 bash $A/build.sh >/dev/null
+  MTKV=$([ "${NPU_MTK:-1}" = 0 ] || echo 1)
+  [ -z "$MTKV" ] || [ -s $MTK_EP_DIR/libonnxruntime_providers_neuropilot.so ] \
+    || { echo "нет дополнения NeuroPilot в $MTK_EP_DIR — bash bench/npu/neuropilot-ep/build.sh (или NPU_MTK=0)"; exit 1; }
+  NPU=1 MTK=$MTKV bash $A/build.sh >/dev/null
+  NPU=1 MTK=$MTKV SLIM=1 bash $A/build.sh >/dev/null
   APKS="$APKS Falar-npu.apk Falar-slim-npu.apk"
 fi
 
@@ -131,8 +137,8 @@ cat > $RELNOTES <<EOF
 |---|---|---|
 | \`Falar.apk\` | $FULL | обычная сборка |
 | \`Falar-slim.apk\` | $SLIMSZ | без контекстного уточнителя, для слабых телефонов |
-${NPUSZ:+| \`Falar-npu.apk\` | $NPUSZ | обычная + распознавание на NPU Snapdragon (888/778G и новее), экспериментально |}
-${SLIMNPUSZ:+| \`Falar-slim-npu.apk\` | $SLIMNPUSZ | облегчённая + NPU Snapdragon |}
+${NPUSZ:+| \`Falar-npu.apk\` | $NPUSZ | обычная + распознавание на NPU: Snapdragon 888/778G и новее${MTKV:+, MediaTek Dimensity 8400}; экспериментально |}
+${SLIMNPUSZ:+| \`Falar-slim-npu.apk\` | $SLIMNPUSZ | облегчённая + NPU |}
 
 Android 9 и новее, процессор arm64. При первом запуске приложение скачает модели (около 1,6 ГБ,
 по Wi-Fi, можно прервать и продолжить). После этого интернет не нужен.

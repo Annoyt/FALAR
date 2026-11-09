@@ -20,6 +20,9 @@ public final class Modules {
   private Modules() {}
 
   public static final String BASE = "base", TTS = "tts", OCR = "ocr", LLM = "llm", CLOUD = "cloud", SPEAKER = "speaker", CORPUS = "corpus";
+  /** Модели распознавания на NPU (Npu): не выбирается здесь — включается переключателем «Распознавание на NPU» в
+   *  «Экспериментальном» и только в сборке с NPU на своём чипе (ModelStore.npuFor, TranslatorService.npuWanted). */
+  public static final String NPU = "npu";
   /** Шумоподавление нарезки (DenoiseGate): модель в самом APK, качать нечего. */
   public static final String DENOISE = "denoise";
   /** Выбираемые модули в порядке показа. */
@@ -46,6 +49,7 @@ public final class Modules {
       case SPEAKER: return L.t("🎤 Отпечаток голоса");
       case DENOISE: return L.t("🔉 Шумоподавление");
       case CORPUS: return L.t("📚 Корпус фраз");
+      case NPU: return L.t("⚡ Распознавание на NPU");
       default: return m;
     }
   }
