@@ -10,7 +10,8 @@
 # виден в списке процессов. Нигде не печатается. Версия берётся из манифеста
 # приложения: менять её надо там, а заодно поднимать `app` в models/manifest.json (build.sh это
 # проверяет), а раздел «== следующая» в bench/apk/whatsnew.txt — назвать этой версией: окно «Что нового»
-# после обновления берёт пункты оттуда (без записи скрипт не начнёт). Имена файлов Falar.apk и Falar-slim.apk постоянные — ссылка
+# после обновления берёт пункты оттуда (без записи скрипт не начнёт). Имена файлов Falar.apk, Falar-slim.apk и их пары
+# с NPU (Falar-npu.apk, Falar-slim-npu.apk) постоянные — ссылка
 # releases/latest/download/Falar.apk не должна ломаться от версии к версии.
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd); A=$R/bench/apk
@@ -69,32 +70,67 @@ gh release view "$TAG" -R $REPO >/dev/null 2>&1 && { echo "релиз $TAG уж�
 echo "== сборка $VER"
 bash $A/build.sh >/dev/null
 SLIM=1 bash $A/build.sh >/dev/null
+# Сборки с NPU (владелец 09.11: «сборка с и без, страница помогает выбрать»; 10.11 — «с функциями для mediatek и
+# qualcom»): те же две, но с ORT с QNN и библиотеками Qualcomm (лицензия AI Stack — только внутри приложения) и с
+# дополнением ORT для NeuroPilot (MediaTek). Библиотеки Qualcomm — bench/npu/fetch_qnn.sh, по умолчанию в
+# .stand/qnn-android основной копии проекта; дополнение — bench/npu/neuropilot-ep/build.sh, в .stand/mtk-ep/v0.3.0-int16.
+# NPU_BUILDS=0 — выпуск без сборок с NPU, NPU_MTK=0 — сборки с NPU только для Snapdragon (по слову владельца).
+MAIN=$(cd "$(git -C $R rev-parse --git-common-dir)/.." && pwd)
+export QNN_DIR=${QNN_DIR:-$MAIN/.stand/qnn-android}
+export MTK_EP_DIR=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16}
+APKS="Falar.apk Falar-slim.apk"
+# Страница (docs/index.html, NPU_FROM) ведёт телефоны с NPU на Falar-npu.apk начиная с этой версии: выпуск
+# без сборок с NPU с такой версии сломал бы им кнопку «Скачать». По умолчанию сборки с NPU делаются ровно с NPU_FROM
+# (владелец 10.11: 0.37.0 — без них, пока озвучка с eSpeak NG под GPL лежит в одном APK с закрытыми библиотеками
+# Qualcomm); NPU_BUILDS=1 — собрать и раньше (выйдут файлами релиза, страница их не предложит).
+NPU_FROM=$(grep -o "NPU_FROM = '[0-9.]*'" $R/docs/index.html | grep -o "[0-9.]*" | tail -1)
+vnum() { echo "$1" | awk -F. '{print $1 * 1000000 + $2 * 1000 + $3}'; }
+ONPAGE=$([ -n "$NPU_FROM" ] && [ $(vnum $VER) -ge $(vnum $NPU_FROM) ] && echo 1 || echo 0)
+NPU_BUILDS=${NPU_BUILDS:-$ONPAGE}
+if [ "$NPU_BUILDS" = 0 ] && [ "$ONPAGE" = 1 ]; then
+  echo "NPU_BUILDS=0, а страница с $NPU_FROM предлагает Falar-npu.apk — поднимите NPU_FROM в docs/index.html или соберите с NPU"; exit 1
+fi
+echo "  сборки с NPU: $([ "$NPU_BUILDS" = 0 ] && echo "нет (страница предлагает их с ${NPU_FROM:-—})" || echo да)"
+if [ "$NPU_BUILDS" != 0 ]; then
+  [ -s $QNN_DIR/qnn/libQnnHtp.so ] || { echo "нет библиотек NPU в $QNN_DIR — bash bench/npu/fetch_qnn.sh (или NPU_BUILDS=0)"; exit 1; }
+  MTKV=$([ "${NPU_MTK:-1}" = 0 ] || echo 1)
+  [ -z "$MTKV" ] || [ -s $MTK_EP_DIR/libonnxruntime_providers_neuropilot.so ] \
+    || { echo "нет дополнения NeuroPilot в $MTK_EP_DIR — bash bench/npu/neuropilot-ep/build.sh (или NPU_MTK=0)"; exit 1; }
+  NPU=1 MTK=$MTKV bash $A/build.sh >/dev/null
+  NPU=1 MTK=$MTKV SLIM=1 bash $A/build.sh >/dev/null
+  APKS="$APKS Falar-npu.apk Falar-slim-npu.apk"
+fi
 
 # Проверка подписи: отладочный ключ в релиз не пускаем ни при каких обстоятельствах. Его CN
 # известен всем, и «обновление» с такой подписью может выпустить кто угодно.
-for f in $A/Falar.apk $A/Falar-slim.apk; do
+for f in $(for n in $APKS; do echo $A/$n; done); do
   CN=$(apksigner verify --print-certs "$f" | grep -m1 'Signer #1 certificate DN' | sed 's/.*DN: //')
   case "$CN" in *"Android Debug"*) echo "$f подписан отладочным ключом ($CN)"; exit 1;; esac
   echo "  $(basename $f): $(du -h $f | cut -f1), подпись $CN"
 done
 
-cd $A && sha256sum Falar.apk Falar-slim.apk > SHA256SUMS.txt && cd $R
+cd $A && sha256sum $APKS > SHA256SUMS.txt && cd $R
 FULL=$(du -h $A/Falar.apk | cut -f1); SLIMSZ=$(du -h $A/Falar-slim.apk | cut -f1)
+NPUSZ=; SLIMNPUSZ=        # только если сборки с NPU в этом выпуске: прежний Falar-npu.apk в каталоге не в счёт
+case " $APKS " in *" Falar-npu.apk "*) NPUSZ=$(du -h $A/Falar-npu.apk | cut -f1); SLIMNPUSZ=$(du -h $A/Falar-slim-npu.apk | cut -f1);; esac
 
 # latest.json — то, что приложение читает само, чтобы узнать о новой версии. Лежит среди файлов
 # релиза, адрес постоянный: releases/latest/download/latest.json. Номер сборки, размер и sha256
 # берутся из того, что реально собрано, — сверять обновление до установки иначе нечем.
 # MIN_CODE=<число> — пометить обновление обязательным (ниже этой сборки пользоваться нельзя).
 # NOTES='…' — строка, которую человек увидит в уведомлении.
-python3 - "$A" "$VER" "${MIN_CODE:-0}" "${NOTES:-}" <<'PY'
+python3 - "$A" "$VER" "${MIN_CODE:-0}" "${NOTES:-}" "$APKS" <<'PY'
 import hashlib, json, os, re, sys
-a, ver, mincode, notes = sys.argv[1:5]
+a, ver, mincode, notes, apks = sys.argv[1:6]
 code = int(re.search(r'versionCode="(\d+)"', open(os.path.join(a, "AndroidManifest.xml"), encoding="utf-8").read()).group(1))
 def item(name):
     p = os.path.join(a, name)
     return {"apk": name, "size": os.path.getsize(p), "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()}
 d = item("Falar.apk")
 d.update({"versionCode": code, "versionName": ver, "minVersionCode": int(mincode), "notes": notes, "slim": item("Falar-slim.apk")})
+# Сборки с NPU — для приложения с NPU (Updates.parse: npu, slim_npu); у остальных разделы просто не читаются
+if "Falar-npu.apk" in apks.split():
+    d.update({"npu": item("Falar-npu.apk"), "slim_npu": item("Falar-slim-npu.apk")})
 json.dump(d, open(os.path.join(a, "latest.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 print("  latest.json: сборка", code, ver, ("· обязательное с " + mincode) if int(mincode) else "")
 PY
@@ -107,6 +143,8 @@ cat > $RELNOTES <<EOF
 |---|---|---|
 | \`Falar.apk\` | $FULL | обычная сборка |
 | \`Falar-slim.apk\` | $SLIMSZ | без контекстного уточнителя, для слабых телефонов |
+${NPUSZ:+| \`Falar-npu.apk\` | $NPUSZ | обычная + распознавание на NPU: Snapdragon 888/778G и новее${MTKV:+, MediaTek Dimensity 8400}; экспериментально |}
+${SLIMNPUSZ:+| \`Falar-slim-npu.apk\` | $SLIMNPUSZ | облегчённая + NPU |}
 
 Android 9 и новее, процессор arm64. При первом запуске приложение скачает модели (около 1,6 ГБ,
 по Wi-Fi, можно прервать и продолжить). После этого интернет не нужен.
@@ -120,7 +158,7 @@ EOF
 # для себя, чтобы сборку можно было повторить.
 git -C $R tag -a "$TAG" -m "Falar $VER"
 gh release create "$TAG" -R $REPO --target "$(git -C $R rev-parse HEAD)" --title "Falar $VER" --notes-file $RELNOTES ${DRAFT:+--draft} \
-  $A/Falar.apk $A/Falar-slim.apk $A/SHA256SUMS.txt $A/latest.json
+  $(for n in $APKS; do echo $A/$n; done) $A/SHA256SUMS.txt $A/latest.json
 rm -f $RELNOTES
 echo "== готово: $(gh release view "$TAG" -R $REPO --json url --jq .url)"
 echo "   кнопка на странице ведёт на https://github.com/$REPO/releases/latest/download/Falar.apk"

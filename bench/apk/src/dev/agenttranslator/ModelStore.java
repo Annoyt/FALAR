@@ -44,6 +44,8 @@ public class ModelStore {
     public final String path, sha256, tier, url, name; public final long size;
     /** Модуль (Modules): base — нужен всегда, остальные — когда модуль включён. */
     public String module = "";
+    /** Чип, под который файл (поле chip: модели NPU у Snapdragon и MediaTek свои — npuFor); пусто — любой. */
+    public String chip = "";
     public final boolean archive; public final String unpackTo; public final List<String[]> check;
     /** Файлы, которые этот заменяет: {путь, размер, sha256}. */
     public final List<String[]> replaces;
@@ -117,6 +119,7 @@ public class ModelStore {
         items.add(new Item(f.getString("path"), f.getLong("size"), f.getString("sha256"), f.optString("tier", "core"),
                            srcUrl(f.getJSONObject("source")), false, null, null, rep));
         items.get(items.size() - 1).module = module(f);
+        items.get(items.size() - 1).chip = f.optString("chip", "");
       }
       JSONArray as = m.optJSONArray("archives");
       for (int i = 0; as != null && i < as.length(); i++) {
@@ -130,6 +133,12 @@ public class ModelStore {
       }
     } catch (JSONException e) { throw new IllegalArgumentException("манифест моделей: " + e.getMessage()); }
     loadVerified();
+  }
+  /** Модели NPU (модуль npu, Npu): этот телефон знает только свои — общие (без поля chip) и своего чипа; chip = null —
+   *  NPU здесь не будет (сборка без его библиотек, чип не тот или не проверен), и модуля нет вовсе: не качается, не
+   *  сверяется, не числится недостающим. Зовётся сразу после конструктора, до первой сверки. */
+  public void npuFor(String chip) {
+    items.removeIf(it -> Modules.NPU.equals(it.module) && (chip == null || !it.chip.isEmpty() && !it.chip.equals(chip)));
   }
   /** Модуль записи манифеста: поле module; без него обязательное — base (манифесты до 0.24). */
   static String module(JSONObject f) { return f.optString("module", "core".equals(f.optString("tier", "core")) ? "base" : ""); }

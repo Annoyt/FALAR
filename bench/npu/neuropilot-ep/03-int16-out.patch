@@ -1,0 +1,49 @@
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/conv_op_builder.cc b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/conv_op_builder.cc
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/conv_op_builder.cc	2026-11-03 17:14:09.000000000 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/conv_op_builder.cc	2026-11-09 23:58:48.744317345 +0500
+@@ -359,9 +359,11 @@
+             shaper[output], 0.0f /*scale ignored*/, 0 /*zp ignored*/);
+         // Per-channel params set separately via NeuronModel_setOperandSymmPerChannelQuantParams.
+       } else {
++        // Falar patch: INT16 output -> TENSOR_QUANT16_SYMM (was always 8-bit).
+         output_operand_type = OperandType(
+-            qp.IsSigned() ? Type::TENSOR_QUANT8_ASYMM_SIGNED
+-                           : Type::TENSOR_QUANT8_ASYMM,
++            qp.quant_type == onnx::TensorProto::INT16 ? Type::TENSOR_QUANT16_SYMM
++            : qp.IsSigned() ? Type::TENSOR_QUANT8_ASYMM_SIGNED
++                            : Type::TENSOR_QUANT8_ASYMM,
+             shaper[output], qp.scale, qp.zero_point);
+       }
+     }
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/gemm_op_builder.cc b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/gemm_op_builder.cc
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/gemm_op_builder.cc	2026-11-03 17:14:09.000000000 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/gemm_op_builder.cc	2026-11-09 23:58:48.744188181 +0500
+@@ -335,7 +335,10 @@
+   if (is_quant_gemm) {
+     const auto* qdq = ctx.GetQDQGroup(output);
+     if (qdq && qdq->output_quant_params.has_value()) {
+-      output_type = qdq->output_quant_params->IsSigned()
++      // Falar patch: INT16 output -> TENSOR_QUANT16_SYMM (was always 8-bit).
++      output_type = qdq->output_quant_params->quant_type == onnx::TensorProto::INT16
++                        ? Type::TENSOR_QUANT16_SYMM
++                    : qdq->output_quant_params->IsSigned()
+                         ? Type::TENSOR_QUANT8_ASYMM_SIGNED
+                         : Type::TENSOR_QUANT8_ASYMM;
+     }
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/matmul_op_builder.cc b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/matmul_op_builder.cc
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/matmul_op_builder.cc	2026-11-03 17:14:09.000000000 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/matmul_op_builder.cc	2026-11-09 23:58:48.743990008 +0500
+@@ -349,8 +349,11 @@
+     if (qdq->output_quant_params.has_value()) {
+       y_scale      = qdq->output_quant_params->scale;
+       y_zero_point = qdq->output_quant_params->zero_point;
+-      out_type = qdq->output_quant_params->IsSigned() ? Type::TENSOR_QUANT8_ASYMM_SIGNED
+-                                                       : Type::TENSOR_QUANT8_ASYMM;
++      // Falar patch: INT16 output -> TENSOR_QUANT16_SYMM (was always 8-bit, saturating A16W8 at +-127).
++      out_type = qdq->output_quant_params->quant_type == onnx::TensorProto::INT16
++                     ? Type::TENSOR_QUANT16_SYMM
++                 : qdq->output_quant_params->IsSigned() ? Type::TENSOR_QUANT8_ASYMM_SIGNED
++                                                        : Type::TENSOR_QUANT8_ASYMM;
+     }
+   }
+ 

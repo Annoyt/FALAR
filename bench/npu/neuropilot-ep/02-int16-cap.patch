@@ -1,0 +1,57 @@
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.cc b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.cc
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.cc	2026-11-03 17:14:09.000000000 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.cc	2026-11-09 23:55:13.005974019 +0500
+@@ -140,6 +140,16 @@
+       }
+     }
+ 
++    // Falar patch: libneuron_op_capability.so (closed) keeps its own copy of the type checks and rejects
++    // INT16 quantization (A16W8: symmetric int16 activations, TENSOR_QUANT16_SYMM). For nodes whose QDQ
++    // arrangement carries INT16, the open checks above already passed; skip the closed predicate and let the
++    // Neuron runtime decide (the EP probe-compiles every claimed group and drops what Neuron cannot build).
++    if (InvolvesInt16Quant(node, ctx)) {
++      LOGS_NEURON(VERBOSE) << "Falar: INT16 QDQ node [" << node.name() << "] op_type [" << node.op_type()
++                           << "]: closed capability check skipped";
++      return true;
++    }
++
+     std::vector<const char*> device_names;
+     const NeuronCapParams cap_params = ToCapParams(params, device_names);
+ 
+@@ -161,6 +171,24 @@
+ }
+ 
+ // ---------------------------------------------------------------------------
++// InvolvesInt16Quant (Falar patch) — Q with INT16 output, DQ with INT16 input, or a QDQ group whose
++// quantized inputs/output are INT16.
++// ---------------------------------------------------------------------------
++bool BaseOpBuilder::InvolvesInt16Quant(const onnx::NodeProto& node, const NeuronGraphContext& ctx) {
++  const auto is16 = [](int32_t t) { return t == onnx::TensorProto::INT16; };
++  if (node.op_type() == "QuantizeLinear" && node.output_size() > 0)
++    return is16(ctx.GetElementType(node.output(0)));
++  if (node.op_type() == "DequantizeLinear" && node.input_size() > 0)
++    return is16(ctx.GetElementType(node.input(0)));
++  if (node.output_size() == 0 || node.output(0).empty()) return false;
++  const QDQNodeGroup* g = ctx.GetQDQGroup(node.output(0));
++  if (!g) return false;
++  for (const auto& q : g->input_quant_params)
++    if (q.has_value() && is16(q->quant_type)) return true;
++  return g->output_quant_params.has_value() && is16(g->output_quant_params->quant_type);
++}
++
++// ---------------------------------------------------------------------------
+ // HasSupportedOpSet
+ // ---------------------------------------------------------------------------
+ bool BaseOpBuilder::HasSupportedOpSet(const onnx::NodeProto& node) const {
+diff -ru a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.h b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.h
+--- a/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.h	2026-11-03 17:14:09.000000000 +0500
++++ b/onnxruntime-ep-neuropilot-0.3.0/src/neuron_plugin_ep/neuron_impl/builders/op_impl/base_op_builder.h	2026-11-09 23:55:13.006651705 +0500
+@@ -96,6 +96,8 @@
+   virtual bool IsNodeUnitTypeSupported(const onnx::NodeProto& /*node*/) const { return true; }
+ 
+  private:
++  // Falar patch: INT16 QDQ (A16W8) — see base_op_builder.cc.
++  static bool InvolvesInt16Quant(const onnx::NodeProto& node, const NeuronGraphContext& ctx);
+   bool HasSupportedOpSet(const onnx::NodeProto& node) const;
+   bool HasSupportedInputs(const onnx::NodeProto& node,
+                           const NeuronGraphContext& ctx,

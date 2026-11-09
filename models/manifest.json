@@ -1,11 +1,11 @@
 {
   "manifest_version": 1,
-  "app": "0.36.1",
+  "app": "0.37.0",
   "own_repo": "youannoingme/falar-models",
   "device_dir": "Android/data/app.falar/files/models",
-  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, остальное — нет. module — модуль приложения (base — перевод речи, нужен всегда; tts — озвучка, ocr — чтение снимков, llm — уточнитель, speaker — отпечаток голоса, corpus — корпус фраз; bench — только для стенда): файлы включённого модуля качаются при установке и докачиваются сами, выключенного — не качаются. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
+  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, остальное — нет. module — модуль приложения (base — перевод речи, нужен всегда; tts — озвучка, ocr — чтение снимков, llm — уточнитель, speaker — отпечаток голоса, corpus — корпус фраз; npu — модели распознавания на NPU: только в сборке с NPU и только своего чипа, поле chip — qualcomm или mediatek; bench — только для стенда): файлы включённого модуля качаются при установке и докачиваются сами, выключенного — не качаются. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
   "total_core_bytes": 1414716715,
-  "total_optional_bytes": 1341469083,
+  "total_optional_bytes": 2556836543,
   "files": [
     {
       "path": "silero_vad.onnx",
@@ -348,6 +348,56 @@
       },
       "derived_from": "PaddlePaddle/latin_PP-OCRv5_mobile_rec (конвертация RapidAI в ONNX, словарь из 502 знаков вшит в метаданные character)",
       "role": "распознаватель строки: латиница с диакритикой pt-BR (PP-OCRv5 mobile latin, CTC)"
+    },
+    {
+      "path": "npu/nemo128.onnx",
+      "size": 139764,
+      "sha256": "a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f",
+      "tier": "optional",
+      "module": "npu",
+      "license": "MIT",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "npu/nemo128.onnx",
+        "revision": "main"
+      },
+      "derived_from": "istupakov/onnx-asr: nemo128.onnx (признаки NeMo, 128 полос мел)",
+      "role": "признаки звука для кодировщика на NPU — то же, что считает sherpa-onnx для parakeet"
+    },
+    {
+      "path": "npu/encoder-npu.onnx",
+      "size": 594153190,
+      "sha256": "7f1d140e0fdec67c17cc011b542abcffb5136e4777af0d684fd4c00970c34398",
+      "tier": "optional",
+      "module": "npu",
+      "chip": "qualcomm",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "npu/encoder-npu.onnx",
+        "revision": "main"
+      },
+      "derived_from": "nvidia/parakeet-tdt-0.6b-v3: кодировщик в QDQ w8a16 (Qualcomm AI Hub, bench/npu/qdq_fix.py), веса свёрнуты в int8 (bench/npu/app_model.py)",
+      "role": "кодировщик parakeet на NPU Snapdragon (QNN HTP v68 и новее), окно 832 кадра"
+    },
+    {
+      "path": "npu/encoder-mtk.onnx",
+      "size": 621074506,
+      "sha256": "900965467cc7888a04036852a71cea66a1b5ac7a0920c1c078655c03d53b0a31",
+      "tier": "optional",
+      "module": "npu",
+      "chip": "mediatek",
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "hf",
+        "repo": "youannoingme/falar-models",
+        "file": "npu/encoder-mtk.onnx",
+        "revision": "main"
+      },
+      "derived_from": "nvidia/parakeet-tdt-0.6b-v3: кодировщик с постоянной формой (bench/npu/mtk_model.py) в A16W8 (bench/npu/mtk_quant.py)",
+      "role": "кодировщик parakeet на NPU MediaTek (NeuroPilot, проверен на MT6899), окно 832 кадра"
     }
   ],
   "archives": [

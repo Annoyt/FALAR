@@ -39,10 +39,16 @@ public class Updates {
    *  облегчённую: иначе обновление молча превратило бы её в полную и утянуло лишние 60 МБ.
    *  Бросает IllegalArgumentException на мусоре: молча считать «обновлений нет» нельзя, иначе
    *  сломанный файл выглядит как «всё хорошо» и приложение перестаёт обновляться навсегда. */
-  public static Info parse(String json, boolean slim) {
+  public static Info parse(String json, boolean slim) { return parse(json, slim, false); }
+
+  /** npu — в поставленной сборке библиотеки Qualcomm для NPU (Snapdragon): качать надо сборку с NPU того же вида
+   *  (разделы «npu» и «slim_npu» в latest.json). Если в выпуске сборки с NPU нет — та же без NPU: распознавание на
+   *  NPU экспериментальное, обновления из-за него вставать не должны. */
+  public static Info parse(String json, boolean slim, boolean npu) {
     try {
       JSONObject o = new JSONObject(json);
-      JSONObject b = slim && o.has("slim") ? o.getJSONObject("slim") : o;
+      String key = npu ? (slim ? "slim_npu" : "npu") : null;
+      JSONObject b = key != null && o.has(key) ? o.getJSONObject(key) : slim && o.has("slim") ? o.getJSONObject("slim") : o;
       Info i = new Info();
       i.code = o.getInt("versionCode");
       i.name = o.optString("versionName", "");

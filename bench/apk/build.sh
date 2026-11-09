@@ -37,6 +37,27 @@ cp $R/data/ocr_words_pt.txt.gz $OUT/assets/ocr_words_pt.txt.gz
 cp $A/whatsnew.txt $OUT/assets/whatsnew.txt
 # Надписи по-португальски (L, UiLang): русская строка кода — ключ, перевод — после табуляции.
 cp $A/ui_pt.txt $OUT/assets/ui_pt.txt
+# Тексты лицензий чужих частей (Licenses, экран «Лицензии»): GPL 3.0 — eSpeak NG в мосте JNI и данных озвучки,
+# Apache 2.0, MIT. Дословно; авторы и что изменено — в Licenses.java.
+mkdir -p $OUT/assets/licenses && cp $A/licenses/*.txt $OUT/assets/licenses/
+# NPU=1 — сборка с распознаванием на NPU Snapdragon (Npu, NpuAsr): ONNX Runtime с QNN вместо обычного и библиотеки
+# QNN 2.42 (лицензия Qualcomm AI Stack: распространять только внутри приложения — поэтому в APK, а не модулем).
+# Берутся из QNN_DIR (bench/npu/fetch_qnn.sh), в репозитории их нет. Там же лицензия Qualcomm и их NOTICE — в «Лицензии».
+# .stand — в основной копии проекта (и у рабочих копий .worktrees/* тоже): через общий каталог git.
+MAIN=$(cd "$(git -C "$A" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+Q=${QNN_DIR:-$MAIN/.stand/qnn-android}
+# MTK=1 — сборка с распознаванием на NPU MediaTek (Npu, NpuAsr; ветка mtk-npu): своя сборка дополнения ORT для
+# NeuroPilot с правками для int16 (bench/npu/neuropilot-ep/build.sh) и закрытая libneuron_op_capability.so из его
+# выпуска — из MTK_EP_DIR, в репозиторий не идут. ORT — обычный 1.29 из jni (или с QNN при NPU=1): дополнение — модуль.
+M=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16}
+if [ -n "$MTK" ]; then
+  [ -s $M/libonnxruntime_providers_neuropilot.so ] && [ -s $M/libneuron_op_capability.so ] \
+    || { echo "MTK=1: нет дополнения NeuroPilot в $M — bench/npu/neuropilot-ep/build.sh"; exit 1; }
+fi
+if [ -n "$NPU" ]; then
+  [ -s $Q/ort/libonnxruntime.so ] && [ -s $Q/qnn/libQnnHtp.so ] || { echo "NPU=1: нет библиотек в $Q — bench/npu/fetch_qnn.sh"; exit 1; }
+  mkdir -p $OUT/assets/licenses/qualcomm && cp $Q/qnn/AI-Stack-License.txt $Q/qnn/NOTICE.txt $OUT/assets/licenses/qualcomm/
+fi
 # Шумодав нарезки «только при шуме» (DenoiseGate, GTCRN, MIT, 0,5 МБ) — в APK: включён у всех по умолчанию.
 # Файл из зеркала моделей (tools/models_fetch.py), сверяется с models/manifest.json: в APK — ровно проверенное.
 python3 - "$R/models/manifest.json" "$R/models/denoiser/gtcrn_simple.onnx" <<'PY'
@@ -67,6 +88,11 @@ if [ -n "$SLIM" ]; then
 else
   cp $A/jni/arm64-v8a/*.so $OUT/stage/lib/arm64-v8a/
 fi
+if [ -n "$NPU" ]; then
+  cp $Q/ort/libonnxruntime.so $Q/ort/libonnxruntime4j_jni.so $OUT/stage/lib/arm64-v8a/   # ORT 1.29.0 с QNN вместо обычного
+  cp $Q/qnn/*.so $OUT/stage/lib/arm64-v8a/
+fi
+[ -z "$MTK" ] || cp $M/libonnxruntime_providers_neuropilot.so $M/libneuron_op_capability.so $OUT/stage/lib/arm64-v8a/
 # Сомнительные слова (WordConf) помечаются по уверенности распознавателя, а её отдаёт только пересобранный мост JNI
 # (tools/sherpa-jni): в нём конструктор результата с восемью аргументами. С прежним приложение работает, но слов
 # не помечает — об этом предупреждение.
@@ -82,7 +108,10 @@ zipalign -f 4 $OUT/unaligned.apk $OUT/aligned.apk
 # Пароли передаются через окружение (apksigner понимает env:ИМЯ), а не аргументом: аргумент виден
 # в списке процессов любому на машине. Ключ и пароль в репозиторий не попадают никогда; сменить
 # ключ после первого публичного релиза нельзя без переустановки у всех, кто поставил.
-OUTAPK=$A/Falar${SLIM:+-slim}.apk
+# Имя: -npu — сборка с NPU (QNN, а у выпуска ещё и NeuroPilot: release.sh собирает NPU=1 MTK=1), -mtk — только
+# NeuroPilot (стенд MediaTek).
+SUF=${SLIM:+-slim}; if [ -n "$NPU" ]; then SUF=$SUF-npu; elif [ -n "$MTK" ]; then SUF=$SUF-mtk; fi
+OUTAPK=$A/Falar$SUF.apk
 if [ -n "$FALAR_KEYSTORE" ]; then
   [ -f "$FALAR_KEYSTORE" ] || { echo "нет файла ключа: $FALAR_KEYSTORE"; exit 1; }
   [ -n "$FALAR_KS_PASS" ] || { echo "нужен FALAR_KS_PASS (пароль хранилища)"; exit 1; }

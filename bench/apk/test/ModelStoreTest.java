@@ -82,6 +82,8 @@ public class ModelStoreTest {
   static String file(String path, byte[] data, String tier, String src) throws Exception {
     return "{\"path\":\"" + path + "\",\"size\":" + data.length + ",\"sha256\":\"" + sha(data) + "\",\"tier\":\"" + tier + "\",\"source\":" + src + "}";
   }
+  /** Запись манифеста с дополнительными полями (вставляются в саму запись, не в source). */
+  static String more(String entry, String fields) { return entry.substring(0, entry.length() - 1) + fields + "}"; }
   static String hf(String name) { return "{\"type\":\"hf\",\"repo\":\"you/repo\",\"file\":\"" + name + "\",\"revision\":\"main\"}"; }
   static void del(File f) { File[] k = f.listFiles(); if (k != null) for (File c : k) del(c); f.delete(); }
   static File tmpDir(String n) throws IOException { File d = Files.createTempDirectory("mst-" + n).toFile(); d.delete(); return d; }
@@ -476,6 +478,35 @@ public class ModelStoreTest {
     eq(ModelStore.autoUpgradeBlock(as, false, false, true, 1499, 500), "мало места: нужно ещё 0.0 МБ", "A6 места на байт меньше нужного — нет");
     eq(ModelStore.autoUpgradeBlock(as, false, false, true, 1500, 500), null, "A6 ровно хватает — качаем");
     eq(ModelStore.autoUpgradeBlock(as, false, false, true, -1, 500), null, "A7 место неизвестно — не мешаем");
+
+    // ---- модели NPU (npuFor): у Snapdragon и MediaTek свои (поле chip), общие — без него; NPU здесь нет — модуля нет
+    {
+      byte[] core = rnd(50, 30), pre = rnd(100, 31), q = rnd(200, 32), mtk = rnd(300, 33);
+      String nman = "{\"manifest_version\":1,\"app\":\"0.37.0\",\"files\":["
+          + file("asr/a.onnx", core, "core", hf("a.onnx")) + ","
+          + more(file("npu/nemo128.onnx", pre, "optional", hf("npu/nemo128.onnx")), ",\"module\":\"npu\"") + ","
+          + more(file("npu/encoder-npu.onnx", q, "optional", hf("npu/encoder-npu.onnx")), ",\"module\":\"npu\",\"chip\":\"qualcomm\"") + ","
+          + more(file("npu/encoder-mtk.onnx", mtk, "optional", hf("npu/encoder-mtk.onnx")), ",\"module\":\"npu\",\"chip\":\"mediatek\"") + "]}";
+      File ndir = tmpDir("npu"); ndir.mkdirs();
+      ModelStore qs = new ModelStore(ndir, nman, () -> true, x -> {}, l -> {});
+      eq(qs.byPath("npu/encoder-mtk.onnx").chip, "mediatek", "N0 поле chip прочитано");
+      qs.npuFor("qualcomm");
+      eq(qs.bytes("npu"), 300L, "N1 Snapdragon: признаки и своя модель, без модели MediaTek");
+      ok(qs.byPath("npu/encoder-mtk.onnx") == null && qs.byPath("asr/a.onnx") != null, "N1 чужая модель убрана, остальное на месте");
+      ModelStore ms2 = new ModelStore(ndir, nman, () -> true, x -> {}, l -> {});
+      ms2.npuFor("mediatek");
+      eq(ms2.bytes("npu"), 400L, "N2 MediaTek: признаки и своя модель");
+      ModelStore none = new ModelStore(ndir, nman, () -> true, x -> {}, l -> {});
+      none.npuFor(null);
+      eq(none.bytes("npu"), 0L, "N3 без NPU модуля нет вовсе");
+      eq(none.items.size(), 1, "N3 обязательное осталось");
+      // модуль npu выключен — не качается; включён — докачивается в фоне (autos), обязательным не становится
+      qs.modules = new HashSet<>();
+      ok(qs.autos().isEmpty(), "N4 модуль npu не нужен — докачивать нечего");
+      qs.modules = new HashSet<>(Collections.singleton("npu"));
+      eq(qs.autos().size(), 2, "N4 модуль npu нужен — признаки и модель в докачке");
+      eq(qs.need(Collections.emptySet()).size(), 1, "N5 экран первого запуска ждёт только обязательное");
+    }
 
     System.out.println(fails == 0 ? "ModelStore: " + checks + " проверок, все прошли" : "ModelStore: провалов " + fails + " из " + checks);
     // ---- ход модуля: целые файлы и недокачанные .part — для полосы загрузки у модуля

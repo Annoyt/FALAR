@@ -324,9 +324,13 @@ public class TranslatorService extends Service {
   void init() {
     wl = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AT:pipeline"); wl.acquire();
     modelsDir = new File(getExternalFilesDir(null), "models");
+    // Каталог модели NPU создаёт само приложение: созданный по adb (владелец shell) оно не может ни читать, ни писать —
+    // так модели стенда (bench/npu/npu_app_device.sh) кладутся в каталог приложения без смены прав (RTL их запрещает).
+    if (Npu.chip() != null) new File(modelsDir, "npu").mkdirs();
     // Хранилище создаём здесь, а не в фоне: стендовые интенты (models/modelsbase) приходят сразу за onCreate.
     try { store = new ModelStore(modelsDir, readAsset("models_manifest.json"), this::netAllowed, this::onStoreState, this::log); }
     catch (Throwable t) { Log.e(TAG, "manifest", t); status(L.f("Ошибка манифеста моделей: %s", t)); return; }
+    store.npuFor(Npu.manifestChip(Npu.chip(), Npu.socModel(), new File(getApplicationInfo().nativeLibraryDir)));
     // Модули: выбор человека; до выбора (новая установка) — по умолчанию под этот телефон.
     SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
     String saved = sp.getString(PREF_MODULES, null);
@@ -339,7 +343,7 @@ public class TranslatorService extends Service {
       if (known == null || !modules.equals(was)) sp.edit().putString(PREF_MODULES, Modules.join(modules)).putString(PREF_KNOWN, String.join(",", Modules.CHOICE)).apply();
       for (String m : modules) if (!was.contains(m)) log("🧩 новый модуль включён: " + Modules.title(m) + " — выключить можно в «Модули и файлы»");
     }
-    modulesChosen = saved != null; store.modules = modules;
+    modulesChosen = saved != null; store.modules = storeModules();
     worker.submit(this::boot);
   }
   String readAsset(String name) throws java.io.IOException {
@@ -450,6 +454,90 @@ public class TranslatorService extends Service {
       worker.submit(() -> loadTtsLate(rest, nStages, askedTts));
     } catch (Throwable t) { Log.e(TAG, "init", t); status(L.f(L.k("Ошибка: %s"), t)); Engine.stage = null; Engine.asrUp = null; loading = false; ttsLoading = false; busy("load", null, 0, 0); }
   }
+  /** Распознавание на NPU Snapdragon (Npu, NpuAsr; «Экспериментальное», владелец 09.11: по умолчанию включено, где
+   *  возможно). Своим потоком после загрузки всего остального: граф QNN при первом запуске собирается десятки секунд,
+   *  очередь фраз его не ждёт, до тех пор распознаёт процессор. Собранный граф — в no_backup: не уезжает ни в облачную
+   *  копию, ни на другой телефон (там другое поколение NPU). */
+  /** Первая сборка графа QNN — прирост памяти процесса до 1,6 ГБ (AI Hub 09.11, по телефонам 0,1–1,6), поэтому
+   *  только при 2 ГБ свободных, иначе — через 10 минут снова. Из сохранённого графа — 0,4–1,3 с, без проверки. */
+  static final long NPU_FIRST_BUILD_FREE = 2_000_000_000L;
+  /** MediaTek: первая сборка графа NeuroPilot частями — минус 1,7 ГБ свободной памяти (POCO X7 Pro 10.11; одной частью
+   *  телефон уходил в перезагрузку по нехватке памяти) — поэтому только при 3 ГБ свободных. */
+  static final long NPU_FIRST_BUILD_FREE_MTK = 3_000_000_000L;
+  volatile long npuFree = Npu.mediatek() ? NPU_FIRST_BUILD_FREE_MTK : NPU_FIRST_BUILD_FREE;
+  /** Сколько фраз распознал NPU — в журнал первые три и каждая двадцатая: видно, что фразы идут через NPU и за сколько. */
+  int npuPhrases;
+  void startNpu() {
+    final Engine e = eng; if (e == null || e.npu != null || "готовится".equals(e.npuState)) return;
+    final File lib = new File(getApplicationInfo().nativeLibraryDir);
+    final Npu.Chip chip = Npu.chip();
+    String why = Npu.unavailable(chip, lib, modelsDir);
+    e.npuOn = getSharedPreferences("at", MODE_PRIVATE).getBoolean(Npu.PREF, true);
+    if (why != null) { e.npuState = why; return; }
+    if (!e.npuOn) { e.npuState = L.k("выключено"); return; }
+    // Защита от повторов на телефонах, где NPU не справляется (Redmi Note 10 Pro, MT6891 / Neuron 5, 10.11: дополнение
+    // уронило всё приложение при создании сессии): «npu_fail» — граф не собрался на этой прошивке и версии Falar, больше
+    // не пробуем; «npu_try» — сборка начата и не закончилась (процесс упал или его убили) — тоже не пробуем.
+    final android.content.SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    final String id = npuId();
+    if (id.equals(sp.getString("npu_fail", ""))) { e.npuState = L.k("не справляется с моделью"); return; }
+    String tried = sp.getString("npu_try", "");
+    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
+    if (tries >= 1) {   // одного раза хватает: нативный сбой дополнения роняет весь процесс (Redmi, 10.11)
+      e.npuState = L.k("сбой при прошлой сборке графа");
+      log("⚡ NPU: прошлая сборка графа оборвалась — до обновления приложения распознаёт процессор");
+      return;
+    }
+    final File ctx = new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
+    if (!ctx.exists()) {
+      android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+      ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
+      if (mi.availMem < npuFree) {
+        e.npuState = L.k("ждёт свободной памяти");
+        log("⚡ NPU: для первой сборки графа нужно " + (npuFree / 1_000_000) + " МБ свободной памяти, сейчас " + (mi.availMem >> 20) + " МБ — попробую через 10 минут");
+        main.postDelayed(this::startNpu, 10 * 60_000L);
+        return;
+      }
+    }
+    e.npuState = L.k("готовится");
+    log(ctx.exists() ? "⚡ NPU: поднимаю сохранённый граф" : "⚡ NPU: собираю граф (первый раз — до двух минут), пока распознаёт процессор");
+    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();      // commit: запись до возможного падения
+    Thread t = new Thread(() -> {
+      e.startNpu(lib, ctx);
+      android.content.SharedPreferences.Editor ed = sp.edit().remove("npu_try");
+      if ("error".equals(e.npuState)) { ed.putString("npu_fail", id); e.npuState = L.k("не справляется с моделью"); }
+      ed.apply();
+    }, "npu");
+    t.setPriority(Thread.MIN_PRIORITY); t.start();
+  }
+  /** Прошивка и версия Falar: NPU, отказавший на них (npu_fail), до обновления одного или другого не пробуется. */
+  String npuId() { return android.os.Build.FINGERPRINT + "/" + myCode(); }
+  /** Модели NPU (модуль npu, 0,6 ГБ) нужны: на этом чипе в этой сборке NPU возможен (ModelStore.npuFor оставил их в
+   *  списке), переключатель «Распознавание на NPU» включён и NPU здесь не отказывал. Тогда они докачиваются в фоне, как
+   *  файлы включённых модулей (ModelStore.autos, по разрешённой сети), и NPU поднимается сам (reloadOptional). */
+  boolean npuWanted() {
+    if (store == null || store.bytes(Modules.NPU) == 0) return false;
+    SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    return sp.getBoolean(Npu.PREF, true) && !npuId().equals(sp.getString("npu_fail", ""));
+  }
+  /** Модули для хранилища: выбранные человеком и модели NPU, если нужны (npuWanted). */
+  Set<String> storeModules() {
+    Set<String> s = new LinkedHashSet<>(modules);
+    if (npuWanted()) s.add(Modules.NPU);
+    return s;
+  }
+  /** Переключатель «Распознавание на NPU». */
+  public void setNpu(boolean on) {
+    getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean(Npu.PREF, on).apply();
+    if (store != null) {                               // модели NPU: включили — докачать (раз за включение), выключили — не качать
+      store.modules = storeModules();
+      if (on) autoFetchTried = false;
+      worker.submit(() -> { store.summarize(); if (on && eng != null) maybeAutoFetch(); });
+    }
+    Engine e = eng; if (e == null) return;
+    e.npuOn = on; log("⚡ NPU " + (on ? "включён" : "выключен") + (e.npu == null ? "" : " · фраз на NPU " + e.npuCalls));
+    if (on && e.npu == null && !"готовится".equals(e.npuState)) startNpu();
+  }
   /** Озвучка — после остального и после сказанного: фразы в очереди перевода (они встают за этой задачей —
    *  она уходит в конец очереди за ними), фраза, которую ещё говорят, и не нарезанный звук идут вперёд. Иначе
    *  фраза, законченная сразу после загрузки перевода, ждала бы голоса 2,8 с (прогон 03.10: перевод на 11,2 с при
@@ -473,6 +561,7 @@ public class TranslatorService extends Service {
     getSharedPreferences("at", MODE_PRIVATE).edit().putString("load_ms", eng.loadAsrMs + "," + eng.loadMtMs + "," + eng.loadTtsMs + "," + restMs).apply();
     busy("load", null, 0, 0);
     notify(L.f("Готов. %s", pb.stats()));
+    startNpu();
     maybeAutoUpgrade("");
   }
   /** Настройки звука — до микрофона: слушание открывается раньше моделей, и нарезка того, что сказали во
@@ -571,9 +660,11 @@ public class TranslatorService extends Service {
     float[] use = asrFor(samples), fed = use;           // два микрофона: выровненная сумма той же длины (dualAsr)
     if (padMs > 0) { int pad = padMs * sr / 1000; fed = new float[pad + use.length];
       System.arraycopy(use, 0, fed, pad, use.length); }
-    long t0 = System.nanoTime(); Engine.Asr ar;
+    long t0 = System.nanoTime(); Engine.Asr ar; long npuBefore = en.npuCalls;
     synchronized (asrLock) { ar = en.asrFull(dir.substring(0, 2), fed, sr); }   // sherpa ресемплирует сам
     long ms = (System.nanoTime() - t0) / 1000000;
+    if (en.npuCalls > npuBefore && (++npuPhrases <= 3 || npuPhrases % 20 == 0))
+      log(String.format(Locale.ROOT, "⚡ фраза на NPU: %.1f с речи за %d мс (%d-я)", samples.length / (double) sr, ms, npuPhrases));
     if (!probsTold && ar.tokens != null && ar.tokens.length > 0) {   // с прежней библиотекой JNI пометок нет — видно по журналу
       probsTold = true;
       log(ar.probs != null ? "🔎 распознаватель отдаёт уверенность в словах — сомнительные помечаются"
@@ -1046,6 +1137,14 @@ public class TranslatorService extends Service {
     // маршрут не трогаются. Пишет files/aec_<cfg>.wav (16 кГц), aec_ref*.wav (что играли) и aec.json
     // (когда начали играть, метки времени записи и дорожки) — разбор на столе (tools/aec_eval.py,
     // tools/barge_eval.py). Слушание на время стенда выключается.
+    // Стенд NPU: --es npu 1|0 — переключатель «Распознавание на NPU» (та же фраза на NPU и на процессоре);
+    // --es npufree МБ — порог свободной памяти для первой сборки графа (по умолчанию 2000).
+    if (i != null && i.hasExtra("npufree")) { npuFree = Long.parseLong(i.getStringExtra("npufree")) * 1_000_000L; log("⚡ стенд: порог памяти для сборки графа NPU — " + i.getStringExtra("npufree") + " МБ"); }
+    // --es npuany 1 — пробовать NPU и на непроверенном чипе MediaTek (Npu.MTK_OK); может уронить приложение
+    if (i != null && i.hasExtra("npuany")) { Npu.MTK_ANY = "1".equals(i.getStringExtra("npuany")); log("⚡ стенд: NPU на любом MediaTek — " + Npu.MTK_ANY); }
+    // --es npureset 1 — забыть «не справляется» и оборванные сборки графа (npu_fail, npu_try), попробовать снова
+    if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").apply(); log("⚡ стенд: NPU — пробовать снова"); }
+    if (i != null && i.hasExtra("npu")) setNpu("1".equals(i.getStringExtra("npu")));
     if (i != null && i.hasExtra("bargedump")) { bargeDump = Integer.parseInt(i.getStringExtra("bargedump")); log("🗣 стенд: запишу совмещение на концах " + bargeDump + " фраз"); }
     if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
       new Thread(() -> { try { aecStand(cfgs); } catch (Throwable t) { log("🔁 эхо-стенд: ошибка — " + t); } }, "aec").start(); }
@@ -1708,7 +1807,7 @@ public class TranslatorService extends Service {
     return b.toString();
   }
   void setModules(Set<String> s, String why) {
-    modules = new LinkedHashSet<>(s); store.modules = modules; modulesChosen = true; autoFetchTried = false;
+    modules = new LinkedHashSet<>(s); store.modules = storeModules(); modulesChosen = true; autoFetchTried = false;
     getSharedPreferences("at", MODE_PRIVATE).edit().putString(PREF_MODULES, Modules.join(modules)).putString(PREF_KNOWN, String.join(",", Modules.CHOICE)).apply();
     log("🧩 модули (" + why + "): " + modulesLine());
     worker.submit(store::summarize);                   // сверка может читать файлы — не на экранном потоке
@@ -2462,6 +2561,7 @@ public class TranslatorService extends Service {
       if (words != null && new File(modelsDir, "common_words.txt").exists()) { words.loadCommon(); log("📝 " + words.stats()); }
       if (chats != null) learn = new Learn(chats, modelsDir, getExternalFilesDir(null));
       if (new File(modelsDir, "denoiser").isDirectory() && eng.denoiser == null) log("🔇 шумоподавитель скачан — подключится после перезапуска приложения");
+      if (eng.npu == null) startNpu();                 // модели NPU докачались — граф собирается, пока распознаёт процессор
       status(L.f("Готово. %s", pb.stats()));
     } catch (Throwable t) { log("подключение скачанного: " + t); }
   }
@@ -2485,6 +2585,11 @@ public class TranslatorService extends Service {
   /** Облегчённая сборка — та, в которой нет llama.cpp. Обновлять её полной нельзя: человек
    *  выбрал 22 МБ вместо 83 осознанно, и молча утянуть остальное было бы подменой выбора. */
   boolean slimBuild() { return !new File(getApplicationInfo().nativeLibraryDir, "libllama-server.so").exists(); }
+  /** Сборка с NPU (build.sh NPU=1 и/или MTK=1): в APK библиотеки Qualcomm или дополнение NeuroPilot. По ней же
+   *  обновление берёт сборку с NPU (Updates.parse) — выпуск собирает их с обоими. */
+  boolean npuBuild() { return new File(getApplicationInfo().nativeLibraryDir, "libQnnHtp.so").exists() || mtkBuild(); }
+  /** В сборке — дополнение NeuroPilot для NPU MediaTek (build.sh MTK=1). */
+  boolean mtkBuild() { return new File(getApplicationInfo().nativeLibraryDir, Npu.MTK_EP).exists(); }
   public int myCode() {
     try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode; } catch (Exception e) { return 0; }
   }
@@ -2602,7 +2707,7 @@ public class TranslatorService extends Service {
   JSONObject teleApp() throws JSONException {
     JSONArray m = new JSONArray();
     for (String x : modules) m.put(x);
-    return new JSONObject().put("name", myName()).put("code", myCode()).put("slim", slimBuild()).put("ui", L.lang).put("modules", m);
+    return new JSONObject().put("name", myName()).put("code", myCode()).put("slim", slimBuild()).put("npu", npuBuild()).put("ui", L.lang).put("modules", m);
   }
 
   /** Телефон без номера и имени владельца: модель, процессор, Android и прошивка, память, обработка звука. */
@@ -2670,7 +2775,7 @@ public class TranslatorService extends Service {
       try {
         if (!online()) { upd(L.t("нет сети — проверю позже")); return; }
         String base = updateBase == null || updateBase.isEmpty() ? Updates.LATEST : updateBase;
-        Updates.Info i = Updates.parse(get(base), slimBuild());
+        Updates.Info i = Updates.parse(get(base), slimBuild(), npuBuild());
         getSharedPreferences("at", MODE_PRIVATE).edit().putLong("update_check", System.currentTimeMillis()).apply();
         int my = myCode();
         if (Updates.newer(my, i)) {
