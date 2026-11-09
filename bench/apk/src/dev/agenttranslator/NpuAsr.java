@@ -89,11 +89,17 @@ final class NpuAsr implements AutoCloseable {
   static OrtSession.SessionOptions qnnOptions(OrtEnvironment env, Map<String, String> qnn, File saveCtx) throws OrtException {
     OrtSession.SessionOptions so = new OrtSession.SessionOptions();
     String lib = qnn.get(EP_LIBRARY);
+    Map<String, String> cfg = new HashMap<>();
     if (lib == null) {
       so.addQnn(qnn);
     } else {
       Map<String, String> o = new HashMap<>(qnn);
       o.remove(EP_LIBRARY);
+      // ключи «ep.…» — настройки сессии ORT (напр. ep.context_embed_mode=0 — граф отдельным файлом), не дополнения
+      for (java.util.Iterator<Map.Entry<String, String>> it = o.entrySet().iterator(); it.hasNext(); ) {
+        Map.Entry<String, String> e = it.next();
+        if (e.getKey().startsWith("ep.")) { cfg.put(e.getKey(), e.getValue()); it.remove(); }
+      }
       so.addExecutionProvider(pluginDevices(env, lib), o);
     }
     if (saveCtx != null) {
@@ -102,6 +108,7 @@ final class NpuAsr implements AutoCloseable {
       so.addConfigEntry("ep.context_file_path", saveCtx.getPath());
       so.addConfigEntry("ep.context_embed_mode", "1");
     }
+    for (Map.Entry<String, String> e : cfg.entrySet()) so.addConfigEntry(e.getKey(), e.getValue());
     return so;
   }
 

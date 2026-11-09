@@ -13,6 +13,8 @@
 #   bash bench/npu/mtk_asr_device.sh SERIAL [КАЖДАЯ_N=1]
 #   MODEL=fp32 NPU_OPTS=NEURON_FLAG_USE_FP16=1 bash bench/npu/mtk_asr_device.sh SERIAL 8
 #   NPU_LOG=verbose …                 # журнал ORT подробно: какие узлы ушли на NPU
+#   EP_DIR=.stand/mtk-ep/v0.3.0-int16 MODEL=a16w8 …  # своя сборка дополнения (A16W8) и модель mtk_quant.py
+#   GUARD_MB=800 …                    # сторож памяти: меньше — процесс останавливается (по умолчанию 800 МБ)
 #   WARM=1 …                          # только прогон из сохранённого графа (первый уже был)
 #   CPU=1 bash bench/npu/mtk_asr_device.sh SERIAL [КАЖДАЯ_N]   # для сравнения — обычный путь приложения на
 #                                     # процессоре: sherpa-onnx, parakeet int8, 4 потока (SherpaAsrPc)
@@ -72,12 +74,34 @@ for f in nemo128.onnx encoder-npu.onnx encoder-npu.onnx.data; do
   say "$f ($(( $(stat -L -c %s $M/$f) / 1048576 )) МБ): $(echo "$(date +%s.%N) - $t" | bc | cut -c1-5) с"
 done
 
+# Сторож памяти: POCO 09.11 дважды перезагрузился (kernel_panic … oom), когда граф NPU не влез. Раз в секунду —
+# MemAvailable телефона; меньше GUARD_MB — наш процесс (по PID из вывода) останавливается, пока ядро цело.
+GUARD_MB=${GUARD_MB:-800}
+guard() {
+  local out=$1 pid="" m
+  while sleep 1; do
+    [ -n "$pid" ] || pid=$(sed -n 's/^PID \([0-9]*\).*/\1/p' $out 2>/dev/null | head -1)
+    [ -n "$pid" ] || continue
+    m=$(sh "grep MemAvailable /proc/meminfo" | awk '{print $2}')
+    [ -n "$m" ] || break
+    echo "$(date +%T) $m" >> $out.mem
+    if [ "$m" -lt $((GUARD_MB * 1024)) ]; then
+      sh "kill -9 $pid"; echo "СТОРОЖ: MemAvailable $((m / 1024)) МБ < $GUARD_MB — процесс $pid остановлен" | tee -a $out; break
+    fi
+    [ "$(sh "[ -d /proc/$pid ] && echo y")" = y ] || break
+  done
+}
+
 run() {
   local since; since=$(sh "date '+%m-%d %H:%M:%S.000'")
+  rm -f $OUT/out-$1-$MODEL.txt $OUT/out-$1-$MODEL.txt.mem; touch $OUT/out-$1-$MODEL.txt
+  guard $OUT/out-$1-$MODEL.txt & local gp=$!
   # PID оболочки = PID app_process (exec): по нему журнал только нашего процесса
   sh "cd $D && export CLASSPATH=$D/classes.dex LD_LIBRARY_PATH=$D NPU_OPTS='$NPU_OPTS' NPU_LOG='$NPU_LOG'; echo PID \$\$; \
       exec app_process $D dev.agenttranslator.NpuAsrPc $D/asr $D/npu $D/corpus $D/hyps-$1.tsv $EVERY \
-      $D/libonnxruntime_providers_neuropilot.so $D/encoder-ctx.onnx" > $OUT/out-$1-$MODEL.txt 2>&1 || true
+      $D/libonnxruntime_providers_neuropilot.so $D/encoder-ctx.onnx" >> $OUT/out-$1-$MODEL.txt 2>&1 || true
+  kill $gp 2>/dev/null; wait $gp 2>/dev/null
+  [ -s $OUT/out-$1-$MODEL.txt.mem ] && say "память телефона в прогоне: меньше всего $(sort -k2 -n $OUT/out-$1-$MODEL.txt.mem | head -1 | awk '{print int($2/1024)}') МБ свободно"
   grep -E 'RESULT|Exception|Error|error|at ai\.|at dev\.|Aborted|Killed' $OUT/out-$1-$MODEL.txt | head -20
   local pid; pid=$(sed -n 's/^PID \([0-9]*\).*/\1/p' $OUT/out-$1-$MODEL.txt | head -1)
   { [ -n "$pid" ] && sh "logcat -d -T '$since' --pid=$pid"
@@ -88,9 +112,9 @@ run() {
   $ADB pull $D/hyps-$1.tsv $OUT/hyps-$1-$MODEL.tsv >/dev/null 2>&1 && $ST/venv-qnn/bin/python -I $W/bench/npu/asr_wer.py --hyps $OUT/hyps-$1-$MODEL.tsv || true
 }
 if [ -z "$WARM" ]; then
-  sh "rm -f $D/encoder-ctx.onnx* $D/hyps-*.tsv"
+  sh "rm -f $D/encoder-ctx.onnx* $D/encoder-ctx_neuron_*.bin $D/hyps-*.tsv"
   say "прогон 1: сборка графа на телефоне"; run first
-  sh "ls -la $D/encoder-ctx.onnx* 2>/dev/null" | sed 's/^/    /'
+  sh "ls -la $D/encoder-ctx* 2>/dev/null" | sed "s/^/    /"
   say "память после: $(sh "grep MemAvailable /proc/meminfo" | tr -s ' ')"
 fi
 say "прогон 2: граф из сохранённого"; run warm
