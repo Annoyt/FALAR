@@ -16,6 +16,13 @@ am, mp, root = sys.argv[1:4]
 ver = re.search(r'versionName="([^"]+)"', open(am, encoding="utf-8").read()).group(1)
 m = json.load(open(mp, encoding="utf-8"))
 if m.get("app") != ver: sys.exit(f"models/manifest.json: app={m.get('app')} не равно versionName={ver}")
+# Чужие репозитории Hugging Face — только с закреплённым коммитом: 07.11.2026 автор parakeet перезалил файлы в main,
+# и новая установка 0.36.0 перестала скачивать распознавание (размер и sha256 не те). Свой репозиторий (own_repo) —
+# можно main: файлы там только добавляются, старые остаются для старых версий.
+for e in m["files"] + m.get("archives", []):
+    s = e.get("source", {})
+    if s.get("type") == "hf" and s.get("repo") != m.get("own_repo") and not re.fullmatch(r"[0-9a-f]{40}", s.get("revision", "")):
+        sys.exit(f"models/manifest.json: {e['path']} из чужого {s.get('repo')} без закреплённого коммита (revision={s.get('revision', 'main')})")
 for e in m["files"]:
     if not e.get("repo_path"): continue
     p = os.path.join(root, e["repo_path"]); h = hashlib.sha256(open(p, "rb").read()).hexdigest()

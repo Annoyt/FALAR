@@ -30,7 +30,7 @@
         "type": "hf",
         "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         "file": "encoder.int8.onnx",
-        "revision": "main"
+        "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78"
       }
     },
     {
@@ -44,7 +44,7 @@
         "type": "hf",
         "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         "file": "decoder.int8.onnx",
-        "revision": "main"
+        "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78"
       }
     },
     {
@@ -58,7 +58,7 @@
         "type": "hf",
         "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         "file": "joiner.int8.onnx",
-        "revision": "main"
+        "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78"
       }
     },
     {
@@ -72,7 +72,7 @@
         "type": "hf",
         "repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         "file": "tokens.txt",
-        "revision": "main"
+        "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78"
       }
     },
     {
@@ -238,7 +238,7 @@
         "type": "hf",
         "repo": "csukuangfj/speaker-embedding-models",
         "file": "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
-        "revision": "main"
+        "revision": "0743f301363dec56491a490f6d6cbc9d67f9a3bf"
       },
       "role": "отпечаток голоса; без него разделение говорящих выключено"
     },
@@ -266,7 +266,7 @@
         "type": "hf",
         "repo": "tencent/Hy-MT2-1.8B-GGUF",
         "file": "Hy-MT2-1.8B-Q4_K_M.gguf",
-        "revision": "main"
+        "revision": "a0c709d9fac510f2c807aa3af52872340dc37a4a"
       },
       "role": "контекстный уточнитель; только полная сборка"
     },
