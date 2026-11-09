@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Стенд Gemini Nano: отдельное приложение, не Falar. Манифест сведён вручную из манифестов AAR
+     (genai-prompt, mlkit common, play-services, datatransport, androidx core/startup/lifecycle). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="app.falar.nanoprobe" android:versionCode="1" android:versionName="0.1">
+  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
+
+  <!-- genai-prompt: связь с системным AICore -->
+  <uses-permission android:name="com.google.android.apps.aicore.service.BIND_SERVICE"/>
+  <queries>
+    <package android:name="com.google.android.aicore"/>
+  </queries>
+
+  <!-- androidx.core -->
+  <permission android:name="app.falar.nanoprobe.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" android:protectionLevel="signature"/>
+  <uses-permission android:name="app.falar.nanoprobe.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"/>
+
+  <!-- INTERNET намеренно нет: модель качает сам AICore, а телеметрии ML Kit (datatransport) уйти некуда.
+       По той же причине TransportBackendDiscovery ниже объявлен без бэкенда cct. -->
+  <application android:label="Falar · стенд Nano" android:allowBackup="false"
+      android:appComponentFactory="androidx.core.app.CoreComponentFactory">
+    <activity android:name=".Probe" android:exported="true" android:launchMode="singleTask"
+        android:configChanges="orientation|screenSize|keyboardHidden">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity>
+
+    <meta-data android:name="com.google.android.gms.version" android:value="@integer/google_play_services_version"/>
+    <activity android:name="com.google.android.gms.common.api.GoogleApiActivity"
+        android:theme="@android:style/Theme.Translucent.NoTitleBar" android:exported="false"/>
+
+    <provider android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+        android:authorities="app.falar.nanoprobe.mlkitinitprovider" android:exported="false" android:initOrder="99"/>
+    <service android:name="com.google.mlkit.common.internal.MlKitComponentDiscoveryService"
+        android:directBootAware="true" android:exported="false">
+      <meta-data android:name="com.google.firebase.components:com.google.mlkit.common.internal.CommonComponentRegistrar"
+          android:value="com.google.firebase.components.ComponentRegistrar"/>
+    </service>
+
+    <provider android:name="androidx.startup.InitializationProvider"
+        android:authorities="app.falar.nanoprobe.androidx-startup" android:exported="false">
+      <meta-data android:name="androidx.lifecycle.ProcessLifecycleInitializer" android:value="androidx.startup"/>
+    </provider>
+
+    <service android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService"
+        android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE"/>
+    <receiver android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.AlarmManagerSchedulerBroadcastReceiver"
+        android:exported="false"/>
+    <service android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery" android:exported="false"/>
+  </application>
+</manifest>

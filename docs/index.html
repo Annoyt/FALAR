@@ -121,6 +121,7 @@ footer small{color:var(--soft)}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
         Скачать для Android</a>
       <p class="meta">Версия 0.36.1 · 84 МБ</p>
+      <p class="meta npu" id="npu" hidden></p>
       <p class="after">Скачивается… шаги установки ниже ↓</p>
     </div>
     <div class="qrbox"><img src="img/qr.png" alt="">Откройте на телефоне</div>
@@ -176,6 +177,7 @@ footer small{color:var(--soft)}
       <a href="https://t.me/falar_tbot">Написать в Telegram</a>
       <a href="https://github.com/Annoyt/FALAR">GitHub</a>
       <a href="https://github.com/Annoyt/FALAR/releases/latest/download/Falar-slim.apk">Облегчённая, 22 МБ</a>
+      <a id="npu-link" href="https://github.com/Annoyt/FALAR/releases/latest/download/Falar-npu.apk" hidden>С NPU для Snapdragon</a>
     </div>
     <p><small>Ранняя версия — перевод иногда ошибается.<br>«Falar» по-португальски — «говорить».</small></p>
   </div>
@@ -187,6 +189,33 @@ document.getElementById('dl').addEventListener('click', function () {
   document.body.classList.add('started');
 });
 if (location.hash === '#started') document.body.classList.add('started');
+
+// Сборка с NPU для Snapdragon (владелец 09.11: «страница должна определять, что давать качать»). Узнаём по
+// видеоядру: Adreno есть только у Snapdragon, а по номеру видно поколение. NPU нужен v68 и новее: 888 (Adreno 660),
+// 778G/780G (642/642L), 7 Gen 1 (644), всё с Adreno 710 и выше (8 Gen 1 … 8 Elite Gen 5, 7 Gen 2–4, 6 Gen 1).
+// Ничего не отправляется — имя видеоядра читается здесь же, на телефоне. Если ошиблись, вреда нет: сборка с NPU
+// на другом телефоне распознаёт процессором, как обычная. Включается с версии NPU_FROM — первой, в выпуске которой
+// есть Falar-npu.apk (tools/release.sh сверяет), иначе кнопка вела бы на несуществующий файл.
+(function () {
+  var NPU_FROM = '0.37.0';
+  var meta = document.querySelector('.meta'), v = /Версия ([0-9.]+)/.exec(meta ? meta.textContent : '');
+  var num = function (s) { return s.split('.').map(Number).reduce(function (a, b) { return a * 1000 + b; }, 0); };
+  if (!v || num(v[1]) < num(NPU_FROM)) return;
+  var gpu = '';
+  try {
+    var gl = document.createElement('canvas').getContext('webgl');
+    var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    gpu = gl ? String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '') : '';
+  } catch (e) {}
+  var link = document.getElementById('npu-link'); if (link) link.hidden = false;
+  var m = /Adreno\D*(\d{3})/i.exec(gpu), n = m ? +m[1] : 0;
+  if (!(n === 642 || n === 643 || n === 644 || n === 660 || n >= 710)) return;
+  var dl = document.getElementById('dl'), note = document.getElementById('npu');
+  dl.href = dl.href.replace('Falar.apk', 'Falar-npu.apk');
+  note.innerHTML = 'Для вашего Snapdragon — сборка с NPU: распознаёт речь быстрее. ' +
+    '<a href="https://github.com/Annoyt/FALAR/releases/latest/download/Falar.apk">Обычная сборка</a>';
+  note.hidden = false;
+})();
 </script>
 </body>
 </html>

@@ -72,6 +72,17 @@ public class UpdatesTest {
     // облегчённой сборке без своего раздела достаётся общий файл, а не ошибка
     String noSlim = "{\"versionCode\":23,\"versionName\":\"0.22.0\",\"apk\":\"Falar.apk\",\"size\":10,\"sha256\":\"" + sha('d') + "\"}";
     eq(Updates.parse(noSlim, true).apk, "Falar.apk", "U8 нет раздела slim — берётся общий");
+    // U9: сборка с NPU (Snapdragon) обновляется сборкой с NPU того же вида; выпуск без NPU — та же без NPU
+    String four = "{\"versionCode\":40,\"versionName\":\"0.37.0\",\"apk\":\"Falar.apk\",\"size\":300000000,\"sha256\":\"" + sha('a') + "\","
+        + "\"slim\":{\"apk\":\"Falar-slim.apk\",\"size\":23000000,\"sha256\":\"" + sha('b') + "\"},"
+        + "\"npu\":{\"apk\":\"Falar-npu.apk\",\"size\":352000000,\"sha256\":\"" + sha('c') + "\"},"
+        + "\"slim_npu\":{\"apk\":\"Falar-slim-npu.apk\",\"size\":75000000,\"sha256\":\"" + sha('d') + "\"}}";
+    eq(Updates.parse(four, false, true).apk, "Falar-npu.apk", "U9 полная с NPU → полная с NPU");
+    eq(Updates.parse(four, true, true).apk, "Falar-slim-npu.apk", "U9 облегчённая с NPU → облегчённая с NPU");
+    eq(Updates.parse(four, true, true).sha256, sha('d'), "U9 sha256 — своей сборки");
+    eq(Updates.parse(four, false, false).apk, "Falar.apk", "U9 без NPU — по-прежнему без NPU");
+    eq(Updates.parse(four, true, false).apk, "Falar-slim.apk", "U9 облегчённая без NPU — облегчённая");
+    eq(Updates.parse(noSlim, true, true).apk, "Falar.apk", "U9 в выпуске нет сборок с NPU — без NPU, обновления не встают");
 
     System.out.println(fails == 0 ? "Updates: " + checks + " проверок, все прошли" : "Updates: провалов " + fails + " из " + checks);
     return fails;
