@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""Проба операций для NPU MediaTek: какую операцию кодировщика parakeet не берёт рантайм Neuron телефона.
+
+POCO X7 Pro 09.11: дополнение NeuroPilot приняло 1605 узлов из 1620, но рантайм Neuron 8.2.26 отказал первой части
+графа целиком («Some ops unsupported by devices: mtk-gpu, mtk-dsp, mtk-mdla», «Fail to verify the given module»),
+не говоря, какая операция виновата. Здесь — маленькие модели по одной операции в той же форме, что в кодировщике
+(у каждой впереди MatMul: части без conv/matmul дополнение отдаёт процессору), и два настоящих куска с нашими весами:
+pre_encode и слой 0 (из .stand/npu/mtk/fp32). MtkOpProbe.java прогоняет их на телефоне (bench/npu/mtk_ops_device.sh).
+
+  mtk_ops.py [--out DIR]          # → .stand/npu/mtk/ops/*.onnx
+"""
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+import onnx
+from onnx import TensorProto, helper, numpy_helper
+
+P = Path("/home/not_me/antigravity-workspace/agentstuff/agenttranslator")
+SRC = P / ".stand/npu/mtk/fp32/encoder-npu.onnx"
+OUT = P / ".stand/npu/mtk/ops"
+T, D, H, DK, FF = 104, 1024, 8, 128, 4096
+rng = np.random.default_rng(0)
+
+
+def w(*shape, s=0.02):
+    return (rng.standard_normal(shape) * s).astype(np.float32)
+
+
+class G:
+    """Мини-граф: вход X [1, T, D] → MatMul (чтобы часть не была «лёгкой») → проверяемые операции → выход."""
+
+    def __init__(self, name, x_shape=(1, T, D)):
+        self.name, self.nodes, self.inits, self.k = name, [], [], 0
+        self.inputs = [helper.make_tensor_value_info("X", TensorProto.FLOAT, list(x_shape))]
+
+    def c(self, arr, dtype=None):
+        self.k += 1
+        n = f"c{self.k}"
+        self.inits.append(numpy_helper.from_array(np.asarray(arr, dtype=dtype), n))
+        return n
+
+    def op(self, op, ins, **attrs):
+        self.k += 1
+        o = f"t{self.k}"
+        self.nodes.append(helper.make_node(op, ins, [o], name=f"{op}_{self.k}", **attrs))
+        return o
+
+    def ops(self, op, ins, n, **attrs):
+        self.k += 1
+        outs = [f"t{self.k}_{i}" for i in range(n)]
+        self.nodes.append(helper.make_node(op, ins, outs, name=f"{op}_{self.k}", **attrs))
+        return outs
+
+    def save(self, y, out):
+        g = helper.make_graph(self.nodes, self.name, self.inputs,
+                              [helper.make_tensor_value_info(y, TensorProto.FLOAT, None)], self.inits)
+        m = helper.make_model(g, opset_imports=[helper.make_opsetid("", 17)], ir_version=8)
+        m = onnx.shape_inference.infer_shapes(m)
+        onnx.checker.check_model(m)
+        onnx.save(m, str(out / f"{self.name}.onnx"))
+
+
+def synthetic(out):
+    g = G("p01_fc")                                         # FULLY_CONNECTED (контроль)
+    g.save(g.op("MatMul", ["X", g.c(w(D, FF))]), out)
+
+    g = G("p02_layernorm")                                  # LayerNorm — расширение MediaTek (код 65536)
+    x = g.op("MatMul", ["X", g.c(w(D, D))])
+    g.save(g.op("LayerNormalization", [x, g.c(1 + w(D)), g.c(w(D))], axis=-1, epsilon=1e-5), out)
+
+    g = G("p03_swish")                                      # LOGISTIC + MUL
+    x = g.op("MatMul", ["X", g.c(w(D, FF))])
+    g.save(g.op("Mul", [x, g.op("Sigmoid", [x])]), out)
+
+    def heads(g, x, n=H, dk=DK):                            # [1,T,n*dk] → [1,n,T,dk]
+        return g.op("Transpose", [g.op("Reshape", [x, g.c([1, T, n, dk], np.int64)])], perm=[0, 2, 1, 3])
+
+    g = G("p04_attention")                                  # BATCH_MATMUL, DIV, SOFTMAX
+    q = heads(g, g.op("MatMul", ["X", g.c(w(D, D))]))
+    k = heads(g, g.op("MatMul", ["X", g.c(w(D, D))]))
+    v = heads(g, g.op("MatMul", ["X", g.c(w(D, D))]))
+    s = g.op("Div", [g.op("MatMul", [q, g.op("Transpose", [k], perm=[0, 1, 3, 2])]), g.c(np.float32(np.sqrt(DK)))])
+    a = g.op("Softmax", [s], axis=-1)
+    g.save(g.op("MatMul", [a, v]), out)
+
+    g = G("p05_relshift")                                   # PAD_V2, RESHAPE, SLICE (rel_shift NeMo)
+    pl = 2 * T - 1
+    x = g.op("MatMul", ["X", g.c(w(D, H * pl))])            # [1,T,8*207]
+    x = g.op("Transpose", [g.op("Reshape", [x, g.c([1, T, H, pl], np.int64)])], perm=[0, 2, 1, 3])  # [1,8,T,207]
+    x = g.op("Pad", [x, g.c([0, 0, 0, 1, 0, 0, 0, 0], np.int64), g.c(np.float32(0))], mode="constant")
+    x = g.op("Reshape", [x, g.c([1, H, pl + 1, T], np.int64)])
+    x = g.op("Slice", [x, g.c([1], np.int64), g.c([pl + 1], np.int64), g.c([2], np.int64)])
+    x = g.op("Reshape", [x, g.c([1, H, T, pl], np.int64)])
+    g.save(g.op("Slice", [x, g.c([0], np.int64), g.c([T], np.int64), g.c([3], np.int64)]), out)
+
+    def conv_in(g):                                         # [1,T,D] → [1,D,1,T]
+        x = g.op("MatMul", ["X", g.c(w(D, D))])
+        return g.op("Unsqueeze", [g.op("Transpose", [x], perm=[0, 2, 1]), g.c([2], np.int64)])
+
+    g = G("p06_glu")                                        # CONV_2D 1×1, SPLIT, LOGISTIC, MUL, SQUEEZE
+    x = g.op("Conv", [conv_in(g), g.c(w(2 * D, D, 1, 1)), g.c(w(2 * D))], kernel_shape=[1, 1])
+    a, b = g.ops("Split", [x, g.c([D, D], np.int64)], 2, axis=1)
+    g.save(g.op("Squeeze", [g.op("Mul", [a, g.op("Sigmoid", [b])]), g.c([2], np.int64)]), out)
+
+    g = G("p07_depthwise")                                  # DEPTHWISE_CONV_2D 1×9
+    x = g.op("Conv", [conv_in(g), g.c(w(D, 1, 1, 9, s=0.2)), g.c(w(D))], kernel_shape=[1, 9], pads=[0, 4, 0, 4], group=D)
+    g.save(g.op("Squeeze", [x, g.c([2], np.int64)]), out)
+
+    g = G("p08_masks")                                      # маски: SUB, MUL, ADD с вещанием
+    s = g.op("MatMul", [heads(g, g.op("MatMul", ["X", g.c(w(D, D))])),
+                        g.op("Transpose", [heads(g, g.op("MatMul", ["X", g.c(w(D, D))]))], perm=[0, 1, 3, 2])])
+    m = (rng.random((1, 1, T, T)) > 0.2).astype(np.float32)
+    mc = g.c(m)
+    bias = g.op("Mul", [g.op("Sub", [mc, g.c(np.float32(1))]), g.c(np.float32(10000))])
+    g.save(g.op("Add", [g.op("Mul", [s, mc]), bias]), out)
+
+    g = G("p09_pre_conv", x_shape=(1, 128, 832))           # pre_encode: CONV_2D 3×3 шаг 2, RELU, глубинная 3×3
+    x = g.op("Unsqueeze", [g.op("Transpose", ["X"], perm=[0, 2, 1]), g.c([1], np.int64)])   # [1,1,832,128]
+    x = g.op("Relu", [g.op("Conv", [x, g.c(w(256, 1, 3, 3, s=0.3)), g.c(w(256))], kernel_shape=[3, 3], strides=[2, 2], pads=[1, 1, 1, 1])])
+    x = g.op("Conv", [x, g.c(w(256, 1, 3, 3, s=0.3)), g.c(w(256))], kernel_shape=[3, 3], strides=[2, 2], pads=[1, 1, 1, 1], group=256)
+    x = g.op("Relu", [g.op("Conv", [x, g.c(w(256, 256, 1, 1, s=0.05)), g.c(w(256))], kernel_shape=[1, 1])])
+    g.save(x, out)
+
+    g = G("p10_floor")                                      # FLOOR (путь длины)
+    x = g.op("MatMul", ["X", g.c(w(D, D))])
+    g.save(g.op("Floor", [g.op("Mul", [x, g.c(np.float32(100))])]), out)
+
+    g = G("p11_ln_big")                                     # LayerNorm на больших значениях (поток остатка)
+    x = g.op("Mul", [g.op("MatMul", ["X", g.c(w(D, D))]), g.c(np.float32(300))])
+    g.save(g.op("LayerNormalization", [x, g.c(1 + w(D)), g.c(w(D))], axis=-1, epsilon=1e-5), out)
+
+
+def real(out):
+    """Настоящие куски кодировщика с нашими весами: pre_encode и слой 0 (вход слоя и маски — входы куска)."""
+    from onnx.external_data_helper import load_external_data_for_model
+    m = onnx.load(str(SRC), load_external_data=False)       # граф; веса куска подтягиваются потом
+    by_name = {n.name: n for n in m.graph.node}
+    prod = {o: n.name for n in m.graph.node for o in n.output}
+    init = {i.name: i for i in m.graph.initializer}
+    ln0 = by_name["/layers.0/norm_feed_forward1/LayerNormalization"].input[0]   # вход слоя 0 = выход pre_encode
+    ln1 = by_name["/layers.1/norm_feed_forward1/LayerNormalization"].input[0]   # выход слоя 0
+    print("слой 0:", ln0, "→", ln1, "(позиции linear_pos при постоянном окне свёрнуты в постоянную)")
+
+    def cut(name, ins, outs):
+        need, stack = set(), list(outs)
+        while stack:
+            t = stack.pop()
+            if not t or t in ins or t in init or t not in prod or prod[t] in need:
+                continue
+            need.add(prod[t])
+            stack.extend(by_name[prod[t]].input)
+        nodes = [n for n in m.graph.node if n.name in need]
+        used = {i for n in nodes for i in n.input}
+        missing = [i for i in used if i not in init and i not in ins and i not in prod and i]
+        assert not missing, missing
+        g = helper.make_graph(nodes, name, [helper.make_tensor_value_info(k, TensorProto.FLOAT, v) for k, v in ins.items()],
+                              [helper.make_tensor_value_info(k, TensorProto.FLOAT, v) for k, v in outs.items()],
+                              [init[i] for i in used if i in init])
+        x = helper.make_model(g, opset_imports=list(m.opset_import), ir_version=m.ir_version)
+        load_external_data_for_model(x, str(SRC.parent))    # веса куска — внутрь файла
+        onnx.checker.check_model(x)
+        onnx.save(x, str(out / f"{name}.onnx"))
+        print(name, "узлов", len(nodes), f"{(out / f'{name}.onnx').stat().st_size / 1e6:.0f} МБ")
+
+    cut("r01_pre_encode", {"audio_signal": [1, 128, 832]}, {ln0: [1, T, D]})
+    cut("r02_layer0", {ln0: [1, T, D], "mtk_matt": [1, 1, T, T], "mtk_bias": [1, 1, T, T], "mtk_vconv": [1, 1, T]}, {ln1: [1, T, D]})
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--out", default=str(OUT))
+    a = ap.parse_args()
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    synthetic(out)
+    real(out)
+    for f in sorted(out.glob("*.onnx")):
+        print(f.name, f"{f.stat().st_size / 1e6:.1f} МБ")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -2,6 +2,7 @@ package dev.agenttranslator;
 
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtEpDevice;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import java.io.BufferedReader;
@@ -15,8 +16,10 @@ import java.nio.LongBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Распознавание parakeet-tdt-0.6b-v3 с кодировщиком на NPU Snapdragon (ONNX Runtime с QNN).
  *
@@ -30,7 +33,11 @@ import java.util.Map;
  *  Граф QNN собирается при первом запуске (десятки секунд) и сохраняется в ctx (ONNX с готовым контекстом,
  *  ep.context_*): дальше сессия поднимается из него. Контекст привязан к поколению NPU и версии QNN — если он
  *  не грузится (перенесли на другой телефон, обновили библиотеки), он удаляется и граф собирается заново.
- *  Без Android: на ПК тот же класс работает на процессоре (qnn = null) — bench/npu/npu_asr_pc.sh. */
+ *  Без Android: на ПК тот же класс работает на процессоре (qnn = null) — bench/npu/npu_asr_pc.sh.
+ *
+ *  MediaTek (ветка mtk-npu, проба): вместо QNN — дополнение ONNX Runtime для NeuroPilot (plugin EP,
+ *  onnxruntime-ep-neuropilot) с системным адаптером Neuron телефона; параметры с ключом EP_LIBRARY. Модель —
+ *  fp16 с масками во float (bench/npu/mtk_model.py), окно и выходы те же. Граф Neuron сохраняется так же (ctx). */
 final class NpuAsr implements AutoCloseable {
   static final int F = 832, MEL = 128, ENC = 1024, MAX_PER_FRAME = 5;
   static final float FRAME_S = 0.08f;
@@ -46,11 +53,16 @@ final class NpuAsr implements AutoCloseable {
   final OrtSession pre, enc, dec, join;
   final String[] sym;
   final int blank;
-  /** Как поднят кодировщик: «qnn», «qnn-ctx» (из сохранённого контекста) или «cpu». */
+  /** Как поднят кодировщик: «qnn», «qnn-ctx» (из сохранённого контекста), «neuron», «neuron-ctx» или «cpu». */
   final String how;
 
+  /** Ключ параметров NPU: путь к библиотеке дополнения ONNX Runtime (plugin EP), напр.
+   *  libonnxruntime_providers_neuropilot.so; остальные ключи — его параметры. Без ключа параметры — QNN. */
+  static final String EP_LIBRARY = "ep_library";
+
   /** asrDir — модели parakeet приложения (decoder.int8.onnx, joiner.int8.onnx, tokens.txt); npuDir — nemo128.onnx и
-   *  encoder-npu.onnx; qnn — параметры QNN (null — процессор); ctx — куда сохранить собранный граф (null — не сохранять). */
+   *  encoder-npu.onnx; qnn — параметры NPU (null — процессор): QNN или, с ключом EP_LIBRARY, дополнения ORT;
+   *  ctx — куда сохранить собранный граф (null — не сохранять). */
   NpuAsr(File asrDir, File npuDir, Map<String, String> qnn, File ctx) throws OrtException, IOException {
     OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
     cpu.setIntraOpNumThreads(1);
@@ -64,18 +76,26 @@ final class NpuAsr implements AutoCloseable {
     if (qnn == null) {
       e = env.createSession(model, cpu);
     } else {
+      String kind = qnn.containsKey(EP_LIBRARY) ? "neuron" : "qnn";
       if (ctx != null && ctx.exists()) {
-        try { e = env.createSession(ctx.getPath(), qnnOptions(qnn, null)); h = "qnn-ctx"; }
+        try { e = env.createSession(ctx.getPath(), qnnOptions(env, qnn, null)); h = kind + "-ctx"; }
         catch (OrtException x) { ctx.delete(); }
       }
-      if (e == null) { e = env.createSession(model, qnnOptions(qnn, ctx)); h = "qnn"; }
+      if (e == null) { e = env.createSession(model, qnnOptions(env, qnn, ctx)); h = kind; }
     }
     enc = e; how = h;
   }
 
-  static OrtSession.SessionOptions qnnOptions(Map<String, String> qnn, File saveCtx) throws OrtException {
+  static OrtSession.SessionOptions qnnOptions(OrtEnvironment env, Map<String, String> qnn, File saveCtx) throws OrtException {
     OrtSession.SessionOptions so = new OrtSession.SessionOptions();
-    so.addQnn(qnn);
+    String lib = qnn.get(EP_LIBRARY);
+    if (lib == null) {
+      so.addQnn(qnn);
+    } else {
+      Map<String, String> o = new HashMap<>(qnn);
+      o.remove(EP_LIBRARY);
+      so.addExecutionProvider(pluginDevices(env, lib), o);
+    }
     if (saveCtx != null) {
       saveCtx.getParentFile().mkdirs();
       so.addConfigEntry("ep.context_enable", "1");
@@ -83,6 +103,27 @@ final class NpuAsr implements AutoCloseable {
       so.addConfigEntry("ep.context_embed_mode", "1");
     }
     return so;
+  }
+
+  /** Имена EP, которые заявила каждая зарегистрированная библиотека дополнения (регистрация — одна на среду ORT). */
+  private static final Map<String, Set<String>> plugins = new HashMap<>();
+
+  /** Устройства дополнения ORT из библиотеки lib: те, что появились после её регистрации (встроенные EP, например
+   *  процессор, были и до неё). Не заявило ни одного — исключение, и распознаёт процессор. */
+  static synchronized List<OrtEpDevice> pluginDevices(OrtEnvironment env, String lib) throws OrtException {
+    Set<String> names = plugins.get(lib);
+    if (names == null) {
+      Set<String> before = new HashSet<>();
+      for (OrtEpDevice d : env.getEpDevices()) before.add(d.getEpName());
+      env.registerExecutionProviderLibrary(new File(lib).getName(), lib);
+      names = new HashSet<>();
+      for (OrtEpDevice d : env.getEpDevices()) if (!before.contains(d.getEpName())) names.add(d.getEpName());
+      plugins.put(lib, names);
+    }
+    List<OrtEpDevice> out = new ArrayList<>();
+    for (OrtEpDevice d : env.getEpDevices()) if (names.contains(d.getEpName())) out.add(d);
+    if (out.isEmpty()) throw new OrtException("дополнение ORT " + new File(lib).getName() + " не заявило устройств");
+    return out;
   }
 
   /** tokens.txt sherpa-onnx: «символ номер» в строке; «▁» в начале символа — пробел (SymbolTable::operator[]). */

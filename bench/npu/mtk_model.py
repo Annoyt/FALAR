@@ -95,6 +95,7 @@ def build(out):
 
     r = onnx.load(str(out / "encoder-npu.onnx"), load_external_data=False)
     float_masks(r, out)
+    conv2d(r)
     onnx.save(r, str(out / "encoder-npu.onnx"))      # только граф: веса остаются в encoder-npu.onnx.data
     report(out / "encoder-npu.onnx", r)
 
@@ -199,6 +200,41 @@ def float_masks(m, base):
     g.initializer.extend(left)
     del g.value_info[:]
     print("маски во float:", dict(kinds), "; окно внимания", "всё" if ctxm.all() else "с ограничением")
+
+
+def conv2d(m):
+    """Conv1D → Conv2D высотой 1: у дополнения NeuroPilot только двумерная свёртка («Only conv 2d is supported»,
+    журнал POCO 09.11), а в каждом слое conformer'а их три (pointwise 1, depthwise 9, pointwise 2) — 72 узла.
+    X [N,C,T] → Unsqueeze(2) → Conv(ядро 1×K, отступы 0/p, шаг 1/s) → Squeeze(2). Веса [Co,Ci,K] → [Co,Ci,1,K]: те же
+    байты (во внешнем файле не меняются), поменялась только форма. Результат тот же до бита."""
+    g = m.graph
+    init = {i.name: i for i in g.initializer}
+    users = Counter(x for n in g.node for x in n.input)
+    ax = "mtk_axis2"
+    g.initializer.append(numpy_helper.from_array(np.array([2], np.int64), ax))
+    out, k1 = [], 0
+    for n in g.node:
+        w = init.get(n.input[1]) if n.op_type == "Conv" and len(n.input) > 1 else None
+        if w is None or len(w.dims) != 3:
+            out.append(n)
+            continue
+        assert users[w.name] == 1, f"{n.name}: веса {w.name} общие — форму не поменять"
+        at = {a.name: helper.get_attribute_value(a) for a in n.attribute}
+        K = w.dims[2]
+        pads = at.get("pads", [0, 0])
+        assert at.get("auto_pad", b"NOTSET") in (b"NOTSET", "NOTSET"), f"{n.name}: auto_pad"
+        w.dims[:] = [w.dims[0], w.dims[1], 1, K]
+        x4, y4 = n.input[0] + "_h1_" + str(k1), n.output[0] + "_h1"
+        out.append(helper.make_node("Unsqueeze", [n.input[0], ax], [x4], name=n.name + "_h1_in"))
+        attrs = dict(kernel_shape=[1, K], pads=[0, pads[0], 0, pads[1]], strides=[1, at.get("strides", [1])[0]],
+                     dilations=[1, at.get("dilations", [1])[0]], group=at.get("group", 1))
+        out.append(helper.make_node("Conv", [x4] + list(n.input[1:]), [y4], name=n.name, **attrs))
+        out.append(helper.make_node("Squeeze", [y4, ax], [n.output[0]], name=n.name + "_h1_out"))
+        k1 += 1
+    del g.node[:]
+    g.node.extend(out)
+    del g.value_info[:]
+    print(f"свёртки 1D → 2D: {k1}")
 
 
 def to_fp16(src, dst):
