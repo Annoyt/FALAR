@@ -4,12 +4,15 @@
 # перевыкладываются: приложение и tools/models_fetch.py берут их из исходных репозиториев.
 #
 # Токен берётся из окружения hf (после `hf auth login`), в скрипт и в репозиторий не попадает.
-#   bash tools/models_publish.sh            # залить
-#   bash tools/models_publish.sh --dry-run  # только показать, что уйдёт
+#   bash tools/models_publish.sh            # залить всё (из основной копии проекта: там зеркало моделей models/)
+#   bash tools/models_publish.sh --npu      # только модели NPU, манифест и README (0.37.0: остальное не менялось)
+#   bash tools/models_publish.sh --dry-run  # только показать, что уйдёт (можно вместе с --npu)
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd); M=$R/models
+DRY=; ONLY_NPU=; for a in "$@"; do case $a in --dry-run) DRY=1;; --npu) ONLY_NPU=1;; *) echo "не знаю $a"; exit 2;; esac; done
 REPO=$(python3 -c "import json;print(json.load(open('$M/manifest.json'))['own_repo'])")
 STAGE=$(mktemp -d)
+if [ -z "$ONLY_NPU" ]; then
 mkdir -p $STAGE/mt/pt2ru $STAGE/mt/ru2pt
 # С 0.23.0 перевод — encoder_kv_model.onnx (tools/mt_encoder_kv.py) и decoder_with_past_model.onnx.
 # Прежние encoder_model.onnx и decoder_model.onnx в репозитории остаются — их качают сборки до 0.23;
@@ -21,6 +24,7 @@ done
 (cd $M && zip -q -r -X $STAGE/tts_ru.zip tts_ru && zip -q -r -X $STAGE/tts_pt.zip tts_pt)
 cp $R/bench/apk/phrasebook_seed.json $STAGE/phrasebook.json
 cp $R/data/tatoeba/phrasebook_tatoeba.tsv $R/data/common_words.txt $STAGE/
+fi
 cp $M/manifest.json $STAGE/manifest.json
 # Модели распознавания на NPU (модуль npu, с 0.37.0; приложение качает только модель своего чипа): кодировщик parakeet
 # для Snapdragon (bench/npu/app_model.py) и для MediaTek (bench/npu/mtk_quant.py, A16W8) и признаки nemo128 — из .stand
@@ -58,7 +62,7 @@ tags: [translation, onnx, opus-mt, falar]
 - \`manifest.json\`: по нему приложение и \`tools/models_fetch.py\` собирают полный набор, включая модели из исходных репозиториев.
 MD
 du -sh $STAGE; find $STAGE -type f | sed "s|$STAGE/||"
-if [ "$1" = "--dry-run" ]; then rm -rf $STAGE; exit 0; fi
+if [ -n "$DRY" ]; then rm -rf $STAGE; exit 0; fi
 hf repo create "$REPO" --type model 2>/dev/null || true
 hf upload "$REPO" "$STAGE" . --commit-message "models for Falar $(python3 -c "import json;print(json.load(open('$M/manifest.json'))['app'])")"
 rm -rf $STAGE
