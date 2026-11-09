@@ -323,8 +323,13 @@ if ! asleep && focus | grep -q "$PKG/"; then
   T=$(sh "uiautomator dump /sdcard/falar-vt.xml >/dev/null; cat /sdcard/falar-vt.xml; rm -f /sdcard/falar-vt.xml" | "$PY" -c "
 import re,sys,html
 print('\n'.join(html.unescape(t) for t in re.findall(r'text=\"([^\"]*)\"', sys.stdin.read()) if t))")
+  if grep -q 'SHOW_NUMBERS = true' "$R/bench/apk/src/dev/agenttranslator/Voices.java"; then
   printf '%s\n' "$T" | grep -qxE '(Собеседник|Interlocutor) 2' && res 0 "V8 над текущей репликой — «Собеседник 2»" || res 1 "V8 подписи «Собеседник 2» нет: $(printf '%s' "$T" | head -c 300 | tr '\n' '|')"
   printf '%s\n' "$T" | grep -qxE '(Собеседник|Interlocutor) 1' && res 0 "V8 в карточках — «Собеседник 1»" || res 1 "V8 подписи «Собеседник 1» в карточках нет"
+  else   # номера скрыты (владелец 09.11): подпись над репликой — по направлению, как без голосов; номеров нигде нет
+  printf '%s\n' "$T" | grep -qxE 'вы · по-португальски|você · em português|собеседник|interlocutor' && res 0 "V8 над текущей репликой — подпись без номера («$(printf '%s\n' "$T" | grep -xE -m1 'вы · по-португальски|você · em português|собеседник|interlocutor')»)" || res 1 "V8 подписи без номера над репликой нет: $(printf '%s' "$T" | head -c 300 | tr '\n' '|')"
+  printf '%s\n' "$T" | grep -qiE '(собеседник|interlocutor) [0-9]+' && res 1 "V8 на экране номер голоса: $(printf '%s\n' "$T" | grep -iE -m1 '(собеседник|interlocutor) [0-9]+')" || res 0 "V8 номеров голосов на экране нет — ни над репликой, ни в карточках"
+  fi
 else sk "V8 экран погашен или впереди не Falar ($(focus | sed 's/.*{//; s/}.*//'))"; fi
 
 say "== V9: заглушка микрофона — ровно на время звучания, а не дольше"
