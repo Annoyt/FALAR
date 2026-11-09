@@ -13,6 +13,9 @@
 #   bash bench/npu/mtk_asr_device.sh SERIAL [КАЖДАЯ_N=1]
 #   MODEL=fp32 NPU_OPTS=NEURON_FLAG_USE_FP16=1 bash bench/npu/mtk_asr_device.sh SERIAL 8
 #   NPU_LOG=verbose …                 # журнал ORT подробно: какие узлы ушли на NPU
+#   WARM=1 …                          # только прогон из сохранённого графа (первый уже был)
+#   CPU=1 bash bench/npu/mtk_asr_device.sh SERIAL [КАЖДАЯ_N]   # для сравнения — обычный путь приложения на
+#                                     # процессоре: sherpa-onnx, parakeet int8, 4 потока (SherpaAsrPc)
 #   bash bench/npu/mtk_asr_device.sh SERIAL clean
 set -e
 S=$1; [ -n "$S" ] || { echo "нужен SERIAL"; exit 2; }
@@ -25,7 +28,9 @@ say() { echo "$(date +%T) $*"; }
 sh() { $ADB shell "$@" < /dev/null | tr -d '\r'; }
 if [ "$2" = clean ]; then sh "rm -rf $D"; say "удалено $D"; exit 0; fi
 EVERY=${2:-1}
-[ -s $EP/libonnxruntime_providers_neuropilot.so ] && [ -s $EP/libneuron_op_capability.so ] || { echo "нет дополнения в $EP"; exit 2; }
+if [ -z "$CPU" ]; then
+  [ -s $EP/libonnxruntime_providers_neuropilot.so ] && [ -s $EP/libneuron_op_capability.so ] || { echo "нет дополнения в $EP"; exit 2; }
+fi
 [ -s $M/encoder-npu.onnx ] || { echo "нет модели $M — bench/npu/mtk_model.py"; exit 2; }
 exec > >(tee -a $OUT/run-$(date +%Y%m%d-%H%M%S).log) 2>&1
 
@@ -33,7 +38,8 @@ say "телефон: $(sh getprop ro.product.model), SoC $(sh getprop ro.soc.mod
 say "память: $(sh "grep MemAvailable /proc/meminfo" | tr -s ' ')"
 
 # dex: NpuAsr + стенд + классы ONNX Runtime Java
-javac --release 11 -nowarn -cp "$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/NpuAsr.java $W/bench/npu/NpuAsrPc.java
+javac --release 11 -nowarn -cp "$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/NpuAsr.java \
+  $W/bench/npu/NpuAsrPc.java $W/bench/npu/SherpaAsrPc.java $A/sherpa-java-api/*.java
 java -cp $P/tools/r8.jar com.android.tools.r8.D8 --release --min-api 28 --lib $P/tools/android.jar --output $OUT \
   $(find $OUT/classes -name '*.class') $A/libs/onnxruntime-1.29.0-classes.jar 2>&1 | grep -v -E "warning|Warning" || true
 sh "mkdir -p $D/asr $D/npu $D/corpus/pt $D/corpus/ru"
@@ -46,6 +52,17 @@ if [ -z "$PUSHED" ]; then
   push $D/asr $P/models/asr_multi/decoder.int8.onnx $P/models/asr_multi/joiner.int8.onnx $P/models/asr_multi/tokens.txt
   push $D/corpus/pt $W/bench/air/corpus/pt/*.wav
   push $D/corpus/ru $W/bench/air/corpus/ru/*.wav
+fi
+if [ -n "$CPU" ]; then          # обычный путь приложения: sherpa int8 на процессоре, тот же корпус
+  for f in $A/jni/arm64-v8a/libsherpa-onnx-jni.so $A/jni/arm64-v8a/libonnxruntime_sherpa.so $P/models/asr_multi/encoder.int8.onnx; do
+    t=$D; case $f in *.onnx) t=$D/asr;; esac
+    [ "$(sh "stat -c %s $t/$(basename $f) 2>/dev/null || echo 0")" = "$(stat -L -c %s $f)" ] || push $t $f
+  done
+  sh "cd $D && CLASSPATH=$D/classes.dex LD_LIBRARY_PATH=$D app_process $D dev.agenttranslator.SherpaAsrPc $D/asr $D/corpus \
+      $D/hyps-cpu.tsv $EVERY 4" > $OUT/out-cpu.txt 2>&1 || true
+  grep -E 'RESULT|Exception|Error' $OUT/out-cpu.txt | head -10
+  $ADB pull $D/hyps-cpu.tsv $OUT/hyps-cpu.tsv >/dev/null 2>&1 && $ST/venv-qnn/bin/python -I $W/bench/npu/asr_wer.py --hyps $OUT/hyps-cpu.tsv || true
+  exit 0
 fi
 # модель — по размеру каждого файла (другая — fp16/fp32 — заливается заново); код выхода — через echo, не через tr
 for f in nemo128.onnx encoder-npu.onnx encoder-npu.onnx.data; do
@@ -70,9 +87,11 @@ run() {
   grep -i -E "neuron|partition|placed|fallback|unsupported|not supported|error|fail" $OUT/logcat-$1-$MODEL.txt | head -25 | cut -c1-260
   $ADB pull $D/hyps-$1.tsv $OUT/hyps-$1-$MODEL.tsv >/dev/null 2>&1 && $ST/venv-qnn/bin/python -I $W/bench/npu/asr_wer.py --hyps $OUT/hyps-$1-$MODEL.tsv || true
 }
-sh "rm -f $D/encoder-ctx.onnx* $D/hyps-*.tsv"
-say "прогон 1: сборка графа на телефоне"; run first
-sh "ls -la $D/encoder-ctx.onnx* 2>/dev/null" | sed 's/^/    /'
-say "память после: $(sh "grep MemAvailable /proc/meminfo" | tr -s ' ')"
+if [ -z "$WARM" ]; then
+  sh "rm -f $D/encoder-ctx.onnx* $D/hyps-*.tsv"
+  say "прогон 1: сборка графа на телефоне"; run first
+  sh "ls -la $D/encoder-ctx.onnx* 2>/dev/null" | sed 's/^/    /'
+  say "память после: $(sh "grep MemAvailable /proc/meminfo" | tr -s ' ')"
+fi
 say "прогон 2: граф из сохранённого"; run warm
 say "готово; итог — $OUT"
