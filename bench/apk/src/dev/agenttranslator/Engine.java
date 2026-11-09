@@ -67,6 +67,7 @@ public class Engine {
    *  он выключен или фраза длиннее окна 8,3 с — sherpa на процессоре, как раньше. npuState — что с ним, словами. */
   public volatile NpuAsr npu; public volatile boolean npuOn = false; public volatile String npuState = "";
   public volatile long npuMs, npuCalls;
+  static final long NPU_PROBE_MAX_MS = 600;
   public String asrName = "";
   OrtEnvironment env; final Map<String, OrtSession[]> mt = new HashMap<>(); final Map<String, SpmTokenizer> tok = new HashMap<>();
   public long loadAsrMs, loadMtMs, loadTtsMs;
@@ -274,9 +275,18 @@ public class Engine {
     long t = System.nanoTime();
     try {
       Npu.adspPath(libDir);
-      NpuAsr n = new NpuAsr(new java.io.File(m, "asr_multi"), new java.io.File(m, "npu"), Npu.qnnOptions(libDir), ctx);
+      java.util.Map<String, String> opts = Npu.qnnOptions(libDir);
+      NpuAsr n = new NpuAsr(new java.io.File(m, "asr_multi"), new java.io.File(m, "npu"), opts, ctx);
+      long probe = n.probeMs();
+      // Порог: NPU — 14–90 мс на окно (AI Hub, 8 телефонов); процессор с этой моделью — 2,3 с (A52s, RTL 09.11)
+      if (probe > NPU_PROBE_MAX_MS) {
+        n.close(); npuState = "error";
+        log.log("⚡ NPU не взял граф (пробный прогон " + probe + " мс, " + opts.getOrDefault("htp_arch", "поколение не задано")
+            + ") — распознаёт процессор, как раньше");
+        return;
+      }
       npu = n; npuState = n.how;
-      log.log("⚡ NPU готов за " + (System.nanoTime() - t) / 1_000_000 + " мс (" + n.how + ")");
+      log.log("⚡ NPU готов за " + (System.nanoTime() - t) / 1_000_000 + " мс (" + n.how + ", пробный прогон " + probe + " мс)");
     } catch (Throwable e) {
       npuState = "error"; log.log("⚡ NPU не поднялся, распознаёт процессор: " + e);
     }

@@ -100,6 +100,21 @@ final class NpuAsr implements AutoCloseable {
     return out.toArray(new String[0]);
   }
 
+  /** Время одного прогона кодировщика на пустом окне, мс. NPU — десятки миллисекунд; если QNN не взял граф
+   *  (ORT молча отдаёт его процессору), выходит секунды — тогда NPU не включается (Engine.startNpu). */
+  synchronized long probeMs() throws OrtException {
+    try (OnnxTensor a = OnnxTensor.createTensor(env, FloatBuffer.wrap(new float[MEL * F]), new long[]{1, MEL, F});
+         OnnxTensor l = OnnxTensor.createTensor(env, FloatBuffer.wrap(new float[]{F}), new long[]{1})) {
+      long best = Long.MAX_VALUE;
+      for (int k = 0; k < 2; k++) {     // первый вызов прогревает
+        long t = System.nanoTime();
+        try (OrtSession.Result r = enc.run(map("audio_signal", a, "length", l))) { }
+        best = Math.min(best, (System.nanoTime() - t) / 1_000_000);
+      }
+      return best;
+    }
+  }
+
   /** Распознать фразу (16 кГц). null — длиннее окна NPU (832 кадра признаков). */
   synchronized Result run(float[] s) throws OrtException {
     float[] x = new float[MEL * F]; long T;
