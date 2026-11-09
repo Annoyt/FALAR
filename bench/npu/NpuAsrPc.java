@@ -8,18 +8,28 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
 
-/** Стенд на ПК для NpuAsr: тот же класс, что в приложении, но кодировщик на процессоре (QDQ считается во float, выход
- *  тот же, что у NPU с точностью квантования). По корпусу bench/air/corpus → «имя<TAB>гипотеза» и время на фразу.
- *  WER — bench/npu/asr_wer.py --hyps. Запуск — bench/npu/npu_asr_pc.sh.
- *    NpuAsrPc ASR_DIR NPU_DIR CORPUS OUT.tsv [КАЖДАЯ_N] */
+/** Стенд для NpuAsr: тот же класс, что в приложении, по корпусу bench/air/corpus → «имя<TAB>гипотеза» и время на фразу.
+ *  На ПК кодировщик на процессоре (QDQ во float — bench/npu/npu_asr_pc.sh); на телефоне со Snapdragon через app_process
+ *  — на NPU, с теми же библиотеками QNN, что в APK (bench/npu/npu_asr_device.sh). WER — bench/npu/asr_wer.py --hyps.
+ *    NpuAsrPc ASR_DIR NPU_DIR CORPUS OUT.tsv [КАЖДАЯ_N] [КАТАЛОГ_QNN [ФАЙЛ_ГРАФА]] */
 public class NpuAsrPc {
   public static void main(String[] a) throws Exception {
     File asr = new File(a[0]), npu = new File(a[1]), corpus = new File(a[2]), out = new File(a[3]);
     int every = a.length > 4 ? Integer.parseInt(a[4]) : 1;
-    int n = 0, done = 0, longer = 0; long ms = 0;
-    try (NpuAsr r = new NpuAsr(asr, npu, null, null);
+    java.util.Map<String, String> qnn = null;
+    if (a.length > 5) {
+      qnn = new java.util.HashMap<>();
+      qnn.put("backend_path", new File(a[5], "libQnnHtp.so").getPath());
+      qnn.put("htp_performance_mode", "burst");
+      qnn.put("htp_graph_finalization_optimization_mode", "3");
+    }
+    File ctx = a.length > 6 ? new File(a[6]) : null;
+    int n = 0, done = 0, longer = 0; long ms = 0, first = -1;
+    long t00 = System.nanoTime();
+    try (NpuAsr r = new NpuAsr(asr, npu, qnn, ctx);
          PrintWriter w = new PrintWriter(out, "UTF-8")) {
-      System.out.println("кодировщик: " + r.how + ", токенов " + r.sym.length + ", пустой " + r.blank);
+      System.out.println("RESULT загрузка " + (System.nanoTime() - t00) / 1_000_000 + " мс; кодировщик: " + r.how
+          + ", токенов " + r.sym.length + ", пустой " + r.blank);
       for (String lang : new String[]{"pt", "ru"}) {
         File[] wavs = new File(corpus, lang).listFiles((d, s) -> s.endsWith(".wav"));
         Arrays.sort(wavs);
@@ -28,7 +38,8 @@ public class NpuAsrPc {
           float[] s = wav(f);
           long t0 = System.nanoTime();
           NpuAsr.Result res = r.run(s);
-          ms += (System.nanoTime() - t0) / 1_000_000;
+          long dt = (System.nanoTime() - t0) / 1_000_000;
+          if (first < 0) first = dt; else ms += dt;
           String name = lang + "_" + f.getName().replace(".wav", "");
           if (res == null) { longer++; continue; }
           w.println(name + "\t" + res.text);
@@ -36,7 +47,8 @@ public class NpuAsrPc {
         }
       }
     }
-    System.out.printf("фраз %d (длиннее окна %d), %.0f мс на фразу → %s%n", done, longer, ms / (double) Math.max(1, done + longer), out);
+    System.out.printf("RESULT фраз %d (длиннее окна %d), первая %d мс, дальше %.1f мс на фразу (признаки + кодировщик + TDT) → %s%n",
+        done, longer, first, ms / (double) Math.max(1, done + longer - 1), out);
   }
 
   /** WAV PCM 16 бит или float32, моно, 16 кГц. */
