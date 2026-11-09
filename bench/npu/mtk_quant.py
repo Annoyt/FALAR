@@ -104,8 +104,12 @@ def quantize(pre, out, ncal):
     m = onnx.load(str(pre), load_external_data=False)
     init = {i.name: i for i in m.graph.initializer}
     excl = [n.name for n in m.graph.node if n.op_type == "MatMul" and (n.input[1] not in init or len(init[n.input[1]].dims) != 2)]
+    # pre_encode (свёртки 3×3 шаг 2 и выход 4096→1024) — во float: в A16W8 Neuron считает его неверно (POCO 10.11,
+    # проба q01: выход в ~2048 раз меньше), в fp16 — верно; весов там 4 млн из 600 млн
+    pre_enc = [n.name for n in m.graph.node if n.name.startswith("/pre_encode/") and n.op_type in ("Conv", "MatMul")]
+    excl += pre_enc
     nq = sum(1 for n in m.graph.node if n.op_type in ("MatMul", "Conv")) - len(excl)
-    print(f"квантуются {nq} узлов MatMul/Conv; во float остаются {len(excl)} MatMul внимания и позиций")
+    print(f"квантуются {nq} узлов MatMul/Conv; во float остаются {len(excl)}: внимание, позиции и pre_encode ({len(pre_enc)})")
 
     raw = out / "raw"
     raw.mkdir(parents=True, exist_ok=True)

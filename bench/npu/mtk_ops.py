@@ -239,10 +239,12 @@ def qdq_probes(out):
     g.save(qd(g, y, 3.0 / 32767, TensorProto.INT16), out, opset=21)
 
 
-def real(out):
-    """Настоящие куски кодировщика с нашими весами: pre_encode и слой 0 (вход слоя и маски — входы куска)."""
+def real(out, src=None, prefix="r"):
+    """Настоящие куски кодировщика с нашими весами: pre_encode и слой 0 (вход слоя и маски — входы куска).
+    src — другая модель (напр. A16W8 из mtk_quant.py), prefix — начало имён файлов."""
     from onnx.external_data_helper import load_external_data_for_model
-    m = onnx.load(str(SRC), load_external_data=False)       # граф; веса куска подтягиваются потом
+    SRC_ = Path(src) if src else SRC
+    m = onnx.load(str(SRC_), load_external_data=False)      # граф; веса куска подтягиваются потом
     by_name = {n.name: n for n in m.graph.node}
     prod = {o: n.name for n in m.graph.node for o in n.output}
     init = {i.name: i for i in m.graph.initializer}
@@ -266,8 +268,9 @@ def real(out):
                               [helper.make_tensor_value_info(k, TensorProto.FLOAT, v) for k, v in outs.items()],
                               [init[i] for i in used if i in init])
         x = helper.make_model(g, opset_imports=list(m.opset_import), ir_version=m.ir_version)
-        load_external_data_for_model(x, str(SRC.parent))    # веса куска — внутрь файла
+        load_external_data_for_model(x, str(SRC_.parent))   # веса куска — внутрь файла
         onnx.checker.check_model(x)
+        name = prefix + name[1:]
         onnx.save(x, str(out / f"{name}.onnx"))
         print(name, "узлов", len(nodes), f"{(out / f'{name}.onnx').stat().st_size / 1e6:.0f} МБ")
 
@@ -285,7 +288,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--no-real", action="store_true", help="без настоящих кусков кодировщика (нужна модель fp32)")
+    ap.add_argument("--real-from", help="только настоящие куски из этой модели (напр. .stand/npu/mtk/a16w8/encoder-npu.onnx)")
+    ap.add_argument("--prefix", default="r")
     a = ap.parse_args()
+    if a.real_from:
+        out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+        real(out, a.real_from, a.prefix)
+        return 0
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     synthetic(out)
