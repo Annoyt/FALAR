@@ -737,6 +737,15 @@ public class TranslatorService extends Service {
     } catch (Throwable ignore) { }
   }
 
+  /** Отказ NPU случился без согласия на статистику, а согласие дали потом — в окне «NPU не заработал»
+   *  (MainActivity.maybeAskNpuData): записать его причину сейчас, ради неё и просили (teleNpu при отказе её не писал). */
+  void teleNpuLast() {
+    try {
+      JSONObject o = new JSONObject(getSharedPreferences("at", MODE_PRIVATE).getString("npu_fail", ""));
+      if (npuId().equals(o.optString("id"))) teleNpu(o.optString("stage"), o.optString("why"));
+    } catch (JSONException ignore) { }
+  }
+
   /** Причина отказа NPU на этой версии и прошивке (npu_fail), или null — не отказывал. Запись прежнего вида — сам id. */
   static String npuFailWhy(SharedPreferences sp, String id) {
     String r = sp.getString("npu_fail", "");

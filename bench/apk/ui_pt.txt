@@ -734,7 +734,9 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 квантовано для NPU (Qualcomm AI Hub, правки Falar)	quantizado para a NPU (Qualcomm AI Hub, ajustes do Falar)
 ждёт свободной памяти	aguardando memória livre
 не Snapdragon и не MediaTek	nem Snapdragon nem MediaTek
-на MediaTek: меньше расход батареи и нагрев, точнее	no MediaTek: menos gasto de bateria e calor, mais preciso
+на MediaTek: меньше расход батареи и нагрев · может не заработать — включите «Статистику для разработчика», и мы исправим это в новых версиях	no MediaTek: menos gasto de bateria e calor · pode não funcionar — ative «Estatísticas para o desenvolvedor» e corrigiremos isso nas próximas versões
+NPU не заработал	A NPU não funcionou
+На этом телефоне распознавание на NPU не получилось. Falar распознаёт процессором, как обычно, — ничего не потеряно. NPU MediaTek мы проверили не на всех телефонах; чтобы исправить это в новых версиях, нужна причина сбоя. Разрешите отправлять разработчику анонимную статистику: причина войдёт в неё, звук и тексты разговоров не уходят.	Neste telefone o reconhecimento na NPU não funcionou. O Falar reconhece no processador, como sempre — nada se perdeu. Ainda não testamos a NPU MediaTek em todos os telefones; para corrigir isso nas próximas versões, precisamos saber a causa da falha. Permita enviar estatísticas anônimas ao desenvolvedor: a causa vai junto, o áudio e os textos das conversas não são enviados.
 не справляется с моделью	não dá conta do modelo
 квантовано для NPU MediaTek (правки Falar)	quantizado para a NPU MediaTek (alterações do Falar)
 правки Falar: 16-битные активации	alterações do Falar: ativações de 16 bits
