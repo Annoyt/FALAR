@@ -18,7 +18,9 @@
 # POCO X7 Pro (MT6899), 10.11: то же падение через 3 с — приложению не отдавали libneuronusdk_adapter.mtk.so (logcat:
 # «NeuronApi error: unable to open library», «uses_libraries=» пусто): с targetSdk 31+ библиотеки производителя нужно
 # назвать в манифесте (<uses-native-library>), а дополнение NeuroPilot ошибку не проверяет. С объявлением граф собирается.
-# Падение на Redmi могло быть тем же — с объявлением там ещё не проверено.
+# Redmi, 10.11 18:11, с объявлением (копия app.falar.npu): падения нет — дополнение отказывает словами («ORT_EP_FAIL —
+# Some ops unsupported by devices: mtk-gpu, mtk-dsp, mtk-mdla»), Falar жив, после перезапуска «уже отказал». Прежний
+# SIGSEGV на Redmi был тем же необъявленным адаптером.
 # POCO, 10.11 18:03, с объявлением и сборкой до моделей (npuFirst), копия app.falar.npu: граф собран до моделей за 43 с
 # (свободно не меньше 1,7 ГБ); после моделей NPU из сохранённого графа за 3,6 с (пробный прогон 173 мс); сверка «2 из 2,
 # сходство 100 %» → NPU; фразы 2,6–3,2 с речи — 188–237 мс; перезапуск — «уже проверен», сразу NPU (169–330 мс);
@@ -90,7 +92,8 @@ FRESH=; [ "$PKG" = app.falar ] || FRESH=1
 open "--es feedonly 1${FRESH:+ --es modules ''}"; sleep 6        # каталоги приложения создаёт само приложение
 if [ -n "$FRESH" ]; then
   say "0. пробная копия $PKG: модули выключены, модели — с ПК"
-  [ -n "$(sh "ls -d $F 2>/dev/null")" ] || { say "   ✗ приложение не создало $F — не заливаю (каталог от adb ему недоступен)"; exit 3; }
+  for _ in $(seq 15); do [ -n "$(sh "ls -d $F 2>/dev/null")" ] && break; sleep 2; done   # первый запуск копии — дольше (Redmi: >6 с)
+  [ -n "$(sh "ls -d $F 2>/dev/null")" ] || { say "   ✗ приложение не создало $F за 30 с — не заливаю (каталог от adb ему недоступен)"; exit 3; }
   LIST=$(python3 - "$W/models/manifest.json" "$P/models" "$W" <<'PY'
 import json, os, sys
 mf, models, root = sys.argv[1:4]
