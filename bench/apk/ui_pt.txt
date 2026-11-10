@@ -766,3 +766,7 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 Скорость речи: португальский	Velocidade da fala: português
 Скорость речи — своя у каждого языка: от вдвое медленнее до вдвое быстрее.	Velocidade da fala própria para cada idioma: da metade ao dobro.
 своя заглушка вместо закрытой библиотеки MediaTek: шесть функций ABI дополнения	substituto próprio no lugar da biblioteca fechada da MediaTek: seis funções da ABI do complemento
+Уточнять до озвучки	Refinar antes de falar
+при «Точнее» голос ждёт уточнитель до 3 с	com «Mais precisa», a voz espera o refinador até 3 s
+PT — собеседнику, RU — вам. Не успел за 3 с — звучит перевод фразы, уточнённый текст появится чуть позже.	PT — para o interlocutor, RU — para você. Se não ficar pronto em 3 s, toca a tradução da frase e o texto refinado aparece logo depois.
+При «Точнее» голос ждёт уточнитель до 3 секунд — язык выбирается в настройках.	Com «Mais precisa», a voz espera o refinador até 3 segundos — o idioma se escolhe nas configurações.

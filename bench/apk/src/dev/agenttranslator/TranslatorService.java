@@ -220,11 +220,21 @@ public class TranslatorService extends Service {
   public static class Turn { public final int n; public final String dir, asr, mt; public final long at; public volatile String refined;
     /** Реплику поправили или удалили, пока она ждала озвучки: поток озвучки её пропускает. */
     public volatile boolean dropped;
+    /** Уточнение до озвучки (RefineVoice): идёт или кончилось (live; null — не начиналось), с какого времени ждёт голос
+     *  (liveT0, мс), ответ уточнителя (liveOut; null — тот же перевод, отброшен или не успел) и записана ли реплика. */
+    volatile java.util.concurrent.CountDownLatch live; volatile long liveT0; volatile String liveOut; boolean saved;
     Turn(int n, String d, String a, String m, long at) { this.n = n; dir = d; asr = a; mt = m; this.at = at; } }
   public final List<Turn> history = Collections.synchronizedList(new ArrayList<>()); int turnNo = 0;
   /** Знаков на токен у модели уточнителя — замер при её запуске (Brief). */
   volatile double llmCpt = Brief.DEFAULT_CHARS_PER_TOKEN;
   public volatile Llm llm; public volatile boolean contextMode = false; final ExecutorService llmWorker = Executors.newSingleThreadExecutor(); volatile boolean refinePending = false, refineRunning = false;
+  /** «Уточнять до озвучки» (RefineVoice, владелец 10.11): при «Точнее» голос выбранного языка ждёт уточнитель. */
+  public volatile String refineVoice = RefineVoice.PT;
+  /** Уточнение до озвучки — своим потоком: проход разбора на llmWorker его в очереди не держит, а сам уступает ему
+   *  (refineLoop ждёт, пока liveBusy > 0). */
+  final ExecutorService liveExec = Executors.newSingleThreadExecutor(r -> new Thread(r, "refine-live"));
+  final java.util.concurrent.atomic.AtomicInteger liveBusy = new java.util.concurrent.atomic.AtomicInteger();
+  volatile boolean llmLoading = false, liveLoadSaid = false;
   /** Интервалы разбора контекста, в репликах: 0 — только по кнопке. Локальный — уточнитель 🧠,
    *  облачный — пересмотр всего разговора. Счётчики идут с последнего разбора и сбрасываются
    *  ручным нажатием; cloudBackoff удваивает облачный интервал после отказа 429 или обрыва —
@@ -396,6 +406,7 @@ public class TranslatorService extends Service {
         log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
       Engine.mtBeam = getSharedPreferences("at", MODE_PRIVATE).getBoolean("mt_quality", true) ? Engine.MT_BEAM_QUALITY : 1;
+      refineVoice = RefineVoice.parse(getSharedPreferences("at", MODE_PRIVATE).getString("refine_voice", RefineVoice.PT));
       Engine.withTts = mod(Modules.TTS);
       Engine.ttsOpen = lg -> SysTts.open(this, chosenVoices(), chosenSpeeds(), lg::log);
       readSoundPrefs();
@@ -1363,7 +1374,8 @@ public class TranslatorService extends Service {
       log("🧪 настройки: разбор " + p.getInt("refine_every", 3) + " · облако " + p.getInt("cloud_every", 0) + " · чтение вслух " + p.getInt("read_guard", 1)
           + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0) + " · перевод точнее " + (p.getBoolean("mt_quality", true) ? 1 : 0)
           + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))] + " · два микрофона " + p.getString("dualmic", "auto")
-          + String.format(Locale.ROOT, " · скорость ru %.1f pt %.1f", TtsVoices.speed(p.getFloat("tts_speed_ru", 1f)), TtsVoices.speed(p.getFloat("tts_speed_pt", 1f)))); }
+          + String.format(Locale.ROOT, " · скорость ru %.1f pt %.1f", TtsVoices.speed(p.getFloat("tts_speed_ru", 1f)), TtsVoices.speed(p.getFloat("tts_speed_pt", 1f)))
+          + " · до озвучки " + RefineVoice.parse(p.getString("refine_voice", RefineVoice.PT))); }
     if (i != null && i.hasExtra("refineevery")) setRefineEvery(Integer.parseInt(i.getStringExtra("refineevery")));
     if (i != null && i.hasExtra("cloudevery")) setCloudEvery(Integer.parseInt(i.getStringExtra("cloudevery")));
     if (i != null && i.hasExtra("consent")) { getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("cloud_consent", "1".equals(i.getStringExtra("consent"))).apply(); log("☁ согласие на отправку разговора: " + cloudConsent()); }
@@ -1376,6 +1388,7 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("cloudprefer")) setCloudQuality("quality".equals(i.getStringExtra("cloudprefer")));
     // Стенд: «Перевод: быстрее / точнее» без экрана — «--es mtprefer quality|speed».
     if (i != null && i.hasExtra("mtprefer")) setMtQuality(!"speed".equals(i.getStringExtra("mtprefer")));
+    if (i != null && i.hasExtra("refinevoice")) setRefineVoice(i.getStringExtra("refinevoice"));
     if (i != null && i.hasExtra("cloudroute") && cloud != null && cloud.ready) {
       boolean was = cloud.preferQuality;
       for (boolean q : new boolean[]{false, true}) {
@@ -2032,9 +2045,11 @@ public class TranslatorService extends Service {
   /** Порог в работе. Меняется только стендом (--es llmneed <МБ>) и живёт до перезапуска: чтобы
    *  проверить разбор на телефоне, где ядро и уточнитель вместе не помещаются. */
   volatile long llmNeed = LLM_NEED;
-  final Runnable llmIdleUnload = () -> { if (!refineRunning) unloadLlm("простой " + LLM_IDLE_MS / 1000 + " с"); };
+  final Runnable llmIdleUnload = () -> { if (!refineRunning && liveBusy.get() == 0) unloadLlm("простой " + LLM_IDLE_MS / 1000 + " с"); };
   void unloadLlm(String why) {
     main.removeCallbacks(llmIdleUnload);
+    resumeLlm(true);                                   // на паузе сервер не услышал бы и просьбу завершиться
+    liveLoadSaid = false;
     Llm l = llm; llm = null;
     if (l != null) { llmWorker.submit(l::stop); log("🧠 уточнитель выгружен: " + why); tsv("llm_unload", why); }
   }
@@ -2314,6 +2329,121 @@ public class TranslatorService extends Service {
     return n + ". " + sl + (who == null || who.isEmpty() ? "" : " (" + who + ")") + ": " + src + "\n   " + tl + " draft: " + draft + "\n";
   }
   static int indexOf(Turn[] h, Turn t) { for (int i = 0; i < h.length; i++) if (h[i] == t) return i; return -1; }
+  /** Вопрос уточнителю Hy-MT о реплике: подсказка (фон, термины) — один раз для прохода и для уточнения до озвучки. */
+  static final class Prep { Turn tn; Turn[] h; String tgt, terms, tp, bg, past; }
+  static final class Fix { String out, why; long ms; }
+  /** null — реплики нет в истории; bg == null — реплика длиннее окна уточнителя. */
+  Prep prep(Turn[] h, Turn tn, String memo) {
+    int idx = indexOf(h, tn); if (idx < 0) return null;
+    Prep p = new Prep(); p.tn = tn; p.h = h; p.tgt = tn.dir.substring(3);
+    p.terms = terms(tn.dir, tn.asr); p.past = lastPastTerms; p.tp = memo.isEmpty() ? "" : memo + "\n";
+    // Бюджет из окна модели: без него длинные реплики переполняли окно, сервер отказывал,
+    // и уточнитель замолкал навсегда. Старое — в памяти разговора, свежее — в пределах бюджета.
+    int budget = Brief.budget(llmCpt, tn.asr.length(), p.terms.length(), p.tp.length());
+    if (budget < 0) return p;
+    List<String> fresh = Brief.fit(backgroundLines(h, idx), Math.min(budget, Brief.FRESH_CHARS));
+    p.bg = p.tp + String.join("\n", fresh);
+    return p;
+  }
+  /** Ответ уточнителя на подготовленный вопрос: why — почему ответ отброшен (Brief.swallowed), иначе null. */
+  Fix ask(Prep p) throws Exception {
+    Llm l = llm; if (l == null) throw new java.io.IOException("уточнитель выгружен");
+    long t = System.nanoTime();
+    String out = l.chat(null, hyPrompt(p.bg, p.tn.asr, p.tgt, p.terms), 200).trim();
+    Fix f = new Fix(); f.ms = (System.nanoTime() - t) / 1000000;
+    if (p.tgt.equals("pt")) out = TextRules.toBrazilian(out);
+    f.out = out; f.why = Brief.swallowed(out, p.tn.asr, p.tn.refined != null ? p.tn.refined : p.tn.mt, seen(p.h, p.tn, p.tp));
+    return f;
+  }
+
+  /** Уточнение до озвучки (RefineVoice, владелец 10.11): при «Точнее» реплика выбранного языка — сразу уточнителю, с
+   *  тем же фоном, что у прохода разбора; голос ждёт ответ не дольше RefineVoice.CAP_MS (liveSay). Уточнитель не
+   *  поднят — поднимается, а реплика звучит переводом фразы. Ответ ложится в реплику (applyFix), как правка прохода,
+   *  когда реплика записана (markSaved): кто из двух придёт позже, тот и кладёт. */
+  boolean startLive(Turn tn) {
+    Llm l = llm;
+    if (l == null || !l.ready) {
+      if (!liveLoadSaid) { liveLoadSaid = true; log("🧠 до озвучки: уточнитель не поднят — эта реплика звучит переводом фразы, поднимаю его"); }
+      kickLlmLoad(); return false;
+    }
+    if (!l.model.toLowerCase().contains("hy-mt")) return false;   // инструктивная модель правит пачкой, не по реплике
+    final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+    tn.liveT0 = System.currentTimeMillis(); tn.live = done;
+    liveBusy.incrementAndGet(); main.removeCallbacks(llmIdleUnload);
+    liveExec.submit(() -> {
+      try {
+        Turn[] h; synchronized (history) { h = history.toArray(new Turn[0]); }
+        Prep pp = prep(h, tn, memoBlock(topicLine()));
+        if (pp == null || pp.bg == null) log("🔁 #" + tn.n + " до озвучки: " + (pp == null ? "реплики нет в истории" : "длиннее окна уточнителя") + " — звучит перевод фразы");
+        else {
+          Fix f = ask(pp);
+          if (f.why != null) log("🔁 #" + tn.n + " до озвучки: ответ отброшен (" + f.ms + " мс) — " + f.why + ": " + f.out);
+          else if (Phrasebook.norm(f.out).equals(Phrasebook.norm(tn.mt))) log("🔁 #" + tn.n + " до озвучки: контекст не изменил перевод (" + f.ms + " мс)");
+          else { tn.liveOut = f.out; log("🔁 #" + tn.n + " до озвучки (" + f.ms + " мс, фон " + pp.bg.length() + " зн.): " + f.out); }
+        }
+      } catch (Throwable e) { log("🔁 #" + tn.n + " до озвучки: уточнитель не ответил — " + e.getMessage()); }
+      finally {
+        done.countDown();
+        markLive(tn);
+        if (liveBusy.decrementAndGet() == 0 && !refineRunning && llm != null) { main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); }
+      }
+    });
+    return true;
+  }
+  /** Что произнести: ответ уточнителя, если он успел до предела (RefineVoice.left от готового перевода), иначе mt.
+   *  wait[0] — сколько голос ждал, мс (-1 — не ждал). */
+  String liveSay(Turn tn, String mt, long[] wait) {
+    java.util.concurrent.CountDownLatch d = tn == null ? null : tn.live;
+    if (d == null) { wait[0] = -1; return mt; }
+    long t = System.currentTimeMillis();
+    try { d.await(RefineVoice.left(tn.liveT0, t), java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    wait[0] = System.currentTimeMillis() - t;
+    String o = tn.liveOut;
+    return o != null ? o : mt;
+  }
+  /** Хвост строки реплики: что вышло с уточнением до озвучки. */
+  static String liveTag(Turn tn, long w) {
+    if (w < 0 || tn == null || tn.live == null) return "";
+    if (tn.liveOut != null) return " · уточнено до озвучки, голос ждал " + w + " мс";
+    return tn.live.getCount() > 0 ? " · уточнитель не успел за " + RefineVoice.CAP_MS / 1000 + " с — звучит перевод фразы" : " · уточнитель оставил перевод (голос ждал " + w + " мс)";
+  }
+  /** Реплика записана в разговор: ответ уточнителя, пришедший раньше, — в неё. */
+  void markSaved(Turn tn) { String o; synchronized (tn) { tn.saved = true; o = tn.liveOut; } if (o != null) applyFix(tn, o, Chats.BY_LLM); }
+  /** Ответ уточнителя пришёл: реплика уже записана — в неё, иначе его положит markSaved. */
+  void markLive(Turn tn) { String o; synchronized (tn) { o = tn.saved ? tn.liveOut : null; } if (o != null) applyFix(tn, o, Chats.BY_LLM); }
+  /** Поднять уточнитель заранее (для уточнения до озвучки) — на llmWorker, если он не занят проходом. */
+  void kickLlmLoad() {
+    if (llmLoading || refineRunning || !mod(Modules.LLM)) return;
+    llmLoading = true;
+    llmWorker.submit(() -> {
+      try { if (ensureLlm()) { liveLoadSaid = false; main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); } }
+      finally { llmLoading = false; }
+    });
+  }
+
+  /** Голос первым (владелец 10.11): пока синтез готовит первый звук, процесс уточнителя стоит (SIGSTOP) и продолжает с
+   *  первым куском (SIGCONT). Рядом с работающим уточнителем синтез Google отдавал первый звук через 0,9–1,1 с вместо
+   *  0,04 (test_voice V3 10.11: «🔁 #2 по контексту (2580 мс)» ровно под репликой). Только если сервер сейчас считает. */
+  final Object llmPauseLock = new Object(); int llmPausedPid = 0; long llmPausedAt = 0;
+  boolean pauseLlm() {
+    Llm l = llm;
+    if (l == null || !l.ready || l.pid <= 0 || !refineRunning && liveBusy.get() == 0) return false;
+    synchronized (llmPauseLock) {
+      if (llmPausedPid != 0) return false;
+      try { android.os.Process.sendSignal(l.pid, 19); llmPausedPid = l.pid; llmPausedAt = System.currentTimeMillis(); return true; }
+      catch (Throwable e) { return false; }
+    }
+  }
+  void resumeLlm(boolean was) {
+    if (!was) return;
+    int pid; long ms;
+    synchronized (llmPauseLock) {
+      if (llmPausedPid == 0) return;
+      pid = llmPausedPid; llmPausedPid = 0; ms = System.currentTimeMillis() - llmPausedAt;
+      try { android.os.Process.sendSignal(pid, 18); } catch (Throwable ignore) {}
+    }
+    log("🧠 уточнитель уступил голосу " + ms + " мс");
+  }
   /** Локальный проход по контексту: реплики с прошлого разбора, не больше пяти, каждая с контекстом
    *  остальных — позже сказанное уточняет раньше сказанное, а вызовов вдвое меньше, чем при
    *  разборе каждой реплики отдельно. Hy-MT — переводная модель: ей по реплике на запрос с
@@ -2337,6 +2467,8 @@ public class TranslatorService extends Service {
       // Правленное человеком не разбираем вовсе: менять его всё равно нельзя, а разбор — это
       // 10–20 секунд процессора и поднятый уточнитель.
       if (chats != null) todo.removeIf(t -> chats.humanAt(t.at));
+      // Уточнённые до озвучки (RefineVoice) — уже разобраны тем же уточнителем с тем же контекстом.
+      todo.removeIf(t -> t.live != null);
       if (todo.isEmpty()) continue;
       boolean hy = llm.model.toLowerCase().contains("hy-mt");
       String topic = topicLine(), memo = memoBlock(topic);
@@ -2347,26 +2479,18 @@ public class TranslatorService extends Service {
       if (hy) {
         int k = 0;
         for (Turn tn : todo) {
+          // Уточнение до озвучки (RefineVoice) — первым: его ждёт голос. Сервер у них один (один слот), и вопрос
+          // прохода, заданный рядом, стоял бы перед ним в очереди.
+          while (liveBusy.get() > 0) Thread.sleep(50);
           busy("refine", L.k("уточняю перевод"), k++, todo.size());
-          int idx = indexOf(h, tn); if (idx < 0) continue;
-          String tgt = tn.dir.substring(3);
-          String tm = terms(tn.dir, tn.asr), tp = memo.isEmpty() ? "" : memo + "\n";
-          if (!lastPastTerms.isEmpty()) log("📚 #" + tn.n + " термины прошлых разговоров: " + lastPastTerms);
-          // Бюджет из окна модели: без него длинные реплики переполняли окно, сервер отказывал,
-          // и уточнитель замолкал навсегда. Старое — в памяти разговора, свежее — в пределах бюджета.
-          int budget = Brief.budget(llmCpt, tn.asr.length(), tm.length(), tp.length());
-          if (budget < 0) { log("🔁 #" + tn.n + " длиннее окна уточнителя (" + tn.asr.length() + " знаков) — оставляю перевод как есть"); continue; }
-          List<String> fresh = Brief.fit(backgroundLines(h, idx), Math.min(budget, Brief.FRESH_CHARS));
-          String bg = tp + String.join("\n", fresh);
-          long t = System.nanoTime();
+          Prep pp = prep(h, tn, memo); if (pp == null) continue;
+          if (!pp.past.isEmpty()) log("📚 #" + tn.n + " термины прошлых разговоров: " + pp.past);
+          if (pp.bg == null) { log("🔁 #" + tn.n + " длиннее окна уточнителя (" + tn.asr.length() + " знаков) — оставляю перевод как есть"); continue; }
           try {
-            String out = llm.chat(null, hyPrompt(bg, tn.asr, tgt, tm), 200).trim();
-            long ms = (System.nanoTime() - t) / 1000000;
-            if (tgt.equals("pt")) out = TextRules.toBrazilian(out);
-            String why = Brief.swallowed(out, tn.asr, tn.refined != null ? tn.refined : tn.mt, seen(h, tn, tp));
-            if (why != null) { rejected++; log("🔁 #" + tn.n + " ответ отброшен (" + ms + " мс, фон " + bg.length() + " зн.) — " + why + ": " + out); }
-            else if (applyFix(tn, out, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту (" + ms + " мс, фон " + bg.length() + " зн.): " + out); }
-            else log("🔁 #" + tn.n + " контекст не изменил перевод (" + ms + " мс, фон " + bg.length() + " зн.)");
+            Fix f = ask(pp);
+            if (f.why != null) { rejected++; log("🔁 #" + tn.n + " ответ отброшен (" + f.ms + " мс, фон " + pp.bg.length() + " зн.) — " + f.why + ": " + f.out); }
+            else if (applyFix(tn, f.out, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту (" + f.ms + " мс, фон " + pp.bg.length() + " зн.): " + f.out); }
+            else log("🔁 #" + tn.n + " контекст не изменил перевод (" + f.ms + " мс, фон " + pp.bg.length() + " зн.)");
           } catch (Exception e) {
             // Одна неудачная реплика не обрывает проход: раньше исключение выбрасывало весь цикл,
             // метка «разобрано до» не сдвигалась, и следующий проход падал на том же месте.
@@ -2524,7 +2648,14 @@ public class TranslatorService extends Service {
   public void setMtQuality(boolean on) {
     getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("mt_quality", on).apply();
     Engine.mtBeam = on ? Engine.MT_BEAM_QUALITY : 1;
-    log("🔤 перевод: " + (on ? "точнее — перебор " + Engine.MT_BEAM_QUALITY + " вариантов" : "быстрее — первый вариант"));
+    log("🔤 перевод: " + (on ? "точнее — перебор " + Engine.MT_BEAM_QUALITY + " вариантов" + (mod(Modules.LLM) ? ", до озвучки уточняется " + RefineVoice.label(refineVoice) : "")
+        : "быстрее — первый вариант, уточнитель только фоном"));
+  }
+  /** «Уточнять до озвучки»: какой язык при «Точнее» ждёт уточнитель (RefineVoice.PT / RU / BOTH). */
+  public void setRefineVoice(String k) {
+    refineVoice = RefineVoice.parse(k);
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString("refine_voice", refineVoice).apply();
+    log("🧠 до озвучки уточняется: " + RefineVoice.label(refineVoice) + (mtQuality() ? "" : " — при «Точнее»; сейчас «Быстрее», голос сразу"));
   }
   public boolean cloudQuality() { return cloud != null && cloud.preferQuality; }
   /** «Облако: быстрее / точнее» — порядок, в котором перебираются бесплатные модели (Cloud.score). */
@@ -3693,10 +3824,10 @@ public class TranslatorService extends Service {
     if (!voice()) return 0;
     int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     final boolean dup = btDuplex(); if (!dup) muteUntil = Long.MAX_VALUE;
-    double sec = 0; final long[] w0 = {0};
-    try { SysTts.Audio ga = eng.speak(tgt, text, chunk -> { if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
+    double sec = 0; final long[] w0 = {0}; final boolean[] held = {pauseLlm()};
+    try { SysTts.Audio ga = eng.speak(tgt, text, chunk -> { if (held[0]) { held[0] = false; resumeLlm(true); } if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
       sec = ga.getSamples().length / (double) rate;
-    } finally { if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec) + pausedMs; playEndMs += pausedMs; if (!dup) muteUntil = until; } }
+    } finally { if (held[0]) { held[0] = false; resumeLlm(true); } if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec) + pausedMs; playEndMs += pausedMs; if (!dup) muteUntil = until; } }
     return sec;
     }
   }
@@ -4911,6 +5042,10 @@ public class TranslatorService extends Service {
       // Снимок не озвучивается: его читают глазами (решение владельца 28.09).
       final boolean hp = headphonesOut();
       final boolean soon = !voice() && ttsSoon();
+      // «Точнее» + выбранный язык (RefineVoice): реплика — сразу уточнителю, голос подождёт его ответ (liveSay). Только
+      // если голос и правда сейчас зазвучит: молча ждать нечего, а уточнит потом проход разбора.
+      final boolean rv = here && !silent && !kind.equals("фото") && !kind.equals(VOICE_KIND) && voice() && VoiceOut.voice(voiceWhat, fTgt, hp)
+          && RefineVoice.waits(refineVoice, mtQuality(), mod(Modules.LLM) && hasLlm(), fTgt) && startLive(turn);
       // Голосовое из мессенджера — тоже: его читают, а вслух оно уже звучало у человека в мессенджере.
       if (silent || !here || kind.equals("фото") || kind.equals(VOICE_KIND) || !voice() && !soon) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : kind.equals("фото") ? " · снимок, без озвучки" : kind.equals(VOICE_KIND) ? " · голосовое, без озвучки" : " · озвучка выключена"; }
       else if (!VoiceOut.voice(voiceWhat, fTgt, hp)) { first[0] = t2; tag += " · " + VoiceOut.silentWhy(voiceWhat, fTgt, hp); }
@@ -4922,7 +5057,17 @@ public class TranslatorService extends Service {
         sayQ.add(new Object[]{dir, fTgt, mt, cacheable, turn});
         first[0] = t2; tag += soon ? " · озвучка — когда поднимутся голоса" : " · озвучка ждёт паузы";
       }
-      else { first[0] = 0; audioS = speakTurn(dir, fTgt, mt, cacheable, first); if (first[0] == 0) first[0] = System.nanoTime(); }
+      else {
+        first[0] = 0; String say = mt;
+        if (rv) {
+          // Текст — на экран сразу (читают раньше, чем слушают), голос — когда ответит уточнитель или выйдет предел
+          final Listener le = listener; final String fd = dir, fs = asr, fm = mt;
+          if (le != null) main.post(() -> le.onTurn(fd, fs, fm, false));
+          long[] lw = {-1}; say = liveSay(turn, mt, lw); tag += liveTag(turn, lw[0]);
+          if (!say.equals(mt) && le != null) { final String fr = say; main.post(() -> le.onTurn(fd, fs, fr, true)); }
+        }
+        audioS = speakTurn(dir, fTgt, say, cacheable && say.equals(mt), first); if (first[0] == 0) first[0] = System.nanoTime();
+      }
       if (here) { lastDir = dir; lastSrc = asr; lastDst = mt; lastMaskedSrc = r.maskedSrc; lastMaskedDst = r.maskedMt; lastSlots = r.slots; lastAt = at; lastDoubt = new Doubt(asr, doubt); }
       String line = String.format("#%d %s | %s\n   → %s\n   %s · %s %d · mt %d · tts→звук %d · до звука %d мс%s", turn.n, dir, asr, mt, tag,
           kind, srcMs, (t2 - t1) / 1000000, (first[0] - t2) / 1000000, srcMs + (first[0] - t1) / 1000000,
@@ -4959,8 +5104,9 @@ public class TranslatorService extends Service {
         }
         if (chats.rolled) { chats.rolled = false; log("📄 в разговоре набралось " + Chats.KEEP + " реплик — продолжаю в новом"); }
       }
-      final String fSrc = asr, fDst = mt, fDir = dir;
-      Listener lt = listener; if (lt != null) main.post(() -> lt.onTurn(fDir, fSrc, fDst, false));
+      final String fSrc = asr, fDst = turn.liveOut != null ? turn.liveOut : mt, fDir = dir;
+      Listener lt = listener; if (lt != null) main.post(() -> lt.onTurn(fDir, fSrc, fDst, turn.liveOut != null));
+      if (turn.live != null) markSaved(turn);
       if (numbered && lt != null) main.post(lt::onHistory);        // первая реплика голоса получила номер
       notify(asr + " → " + mt); scheduleRefine();
       if (whoIn != null && !whoIn.listen) enrollLater(whoIn, r.src, r.asr, chatId, at);
@@ -5001,11 +5147,14 @@ public class TranslatorService extends Service {
     double audioS = 0;
     final long[] w0 = {0};                 // когда отдан первый кусок — с него фраза и звучит
     float[] cached = pb.audio(dir, mt);
+    final boolean[] held = {false};          // уточнитель стоит, пока синтез готовит первый звук (pauseLlm)
     try {                                  // без finally одно исключение в синтезе делало приложение глухим навсегда
       if (cached != null) { if (first != null && first[0] == 0) first[0] = System.nanoTime(); w0[0] = System.currentTimeMillis(); phraseSounds(tgt); writeOut(cached, cached.length, tgt); audioS = cached.length / (double) rate; }
-      else { SysTts.Audio ga = eng.speak(tgt, mt, chunk -> { if (bargeStop) return 0; if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
+      else { held[0] = pauseLlm();
+        SysTts.Audio ga = eng.speak(tgt, mt, chunk -> { if (held[0]) { held[0] = false; resumeLlm(true); } if (bargeStop) return 0; if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
         audioS = ga.getSamples().length / (double) rate; if (cacheable && !bargeStop) pb.putAudio(dir, mt, ga.getSamples(), rate); }
     } finally {
+      if (held[0]) { held[0] = false; resumeLlm(true); }
       long now = System.currentTimeMillis(), until = muteAfter(w0[0] == 0 ? now : w0[0], audioS);
       boolean cut = phraseEnd();
       if (cut) { playEndMs = now; until = now; }                           // перебили: дорожка уже пуста, микрофон открыт
@@ -5049,8 +5198,11 @@ public class TranslatorService extends Service {
           Turn tn = it.length > 4 ? (Turn) it[4] : null;
           if (tn != null && tn.dropped) continue;   // реплику поправили или удалили, пока она ждала
           String say = tn != null && tn.refined != null ? tn.refined : (String) it[2];
-          double sec = speakTurn((String) it[0], (String) it[1], say, (Boolean) it[3], null);
-          if (waited > 150) log(String.format(Locale.ROOT, "🔊 озвучено после паузы %.1f с (%.1f с звука, в очереди ещё %d)", waited / 1000.0, sec, sayQ.size()));
+          // Уточнение до озвучки (RefineVoice): пауза в речи уже шла в счёт предела, ждём только остаток
+          long[] lw = {-1}; if (tn != null && tn.live != null) say = liveSay(tn, say, lw);
+          double sec = speakTurn((String) it[0], (String) it[1], say, (Boolean) it[3] && say.equals(it[2]), null);
+          if (waited > 150 || lw[0] >= 0) log(String.format(Locale.ROOT, "🔊 озвучено после паузы %.1f с (%.1f с звука, в очереди ещё %d)%s", waited / 1000.0, sec, sayQ.size(),
+              lw[0] < 0 ? "" : liveTag(tn, lw[0])));
         } catch (InterruptedException e) { return; }
         catch (Throwable t) { log("🔊 озвучить не вышло: " + t); }
       }

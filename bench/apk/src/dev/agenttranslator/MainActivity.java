@@ -24,7 +24,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  (подсказка, размер шрифта) их сохраняет, другой текст — нет. */
   int[] bigDoubt = new int[0]; String bigDoubtFor = "";
   /** Настройки: строки и сегменты (Rows), переключатели. */
-  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segMtPrefer, segReadGuard, segMicSrc, segVoiceWhat; Switch tTranslitOther;
+  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segMtPrefer, segReadGuard, segMicSrc, segVoiceWhat, segRefineVoice; Switch tTranslitOther;
+  /** «Уточнять до озвучки» — видно при «Точнее» и включённом уточнителе (внутри llmBox). */
+  LinearLayout rvBox;
   ListView histList;
   Button bPin, bWord, bBetter, bClear, bKey; View bModels;
   TextView logLast;
@@ -646,6 +648,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     segCloudEvery.sel(indexOf(new int[]{0, 5, 10, 20}, svc.cloudEvery));
     segPrefer.sel(svc.cloudQuality() ? 1 : 0);
     if (segMtPrefer != null) segMtPrefer.sel(svc.mtQuality() ? 1 : 0);
+    if (segRefineVoice != null) { segRefineVoice.sel(RefineVoice.index(svc.refineVoice)); vis(rvBox, svc.mtQuality()); }
     refreshCloudRow();
   }
 
@@ -2493,6 +2496,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final int[] refVals = {0, 1, 3, 10};
     segRefine = r.seg(s6, new String[]{L.t("По кнопке"), "1", "3", "10"}, i -> { if (svc == null) return; svc.setRefineEvery(refVals[i]); refreshIntervals(); });
     r.caption(s6, L.t("реплик между разборами"));
+    // Уточнять до озвучки (RefineVoice, владелец 10.11): при «Точнее» голос выбранного языка ждёт уточнитель до 3 с.
+    // По умолчанию PT: на ваших разговорах уточнитель переводит лучше по-португальски, по-русски — так же.
+    rvBox = r.part(llmBox);
+    r.row(rvBox, app.falar.R.drawable.ic_speaker, L.t("Уточнять до озвучки"), L.t("при «Точнее» голос ждёт уточнитель до 3 с"), null);
+    LinearLayout sRv = r.sub(rvBox, true);
+    segRefineVoice = r.seg(sRv, new String[]{"PT", "RU", L.t("Оба")}, i -> { if (svc == null) return; svc.setRefineVoice(RefineVoice.KEYS[i]); refreshIntervals(); });
+    r.caption(sRv, L.t("PT — собеседнику, RU — вам. Не успел за 3 с — звучит перевод фразы, уточнённый текст появится чуть позже."));
     cloudBox = r.part(c3);
     rowCloud = r.nav(cloudBox, app.falar.R.drawable.ic_cloud, L.t("Облако"), "", x -> show(6));
 
