@@ -2405,7 +2405,7 @@ public class TranslatorService extends Service {
   static String liveTag(Turn tn, long w) {
     if (w < 0 || tn == null || tn.live == null) return "";
     if (tn.liveOut != null) return " · уточнено до озвучки, голос ждал " + w + " мс";
-    return tn.live.getCount() > 0 ? " · уточнитель не успел за " + RefineVoice.CAP_MS / 1000 + " с — звучит перевод фразы" : " · уточнитель оставил перевод (голос ждал " + w + " мс)";
+    return tn.live.getCount() > 0 ? " · уточнитель не успел за " + RefineVoice.CAP_MS / 1000 + " с — звучит перевод фразы (голос ждал " + w + " мс)" : " · уточнитель оставил перевод (голос ждал " + w + " мс)";
   }
   /** Реплика записана в разговор: ответ уточнителя, пришедший раньше, — в неё. */
   void markSaved(Turn tn) { String o; synchronized (tn) { tn.saved = true; o = tn.liveOut; } if (o != null) applyFix(tn, o, Chats.BY_LLM); }
