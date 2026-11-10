@@ -26,6 +26,9 @@ import java.util.concurrent.TimeUnit;
  *  - на Redmi синтез Google без сети разборчивее (ru 0–2 % ошибок распознавания синтеза против 12,5 %) и даёт
  *    первый звук за 40–70 мс против 270.
  *
+ *  Свой TextToSpeech у каждого языка (Redmi 10.11): с одним на два языка смена голоса между фразами стоила Google
+ *  1,3–2,0 с до первого звука (в разговоре языки чередуются), без смены — 40–80 мс.
+ *
  *  Звук играет сам Falar: синтез идёт в файл (synthesizeToFile), а его куски приходят сюда (onAudioAvailable) и
  *  уходят в ту же дорожку, что раньше у Piper. Поэтому разводка по выходам, перебивание, «Что озвучивать» и
  *  подавление эха остаются прежними. Голоса берутся только те, что работают без сети. Голоса языка нет — перевод
@@ -47,7 +50,11 @@ final class SysTts {
     int getSampleRate() { return rate; }
   }
 
-  final Context ctx; final Log log; final TextToSpeech tts; final String engine;
+  final Context ctx; final Log log; final String engine;
+  /** Свой синтез у каждого языка: голос ставится один раз и не меняется между фразами. */
+  final Map<String, TextToSpeech> tts = new java.util.concurrent.ConcurrentHashMap<>();
+  /** Голос, стоящий сейчас в синтезе языка (setVoice — только при смене). */
+  final Map<String, String> set = new java.util.concurrent.ConcurrentHashMap<>();
   /** Голос по языку (ru, pt) — только без сети; нет ключа — нет голоса, причина в missing. */
   final Map<String, Voice> voice = new java.util.concurrent.ConcurrentHashMap<>();
   final Map<String, String> missing = new java.util.concurrent.ConcurrentHashMap<>();
@@ -60,10 +67,18 @@ final class SysTts {
   private int seq;
   private final File out;
 
-  private SysTts(Context ctx, Log log, TextToSpeech tts, String engine) {
-    this.ctx = ctx; this.log = log; this.tts = tts; this.engine = engine;
+  private SysTts(Context ctx, Log log, String engine) {
+    this.ctx = ctx; this.log = log; this.engine = engine;
     this.out = new File(ctx.getCacheDir(), "tts-out.wav");
-    tts.setOnUtteranceProgressListener(listener);
+  }
+
+  /** Синтез на движке pkg (null — по умолчанию), ждёт до 15 с; не поднялся — null. */
+  static TextToSpeech bind(Context app, String pkg) throws InterruptedException {
+    CountDownLatch l = new CountDownLatch(1); final int[] st = {TextToSpeech.ERROR};
+    TextToSpeech.OnInitListener on = s -> { st[0] = s; l.countDown(); };
+    TextToSpeech t = pkg == null ? new TextToSpeech(app, on) : new TextToSpeech(app, on, pkg);
+    if (l.await(15, TimeUnit.SECONDS) && st[0] == TextToSpeech.SUCCESS) return t;
+    t.shutdown(); return null;
   }
 
   /** Поднять синтез: Google, если стоит, иначе движок по умолчанию; ждёт до 15 с. Не вышло — null, и перевод
@@ -71,18 +86,23 @@ final class SysTts {
   static SysTts open(Context ctx, Map<String, String> chosen, Log log) throws InterruptedException {
     Context app = ctx.getApplicationContext();
     for (String pkg : new String[]{GOOGLE, null}) {
-      CountDownLatch l = new CountDownLatch(1); final int[] st = {TextToSpeech.ERROR};
-      TextToSpeech.OnInitListener on = s -> { st[0] = s; l.countDown(); };
-      TextToSpeech t = pkg == null ? new TextToSpeech(app, on) : new TextToSpeech(app, on, pkg);
-      if (l.await(15, TimeUnit.SECONDS) && st[0] == TextToSpeech.SUCCESS) {
+      long t0 = System.nanoTime();
+      TextToSpeech t = bind(app, pkg);
+      if (t != null) {
         String eng = pkg != null ? pkg : t.getDefaultEngine();
         if (eng == null) eng = "";
-        SysTts s = new SysTts(app, log, t, eng);
+        SysTts s = new SysTts(app, log, eng);
+        s.tts.put(LANGS[0], t); t.setOnUtteranceProgressListener(s.listener);
+        for (int k = 1; k < LANGS.length; k++) {            // второй язык — свой синтез того же движка
+          TextToSpeech t2 = bind(app, eng.isEmpty() ? null : eng);
+          if (t2 != null) { t2.setOnUtteranceProgressListener(s.listener); s.tts.put(LANGS[k], t2); }
+        }
+        long t1 = System.nanoTime();
         s.pick(chosen);
         s.warm();
+        log.log(String.format(Locale.ROOT, "🔊 синтез телефона: подключение %d мс, пробные фразы %d мс", (t1 - t0) / 1000000, (System.nanoTime() - t1) / 1000000));
         return s;
       }
-      t.shutdown();
       if (pkg != null) log.log("🔊 синтез Google не поднялся — пробую движок телефона по умолчанию");
     }
     log.log("🔊 синтез речи телефона не поднялся — перевод только на экране");
@@ -93,7 +113,8 @@ final class SysTts {
   synchronized void pick(Map<String, String> chosen) {
     List<TtsVoices.V> all = new ArrayList<>(); Map<String, Voice> byName = new HashMap<>();
     java.util.Set<Voice> vs = null;
-    try { vs = tts.getVoices(); } catch (Throwable ignore) {}
+    TextToSpeech any = tts.get(LANGS[0]);
+    try { if (any != null) vs = any.getVoices(); } catch (Throwable ignore) {}
     if (vs != null) for (Voice v : vs) {
       Locale lo = v.getLocale(); if (lo == null) continue;
       java.util.Set<String> f = v.getFeatures();
@@ -106,14 +127,20 @@ final class SysTts {
       List<TtsVoices.V> u = TtsVoices.usable(all, lang, chosen == null ? null : chosen.get(lang));
       choices.put(lang, u);
       if (u.isEmpty()) missing.put(lang, TtsVoices.missing(all, lang));
+      else if (!tts.containsKey(lang)) missing.put(lang, L.k("синтез речи телефона не поднялся"));
       else voice.put(lang, byName.get(u.get(0).name));
     }
   }
 
-  /** Пробная фраза каждого голоса: частота звука (дорожка открывается до синтеза) и первый звук не ждёт загрузки. */
-  void warm() {
-    for (String lang : LANGS) if (voice.containsKey(lang)) {
-      Audio a = speak(lang, "ru".equals(lang) ? "Да." : "Sim.", x -> 1);
+  /** Пробные фразы голоса — обычные предложения: после «Да.» первая настоящая фраза ждала первого звука 640–780 мс
+   *  (Redmi 10.11), остальные — 50–70 мс: короткое слово поднимает не всё. Заодно частота звука — дорожка
+   *  открывается до синтеза. */
+  static final String[] WARM_RU = {"Здравствуйте! Как у вас дела сегодня?"}, WARM_PT = {"Olá! Como vai você hoje?"};
+  void warm() { for (String lang : LANGS) warm(lang); }
+  void warm(String lang) {
+    if (!voice.containsKey(lang)) return;
+    for (String t : "ru".equals(lang) ? WARM_RU : WARM_PT) {
+      Audio a = speak(lang, t, x -> 1);
       if (a.src > 0) rate.put(lang, a.src);
     }
   }
@@ -143,8 +170,7 @@ final class SysTts {
     for (String l : LANGS) ch.put(l, l.equals(lang) ? name : voiceName(l));
     pick(ch);
     rate.remove(lang);
-    Audio a = has(lang) ? speak(lang, "ru".equals(lang) ? "Да." : "Sim.", x -> 1) : null;
-    if (a != null && a.src > 0) rate.put(lang, a.src);
+    warm(lang);
     return name.equals(voiceName(lang));
   }
 
@@ -152,12 +178,13 @@ final class SysTts {
    *  0 — синтез останавливается. Голоса языка нет или синтез не удался — пустой звук. Тихий хвост фразы срезается
    *  до 60 мс (TrimTail). */
   synchronized Audio speak(String lang, String text, Chunk cb) {
-    Voice v = voice.get(lang); int want = rate(lang);
-    if (v == null || text == null || text.trim().isEmpty()) return new Audio(new float[0], want, 0);
+    Voice v = voice.get(lang); int want = rate(lang); TextToSpeech tts = this.tts.get(lang);
+    if (v == null || tts == null || text == null || text.trim().isEmpty()) return new Audio(new float[0], want, 0);
     Job j = new Job("f" + (++seq)); cur = j;
     List<float[]> parts = new ArrayList<>(); int n = 0; boolean stop = false;
     try {
-      tts.setVoice(v); tts.setSpeechRate(speechRate);
+      if (!v.getName().equals(set.get(lang))) { tts.setVoice(v); set.put(lang, v.getName()); }
+      tts.setSpeechRate(speechRate);
       if (tts.synthesizeToFile(text, new Bundle(), out, j.id) != TextToSpeech.SUCCESS) { log.log("🔊 синтез не принял фразу"); return new Audio(new float[0], want, 0); }
       TtsVoices.TrimTail trim = new TtsVoices.TrimTail(0.003f, want * 60 / 1000);
       TtsVoices.Resampler rs = null;
@@ -182,7 +209,7 @@ final class SysTts {
     return new Audio(all, want, j.rate);
   }
 
-  void close() { try { tts.stop(); tts.shutdown(); } catch (Throwable ignore) {} }
+  void close() { for (TextToSpeech t : tts.values()) try { t.stop(); t.shutdown(); } catch (Throwable ignore) {} tts.clear(); }
 
   /** Фраза в синтезе: куски звука и конец — очередью к потоку, который её произносит. */
   static final class Job {

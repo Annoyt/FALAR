@@ -843,6 +843,12 @@ public class TranslatorService extends Service {
       worker.submit(() -> processText("pt2ru", unshout(t), true, false, 0, 0, "asr"));
     }
     if (i != null && i.hasExtra("voicewhat")) setVoiceWhat(VoiceOut.parse(i.getStringExtra("voicewhat")));
+    // Стенд голосов (test_voice_device.sh): --es ttsvoice ru:имя — тот же выбор, что в «Голосах»; --es ttsvoice show — что стоит
+    if (i != null && i.hasExtra("ttsvoice")) {
+      String v = i.getStringExtra("ttsvoice"); SysTts st = sysTts();
+      if ("show".equals(v)) log("🔊 голоса: " + (st == null ? "синтеза нет" : st.describe()));
+      else if (v.contains(":")) setTtsVoice(v.substring(0, v.indexOf(':')), v.substring(v.indexOf(':') + 1));
+    }
     if (i != null && i.hasExtra("hold")) {
       holdMs = Math.max(0, Math.min(6000, Integer.parseInt(i.getStringExtra("hold"))));
       getSharedPreferences("at", MODE_PRIVATE).edit().putInt("hold", holdMs).apply();
