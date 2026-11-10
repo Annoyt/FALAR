@@ -545,7 +545,7 @@ public class TranslatorService extends Service {
         c.report("пробный прогон " + probe + " мс — граф не на NPU (" + opts.getOrDefault("htp_arch", chip == Npu.Chip.MEDIATEK ? "NeuroPilot" : "поколение HTP не задано") + ")", false);
         return;
       }
-      getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_try").putString("npu_ctx", id).apply();
+      getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_try").remove("npu_mem").putString("npu_ctx", id).apply();
       String took = (System.nanoTime() - t0) / 1_000_000 + " мс (" + c.how + ", граф " + ms + " мс, пробный прогон " + probe + " мс, свободно не меньше "
           + (c.minFree == Long.MAX_VALUE ? "?" : (c.minFree >> 20) + " МБ") + ")";
       if (checked) {
@@ -569,14 +569,26 @@ public class TranslatorService extends Service {
   void npuEnded(NpuClient c, String stage, String why, boolean memory) {
     Engine e = eng;
     if (e != null) { if (e.npu == c) e.npu = null; if (e.npuShadow == c) { e.npuShadow = null; npuCheck = null; } }
-    if (memory && !"start".equals(stage)) {               // посреди работы освобождали память — NPU не виноват
-      getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_try").apply();
+    final SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    final String id = npuId();
+    if (memory) {
+      if ("start".equals(stage)) {                       // граф не уместился: могла быть неудачная минута — ещё раз
+        String m = sp.getString("npu_mem", "");
+        int n = m.startsWith(id + "|") ? Integer.parseInt(m.substring(id.length() + 1)) + 1 : 1;
+        if (n >= 2) { sp.edit().remove("npu_mem").apply(); npuFailed(id, stage, why + " — второй раз на этой версии"); return; }
+        sp.edit().remove("npu_try").putString("npu_mem", id + "|" + n).apply();
+        if (e != null) e.npuState = L.k("остановлен: мало памяти");
+        log("⚡ NPU: граф не уместился — " + why + ". Распознаёт процессор; попробую при следующем запуске (второй раз — отказ до новой версии)");
+        teleNpu(stage, why);
+        return;
+      }
+      sp.edit().remove("npu_try").apply();               // посреди работы освобождали память — NPU не виноват
       if (e != null) e.npuState = L.k("остановлен: мало памяти");
       log("⚡ NPU остановлен: " + why + " — дальше распознаёт процессор; снова попробую при следующем запуске");
       teleNpu(stage, why);
       return;
     }
-    npuFailed(npuId(), stage, why);
+    npuFailed(id, stage, why);
   }
 
   /** Отказ NPU на этой версии и прошивке: запомнить с причиной, сказать в журнал и, по согласию, разработчику. */
@@ -1321,7 +1333,7 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("npufree")) { npuFree = Long.parseLong(i.getStringExtra("npufree")) * 1_000_000L; log("⚡ стенд: порог памяти для сборки графа NPU — " + i.getStringExtra("npufree") + " МБ"); }
     // --es npureset 1 — как новая версия: забыть отказ, оборванный подъём, проверку и сохранённый граф (npu_fail,
     // npu_try, npu_ok, npu_ctx) — граф соберётся заново, первые фразы сверятся с процессором
-    if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").remove("npu_ok").remove("npu_ctx").apply(); log("⚡ стенд: NPU — как на новой версии"); }
+    if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").remove("npu_ok").remove("npu_ctx").remove("npu_mem").apply(); log("⚡ стенд: NPU — как на новой версии"); }
     if (i != null && i.hasExtra("npu")) setNpu("1".equals(i.getStringExtra("npu")));
     if (i != null && i.hasExtra("bargedump")) { bargeDump = Integer.parseInt(i.getStringExtra("bargedump")); log("🗣 стенд: запишу совмещение на концах " + bargeDump + " фраз"); }
     if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
