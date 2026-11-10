@@ -125,7 +125,8 @@ final class SysTts {
     voice.clear(); missing.clear(); choices.clear();
     for (String lang : LANGS) {
       List<TtsVoices.V> u = TtsVoices.usable(all, lang, chosen == null ? null : chosen.get(lang));
-      choices.put(lang, u);
+      // для «Голосов» — порядок без учёта выбора: «голос 3» остаётся третьим и после того, как его выбрали
+      choices.put(lang, TtsVoices.usable(all, lang, null));
       if (u.isEmpty()) missing.put(lang, TtsVoices.missing(all, lang));
       else if (!tts.containsKey(lang)) missing.put(lang, L.k("синтез речи телефона не поднялся"));
       else voice.put(lang, byName.get(u.get(0).name));
