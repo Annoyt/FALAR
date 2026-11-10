@@ -113,7 +113,15 @@ has() { ui find "$@" >/dev/null; }
 cnt() { ui find "$@" --all | grep -c .; }
 xy() { at "$@" | awk '{print $5, $6}'; }
 tapxy() { front || { say "  (впереди не Falar — касание пропущено: $(focus))"; return 1; }; $ADB shell "input tap $1 $2"; sleep "${3:-1.2}"; }
-tapon() { local p; dump; p=$(xy "$@"); [ -n "$p" ] || { say "  (на экране нет: $*)"; return 1; }; tapxy $p; }
+tapon() { local p; dump; p=$(xy "$@"); [ -n "$p" ] || { say "  (на экране нет: $*)"; miss "$*"; return 1; }; tapxy $p; }
+# Промах — дерево экрана и снимок в .stand/ui-miss (только на ПК: на экране могут быть разговоры владельца), чтобы
+# видеть, что было вместо искомого (10.11: «Настройки» в панели ☰ не находились в U4/U10/U11/U13, а руками — да).
+MISS=$STAND/ui-miss/$(date +%Y%m%d-%H%M%S); NMISS=0
+miss() {
+  NMISS=$((NMISS+1)); [ $NMISS -le 12 ] || return 0; mkdir -p "$MISS"
+  cp $D/ui.xml "$MISS/$NMISS.xml" 2>/dev/null; $ADB exec-out screencap -p > "$MISS/$NMISS.png" 2>/dev/null
+  printf '%s\t%s\t%s\n' "$NMISS" "$1" "$(focus | sed 's/.*Window{[0-9a-f]* u0 //; s/}//')" >> "$MISS/index.tsv"
+}
 # «Назад» — только если открыто что-то поверх разговора: на самом экране разговора оно закрыло бы Falar.
 press() {
   dump
