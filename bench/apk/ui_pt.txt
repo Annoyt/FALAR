@@ -412,6 +412,10 @@ Pode falar · здесь появится перевод	Pode falar · a traduç
 Загружаю модели · %s · ещё ≈ %d с	Carregando modelos · %s · faltam ≈ %d s
 Улучшаю в облаке · ещё ≈ %d с	Melhorando na nuvem · faltam ≈ %d s
 Улучшаю в облаке · дольше обычного · %d с	Melhorando na nuvem · mais demorado que o normal · %d s
+граф NPU	grafo da NPU
+Первый запуск версии: готовлю NPU · ещё ≈ %d с	Primeira execução da versão: preparando a NPU · faltam ≈ %d s
+Первый запуск версии: готовлю NPU · дольше обычного · %d с	Primeira execução da versão: preparando a NPU · mais demorado que o normal · %d s
+Первый запуск этой версии: готовлю распознавание на NPU — до двух минут, один раз	Primeira execução desta versão: preparando o reconhecimento na NPU — até dois minutos, só uma vez
 читаете вслух · микрофон не слушает	lendo em voz alta · o microfone não ouve
 транскрипция скрыта · касание вернёт	transcrição oculta · toque para mostrar
 улучшить нельзя: %s	não dá para melhorar: %s

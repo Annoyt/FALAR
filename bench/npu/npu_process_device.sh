@@ -2,8 +2,9 @@
 # NPU в своём процессе (NpuService, <пакет>:npu) на телефоне — само приложение, сборка с библиотеками NPU (build.sh
 # MTK=1 или NPU=1). Проверяет то, ради чего процесс отдельный (владелец 10.11: «если не работает — чтобы процесс шёл на
 # процессоре; если падает — иметь причину»):
-#   1. «как новая версия» (--es npureset 1): граф собирается заново — в журнале «NPU поднят» / «готов» или «отказал» /
-#      «не уместился» с причиной;
+#   1. «как новая версия» (--es npureset 1) и новый запуск: граф собирается заново — до загрузки моделей, если после них
+#      он не уместится (npuFirst; снимок экрана со сборкой — .stand/npu/process/npu-first.png), — в журнале «NPU поднят» /
+#      «готов» или «отказал» / «не уместился» с причиной;
 #   2. приложение живо — тот же pid, что до попытки, а процесса :npu после отказа нет;
 #   3. NPU поднялся — подача записи (публичные фразы Tatoeba, bench/air/corpus; микрофон глухой, без озвучки): первые
 #      фразы сверяются с процессором («NPU проверен»), дальше распознаёт NPU («фраза на NPU»);
@@ -109,30 +110,42 @@ for pair in "$MODEL:$DST" "$NEMO:nemo128.onnx"; do
   [ "$(sh "stat -c %s $F/models/npu/$dst 2>/dev/null || echo 0")" = "$(stat -c %s $src)" ] \
     || { $ADB push $src $F/models/npu/$dst < /dev/null > /dev/null; say "залито $dst ($(( $(stat -c %s $src) >> 20 )) МБ)"; }
 done
-# 1. заново, как новая версия: порог памяти и сброс — в том же запуске, до подъёма движка (иначе граф ждал бы
-# порога по умолчанию — у MediaTek 3 ГБ — и следующей попытки через 10 минут)
+# 1. заново, как новая версия. Сброс (--es npureset 1) — в работающий Falar, потом новый запуск: первая сборка графа
+# идёт при запуске до моделей (npuFirst), если после них она не уместится, иначе — после моделей (startNpu). Порог памяти
+# (NPUFREE) — в том же запуске, что и сборка. Во время сборки до моделей — снимок экрана: что видит человек.
+PAT="⚡ NPU( отказал| поднят| готов| остановлен|: граф не уместился|: для первой сборки графа нужно)"
+relaunch() {   # новый запуск Falar; m0 — первая строка журнала этого запуска, pid0 — его pid
+  wait_unlock; sh "am force-stop $PKG"; sleep 1; m0=$(( $(lines) + 1 ))
+  open "--es feedonly 1${NPUFREE:+ --es npufree $NPUFREE}"; sleep 4; pid0=$(sh "pidof $PKG")
+}
+outcome() {    # ждать итога NPU этого запуска; сборка до моделей — снимок экрана
+  local pre; pre=$(wait_log $m0 "⚡ NPU: первый запуск этой версии|$PAT" 120)
+  if echo "$pre" | grep -q "первый запуск этой версии"; then
+    sleep 4; open "--es uishot npu-first"; sleep 3
+    $ADB pull $F/npu-first.png $OUT/npu-first.png < /dev/null > /dev/null 2>&1 && say "   снимок экрана во время сборки — $OUT/npu-first.png"
+  fi
+  res=$(wait_log $m0 "$PAT" 300)
+}
 wait_unlock
-sh "am force-stop $PKG"; sleep 1; m0=$(( $(lines) + 1 ))
-open "--es feedonly 1 --es npureset 1${NPUFREE:+ --es npufree $NPUFREE}"; sleep 4
-pid0=$(sh "pidof $PKG")
-say "1. как новая версия: npureset; приложение pid $pid0; свободно $(sh "grep MemAvailable /proc/meminfo" | awk '{print int($2/1024)}') МБ"
-res=$(wait_log $m0 "⚡ NPU( отказал| поднят| готов| остановлен|: граф не уместился|: для первой сборки графа нужно)" 300)
-# Мало памяти для первой сборки — Falar ждёт сам (попробует через 10 минут). Стенд просит освободить память, ждёт её и
-# зовёт сборку сразу (--es npu 1 — переключатель «Распознавание на NPU»: включён и не поднят — поднять).
+open "--es feedonly 1 --es npureset 1"; sleep 3
+relaunch
+say "1. как новая версия (npureset) и новый запуск; приложение pid $pid0; свободно $(sh "grep MemAvailable /proc/meminfo" | awk '{print int($2/1024)}') МБ"
+outcome
+# Мало памяти и до моделей — Falar распознаёт процессором и соберёт граф при следующем запуске. Стенд закрывает Falar,
+# просит освободить память, ждёт её и запускает заново.
 if echo "$res" | grep -q "для первой сборки графа нужно"; then
   need=$(echo "$res" | grep -oE "нужно [0-9]+" | grep -oE "[0-9]+")
-  say "   свободно мало: $(echo "$res" | grep -oE "сейчас [0-9]+ МБ") при нужных $need МБ — закройте на телефоне недавние приложения, кроме $PKG; жду до 15 мин…"
+  say "   свободно мало: $(echo "$res" | grep -oE "сейчас [0-9]+ МБ") при нужных $need МБ — закрываю Falar; закройте на телефоне недавние приложения, жду до 15 мин…"
+  since $m0 | grep "⚡" | cut -c1-300 | sed 's/^/   журнал: /'
+  sh "am force-stop $PKG"
   for _ in $(seq 180); do
     free=$(sh "grep MemAvailable /proc/meminfo" | awk '{print int($2/976.5625)}')   # кБ → МБ по 10^6 байт, как порог в журнале Falar
-    [ -n "$(sh "pidof $PKG")" ] || free=$(( free - 1300 ))     # копию закрыли вместе со всеми: поднимется — займёт ~1,3 ГБ
-    [ "$free" -ge $(( need + 100 )) ] && break; sleep 5
+    [ "$free" -ge $(( need + 400 )) ] && break; sleep 5     # +400: сам Falar до моделей (~250 МБ) и запас
   done
-  say "   свободно $free МБ (за вычетом самого Falar, если его закрыли)"
-  [ "$free" -ge $(( need + 100 )) ] || { say "   ✗ памяти так и не стало — дальше не иду"; exit 1; }
-  wait_unlock; m0=$(( $(lines) + 1 ))
-  if [ -n "$(sh "pidof $PKG")" ]; then open "--es feedonly 1 --es npu 1"
-  else open "--es feedonly 1 --es npureset 1${NPUFREE:+ --es npufree $NPUFREE}"; sleep 4; pid0=$(sh "pidof $PKG"); say "   Falar закрыли — открыт заново (pid $pid0)"; fi
-  res=$(wait_log $m0 "⚡ NPU( отказал| поднят| готов| остановлен|: граф не уместился|: для первой сборки графа нужно)" 300)
+  say "   свободно $free МБ при закрытом Falar"
+  [ "$free" -ge $(( need + 400 )) ] || { say "   ✗ памяти так и не стало — дальше не иду"; exit 1; }
+  relaunch; say "   открыт заново (pid $pid0)"
+  outcome
 fi
 since $m0 | grep "⚡" | cut -c1-400 | sed 's/^/   журнал: /'
 pid1=$(sh "pidof $PKG"); npup=$(sh "pidof $PKG:npu")

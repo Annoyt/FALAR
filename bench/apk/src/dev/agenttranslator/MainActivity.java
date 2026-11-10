@@ -3611,7 +3611,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     long[] ms = loadMs; int n = loadN, k = Math.min(loadK, n - 1);
     long el = android.os.SystemClock.uptimeMillis() - loadFrom;
     stageBar.set(n, k, Screen.loadFrac(ms, n, k, el));
-    busyLbl.setText(Screen.loadCaption(loadWhat, Screen.loadLeft(ms, n, k, el)));
+    busyLbl.setText(Screen.NPU_STAGE.equals(loadWhat) ? Screen.npuCaption(el, ms[0]) : Screen.loadCaption(loadWhat, Screen.loadLeft(ms, n, k, el)));
     ui.postDelayed(this, 500);
   }};
   final Runnable cloudTick = new Runnable() { public void run() {
@@ -3629,7 +3629,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // подпись с тем, сколько осталось.
     if (what != null && "load".equals(kind)) {
       busyRow.setVisibility(View.VISIBLE); chipsRow.setVisibility(View.INVISIBLE);
-      if (loadK < 0) { loadMs = Screen.loadExpect(prefs.getString("load_ms", ""), total); ui.post(loadTick); }
+      if (loadK < 0) {
+        // первая сборка графа NPU — свой этап: ждать столько, сколько шла прошлая (TranslatorService.npuFirst)
+        loadMs = Screen.NPU_STAGE.equals(what) ? new long[]{prefs.getLong("npu_build_ms", Screen.NPU_BUILD_EXPECT_MS)}
+                                               : Screen.loadExpect(prefs.getString("load_ms", ""), total);
+        ui.post(loadTick);
+      }
       if (done != loadK) { loadK = done; loadFrom = android.os.SystemClock.uptimeMillis(); }
       loadN = Math.max(1, total); loadWhat = what;
       return;

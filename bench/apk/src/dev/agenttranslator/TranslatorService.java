@@ -396,6 +396,7 @@ public class TranslatorService extends Service {
       Engine.withTts = mod(Modules.TTS);
       readSoundPrefs();
       earlyStart();
+      npuFirst();                 // первая сборка графа NPU на версии — до моделей, если после них она не уместится
       // Ход загрузки — экрану: этапы «распознавание · перевод · словарь и разговоры · озвучка»,
       // сколько каждый шёл в прошлый раз экран берёт из load_ms (владелец 01.10: «не хватает
       // индикации загрузки моделей, чтобы было понятно, что вот-вот скоро включится»). Озвучка —
@@ -508,7 +509,7 @@ public class TranslatorService extends Service {
     int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
     if (tries >= 2) { npuFailed(id, "start", "подъём графа дважды оборвался вместе с приложением (закрытие Falar или перезагрузка телефона)"); return; }
     if (tries == 1) log("⚡ NPU: прошлый подъём графа оборвался вместе с приложением — пробую ещё раз");
-    final File ctx = new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
+    final File ctx = npuCtx(chip);
     // Граф — под эту версию и прошивку: сохранённый от прежней загрузился бы и молча считал бы прежней моделью.
     if (!id.equals(sp.getString("npu_ctx", ""))) { NpuAsr.deleteCtx(ctx); sp.edit().remove("npu_ctx").remove("npu_ok").apply(); }
     if (!ctx.exists()) {
@@ -528,6 +529,86 @@ public class TranslatorService extends Service {
     sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();   // commit: запись до возможного падения телефона
     Thread t = new Thread(() -> npuUp(e, chip, lib, ctx, id, checked), "npu");
     t.setPriority(Thread.MIN_PRIORITY); t.start();
+  }
+
+  /** Сохранённый граф NPU этого чипа (в no_backup: в облачную копию не идёт, после переустановки собирается заново). */
+  File npuCtx(Npu.Chip chip) {
+    return new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
+  }
+
+  /** Сколько памяти займут движки (распознавание и перевод): размер их файлов и ~250 МБ на остальное (экран, Java,
+   *  VAD, словари). POCO X7 Pro, 10.11: файлы 1,4 ГБ, Falar с ними — 1,6 ГБ. */
+  long engineBytes() { return dirBytes(new File(modelsDir, "asr_multi")) + dirBytes(new File(modelsDir, "mt")) + (250L << 20); }
+  static long dirBytes(File d) {
+    long s = 0; File[] fs = d.listFiles();
+    if (fs != null) for (File f : fs) s += f.isDirectory() ? dirBytes(f) : f.length();
+    return s;
+  }
+
+  /** Первая сборка графа NPU на этой версии — до загрузки моделей (владелец 10.11: «1 вариант … и сообщить
+   *  пользователю, что это займёт время»). Сборке нужно ещё 1,7–2,2 ГБ сверх занятого (A16W8, POCO X7 Pro), а Falar с
+   *  моделями занимает 1,6 ГБ: на телефоне с 8 ГБ после загрузки она не помещается (сторож останавливал её на 774 МБ
+   *  свободных), до загрузки — помещается. Поэтому, если после моделей памяти не хватит, граф собирается сейчас — в
+   *  процессе NPU, который потом закрывается (память сборки — модель, компилятор — уходит вся), а после моделей NPU
+   *  поднимается уже из сохранённого графа (2 с, мало памяти; startNpu). Раз на версию и прошивку. Человеку — этап
+   *  загрузки «граф NPU» со своей подписью и временем (Screen.npuCaption) и строка состояния. Слушание уже идёт
+   *  (earlyStart): сказанное копится и переводится после загрузки. Где памяти хватает и после моделей, — как раньше:
+   *  граф собирается после загрузки, пока распознаёт процессор, без ожидания. */
+  void npuFirst() {
+    final Npu.Chip chip = Npu.chip();
+    final File lib = new File(getApplicationInfo().nativeLibraryDir);
+    if (Npu.unavailable(chip, lib, modelsDir) != null) return;
+    final SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    if (!sp.getBoolean(Npu.PREF, true)) return;
+    final String id = npuId();
+    if (npuFailWhy(sp, id) != null) return;                        // отказ на этой версии — скажет startNpu
+    String tried = sp.getString("npu_try", "");
+    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
+    if (tries >= 2) return;                                         // дважды оборвался — отказ запишет startNpu
+    final File ctx = npuCtx(chip);
+    if (!id.equals(sp.getString("npu_ctx", ""))) { NpuAsr.deleteCtx(ctx); sp.edit().remove("npu_ctx").remove("npu_ok").apply(); }
+    if (ctx.exists()) return;
+    android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+    ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
+    final long eb = engineBytes();
+    if (mi.availMem - eb >= npuFree) return;                       // уместится и после моделей
+    if (mi.availMem < npuFree) {
+      log("⚡ NPU: для первой сборки графа нужно " + (npuFree / 1_000_000) + " МБ свободной памяти, сейчас " + (mi.availMem >> 20)
+          + " МБ — и это до загрузки моделей; распознаёт процессор, соберу при следующем запуске");
+      return;
+    }
+    if (tries == 1) log("⚡ NPU: прошлый подъём графа оборвался вместе с приложением — пробую ещё раз");
+    log("⚡ NPU: первый запуск этой версии — собираю граф до загрузки моделей: после них он не уместится (свободно "
+        + (mi.availMem >> 20) + " МБ, моделям нужно ≈ " + (eb >> 20) + " МБ, сборке — " + (npuFree / 1_000_000) + ")");
+    String wait = L.t("Первый запуск этой версии: готовлю распознавание на NPU — до двух минут, один раз");
+    status(wait); notify(wait);
+    busy("load", Screen.NPU_STAGE, 0, 1);
+    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();   // commit: запись до возможного падения телефона
+    long t0 = System.nanoTime();
+    NpuClient c = null;
+    try {
+      c = NpuClient.connect(this, 30_000, this::npuEnded);
+      c.guard(NPU_GUARD_FREE, NPU_BUILD_MAX_MS);
+      java.util.Map<String, String> opts = chip == Npu.Chip.MEDIATEK ? Npu.neuronOptions(lib) : Npu.qnnOptions(lib);
+      long ms = c.start(chip == Npu.Chip.MEDIATEK ? "neuron" : "qnn", new File(modelsDir, "asr_multi"), new File(modelsDir, "npu"),
+          new File(Npu.model(chip)).getName(), ctx, lib, opts);
+      long all = (System.nanoTime() - t0) / 1_000_000;
+      if (!ctx.exists()) { c.report("граф собран, но не сохранился (" + ctx.getName() + ") — после загрузки моделей его не собрать", false); return; }
+      sp.edit().remove("npu_try").remove("npu_mem").putString("npu_ctx", id).putLong("npu_build_ms", all).apply();
+      log("⚡ NPU: граф собран за " + all + " мс (" + c.how + ", сборка " + ms + " мс, свободно не меньше "
+          + (c.minFree == Long.MAX_VALUE ? "?" : (c.minFree >> 20) + " МБ") + ") — процесс сборки закрываю, загружаю модели; NPU поднимется из сохранённого графа");
+    } catch (NpuClient.Remote x) {
+      if (c != null) c.report(x.getMessage(), false); else npuFailed(id, "start", x.getMessage());
+    } catch (Throwable x) {
+      if (c == null) npuFailed(id, "start", NpuWire.why(x));       // процесс NPU не поднялся вовсе
+      else if (!c.closed()) {                                       // закрыт — уже сообщено: смерть или сторож
+        if (x instanceof android.os.DeadObjectException) { NpuClient.Exit ex = c.exit(); c.report(ex.why, ex.memory); }
+        else c.report(NpuWire.why(x), false);
+      }
+    } finally {
+      if (c != null) c.close();
+      busy("load", null, 0, 0);
+    }
   }
 
   /** Поднять NPU в его процессе: связь, сторож, граф, пробный прогон; потом — сверка (не проверен) или сразу в работу. */
