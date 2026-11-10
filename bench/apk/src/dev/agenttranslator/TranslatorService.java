@@ -309,6 +309,7 @@ public class TranslatorService extends Service {
     Telemetry.collect = Telemetry.YES.equals(getSharedPreferences("at", MODE_PRIVATE).getString("telemetry", Telemetry.ASK));
     Telemetry.catchCrashes(teleDir(), myName());
     tele.merge(Telemetry.Counters.load(prefOrNull("tele_counters"), System.currentTimeMillis()));
+    main.postDelayed(energyEvery, 60_000L);              // расход заряда за слушание — раз в минуту (energyTick)
     NotificationManager nm = getSystemService(NotificationManager.class);
     nm.createNotificationChannel(new NotificationChannel(CH, L.t("Переводчик"), NotificationManager.IMPORTANCE_LOW));
     if (toForeground()) init();
@@ -411,6 +412,7 @@ public class TranslatorService extends Service {
       Engine.ttsOpen = lg -> SysTts.open(this, chosenVoices(), chosenSpeeds(), lg::log);
       readSoundPrefs();
       earlyStart();
+      npuFirst();                 // первая сборка графа NPU на версии — до моделей, если после них она не уместится
       // Ход загрузки — экрану: этапы «распознавание · перевод · словарь и разговоры · озвучка»,
       // сколько каждый шёл в прошлый раз экран берёт из load_ms (владелец 01.10: «не хватает
       // индикации загрузки моделей, чтобы было понятно, что вот-вот скоро включится»). Озвучка —
@@ -470,41 +472,62 @@ public class TranslatorService extends Service {
       worker.submit(() -> loadTtsLate(rest, nStages, askedTts));
     } catch (Throwable t) { Log.e(TAG, "init", t); status(L.f(L.k("Ошибка: %s"), t)); Engine.stage = null; Engine.asrUp = null; loading = false; ttsLoading = false; busy("load", null, 0, 0); }
   }
-  /** Распознавание на NPU Snapdragon (Npu, NpuAsr; «Экспериментальное», владелец 09.11: по умолчанию включено, где
-   *  возможно). Своим потоком после загрузки всего остального: граф QNN при первом запуске собирается десятки секунд,
-   *  очередь фраз его не ждёт, до тех пор распознаёт процессор. Собранный граф — в no_backup: не уезжает ни в облачную
-   *  копию, ни на другой телефон (там другое поколение NPU). */
+  /** Распознавание на NPU (Npu, NpuAsr; «Экспериментальное», владелец 09.11: по умолчанию включено, где возможно).
+   *  Владелец 10.11: «если не работает — чтобы процесс шёл на процессоре; если падает — иметь причину; при каждом
+   *  выпуске как минимум раз выбирать». Поэтому:
+   *  - NPU — в своём процессе (NpuService, NpuClient): падение дополнения (код на C++) убивает только его, приложение
+   *    распознаёт процессором дальше; сторож останавливает этот процесс, когда свободной памяти мало;
+   *  - на каждой версии Falar и прошивке (npuId) — заново: граф собирается заново (сохранённый — от прежней модели и
+   *    рантайма), первые фразы сверяются с процессором (NpuCheck: «две из трёх»), и только потом NPU распознаёт сам;
+   *  - отказ — с причиной (стадия и текст: ошибка ORT, сигнал и кадры падения, память) — в журнал и, по согласию, в
+   *    статистику; до новой версии или прошивки не пробуется (npu_fail), но включение переключателя пробует снова;
+   *  - память закончилась посреди работы (система или сторож закрыли NPU) — не отказ: снова при следующем запуске.
+   *  Своим потоком после загрузки всего остального: граф при первом запуске собирается десятки секунд, очередь фраз его
+   *  не ждёт. Собранный граф — в no_backup: не уезжает ни в облачную копию, ни на другой телефон. */
   /** Первая сборка графа QNN — прирост памяти процесса до 1,6 ГБ (AI Hub 09.11, по телефонам 0,1–1,6), поэтому
    *  только при 2 ГБ свободных, иначе — через 10 минут снова. Из сохранённого графа — 0,4–1,3 с, без проверки. */
   static final long NPU_FIRST_BUILD_FREE = 2_000_000_000L;
   /** MediaTek: первая сборка графа NeuroPilot частями — минус 1,7 ГБ свободной памяти (POCO X7 Pro 10.11; одной частью
    *  телефон уходил в перезагрузку по нехватке памяти) — поэтому только при 3 ГБ свободных. */
   static final long NPU_FIRST_BUILD_FREE_MTK = 3_000_000_000L;
+  /** Сторож процесса NPU: свободной памяти меньше — остановить (на стенде POCO и Redmi 10.11 так вовремя останавливалась
+   *  сборка, телефон цел); подъём графа дольше NPU_BUILD_MAX_MS — тоже (QNN на 7 Gen 4 — 102 с, NeuroPilot на POCO — 43 с). */
+  static final long NPU_GUARD_FREE = 800L << 20, NPU_BUILD_MAX_MS = 5 * 60_000L;
+  /** Пробный прогон дольше — граф ушёл на процессор (A52s 09.11: QNN без htp_arch — 2,35 с), NPU не включать. NPU —
+   *  14–90 мс на окно (AI Hub, 8 телефонов), MediaTek ~150 мс (POCO 10.11). */
+  static final long NPU_PROBE_MAX_MS = 600;
   volatile long npuFree = Npu.mediatek() ? NPU_FIRST_BUILD_FREE_MTK : NPU_FIRST_BUILD_FREE;
   /** Сколько фраз распознал NPU — в журнал первые три и каждая двадцатая: видно, что фразы идут через NPU и за сколько. */
   int npuPhrases;
+  /** Сверка первых фраз этой версии (npuShadow): тексты процессора и NPU; npuCheckIo — NPU в фоне, фраза не ждёт. */
+  volatile NpuCheck npuCheck;
+  final ExecutorService npuCheckIo = Executors.newSingleThreadExecutor(r -> { Thread t = new Thread(r, "npu-check"); t.setPriority(Thread.MIN_PRIORITY); return t; });
+
   void startNpu() {
-    final Engine e = eng; if (e == null || e.npu != null || "готовится".equals(e.npuState)) return;
+    final Engine e = eng; if (e == null || e.npu != null || e.npuShadow != null || "готовится".equals(e.npuState)) return;
     final File lib = new File(getApplicationInfo().nativeLibraryDir);
     final Npu.Chip chip = Npu.chip();
     String why = Npu.unavailable(chip, lib, modelsDir);
-    e.npuOn = getSharedPreferences("at", MODE_PRIVATE).getBoolean(Npu.PREF, true);
+    final SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    e.npuOn = sp.getBoolean(Npu.PREF, true);
     if (why != null) { e.npuState = why; return; }
     if (!e.npuOn) { e.npuState = L.k("выключено"); return; }
-    // Защита от повторов на телефонах, где NPU не справляется (Redmi Note 10 Pro, MT6891 / Neuron 5, 10.11: дополнение
-    // уронило всё приложение при создании сессии): «npu_fail» — граф не собрался на этой прошивке и версии Falar, больше
-    // не пробуем; «npu_try» — сборка начата и не закончилась (процесс упал или его убили) — тоже не пробуем.
-    final android.content.SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
     final String id = npuId();
-    if (id.equals(sp.getString("npu_fail", ""))) { e.npuState = L.k("не справляется с моделью"); return; }
-    String tried = sp.getString("npu_try", "");
-    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
-    if (tries >= 1) {   // одного раза хватает: нативный сбой дополнения роняет весь процесс (Redmi, 10.11)
-      e.npuState = L.k("сбой при прошлой сборке графа");
-      log("⚡ NPU: прошлая сборка графа оборвалась — до обновления приложения распознаёт процессор");
+    String failed = npuFailWhy(sp, id);
+    if (failed != null) {
+      e.npuState = L.k("не справляется с моделью");
+      log("⚡ NPU на этой версии и прошивке уже отказал (" + failed + ") — распознаёт процессор; снова попробую после обновления");
       return;
     }
-    final File ctx = new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
+    // Подъём графа начался и не кончился вместе со всем приложением: Falar закрыли или телефон перезагрузился (так было
+    // на POCO 09.11, когда граф не влез в память). Раз — могли просто закрыть: ещё попытка; дважды — отказ.
+    String tried = sp.getString("npu_try", "");
+    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
+    if (tries >= 2) { npuFailed(id, "start", "подъём графа дважды оборвался вместе с приложением (закрытие Falar или перезагрузка телефона)"); return; }
+    if (tries == 1) log("⚡ NPU: прошлый подъём графа оборвался вместе с приложением — пробую ещё раз");
+    final File ctx = npuCtx(chip);
+    // Граф — под эту версию и прошивку: сохранённый от прежней загрузился бы и молча считал бы прежней моделью.
+    if (!id.equals(sp.getString("npu_ctx", ""))) { NpuAsr.deleteCtx(ctx); sp.edit().remove("npu_ctx").remove("npu_ok").apply(); }
     if (!ctx.exists()) {
       android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
       ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
@@ -516,15 +539,249 @@ public class TranslatorService extends Service {
       }
     }
     e.npuState = L.k("готовится");
-    log(ctx.exists() ? "⚡ NPU: поднимаю сохранённый граф" : "⚡ NPU: собираю граф (первый раз — до двух минут), пока распознаёт процессор");
-    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();      // commit: запись до возможного падения
-    Thread t = new Thread(() -> {
-      e.startNpu(lib, ctx);
-      android.content.SharedPreferences.Editor ed = sp.edit().remove("npu_try");
-      if ("error".equals(e.npuState)) { ed.putString("npu_fail", id); e.npuState = L.k("не справляется с моделью"); }
-      ed.apply();
-    }, "npu");
+    final boolean checked = id.equals(sp.getString("npu_ok", ""));
+    log((ctx.exists() ? "⚡ NPU: поднимаю сохранённый граф" : "⚡ NPU: собираю граф (первый раз на этой версии — до двух минут), пока распознаёт процессор")
+        + " · " + (Npu.verified(chip, Npu.socModel()) ? "чип проверен" : "чип не проверен — пробую в отдельном процессе"));
+    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();   // commit: запись до возможного падения телефона
+    Thread t = new Thread(() -> npuUp(e, chip, lib, ctx, id, checked), "npu");
     t.setPriority(Thread.MIN_PRIORITY); t.start();
+  }
+
+  /** Сохранённый граф NPU этого чипа (в no_backup: в облачную копию не идёт, после переустановки собирается заново). */
+  File npuCtx(Npu.Chip chip) {
+    return new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
+  }
+
+  /** Сколько памяти займут движки (распознавание и перевод): размер их файлов и ~250 МБ на остальное (экран, Java,
+   *  VAD, словари). POCO X7 Pro, 10.11: файлы 1,4 ГБ, Falar с ними — 1,6 ГБ. */
+  long engineBytes() { return dirBytes(new File(modelsDir, "asr_multi")) + dirBytes(new File(modelsDir, "mt")) + (250L << 20); }
+  static long dirBytes(File d) {
+    long s = 0; File[] fs = d.listFiles();
+    if (fs != null) for (File f : fs) s += f.isDirectory() ? dirBytes(f) : f.length();
+    return s;
+  }
+
+  /** Первая сборка графа NPU на этой версии — до загрузки моделей (владелец 10.11: «1 вариант … и сообщить
+   *  пользователю, что это займёт время»). Сборке нужно ещё 1,7–2,2 ГБ сверх занятого (A16W8, POCO X7 Pro), а Falar с
+   *  моделями занимает 1,6 ГБ: на телефоне с 8 ГБ после загрузки она не помещается (сторож останавливал её на 774 МБ
+   *  свободных), до загрузки — помещается. Поэтому, если после моделей памяти не хватит, граф собирается сейчас — в
+   *  процессе NPU, который потом закрывается (память сборки — модель, компилятор — уходит вся), а после моделей NPU
+   *  поднимается уже из сохранённого графа (2 с, мало памяти; startNpu). Раз на версию и прошивку. Человеку — этап
+   *  загрузки «граф NPU» со своей подписью и временем (Screen.npuCaption) и строка состояния. Слушание уже идёт
+   *  (earlyStart): сказанное копится и переводится после загрузки. Где памяти хватает и после моделей, — как раньше:
+   *  граф собирается после загрузки, пока распознаёт процессор, без ожидания. */
+  void npuFirst() {
+    final Npu.Chip chip = Npu.chip();
+    final File lib = new File(getApplicationInfo().nativeLibraryDir);
+    if (Npu.unavailable(chip, lib, modelsDir) != null) return;
+    final SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    if (!sp.getBoolean(Npu.PREF, true)) return;
+    final String id = npuId();
+    if (npuFailWhy(sp, id) != null) return;                        // отказ на этой версии — скажет startNpu
+    String tried = sp.getString("npu_try", "");
+    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
+    if (tries >= 2) return;                                         // дважды оборвался — отказ запишет startNpu
+    final File ctx = npuCtx(chip);
+    if (!id.equals(sp.getString("npu_ctx", ""))) { NpuAsr.deleteCtx(ctx); sp.edit().remove("npu_ctx").remove("npu_ok").apply(); }
+    if (ctx.exists()) return;
+    android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+    ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
+    final long eb = engineBytes();
+    if (mi.availMem - eb >= npuFree) return;                       // уместится и после моделей
+    if (mi.availMem < npuFree) {
+      log("⚡ NPU: для первой сборки графа нужно " + (npuFree / 1_000_000) + " МБ свободной памяти, сейчас " + (mi.availMem >> 20)
+          + " МБ — и это до загрузки моделей; распознаёт процессор, соберу при следующем запуске");
+      return;
+    }
+    if (tries == 1) log("⚡ NPU: прошлый подъём графа оборвался вместе с приложением — пробую ещё раз");
+    log("⚡ NPU: первый запуск этой версии — собираю граф до загрузки моделей: после них он не уместится (свободно "
+        + (mi.availMem >> 20) + " МБ, моделям нужно ≈ " + (eb >> 20) + " МБ, сборке — " + (npuFree / 1_000_000) + ")");
+    String wait = L.t("Первый запуск этой версии: готовлю распознавание на NPU — до двух минут, один раз");
+    status(wait); notify(wait);
+    busy("load", Screen.NPU_STAGE, 0, 1);
+    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();   // commit: запись до возможного падения телефона
+    long t0 = System.nanoTime();
+    NpuClient c = null;
+    try {
+      c = NpuClient.connect(this, 30_000, this::npuEnded);
+      c.guard(NPU_GUARD_FREE, NPU_BUILD_MAX_MS);
+      java.util.Map<String, String> opts = chip == Npu.Chip.MEDIATEK ? Npu.neuronOptions(lib) : Npu.qnnOptions(lib);
+      long ms = c.start(chip == Npu.Chip.MEDIATEK ? "neuron" : "qnn", new File(modelsDir, "asr_multi"), new File(modelsDir, "npu"),
+          new File(Npu.model(chip)).getName(), ctx, lib, opts);
+      long all = (System.nanoTime() - t0) / 1_000_000;
+      if (!ctx.exists()) { c.report("граф собран, но не сохранился (" + ctx.getName() + ") — после загрузки моделей его не собрать", false); return; }
+      sp.edit().remove("npu_try").remove("npu_mem").putString("npu_ctx", id).putLong("npu_build_ms", all).apply();
+      log("⚡ NPU: граф собран за " + all + " мс (" + c.how + ", сборка " + ms + " мс, свободно не меньше "
+          + (c.minFree == Long.MAX_VALUE ? "?" : (c.minFree >> 20) + " МБ") + ") — процесс сборки закрываю, загружаю модели; NPU поднимется из сохранённого графа");
+    } catch (NpuClient.Remote x) {
+      if (c != null) c.report(x.getMessage(), false); else npuFailed(id, "start", x.getMessage());
+    } catch (Throwable x) {
+      if (c == null) npuFailed(id, "start", NpuWire.why(x));       // процесс NPU не поднялся вовсе
+      else if (!c.closed()) {                                       // закрыт — уже сообщено: смерть или сторож
+        if (x instanceof android.os.DeadObjectException) { NpuClient.Exit ex = c.exit(); c.report(ex.why, ex.memory); }
+        else c.report(NpuWire.why(x), false);
+      }
+    } finally {
+      if (c != null) c.close();
+      busy("load", null, 0, 0);
+    }
+  }
+
+  /** Поднять NPU в его процессе: связь, сторож, граф, пробный прогон; потом — сверка (не проверен) или сразу в работу. */
+  void npuUp(Engine e, Npu.Chip chip, File lib, File ctx, String id, boolean checked) {
+    long t0 = System.nanoTime();
+    NpuClient c = null;
+    try {
+      c = NpuClient.connect(this, 30_000, this::npuEnded);
+      c.guard(NPU_GUARD_FREE, NPU_BUILD_MAX_MS);
+      java.util.Map<String, String> opts = chip == Npu.Chip.MEDIATEK ? Npu.neuronOptions(lib) : Npu.qnnOptions(lib);
+      long ms = c.start(chip == Npu.Chip.MEDIATEK ? "neuron" : "qnn", new File(modelsDir, "asr_multi"), new File(modelsDir, "npu"),
+          new File(Npu.model(chip)).getName(), ctx, lib, opts);
+      long probe = c.probe();
+      if (probe > NPU_PROBE_MAX_MS) {
+        c.report("пробный прогон " + probe + " мс — граф не на NPU (" + opts.getOrDefault("htp_arch", chip == Npu.Chip.MEDIATEK ? "NeuroPilot" : "поколение HTP не задано") + ")", false);
+        return;
+      }
+      getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_try").remove("npu_mem").putString("npu_ctx", id).apply();
+      String took = (System.nanoTime() - t0) / 1_000_000 + " мс (" + c.how + ", граф " + ms + " мс, пробный прогон " + probe + " мс, свободно не меньше "
+          + (c.minFree == Long.MAX_VALUE ? "?" : (c.minFree >> 20) + " МБ") + ")";
+      if (checked) {
+        c.stage = "run"; e.npu = c; e.npuState = c.how;
+        log("⚡ NPU готов за " + took + "; на этой версии уже проверен");
+      } else {
+        c.stage = "check"; npuCheck = new NpuCheck(); e.npuShadow = c; e.npuState = L.k("проверяется");
+        log("⚡ NPU поднят за " + took + " — первые фразы распознаю и процессором, и NPU и сверяю");
+      }
+    } catch (NpuClient.Remote x) {
+      if (c != null) c.report(x.getMessage(), false); else npuFailed(id, "start", x.getMessage());
+    } catch (Throwable x) {
+      if (c == null) { npuFailed(id, "start", NpuWire.why(x)); return; }   // процесс NPU не поднялся вовсе
+      if (c.closed()) return;                                               // уже сообщено: смерть или сторож
+      if (x instanceof android.os.DeadObjectException) { NpuClient.Exit ex = c.exit(); c.report(ex.why, ex.memory); }
+      else c.report(NpuWire.why(x), false);
+    }
+  }
+
+  /** Конец работы NPU (NpuClient.Listener): кто бы ни сообщил — фразы дальше распознаёт процессор. */
+  void npuEnded(NpuClient c, String stage, String why, boolean memory) {
+    Engine e = eng;
+    if (e != null) { if (e.npu == c) e.npu = null; if (e.npuShadow == c) { e.npuShadow = null; npuCheck = null; } }
+    final SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    final String id = npuId();
+    if (memory) {
+      if ("start".equals(stage)) {                       // граф не уместился: могла быть неудачная минута — ещё раз
+        String m = sp.getString("npu_mem", "");
+        int n = m.startsWith(id + "|") ? Integer.parseInt(m.substring(id.length() + 1)) + 1 : 1;
+        if (n >= 2) { sp.edit().remove("npu_mem").apply(); npuFailed(id, stage, why + " — второй раз на этой версии"); return; }
+        sp.edit().remove("npu_try").putString("npu_mem", id + "|" + n).apply();
+        if (e != null) e.npuState = L.k("остановлен: мало памяти");
+        log("⚡ NPU: граф не уместился — " + why + ". Распознаёт процессор; попробую при следующем запуске (второй раз — отказ до новой версии)");
+        teleNpu(stage, why);
+        return;
+      }
+      sp.edit().remove("npu_try").apply();               // посреди работы освобождали память — NPU не виноват
+      if (e != null) e.npuState = L.k("остановлен: мало памяти");
+      log("⚡ NPU остановлен: " + why + " — дальше распознаёт процессор; снова попробую при следующем запуске");
+      teleNpu(stage, why);
+      return;
+    }
+    npuFailed(id, stage, why);
+  }
+
+  /** Отказ NPU на этой версии и прошивке: запомнить с причиной, сказать в журнал и, по согласию, разработчику. */
+  void npuFailed(String id, String stage, String why) {
+    Engine e = eng;
+    try {
+      getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_try").putString("npu_fail", new JSONObject().put("id", id)
+          .put("stage", stage).put("why", why).put("at", System.currentTimeMillis()).toString()).apply();
+    } catch (JSONException ignore) { }
+    if (e != null) e.npuState = L.k("не справляется с моделью");
+    log("⚡ NPU отказал — " + npuStage(stage) + ": " + why + ". Распознаёт процессор; снова попробую в следующей версии Falar или после обновления прошивки");
+    teleNpu(stage, why);
+  }
+
+  static String npuStage(String s) {
+    switch (s) {
+      case "start": return "подъём графа";
+      case "probe": return "пробный прогон";
+      case "check": return "сверка с процессором";
+      case "run": return "распознавание фразы";
+      default: return s;
+    }
+  }
+
+  /** Причина — разработчику со статистикой (по согласию): записью сбоя вида «npu»; текстов разговора в ней нет —
+   *  только стадия и текст ошибки ORT, сигнал и кадры падения, память. Телефон и чип — в пакете (teleDevice). */
+  void teleNpu(String stage, String why) {
+    if (!Telemetry.collect || standNow()) return;
+    try {
+      File d = teleDir(); d.mkdirs();
+      long now = System.currentTimeMillis();
+      JSONObject o = new JSONObject().put("at", now / 1000).put("kind", "npu").put("what", Telemetry.cut(why, 300)).put("where", stage)
+          .put("v", myName()).put("state", Telemetry.onScreen ? Telemetry.SCREEN : Telemetry.BACKGROUND);
+      try (java.io.OutputStream out = new java.io.FileOutputStream(new File(d, "crash-" + now + ".json"))) { out.write(o.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+    } catch (Throwable ignore) { }
+  }
+
+  /** Расход заряда за слушание для статистики (Telemetry.Energy; владелец 10.11: «NPU эффективнее — собирать, сколько
+   *  мы расходуем заряда активно»): раз в минуту, пока служба жива, и при смене состояния — счётчик заряда
+   *  (BatteryManager, мкА·ч), на батарее ли, где распознаётся: NPU, процессор или не в счёте (не слушает, стенд, сверка
+   *  NPU — работают оба). Нагрев — температура батареи и уровень PowerManager. Только с согласием на статистику. */
+  final Telemetry.Energy energy = new Telemetry.Energy();
+  final Runnable energyEvery = new Runnable() {
+    @Override public void run() { energyTick(); if (running) main.postDelayed(this, 60_000L); }
+  };
+  void energyTick() {
+    if (!Telemetry.collect) return;
+    try {
+      BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
+      long uah = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
+      boolean onBattery = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS) == BatteryManager.BATTERY_STATUS_DISCHARGING;
+      Engine e = eng;
+      int where = !capturing || e == null || standNow() || e.npuShadow != null ? Telemetry.Energy.NONE
+          : e.npuServing() ? Telemetry.Energy.NPU : Telemetry.Energy.CPU;
+      energy.sample(tele, System.currentTimeMillis(), uah, onBattery, where);
+      if (where != Telemetry.Energy.NONE) {
+        Intent b = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        int t10 = b == null ? Integer.MIN_VALUE : b.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+        int th = Build.VERSION.SDK_INT >= 29 ? ((PowerManager) getSystemService(POWER_SERVICE)).getCurrentThermalStatus() : -1;
+        tele.heat(t10, th);
+      }
+    } catch (Throwable ignore) { }
+  }
+
+  /** Причина отказа NPU на этой версии и прошивке (npu_fail), или null — не отказывал. Запись прежнего вида — сам id. */
+  static String npuFailWhy(SharedPreferences sp, String id) {
+    String r = sp.getString("npu_fail", "");
+    if (r.isEmpty()) return null;
+    if (r.equals(id)) return "причина не записана";
+    try { JSONObject o = new JSONObject(r); return id.equals(o.optString("id")) ? npuStage(o.optString("stage")) + ": " + o.optString("why") : null; }
+    catch (JSONException e) { return null; }
+  }
+
+  /** Сверка фразы, пока NPU не проверен: NPU распознаёт её в фоне (процессор уже распознал), тексты — в NpuCheck. */
+  void npuShadowRun(final NpuClient c, final float[] fed, final String cpu) {
+    final NpuCheck k = npuCheck;
+    if (k == null || c.closed()) return;
+    npuCheckIo.submit(() -> {
+      Engine e = eng;
+      if (c.closed() || e == null || e.npuShadow != c) return;
+      NpuAsr.Result r;
+      try { r = c.run(fed); }
+      catch (NpuClient.Remote x) { c.report("сверка: " + x.getMessage(), false); return; }
+      catch (android.os.DeadObjectException x) { return; }               // процесс умер — причину сообщит его смерть
+      catch (Throwable x) { c.report("сверка: " + NpuWire.why(x), false); return; }
+      NpuCheck.Verdict v = k.add(cpu, r == null ? null : r.text);
+      if (v == NpuCheck.Verdict.OK) {
+        if (e.npuShadow != c) return;
+        c.stage = "run"; e.npu = c; e.npuShadow = null; npuCheck = null; e.npuState = c.how;
+        getSharedPreferences("at", MODE_PRIVATE).edit().putString("npu_ok", npuId()).apply();
+        log("⚡ NPU проверен: " + k.summary() + " — дальше фразы распознаёт он");
+        energyTick();
+      } else if (v == NpuCheck.Verdict.FAIL) {
+        c.report("результат не совпал с процессором: " + k.summary(), false);
+      }
+    });
   }
   /** Прошивка и версия Falar: NPU, отказавший на них (npu_fail), до обновления одного или другого не пробуется. */
   String npuId() { return android.os.Build.FINGERPRINT + "/" + myCode(); }
@@ -534,7 +791,7 @@ public class TranslatorService extends Service {
   boolean npuWanted() {
     if (store == null || store.bytes(Modules.NPU) == 0) return false;
     SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
-    return sp.getBoolean(Npu.PREF, true) && !npuId().equals(sp.getString("npu_fail", ""));
+    return sp.getBoolean(Npu.PREF, true) && npuFailWhy(sp, npuId()) == null;
   }
   /** Модули для хранилища: выбранные человеком и модели NPU, если нужны (npuWanted). */
   Set<String> storeModules() {
@@ -544,7 +801,11 @@ public class TranslatorService extends Service {
   }
   /** Переключатель «Распознавание на NPU». */
   public void setNpu(boolean on) {
-    getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean(Npu.PREF, on).apply();
+    SharedPreferences np = getSharedPreferences("at", MODE_PRIVATE);
+    SharedPreferences.Editor ned = np.edit().putBoolean(Npu.PREF, on);
+    // включили сами — пробовать снова и после отказа: падение NPU приложению теперь не страшно (свой процесс)
+    if (on && npuFailWhy(np, npuId()) != null) { ned.remove("npu_fail").remove("npu_try"); log("⚡ NPU включён вручную — пробую снова на этой версии"); }
+    ned.apply();
     if (store != null) {                               // модели NPU: включили — докачать (раз за включение), выключили — не качать
       store.modules = storeModules();
       if (on) autoFetchTried = false;
@@ -552,7 +813,13 @@ public class TranslatorService extends Service {
     }
     Engine e = eng; if (e == null) return;
     e.npuOn = on; log("⚡ NPU " + (on ? "включён" : "выключен") + (e.npu == null ? "" : " · фраз на NPU " + e.npuCalls));
-    if (on && e.npu == null && !"готовится".equals(e.npuState)) startNpu();
+    if (!on) {                                         // выключили — процесс NPU закрыть: его память (граф, веса) — сразу
+      NpuClient c = e.npu != null ? e.npu : e.npuShadow;
+      e.npu = null; e.npuShadow = null; npuCheck = null;
+      if (c != null) { c.close(); e.npuState = L.k("выключено"); }
+    }
+    if (on && e.npu == null && e.npuShadow == null && !"готовится".equals(e.npuState)) startNpu();
+    energyTick();
   }
   /** Озвучка — после остального и после сказанного: фразы в очереди перевода (они встают за этой задачей —
    *  она уходит в конец очереди за ними), фраза, которую ещё говорят, и не нарезанный звук идут вперёд. Иначе
@@ -683,8 +950,13 @@ public class TranslatorService extends Service {
     long t0 = System.nanoTime(); Engine.Asr ar; long npuBefore = en.npuCalls;
     synchronized (asrLock) { ar = en.asrFull(dir.substring(0, 2), fed, sr); }   // sherpa ресемплирует сам
     long ms = (System.nanoTime() - t0) / 1000000;
-    if (en.npuCalls > npuBefore && (++npuPhrases <= 3 || npuPhrases % 20 == 0))
+    boolean onNpu = en.npuCalls > npuBefore;
+    if (onNpu && (++npuPhrases <= 3 || npuPhrases % 20 == 0))
       log(String.format(Locale.ROOT, "⚡ фраза на NPU: %.1f с речи за %d мс (%d-я)", samples.length / (double) sr, ms, npuPhrases));
+    if (Telemetry.collect && !standNow()) tele.asr(onNpu, ms);
+    NpuClient shadow = en.npuShadow;                   // NPU не проверен на этой версии: та же фраза — ему, в фоне
+    if (shadow != null && !onNpu && sr == 16000 && en.asrMulti != null && !(en.denoiseOn && en.denoiser != null))
+      npuShadowRun(shadow, fed.clone(), ar.text);
     if (!probsTold && ar.tokens != null && ar.tokens.length > 0) {   // с прежней библиотекой JNI пометок нет — видно по журналу
       probsTold = true;
       log(ar.probs != null ? "🔎 распознаватель отдаёт уверенность в словах — сомнительные помечаются"
@@ -1176,10 +1448,9 @@ public class TranslatorService extends Service {
     // Стенд NPU: --es npu 1|0 — переключатель «Распознавание на NPU» (та же фраза на NPU и на процессоре);
     // --es npufree МБ — порог свободной памяти для первой сборки графа (по умолчанию 2000).
     if (i != null && i.hasExtra("npufree")) { npuFree = Long.parseLong(i.getStringExtra("npufree")) * 1_000_000L; log("⚡ стенд: порог памяти для сборки графа NPU — " + i.getStringExtra("npufree") + " МБ"); }
-    // --es npuany 1 — пробовать NPU и на непроверенном чипе MediaTek (Npu.MTK_OK); может уронить приложение
-    if (i != null && i.hasExtra("npuany")) { Npu.MTK_ANY = "1".equals(i.getStringExtra("npuany")); log("⚡ стенд: NPU на любом MediaTek — " + Npu.MTK_ANY); }
-    // --es npureset 1 — забыть «не справляется» и оборванные сборки графа (npu_fail, npu_try), попробовать снова
-    if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").apply(); log("⚡ стенд: NPU — пробовать снова"); }
+    // --es npureset 1 — как новая версия: забыть отказ, оборванный подъём, проверку и сохранённый граф (npu_fail,
+    // npu_try, npu_ok, npu_ctx) — граф соберётся заново, первые фразы сверятся с процессором
+    if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").remove("npu_ok").remove("npu_ctx").remove("npu_mem").apply(); log("⚡ стенд: NPU — как на новой версии"); }
     if (i != null && i.hasExtra("npu")) setNpu("1".equals(i.getStringExtra("npu")));
     if (i != null && i.hasExtra("bargedump")) { bargeDump = Integer.parseInt(i.getStringExtra("bargedump")); log("🗣 стенд: запишу совмещение на концах " + bargeDump + " фраз"); }
     // Стенд озвучки (TtsBench, владелец 10.11 — замена Piper с eSpeak под GPL): --es ttsbench ФАЙЛ_ФРАЗ (в каталоге
@@ -1541,8 +1812,8 @@ public class TranslatorService extends Service {
     getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("vad", on).apply();   // START_STICKY поднимает сервис с vadMode=false
     vadReset = true;                                    // сделает поток нарезки перед следующим кадром
     if (on) listenLiveReset = true;
-    if (on && !capturing) { capturing = true; startCapture(); }
-    else if (!on) capturing = false;                       // поток сам выйдет и отпустит микрофон
+    if (on && !capturing) { capturing = true; startCapture(); energyTick(); }
+    else if (!on) { energyTick(); capturing = false; }    // поток сам выйдет и отпустит микрофон
     notify(L.t(on ? "Слушаю…" : "Микрофон выключен")); }
   /** Последняя секунда слушания (кадры до усиления) — подпор удержания: модели нужен настоящий звук комнаты перед
    *  фразой, а удержание начиналось с нажатия, без него (results/2026-10-08-asr-review.md: на корпусе без подпора
@@ -2934,6 +3205,7 @@ public class TranslatorService extends Service {
       for (ApplicationExitInfo x : getSystemService(ActivityManager.class).getHistoricalProcessExitReasons(getPackageName(), 0, 16)) {
         String k = Telemetry.exitKind(x.getReason());
         if (k == null || x.getTimestamp() <= since || cr.length() >= Telemetry.MAX_CRASHES) continue;
+        if (x.getProcessName() != null && x.getProcessName().endsWith(":npu")) continue;   // NPU — своей записью (teleNpu)
         String d = x.getDescription() == null ? "" : Telemetry.cut(x.getDescription(), 120);
         cr.put(new JSONObject().put("at", x.getTimestamp() / 1000).put("kind", k).put("what", d).put("pss_mb", x.getPss() / 1024)
             .put("state", Telemetry.importanceState(x.getImportance())));
@@ -3985,8 +4257,8 @@ public class TranslatorService extends Service {
 
   /** Нужен ли микрофон сейчас: включено прослушивание или идёт удержание. */
   public boolean micWanted() { return listenPt || listenRu || recording; }
-  void ensureCapture() { if (!capturing) { capturing = true; startCapture(); } }
-  void stopCapture() { capturing = false; log("🎚 микрофон отпущен"); }
+  void ensureCapture() { if (!capturing) { capturing = true; startCapture(); energyTick(); } }
+  void stopCapture() { energyTick(); capturing = false; log("🎚 микрофон отпущен"); }
   void restartCapture() { if (!micWanted()) return; capturing = false;
     try { Thread.sleep(350); } catch (InterruptedException e) {}
     capturing = true; startCapture(); }

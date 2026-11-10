@@ -135,7 +135,7 @@ public class ModelStore {
     loadVerified();
   }
   /** Модели NPU (модуль npu, Npu): этот телефон знает только свои — общие (без поля chip) и своего чипа; chip = null —
-   *  NPU здесь не будет (сборка без его библиотек, чип не тот или не проверен), и модуля нет вовсе: не качается, не
+   *  NPU здесь не будет (сборка без его библиотек или чип не Snapdragon и не MediaTek), и модуля нет вовсе: не качается, не
    *  сверяется, не числится недостающим. Зовётся сразу после конструктора, до первой сверки. */
   public void npuFor(String chip) {
     items.removeIf(it -> Modules.NPU.equals(it.module) && (chip == null || !it.chip.isEmpty() && !it.chip.equals(chip)));

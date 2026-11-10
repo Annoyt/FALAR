@@ -86,6 +86,13 @@ final class Telemetry {
     int stand;
     long asrMs, speechMs;
     double gainSum;
+    /** Где распознавались фразы (владелец 10.11: «процессор иногда чуть быстрее, но NPU эффективнее — собирать»): на NPU
+     *  (NpuClient) и на процессоре — число и мс на них; batt — расход заряда за слушание без зарядки там и там (Energy),
+     *  мкА·ч и мс; tMax10 — самая высокая температура батареи, °C × 10; thermal — самый высокий уровень нагрева
+     *  PowerManager (0 — нет … 6 — выключение; −1 — не знаю). */
+    int npu, cpu;
+    long npuMs, cpuMs, eNpuUah, eNpuMs, eCpuUah, eCpuMs;
+    int tMax10 = Integer.MIN_VALUE, thermal = -1;
     final int[] noise = new int[NOISE_EDGES.length + 1];
     final TreeMap<String, Integer> mic = new TreeMap<>(), skips = new TreeMap<>();
 
@@ -123,6 +130,22 @@ final class Telemetry {
     /** Фраза прогона стенда — только посчитать, что была. */
     synchronized void stand() { stand++; }
 
+    /** Распознанная фраза: на NPU ли и за сколько мс. */
+    synchronized void asr(boolean onNpu, long ms) {
+      if (onNpu) { npu++; npuMs += Math.max(0, ms); } else { cpu++; cpuMs += Math.max(0, ms); }
+    }
+
+    /** Отрезок слушания на батарее (Energy): сколько заряда ушло и за сколько мс, на NPU или процессоре. */
+    synchronized void energy(boolean onNpu, long uah, long ms) {
+      if (onNpu) { eNpuUah += uah; eNpuMs += ms; } else { eCpuUah += uah; eCpuMs += ms; }
+    }
+
+    /** Нагрев во время слушания: температура батареи (°C × 10, MIN_VALUE — не знаю) и уровень PowerManager. */
+    synchronized void heat(int temp10, int thermalStatus) {
+      if (temp10 != Integer.MIN_VALUE) tMax10 = Math.max(tMax10, temp10);
+      thermal = Math.max(thermal, thermalStatus);
+    }
+
     /** Человек поправил распознанный текст: сколько знаков поменял из скольких. */
     synchronized void edit(String was, String now) {
       edits++;
@@ -150,6 +173,18 @@ final class Telemetry {
       o.put("foreign", foreign);
       if (!skips.isEmpty()) o.put("skips", new JSONObject((Map<?, ?>) skips));
       if (stand > 0) o.put("stand", stand);
+      if (npu > 0) o.put("npu", npu).put("npu_ms", Math.round(npuMs / (double) npu));
+      if (npu > 0 && cpu > 0) o.put("cpu", cpu).put("cpu_ms", Math.round(cpuMs / (double) cpu));
+      if (eNpuMs + eCpuMs > 0 || tMax10 != Integer.MIN_VALUE) {
+        JSONObject b = new JSONObject();
+        if (eNpuMs > 0) b.put("npu_min", Math.round(eNpuMs / 6000.0) / 10.0).put("npu_mah", Math.round(eNpuUah / 100.0) / 10.0)
+            .put("npu_mah_h", Math.round(eNpuUah * 36000.0 / eNpuMs) / 10.0);   // мкА·ч / мс × 3600 = мА·ч в час
+        if (eCpuMs > 0) b.put("cpu_min", Math.round(eCpuMs / 6000.0) / 10.0).put("cpu_mah", Math.round(eCpuUah / 100.0) / 10.0)
+            .put("cpu_mah_h", Math.round(eCpuUah * 36000.0 / eCpuMs) / 10.0);   // мкА·ч / мс × 3600 = мА·ч в час
+        if (tMax10 != Integer.MIN_VALUE) b.put("t_max", tMax10 / 10.0);
+        if (thermal >= 0) b.put("thermal", thermal);
+        o.put("batt", b);
+      }
       return o;
     }
 
@@ -159,7 +194,9 @@ final class Telemetry {
         JSONObject o = new JSONObject().put("since", since).put("pt", pt).put("ru", ru).put("empty", empty).put("foreign", foreign)
             .put("hold", hold).put("listen", listen).put("denoise", denoise).put("wiener", wiener).put("music", music).put("clip", clip)
             .put("edits", edits).put("editChars", editChars).put("editTotal", editTotal).put("gainN", gainN).put("asrMs", asrMs)
-            .put("speechMs", speechMs).put("gainSum", gainSum).put("stand", stand).put("mic", new JSONObject((Map<?, ?>) mic)).put("skips", new JSONObject((Map<?, ?>) skips));
+            .put("speechMs", speechMs).put("gainSum", gainSum).put("stand", stand).put("mic", new JSONObject((Map<?, ?>) mic)).put("skips", new JSONObject((Map<?, ?>) skips))
+            .put("npu", npu).put("cpu", cpu).put("npuMs", npuMs).put("cpuMs", cpuMs).put("eNpuUah", eNpuUah).put("eNpuMs", eNpuMs)
+            .put("eCpuUah", eCpuUah).put("eCpuMs", eCpuMs).put("tMax10", tMax10).put("thermal", thermal);
         JSONArray nz = new JSONArray();
         for (int x : noise) nz.put(x);
         return o.put("noise", nz).toString();
@@ -177,6 +214,9 @@ final class Telemetry {
         c.wiener = o.optInt("wiener"); c.music = o.optInt("music"); c.clip = o.optInt("clip"); c.edits = o.optInt("edits");
         c.editChars = o.optInt("editChars"); c.editTotal = o.optInt("editTotal"); c.gainN = o.optInt("gainN");
         c.asrMs = o.optLong("asrMs"); c.speechMs = o.optLong("speechMs"); c.gainSum = o.optDouble("gainSum", 0); c.stand = o.optInt("stand");
+        c.npu = o.optInt("npu"); c.cpu = o.optInt("cpu"); c.npuMs = o.optLong("npuMs"); c.cpuMs = o.optLong("cpuMs");
+        c.eNpuUah = o.optLong("eNpuUah"); c.eNpuMs = o.optLong("eNpuMs"); c.eCpuUah = o.optLong("eCpuUah"); c.eCpuMs = o.optLong("eCpuMs");
+        c.tMax10 = o.optInt("tMax10", Integer.MIN_VALUE); c.thermal = o.optInt("thermal", -1);
         JSONArray nz = o.optJSONArray("noise");
         for (int i = 0; nz != null && i < Math.min(nz.length(), c.noise.length); i++) c.noise[i] = nz.optInt(i);
         for (String m : new String[]{"mic", "skips"}) {
@@ -193,6 +233,7 @@ final class Telemetry {
       Counters c = load(save(), now);
       since = now; pt = ru = empty = foreign = hold = listen = denoise = wiener = music = clip = edits = editChars = editTotal = gainN = stand = 0;
       asrMs = speechMs = 0; gainSum = 0; Arrays.fill(noise, 0); mic.clear(); skips.clear();
+      npu = cpu = 0; npuMs = cpuMs = eNpuUah = eNpuMs = eCpuUah = eCpuMs = 0; tMax10 = Integer.MIN_VALUE; thermal = -1;
       return c;
     }
 
@@ -202,9 +243,31 @@ final class Telemetry {
       pt += o.pt; ru += o.ru; empty += o.empty; foreign += o.foreign; hold += o.hold; listen += o.listen; denoise += o.denoise;
       wiener += o.wiener; music += o.music; clip += o.clip; edits += o.edits; editChars += o.editChars; editTotal += o.editTotal;
       gainN += o.gainN; asrMs += o.asrMs; speechMs += o.speechMs; gainSum += o.gainSum; stand += o.stand;
+      npu += o.npu; cpu += o.cpu; npuMs += o.npuMs; cpuMs += o.cpuMs;
+      eNpuUah += o.eNpuUah; eNpuMs += o.eNpuMs; eCpuUah += o.eCpuUah; eCpuMs += o.eCpuMs;
+      tMax10 = Math.max(tMax10, o.tMax10); thermal = Math.max(thermal, o.thermal);
       for (int i = 0; i < noise.length; i++) noise[i] += o.noise[i];
       o.mic.forEach((k, v) -> mic.merge(k, v, Integer::sum));
       o.skips.forEach((k, v) -> skips.merge(k, v, Integer::sum));
+    }
+  }
+
+  /** Расход заряда за слушание (владелец 10.11: «собирать, сколько мы расходуем заряда активно»). Отсчёт — раз в минуту
+   *  и при смене состояния: счётчик заряда (BatteryManager.CHARGE_COUNTER, мкА·ч), на батарее ли, где распознаётся.
+   *  Отрезок между двумя отсчётами идёт в ведро NPU или процессора, если на обоих концах слушание без зарядки и одно и то
+   *  же место, отрезок не длиннее MAX_GAP (дольше — телефон мог спать) и заряд не вырос (вырос — заряжали или счётчик
+   *  пересчитался). Счётчик обновляется шагами по 1 мА·ч и с запозданием (POCO 10.11) — точно выходит за часы, не за
+   *  минуты: потому — сумма за период пакета. Проверка NPU (идут оба) и тишина без микрофона — не в счёте. */
+  static final class Energy {
+    static final long MAX_GAP = 10 * 60_000L;
+    static final int NONE = 0, CPU = 1, NPU = 2;
+    long t = -1, uah; int mode = NONE;
+
+    synchronized void sample(Counters c, long now, long chargeUah, boolean onBattery, int where) {
+      int m = chargeUah > 0 && onBattery ? where : NONE;
+      if (mode != NONE && m == mode && now > t && now - t <= MAX_GAP && chargeUah <= uah)
+        c.energy(m == NPU, uah - chargeUah, now - t);
+      t = now; uah = chargeUah; mode = m;
     }
   }
 

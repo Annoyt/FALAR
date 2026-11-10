@@ -75,7 +75,16 @@ cp $R/models/denoiser/gtcrn_simple.onnx $OUT/assets/gtcrn_simple.onnx
 # minSdk и targetSdk — только из манифеста: --min-sdk-version/--target-sdk-version у aapt2 лишь подставляют
 # значение, которого в манифесте нет, и здесь стояли прежние 28/33, ничего не меняя (проверено 03.10).
 # tools/android.jar — API 33: так собирается и под targetSdk 35, а то, чего в 33 нет, код берёт числами.
-aapt2 link -o $OUT/base.apk --manifest $A/AndroidManifest.xml -I "$AJ" --java $OUT/gen -A $OUT/assets $OUT/res.zip
+# APP_ID — пробная копия рядом с установленной: своё имя пакета, свои данные и настройки. Нужна там, где Falar стоит из
+# выпуска (подпись релизным ключом): отладочную сборку поверх телефон не примет, а удалить выпуск — стереть человеку
+# разговоры (POCO владельца, 10.11). Код и ресурсы те же (R остаётся app.falar); APP_LABEL — подпись под значком.
+MF=$A/AndroidManifest.xml
+if [ -n "$APP_ID" ]; then
+  MF=$OUT/AndroidManifest.xml
+  sed "s|android:label=\"Falar\"|android:label=\"${APP_LABEL:-Falar $APP_ID}\"|" $A/AndroidManifest.xml > $MF
+  grep -q "android:label=\"${APP_LABEL:-Falar $APP_ID}\"" $MF || { echo "APP_ID: подпись под значком не подставилась"; exit 1; }
+fi
+aapt2 link -o $OUT/base.apk --manifest $MF ${APP_ID:+--rename-manifest-package $APP_ID} -I "$AJ" --java $OUT/gen -A $OUT/assets $OUT/res.zip
 javac --release 11 -nowarn -cp "$AJ:$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/*.java $A/sherpa-java-api/*.java $OUT/gen/app/falar/R.java
 # Код выхода D8 не терять: раньше его вывод шёл через grep с «|| true», и когда 28.09.2026 на
 # сборке упала сама JVM (внутренняя ошибка JIT), скрипт спокойно собрал APK без половины кода —
@@ -127,7 +136,7 @@ zipalign -f 4 $OUT/unaligned.apk $OUT/aligned.apk
 # Имя: -npu — сборка с NPU (QNN, а у выпуска ещё и NeuroPilot: release.sh собирает NPU=1 MTK=1), -mtk — только
 # NeuroPilot (стенд MediaTek).
 SUF=${SLIM:+-slim}; if [ -n "$NPU" ]; then SUF=$SUF-npu; elif [ -n "$MTK" ]; then SUF=$SUF-mtk; fi
-OUTAPK=$A/Falar$SUF.apk
+OUTAPK=$A/Falar$SUF${APP_ID:+-$APP_ID}.apk
 if [ -n "$FALAR_KEYSTORE" ]; then
   [ -f "$FALAR_KEYSTORE" ] || { echo "нет файла ключа: $FALAR_KEYSTORE"; exit 1; }
   [ -n "$FALAR_KS_PASS" ] || { echo "нужен FALAR_KS_PASS (пароль хранилища)"; exit 1; }

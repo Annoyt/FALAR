@@ -65,11 +65,11 @@ public class Engine {
   /** Голос перевода — синтез телефона (SysTts, с 0.38.0 вместо Piper); null — не поднят или модуль «Озвучка» выключен. */
   public volatile SysTts sys;
   public OfflineSpeechDenoiser denoiser; public volatile boolean denoiseOn = false;
-  /** Распознавание на NPU Snapdragon (Npu, NpuAsr): поднимается в фоне после загрузки (startNpu); пока его нет,
-   *  он выключен или фраза длиннее окна 8,3 с — sherpa на процессоре, как раньше. npuState — что с ним, словами. */
-  public volatile NpuAsr npu; public volatile boolean npuOn = false; public volatile String npuState = "";
+  /** Распознавание на NPU (Npu, NpuAsr в своём процессе — NpuService, NpuClient): поднимается в фоне после загрузки
+   *  (TranslatorService.startNpu); пока его нет, он выключен, не проверен на этой версии (npuShadow — фразы сверяются с
+   *  процессором) или фраза длиннее окна 8,3 с — sherpa на процессоре, как раньше. npuState — что с ним, словами. */
+  public volatile NpuClient npu, npuShadow; public volatile boolean npuOn = false; public volatile String npuState = "";
   public volatile long npuMs, npuCalls;
-  static final long NPU_PROBE_MAX_MS = 600;
   public String asrName = "";
   OrtEnvironment env; final Map<String, OrtSession[]> mt = new HashMap<>(); final Map<String, SpmTokenizer> tok = new HashMap<>();
   public long loadAsrMs, loadMtMs, loadTtsMs;
@@ -272,34 +272,11 @@ public class Engine {
     for (int k = 0; k < p.length; k++) p[k] = (float) Math.exp(logProbs[k]);
     return p;
   }
-  /** Поднять распознавание на NPU (долго при первом запуске: граф QNN собирается на телефоне, потом — из ctx). */
-  public void startNpu(java.io.File libDir, java.io.File ctx) {
-    long t = System.nanoTime();
-    try {
-      Npu.Chip chip = Npu.chip();
-      java.util.Map<String, String> opts;
-      if (chip == Npu.Chip.MEDIATEK) opts = Npu.neuronOptions(libDir);
-      else { Npu.adspPath(libDir); opts = Npu.qnnOptions(libDir); }
-      String model = new java.io.File(Npu.model(chip)).getName();
-      NpuAsr n = new NpuAsr(new java.io.File(m, "asr_multi"), new java.io.File(m, "npu"), model, opts, ctx);
-      long probe = n.probeMs();
-      // Порог: NPU — 14–90 мс на окно (AI Hub, 8 телефонов), MediaTek ~150 мс (POCO 10.11); процессор с этой моделью —
-      // 1,5–2,3 с (A52s RTL 09.11, POCO)
-      if (probe > NPU_PROBE_MAX_MS) {
-        n.close(); npuState = "error";
-        log.log("⚡ NPU не взял граф (пробный прогон " + probe + " мс, " + opts.getOrDefault("htp_arch", "поколение не задано")
-            + ") — распознаёт процессор, как раньше");
-        return;
-      }
-      npu = n; npuState = n.how;
-      log.log("⚡ NPU готов за " + (System.nanoTime() - t) / 1_000_000 + " мс (" + n.how + ", пробный прогон " + probe + " мс)");
-    } catch (Throwable e) {
-      npuState = "error"; log.log("⚡ NPU не поднялся, распознаёт процессор: " + e);
-    }
-  }
-  /** Распознать на NPU; null — его нет, выключен, фраза длиннее окна или ошибка (тогда NPU выключается до перезапуска). */
+  /** Распознать на NPU; null — его нет, выключен, фраза длиннее окна или сбой. Сбой — NPU выключается: ошибку в его
+   *  процессе служба получает словами (NpuClient.report — отказ до новой версии), падение процесса — через его смерть
+   *  с причиной; фраза — процессором, как раньше. */
   Asr npuAsr(float[] s, int sr) {
-    NpuAsr n = npu;
+    NpuClient n = npu;
     if (n == null || !npuOn || sr != 16000) return null;
     long t = System.nanoTime();
     try {
@@ -307,12 +284,19 @@ public class Engine {
       if (r == null) return null;
       npuMs += (System.nanoTime() - t) / 1_000_000; npuCalls++;
       return new Asr(r.text.trim(), r.tokens, r.times, r.durs, probs(r.logProbs, r.tokens));
+    } catch (NpuClient.Remote e) {
+      npu = null; n.report("фраза: " + e.getMessage(), false);
+      return null;
+    } catch (android.os.DeadObjectException e) {
+      npu = null;                                    // процесс умер — причину сообщит его смерть (NpuClient.onDeath)
+      return null;
     } catch (Throwable e) {
-      npu = null; npuState = "error"; log.log("⚡ NPU сбился, дальше распознаёт процессор: " + e);
-      try { n.close(); } catch (Throwable ignore) {}
+      npu = null; n.report("фраза: " + NpuWire.why(e), false);
       return null;
     }
   }
+  /** Распознаёт ли фразы сейчас NPU (для счёта батареи и статистики): поднят, проверен, включён и шумодав не мешает. */
+  public boolean npuServing() { return npu != null && npuOn && asrMulti != null && !(denoiseOn && denoiser != null); }
   public Asr asrFull(String lang, float[] s, int sr) {
     OfflineRecognizer off = asrMulti != null ? asrMulti : (lang.equals("pt") ? asrPt : null);
     if (asrMulti != null && !(denoiseOn && denoiser != null)) { Asr a = npuAsr(s, sr); if (a != null) return a; }

@@ -412,6 +412,10 @@ Pode falar · здесь появится перевод	Pode falar · a traduç
 Загружаю модели · %s · ещё ≈ %d с	Carregando modelos · %s · faltam ≈ %d s
 Улучшаю в облаке · ещё ≈ %d с	Melhorando na nuvem · faltam ≈ %d s
 Улучшаю в облаке · дольше обычного · %d с	Melhorando na nuvem · mais demorado que o normal · %d s
+граф NPU	grafo da NPU
+Первый запуск версии: готовлю NPU · ещё ≈ %d с	Primeira execução da versão: preparando a NPU · faltam ≈ %d s
+Первый запуск версии: готовлю NPU · дольше обычного · %d с	Primeira execução da versão: preparando a NPU · mais demorado que o normal · %d s
+Первый запуск этой версии: готовлю распознавание на NPU — до двух минут, один раз	Primeira execução desta versão: preparando o reconhecimento na NPU — até dois minutos, só uma vez
 читаете вслух · микрофон не слушает	lendo em voz alta · o microfone não ouve
 транскрипция скрыта · касание вернёт	transcrição oculta · toque para mostrar
 улучшить нельзя: %s	não dá para melhorar: %s
@@ -727,13 +731,10 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 не Snapdragon и не MediaTek	nem Snapdragon nem MediaTek
 на MediaTek: меньше расход батареи и нагрев, точнее	no MediaTek: menos gasto de bateria e calor, mais preciso
 не справляется с моделью	não dá conta do modelo
-сбой при прошлой сборке графа	falha na última montagem do grafo
 квантовано для NPU MediaTek (правки Falar)	quantizado para a NPU MediaTek (alterações do Falar)
 правки Falar: 16-битные активации	alterações do Falar: ativações de 16 bits
 лицензия не указана	licença não indicada
-этот чип MediaTek не проверен	este chip MediaTek não foi testado
 ⚡ Распознавание на NPU	⚡ Reconhecimento na NPU
-этот чип Snapdragon не проверен	este chip Snapdragon não foi testado
 В «О приложении» — авторы и лицензии моделей и библиотек Falar.	Em «Sobre o app» — autores e licenças dos modelos e bibliotecas do Falar.
 Распознавание и отпечаток голоса	Reconhecimento e impressão de voz
 добавлена уверенность распознавателя, собрано без синтеза речи	adicionada a confiança do reconhecedor, compilado sem síntese de voz
@@ -770,3 +771,5 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 при «Точнее» голос ждёт уточнитель до 3 с	com «Mais precisa», a voz espera o refinador até 3 s
 PT — собеседнику, RU — вам. Не успел за 3 с — звучит перевод фразы, уточнённый текст появится чуть позже.	PT — para o interlocutor, RU — para você. Se não ficar pronto em 3 s, toca a tradução da frase e o texto refinado aparece logo depois.
 При «Точнее» голос ждёт уточнитель до 3 секунд — язык выбирается в настройках.	Com «Mais precisa», a voz espera o refinador até 3 segundos — o idioma se escolhe nas configurações.
+проверяется	em verificação
+остановлен: мало памяти	parado: pouca memória
