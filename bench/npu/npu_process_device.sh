@@ -8,6 +8,9 @@
 #   3. перезапуск — отказ помнится («уже отказал», без новой попытки) или NPU поднимается из сохранённого графа.
 # Модель кладётся в models/npu приложения (MediaTek — encoder-mtk.onnx, Snapdragon — encoder-npu.onnx) — из MODEL.
 # Ждёт свободного стенда (.stand/lock) до часа: другие проверки на телефоне не прерываются.
+# Redmi Note 10 Pro (MT6891, Neuron 5), 10.11: процесс NPU упал (SIGSEGV SEGV_MAPERR · #00 <unknown> · #01–03
+# libonnxruntime_providers_neuropilot.so · #04–05 libonnxruntime.so) через 10 с после начала сборки графа; Falar жив (тот же
+# pid), процесса :npu нет; после перезапуска — «уже отказал» с той же причиной, без новой попытки.
 #
 #   bash bench/npu/npu_process_device.sh SERIAL [APK] [MODEL]
 #     APK   — по умолчанию bench/apk/Falar-mtk.apk; «-» — не ставить
