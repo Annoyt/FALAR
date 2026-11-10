@@ -45,5 +45,8 @@
       </intent-filter>
     </activity>
     <service android:name="dev.agenttranslator.TranslatorService" android:exported="false" android:foregroundServiceType="microphone"/>
+    <!-- Распознавание на NPU — в своём процессе (NpuService, владелец 10.11): падение дополнения NPU (код на C++) убивает
+         только его, приложение распознаёт процессором дальше и знает причину. -->
+    <service android:name="dev.agenttranslator.NpuService" android:exported="false" android:process=":npu"/>
   </application>
 </manifest>

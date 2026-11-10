@@ -732,11 +732,10 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 не Snapdragon и не MediaTek	nem Snapdragon nem MediaTek
 на MediaTek: меньше расход батареи и нагрев, точнее	no MediaTek: menos gasto de bateria e calor, mais preciso
 не справляется с моделью	não dá conta do modelo
-сбой при прошлой сборке графа	falha na última montagem do grafo
 квантовано для NPU MediaTek (правки Falar)	quantizado para a NPU MediaTek (alterações do Falar)
 правки Falar: 16-битные активации	alterações do Falar: ativações de 16 bits
 лицензия не указана	licença não indicada
-этот чип MediaTek не проверен	este chip MediaTek não foi testado
 ⚡ Распознавание на NPU	⚡ Reconhecimento na NPU
-этот чип Snapdragon не проверен	este chip Snapdragon não foi testado
 В «О приложении» — авторы и лицензии моделей и библиотек Falar.	Em «Sobre o app» — autores e licenças dos modelos e bibliotecas do Falar.
+проверяется	em verificação
+остановлен: мало памяти	parado: pouca memória
