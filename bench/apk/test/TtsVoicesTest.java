@@ -10,7 +10,8 @@ import java.util.List;
  *  T2 — почему голоса нет: «не скачан» (язык движок знает) и «нет голоса»;
  *  T3 — звук движка в float: 16 бит, 8 бит, float, два канала;
  *  T4 — передискретизация кусками = целиком, длина по частотам;
- *  T5 — тихий хвост фразы срезается до keep, тишина в середине остаётся.
+ *  T5 — тихий хвост фразы срезается до keep, тишина в середине остаётся;
+ *  T6 — скорость речи: 0,5–2× с шагом 0,1, позиция ползунка туда и обратно, надпись «1,0×».
  *  Запуск: bash bench/apk/test.sh. */
 public class TtsVoicesTest {
   static int fails = 0, checks = 0;
@@ -88,6 +89,17 @@ public class TtsVoicesTest {
     ok(o3.length == 0 && o4.length == 3, "T5 хвост из 8 тихих отсчётов урезан до keep=3: " + o3.length + " + " + o4.length);
     TtsVoices.TrimTail t2 = new TtsVoices.TrimTail(0.003f, 100);
     ok(t2.push(new float[]{0.3f, 0}).length == 1 && t2.end().length == 1, "T5 короткий хвост остаётся целиком");
+
+    ok(TtsVoices.speed(1f) == 1f && TtsVoices.speed(0.1f) == 0.5f && TtsVoices.speed(3f) == 2f, "T6 скорость — в пределах 0,5–2×");
+    ok(TtsVoices.speed(Float.NaN) == 1f && TtsVoices.speed(Float.POSITIVE_INFINITY) == 1f, "T6 не число — 1×");
+    ok(TtsVoices.speed(1.26f) == 1.3f && TtsVoices.speed(1.24f) == 1.2f, "T6 до десятых: " + TtsVoices.speed(1.26f) + ", " + TtsVoices.speed(1.24f));
+    ok(TtsVoices.speedAt(0) == 0.5f && TtsVoices.speedAt(5) == 1f && TtsVoices.speedAt(TtsVoices.SPEED_STEPS) == 2f, "T6 ползунок: 0 — 0,5×, 5 — 1×, конец — 2×");
+    boolean round = true;
+    for (int i = 0; i <= TtsVoices.SPEED_STEPS; i++) round &= TtsVoices.speedPos(TtsVoices.speedAt(i)) == i;
+    ok(round, "T6 позиция → скорость → позиция — та же на всех 16 шагах");
+    ok(TtsVoices.speedPos(9f) == TtsVoices.SPEED_STEPS && TtsVoices.speedPos(0f) == 0, "T6 чужое значение в настройках — край ползунка");
+    ok("1,0×".equals(TtsVoices.speedLabel(1f)) && "0,5×".equals(TtsVoices.speedLabel(0.5f)) && "2,0×".equals(TtsVoices.speedLabel(2f))
+        && "1,3×".equals(TtsVoices.speedLabel(1.3f)), "T6 надпись: " + TtsVoices.speedLabel(1f) + " " + TtsVoices.speedLabel(1.3f));
 
     System.out.println(fails == 0 ? "TtsVoices: " + checks + " проверок, все прошли" : "TtsVoices: провалов " + fails + " из " + checks);
     System.exit(fails == 0 ? 0 : 1);

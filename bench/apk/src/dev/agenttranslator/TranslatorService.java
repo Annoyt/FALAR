@@ -397,7 +397,7 @@ public class TranslatorService extends Service {
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
       Engine.mtBeam = getSharedPreferences("at", MODE_PRIVATE).getBoolean("mt_quality", true) ? Engine.MT_BEAM_QUALITY : 1;
       Engine.withTts = mod(Modules.TTS);
-      Engine.ttsOpen = lg -> SysTts.open(this, chosenVoices(), lg::log);
+      Engine.ttsOpen = lg -> SysTts.open(this, chosenVoices(), chosenSpeeds(), lg::log);
       readSoundPrefs();
       earlyStart();
       // Ход загрузки — экрану: этапы «распознавание · перевод · словарь и разговоры · озвучка»,
@@ -848,6 +848,16 @@ public class TranslatorService extends Service {
       String v = i.getStringExtra("ttsvoice"); SysTts st = sysTts();
       if ("show".equals(v)) log("🔊 голоса: " + (st == null ? "синтеза нет" : st.describe()));
       else if (v.contains(":")) setTtsVoice(v.substring(0, v.indexOf(':')), v.substring(v.indexOf(':') + 1));
+    }
+    // Скорость речи (test_voice_device.sh, возврат стенда): --es ttsspeed ru:1.5 или ru:1.0,pt:1.2 — тот же путь, что
+    // ползунки «Скорость речи»; --es ttsspeed show — что стоит
+    if (i != null && i.hasExtra("ttsspeed")) {
+      String v = i.getStringExtra("ttsspeed");
+      if ("show".equals(v)) log("🔊 скорость: ru " + TtsVoices.speedLabel(ttsSpeed("ru")) + " · pt " + TtsVoices.speedLabel(ttsSpeed("pt")));
+      else for (String p : v.split(",")) {
+        int k = p.indexOf(':'); if (k <= 0) continue;
+        try { setTtsSpeed(p.substring(0, k).trim(), Float.parseFloat(p.substring(k + 1).trim().replace(',', '.'))); } catch (NumberFormatException ignore) {}
+      }
     }
     if (i != null && i.hasExtra("hold")) {
       holdMs = Math.max(0, Math.min(6000, Integer.parseInt(i.getStringExtra("hold"))));
@@ -1352,7 +1362,8 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("settings")) { android.content.SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
       log("🧪 настройки: разбор " + p.getInt("refine_every", 3) + " · облако " + p.getInt("cloud_every", 0) + " · чтение вслух " + p.getInt("read_guard", 1)
           + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0) + " · перевод точнее " + (p.getBoolean("mt_quality", true) ? 1 : 0)
-          + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))] + " · два микрофона " + p.getString("dualmic", "auto")); }
+          + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))] + " · два микрофона " + p.getString("dualmic", "auto")
+          + String.format(Locale.ROOT, " · скорость ru %.1f pt %.1f", TtsVoices.speed(p.getFloat("tts_speed_ru", 1f)), TtsVoices.speed(p.getFloat("tts_speed_pt", 1f)))); }
     if (i != null && i.hasExtra("refineevery")) setRefineEvery(Integer.parseInt(i.getStringExtra("refineevery")));
     if (i != null && i.hasExtra("cloudevery")) setCloudEvery(Integer.parseInt(i.getStringExtra("cloudevery")));
     if (i != null && i.hasExtra("consent")) { getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("cloud_consent", "1".equals(i.getStringExtra("consent"))).apply(); log("☁ согласие на отправку разговора: " + cloudConsent()); }
@@ -1823,6 +1834,39 @@ public class TranslatorService extends Service {
     for (String l : SysTts.LANGS) { String v = sp.getString("tts_voice_" + l, null); if (v != null) m.put(l, v); }
     return m;
   }
+  /** Скорость речи по языку, заданная человеком («Настройки» → «Скорость речи»). */
+  java.util.Map<String, Float> chosenSpeeds() {
+    SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE); java.util.Map<String, Float> m = new java.util.HashMap<>();
+    for (String l : SysTts.LANGS) if (sp.contains("tts_speed_" + l)) m.put(l, TtsVoices.speed(sp.getFloat("tts_speed_" + l, 1f)));
+    return m;
+  }
+  /** Скорость речи языка: у поднятого синтеза — та, с которой он говорит; до загрузки — из настроек. */
+  public float ttsSpeed(String lang) {
+    SysTts s = sysTts();
+    return s != null ? s.speed(lang) : TtsVoices.speed(getSharedPreferences("at", MODE_PRIVATE).getFloat("tts_speed_" + lang, 1f));
+  }
+  /** Номер последней смены скорости: пробную фразу говорит только последняя — ползунок двигали несколько раз подряд. */
+  final java.util.concurrent.atomic.AtomicInteger speedSeq = new java.util.concurrent.atomic.AtomicInteger();
+  /** Сменить скорость речи языка («Скорость речи», 0,5–2×) и произнести пробную фразу с ней. Действует с ближайшей
+   *  фразы; озвученное раньше из кэша фраз (Phrasebook) сбрасывается — оно звучало бы с прежней скоростью. */
+  public void setTtsSpeed(String lang, float x) {
+    final float v = TtsVoices.speed(x);
+    getSharedPreferences("at", MODE_PRIVATE).edit().putFloat("tts_speed_" + lang, v).apply();
+    SysTts s0 = sysTts(); if (s0 != null) s0.setSpeed(lang, v);
+    final int my = speedSeq.incrementAndGet();
+    worker.submit(() -> {
+      if (my != speedSeq.get()) return;                  // ползунок двинули ещё раз — пробную фразу скажет последняя смена
+      SysTts s = sysTts();
+      if (s == null) { log("🔊 скорость " + lang + ": " + TtsVoices.speedLabel(v) + " — с загрузкой синтеза"); return; }
+      s.setSpeed(lang, v); voiceTag();
+      double sec = 0;
+      try { sec = speakOut(lang, sample(lang)); } catch (Throwable t) { log("🔊 " + t); }
+      log(String.format(Locale.ROOT, "🔊 скорость %s: %s · пробная фраза %.2f с звука", lang, TtsVoices.speedLabel(v), sec));
+      Listener l = listener; if (l != null) main.post(l::onModules);
+    });
+  }
+  /** Пробная фраза голоса и скорости — её произносит выбранный голос или новая скорость. */
+  static String sample(String lang) { return "ru".equals(lang) ? "Здравствуйте! Так звучит перевод." : "Olá! É assim que soa a tradução."; }
   /** Синтез телефона, если поднят. */
   public SysTts sysTts() { Engine e = eng; return e == null ? null : e.sys; }
   /** Сменить голос языка и произнести им пробную фразу (выбор в «Голосах»). */
@@ -1832,7 +1876,7 @@ public class TranslatorService extends Service {
       SysTts s = sysTts(); if (s == null) return;
       synchronized (tts) { s.setVoice(lang, name); }
       voiceTag(); log("🔊 голос " + lang + ": " + s.voiceName(lang));
-      try { speakOut(lang, "ru".equals(lang) ? "Здравствуйте! Так звучит перевод." : "Olá! É assim que soa a tradução."); } catch (Throwable t) { log("🔊 " + t); }
+      try { speakOut(lang, sample(lang)); } catch (Throwable t) { log("🔊 " + t); }
       Listener l = listener; if (l != null) main.post(l::onModules);
     });
   }
@@ -1848,7 +1892,8 @@ public class TranslatorService extends Service {
   /** Кэш озвученных фраз — под нынешние голоса: звук прежнего голоса (или Piper до 0.38) из кэша не играет. */
   void voiceTag() {
     SysTts s = sysTts(); Phrasebook p = pb;
-    if (p != null && s != null) p.audioVoice(s.engine + "|" + s.voiceName("ru") + "|" + s.voiceName("pt"));
+    if (p != null && s != null) p.audioVoice(s.engine + "|" + s.voiceName("ru") + "|" + s.voiceName("pt")
+        + String.format(Locale.ROOT, "|%.1f|%.1f", s.speed("ru"), s.speed("pt")));
   }
   /** Голоса ещё грузятся (loadTtsLate): перевод не ждёт их, а встаёт в очередь озвучки. */
   boolean ttsSoon() { return ttsLoading && mod(Modules.TTS) && eng != null; }
@@ -3638,18 +3683,20 @@ public class TranslatorService extends Service {
     } catch (Throwable e) { /* нет сведений — считаем динамиком */ }
     return false;
   }
-  /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). */
-  void speakOut(String tgt, String text) throws Exception {
-    if (!voice()) { hint(L.t("🔇 озвучка выключена — «Настройки» → «Модули»")); return; }
-    if (!eng.hasVoice(tgt)) { noVoice(tgt); return; }
+  /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). Итог — секунды звука (0 — не
+   *  звучал). */
+  double speakOut(String tgt, String text) throws Exception {
+    if (!voice()) { hint(L.t("🔇 озвучка выключена — «Настройки» → «Модули»")); return 0; }
+    if (!eng.hasVoice(tgt)) { noVoice(tgt); return 0; }
     synchronized (tts) {
-    if (!voice()) return;
+    if (!voice()) return 0;
     int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     final boolean dup = btDuplex(); if (!dup) muteUntil = Long.MAX_VALUE;
     double sec = 0; final long[] w0 = {0};
     try { SysTts.Audio ga = eng.speak(tgt, text, chunk -> { if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
       sec = ga.getSamples().length / (double) rate;
     } finally { if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec) + pausedMs; playEndMs += pausedMs; if (!dup) muteUntil = until; } }
+    return sec;
     }
   }
   /** Очистка выученного. Ярус копится сам и молча, поэтому убрать его должно быть можно

@@ -78,7 +78,7 @@ snap() {
   say "  снимок: $(basename "$d") · $(cut -c10- "$d/settings") · модули [$(cat "$d/modules")]"
 }
 restore() {
-  local d f st b c j now nowmods ref cloud rg qual l lst mods m
+  local d f st b c j now nowmods ref cloud rg qual l lst mods m mtq sp
   d=$(cat "$STATE/pending" 2>/dev/null); [ -n "$d" ] && [ -d "$d" ] || return 0
   say "== возврат по снимку $(basename "$d")"
   $ADB shell "am force-stop $PKG"; sleep 1
@@ -99,13 +99,14 @@ restore() {
   ref=$(field разбор < "$d/settings"); cloud=$(sed -n 's/.*облако \([0-9][0-9]*\).*/\1/p' "$d/settings"); rg=$(sed -n 's/.*чтение вслух \([0-9]\).*/\1/p' "$d/settings")
   qual=$(sed -n 's/.*облако точнее \([01]\).*/\1/p' "$d/settings"); l=$(sed -n 's/.*слушаю \([a-z]*\) ·.*/\1/p' "$d/settings")
   mtq=$(sed -n 's/.*перевод точнее \([01]\).*/\1/p' "$d/settings")
+  sp=$(sed -n 's/.*скорость ru \([0-9.]*\) pt \([0-9.]*\).*/ru:\1,pt:\2/p' "$d/settings")      # скорость речи (с 0.38.0)
   lst=$(case "$l" in ptru) echo both;; pt|ru) echo $l;; *) echo off;; esac); mods=$(cat "$d/modules")
   wait_idle
   m=$(mark); launch --es settings show; now=$(wl "$m" '🧪 настройки:' 20 | cut -c10-)
   m=$(mark); launch --es modules show; nowmods=$(wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]')
   if [ "$now" != "$(cut -c10- "$d/settings")" ] || [ "$nowmods" != "$mods" ]; then
     launch --es listen $lst --es refineevery $ref --es cloudevery $cloud --es readguard $rg --es cloudprefer $([ "$qual" = 1 ] && echo quality || echo fast) \
-      $([ -n "$mtq" ] && echo "--es mtprefer $([ "$mtq" = 1 ] && echo quality || echo speed)") \
+      $([ -n "$mtq" ] && echo "--es mtprefer $([ "$mtq" = 1 ] && echo quality || echo speed)") $([ -n "$sp" ] && [ "$sp" != "$(printf '%s' "$now" | sed -n 's/.*скорость ru \([0-9.]*\) pt \([0-9.]*\).*/ru:\1,pt:\2/p')" ] && echo "--es ttsspeed $sp") \
       $([ "$nowmods" != "$mods" ] && [ -n "$mods" ] && echo "--es modules '$mods'"); sleep 4
     m=$(mark); launch --es settings show; now=$(wl "$m" '🧪 настройки:' 20 | cut -c10-)
     [ "$now" = "$(cut -c10- "$d/settings")" ] && say "  настройки и модули — как были: $now" || say "  ВНИМАНИЕ: настройки после возврата «$now», а было «$(cut -c10- "$d/settings")»"

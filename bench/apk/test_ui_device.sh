@@ -189,9 +189,10 @@ restore() {
   until idle; do n=$((n+1)); [ $n -eq 1 ] && say "  телефон занят ($(focus)) — настройки верну, когда освободится"; sleep 15; done
   if [ -n "$REF" ]; then
     launch --es listen ${LST:-off} --es refineevery $REF --es cloudevery $CLOUD --es readguard $RG --es voicewhat ${VW:-auto} \
-      $([ -n "$MTQ" ] && echo "--es mtprefer $([ "$MTQ" = 1 ] && echo quality || echo speed)"); sleep 3
+      $([ -n "$MTQ" ] && echo "--es mtprefer $([ "$MTQ" = 1 ] && echo quality || echo speed)") \
+      $([ -n "$SPCH" ] && [ -n "$SP" ] && echo "--es ttsspeed $SP"); sleep $([ -n "$SPCH" ] && echo 8 || echo 3)
     $ADB shell "am force-stop $PKG"; sleep 1
-    say "  настройки: разбор $REF, облако $CLOUD, чтение вслух $RG, слушание ${LST:-off}, озвучка ${VW:-auto}${MTQ:+, перевод точнее $MTQ}"
+    say "  настройки: разбор $REF, облако $CLOUD, чтение вслух $RG, слушание ${LST:-off}, озвучка ${VW:-auto}${MTQ:+, перевод точнее $MTQ}${SPCH:+, скорость $SP}"
   fi
   say "  текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
   idle && launch; rm -rf "$D"
@@ -223,6 +224,7 @@ REF=$(printf '%s' "$st" | sed -n 's/.*разбор \([0-9][0-9]*\).*/\1/p'); CLO
 RG=$(printf '%s' "$st" | sed -n 's/.*чтение вслух \([0-9]\).*/\1/p'); QUAL=$(printf '%s' "$st" | sed -n 's/.*облако точнее \([01]\).*/\1/p')
 MTQ=$(printf '%s' "$st" | sed -n 's/.*перевод точнее \([01]\).*/\1/p')   # пусто — у сборки нет «Перевод фраз: быстрее / точнее»
 VW=$(printf '%s' "$st" | sed -n 's/.*озвучка \([a-z]*\).*/\1/p')
+SP=$(printf '%s' "$st" | sed -n 's/.*скорость ru \([0-9.]*\) pt \([0-9.]*\).*/ru:\1,pt:\2/p')   # пусто — у сборки нет «Скорость речи»
 L=$(printf '%s' "$st" | sed -n 's/.*слушаю \([a-z]*\) ·.*/\1/p'); LST=$(case "$L" in ptru) echo both;; pt|ru) echo $L;; *) echo off;; esac)
 m=$(mark); launch --es modules show
 MODS=$(wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]')
@@ -614,6 +616,30 @@ if mod tts; then
   m=$(mark); start --es voicewhat ${VW:-auto} --es silent 1; wl "$m" '🔈 молчаливый режим' 10 >/dev/null
 else sk "U11 модуль «Озвучка» выключен — выбор не показывается"; fi
 
+say "== U13: «Скорость речи»"
+if mod tts && [ -n "$SP" ]; then
+  tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5
+  seek --desc "Скорость речи: португальский"; dump
+  lbl() { awk -v v="$1" 'BEGIN { printf "%.1f×", v }' | tr . ,; }               # 1.0 → «1,0×», как на экране
+  val() { ui up --desc "Скорость речи: $1" | grep -E '^[0-9],[0-9]×$' | head -1; }  # значение справа от ползунка
+  wru=$(lbl "$(printf '%s' "$SP" | sed 's/ru:\([0-9.]*\),.*/\1/')"); wpt=$(lbl "$(printf '%s' "$SP" | sed 's/.*pt:\([0-9.]*\)/\1/')")
+  chk 'has --text "Скорость речи" && has --desc "Скорость речи: русский" && has --desc "Скорость речи: португальский"' "U13 строка «Скорость речи» и два ползунка — RU и PT"
+  chk '[ "$(val русский)" = "$wru" ] && [ "$(val португальский)" = "$wpt" ]' "U13 значения — как у службы: RU $(val русский) (${wru}), PT $(val португальский) (${wpt})"
+  read x0 y0 x1 y1 cx cy _ <<< "$(at --desc "Скорость речи: русский")"
+  # Касание у края дорожки — крайнее значение: правый край — 2×, левый — 0,5×. Отпустили — служба запоминает и
+  # говорит пробную фразу; длина её звука — в журнале.
+  SPCH=1
+  m=$(mark); tapxy $((x1 - 3)) $cy; l2=$(wl "$m" '🔊 скорость ru: ' 20); dump
+  chk 'printf "%s" "$l2" | grep -q "скорость ru: 2,0×" && [ "$(val русский)" = "2,0×" ]' "U13 правый край — 2,0×: $(printf '%s' "$l2" | cut -c10-)"
+  m=$(mark); tapxy $((x0 + 3)) $cy; l05=$(wl "$m" '🔊 скорость ru: ' 25); dump
+  chk 'printf "%s" "$l05" | grep -q "скорость ru: 0,5×" && [ "$(val русский)" = "0,5×" ]' "U13 левый край — 0,5×: $(printf '%s' "$l05" | cut -c10-)"
+  a=$(printf '%s' "$l2" | sed -n 's/.*пробная фраза \([0-9.]*\) с.*/\1/p'); b=$(printf '%s' "$l05" | sed -n 's/.*пробная фраза \([0-9.]*\) с.*/\1/p')
+  chk '[ "$(awk -v a="$a" -v b="$b" "BEGIN { print (a > 0 && b > 2.5 * a) ? 1 : 0 }")" = 1 ]' "U13 на 0,5× пробная фраза намного длиннее, чем на 2×: ${b:-?} с против ${a:-?} с"
+  # Обратно — стендом, точно в прежнее значение; ползунок за ним — тоже
+  m=$(mark); start --es ttsspeed "$SP"; wl "$m" '🔊 скорость pt: ' 25 >/dev/null; SPCH=; sleep 1; dump
+  chk '[ "$(val русский)" = "$wru" ]' "U13 скорость сменили не ползунком — ползунок показывает её: RU $(val русский)"
+  press; dump
+else sk "U13 модуль «Озвучка» выключен или у сборки нет «Скорость речи»"; fi
 
 say "== U8: «＋» — новый разговор и возврат из панели"
 m=$(mark); tapon --desc "Новый разговор"; l=$(wl "$m" '＋ новый разговор' 10); sleep 1; dump

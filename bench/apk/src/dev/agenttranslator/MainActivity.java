@@ -77,6 +77,8 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   final java.util.Map<String, CheckBox> setupChecks = new java.util.HashMap<>();
   LinearLayout ttsBox, cloudBox, llmBox, modBox, keysBox, addBox; View bKeyHelp; Button bUnused; boolean setupSynced = false;
   Rows.Row rowCloud, rowMods, rowLog, rowRoute, rowVoices; TextView modsSum;
+  /** «Скорость речи»: ползунок и значение у русского и португальского. */
+  SeekBar sSpeedRu, sSpeedPt; TextView speedRu, speedPt;
   final java.util.Map<String, ModRow> modRows = new java.util.HashMap<>();
   ModelStore.State mst; boolean micForever, svcStarted; ScrollView bigScroll;
   TextView updLbl, updTitle; Button bUpdate, bUpdateGo; LinearLayout updCard;
@@ -2435,6 +2437,11 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Голоса — синтез телефона (SysTts, с 0.38.0): какой голос у каждого языка, скачать недостающий
     rowVoices = r.nav(ttsBox, app.falar.R.drawable.ic_voice, L.t("Голоса"), "", x -> voicesDialog());
     rowVoices.sub.setVisibility(View.VISIBLE);
+    // Скорость речи — своя у каждого языка (владелец 10.11: «от 0.5 до 2х»); отпустили ползунок — пробная фраза
+    r.row(ttsBox, app.falar.R.drawable.ic_speaker, L.t("Скорость речи"), L.t("у каждого языка своя, от 0,5× до 2×"), null);
+    LinearLayout sSp = r.sub(ttsBox, true);
+    speedRu = new TextView(this); sSpeedRu = speedBar("ru", speedRu); sSp.addView(sliderRow("RU", sSpeedRu, speedRu));
+    speedPt = new TextView(this); sSpeedPt = speedBar("pt", speedPt); sSp.addView(sliderRow("PT", sSpeedPt, speedPt));
     int hold = prefs.getInt("hold", 1500);
     holdLbl = r.value(holdText(hold));
     r.row(ttsBox, app.falar.R.drawable.ic_speaker, L.t("Пауза до озвучки"), L.t("перевод виден сразу, голос ждёт тишины"), holdLbl);
@@ -2519,6 +2526,37 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
     ScrollView outer = new ScrollView(this); outer.setBackgroundColor(look.page); outer.addView(v);
     return outer;
+  }
+
+  /** Ползунок скорости речи языка: 0,5–2× с шагом 0,1 (TtsVoices.speedAt). Отпустили — служба запоминает скорость и
+   *  говорит пробную фразу; шаги без касания (TalkBack, клавиши) — через 0,7 с после последнего. Пока шаг ждёт,
+   *  ползунок помечен (tag) — refreshVoices его не трогает. */
+  SeekBar speedBar(String lang, TextView val) {
+    final SeekBar sb = new SeekBar(this); sb.setMax(TtsVoices.SPEED_STEPS);
+    float x = svc != null ? svc.ttsSpeed(lang) : TtsVoices.speed(prefs.getFloat("tts_speed_" + lang, 1f));
+    sb.setProgress(TtsVoices.speedPos(x)); val.setText(TtsVoices.speedLabel(x));
+    sb.setContentDescription("ru".equals(lang) ? L.t("Скорость речи: русский") : L.t("Скорость речи: португальский"));
+    final Runnable apply = () -> {
+      sb.setTag(null); float v = TtsVoices.speedAt(sb.getProgress());
+      if (svc != null) svc.setTtsSpeed(lang, v); else prefs.edit().putFloat("tts_speed_" + lang, v).apply();
+    };
+    sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+      boolean drag;
+      public void onProgressChanged(SeekBar b, int p, boolean user) {
+        val.setText(TtsVoices.speedLabel(TtsVoices.speedAt(p)));
+        if (user && !drag) { b.setTag(Boolean.TRUE); b.removeCallbacks(apply); b.postDelayed(apply, 700); }
+      }
+      public void onStartTrackingTouch(SeekBar b) { drag = true; b.setTag(Boolean.TRUE); b.removeCallbacks(apply); }
+      public void onStopTrackingTouch(SeekBar b) { drag = false; apply.run(); }
+    });
+    return sb;
+  }
+  /** Ползунок скорости — как у службы (её могли сменить стендом или до загрузки синтеза). */
+  void syncSpeed(SeekBar sb, TextView val, String lang) {
+    if (sb == null || svc == null || sb.getTag() != null) return;
+    float x = svc.ttsSpeed(lang); int p = TtsVoices.speedPos(x);
+    if (sb.getProgress() != p) sb.setProgress(p);
+    val.setText(TtsVoices.speedLabel(x));
   }
 
   /** Ползунок с подписью слева и значением справа. */
@@ -3370,6 +3408,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
     vis(bBetter, Modules.better(on));
     refreshModules(); refreshBetter();
+    refreshVoices();                     // и без страницы модулей: голоса и скорость речи — в «Настройках»
   }
 
   /** Модули: переключатель, размер по манифесту, метка состояния и полоса загрузки — по размерам
@@ -3428,6 +3467,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Подпись «Голоса»: какой голос у языка или чего не хватает. */
   void refreshVoices() {
     if (rowVoices == null || svc == null) return;
+    syncSpeed(sSpeedRu, speedRu, "ru"); syncSpeed(sSpeedPt, speedPt, "pt");
     SysTts s = svc.sysTts();
     if (s == null) { rowVoices.sub.setText(svc.eng != null && !svc.ttsLoading && svc.mod(Modules.TTS) ? L.t("синтез речи телефона не поднялся") : L.t("голоса телефона, без сети")); return; }
     StringBuilder b = new StringBuilder();

@@ -760,3 +760,8 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 голос не скачан	voz não baixada
 нет голоса	sem voz
 Перевод произносит голос самого телефона: разборчивее и почти без задержки.	A tradução é falada pela voz do próprio celular: mais clara e quase sem atraso.
+Скорость речи	Velocidade da fala
+у каждого языка своя, от 0,5× до 2×	cada idioma tem a sua, de 0,5× a 2×
+Скорость речи: русский	Velocidade da fala: russo
+Скорость речи: португальский	Velocidade da fala: português
+Скорость речи — своя у каждого языка: от вдвое медленнее до вдвое быстрее.	Velocidade da fala própria para cada idioma: da metade ao dobro.

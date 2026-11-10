@@ -62,7 +62,9 @@ final class SysTts {
   final Map<String, Integer> rate = new java.util.concurrent.ConcurrentHashMap<>();
   /** Все голоса движка для ru-RU и pt-BR без сети — выбор в настройках. */
   final Map<String, List<TtsVoices.V>> choices = new java.util.concurrent.ConcurrentHashMap<>();
-  volatile float speechRate = 1f;
+  /** Скорость речи по языку («Настройки» → «Скорость речи», 0,5–2×, TtsVoices.speed); нет ключа — 1×. Читается
+   *  при каждой фразе, поэтому новая скорость — с ближайшей фразы. */
+  final Map<String, Float> speed = new java.util.concurrent.ConcurrentHashMap<>();
   private volatile Job cur;
   private int seq;
   private final File out;
@@ -83,7 +85,7 @@ final class SysTts {
 
   /** Поднять синтез: Google, если стоит, иначе движок по умолчанию; ждёт до 15 с. Не вышло — null, и перевод
    *  только на экране. chosen — голоса, выбранные человеком (имя по языку, может не быть). */
-  static SysTts open(Context ctx, Map<String, String> chosen, Log log) throws InterruptedException {
+  static SysTts open(Context ctx, Map<String, String> chosen, Map<String, Float> speeds, Log log) throws InterruptedException {
     Context app = ctx.getApplicationContext();
     for (String pkg : new String[]{GOOGLE, null}) {
       long t0 = System.nanoTime();
@@ -98,6 +100,7 @@ final class SysTts {
           if (t2 != null) { t2.setOnUtteranceProgressListener(s.listener); s.tts.put(LANGS[k], t2); }
         }
         long t1 = System.nanoTime();
+        if (speeds != null) for (Map.Entry<String, Float> e : speeds.entrySet()) s.setSpeed(e.getKey(), e.getValue());
         s.pick(chosen);
         s.warm();
         log.log(String.format(Locale.ROOT, "🔊 синтез телефона: подключение %d мс, пробные фразы %d мс", (t1 - t0) / 1000000, (System.nanoTime() - t1) / 1000000));
@@ -150,6 +153,8 @@ final class SysTts {
   boolean any() { return !voice.isEmpty(); }
   int rate(String lang) { Integer r = rate.get(lang); return r != null ? r : 24000; }
   String voiceName(String lang) { Voice v = voice.get(lang); return v == null ? "" : v.getName(); }
+  float speed(String lang) { Float x = speed.get(lang); return x != null ? x : 1f; }
+  void setSpeed(String lang, float x) { speed.put(lang, TtsVoices.speed(x)); }
 
   /** Строка для журнала: «com.google.android.tts · ru ru-ru-x-dfc-local · pt — голос не скачан». */
   String describe() {
@@ -185,7 +190,7 @@ final class SysTts {
     List<float[]> parts = new ArrayList<>(); int n = 0; boolean stop = false;
     try {
       if (!v.getName().equals(set.get(lang))) { tts.setVoice(v); set.put(lang, v.getName()); }
-      tts.setSpeechRate(speechRate);
+      tts.setSpeechRate(speed(lang));
       if (tts.synthesizeToFile(text, new Bundle(), out, j.id) != TextToSpeech.SUCCESS) { log.log("🔊 синтез не принял фразу"); return new Audio(new float[0], want, 0); }
       TtsVoices.TrimTail trim = new TtsVoices.TrimTail(0.003f, want * 60 / 1000);
       TtsVoices.Resampler rs = null;

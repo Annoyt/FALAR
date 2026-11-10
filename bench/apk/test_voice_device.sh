@@ -10,7 +10,9 @@
 #    сразу следом (у каждого языка свой синтез: смена голоса не ждёт загрузки).
 # V3 выбор голоса (тот же путь, что «Настройки» → «Голоса», --es ttsvoice): голос сменился и звучит; в конце —
 #    прежний.
-# V4 за проверку Falar не падал (logcat). В конце — прежний голос и «Что озвучивать», молчаливый режим стенда.
+# V4 за проверку Falar не падал (logcat). В конце — прежний голос, скорость и «Что озвучивать», молчаливый режим стенда.
+# V5 скорость речи (тот же путь, что ползунки «Скорость речи», --es ttsspeed): пробная фраза на 2× заметно короче,
+#    чем на 1×, на 0,5× — длиннее (длина звука — из журнала «🔊 скорость ru: …· пробная фраза N с звука»).
 # Разговоры владельца не трогаются: реплики — в отдельном тестовом разговоре, он удаляется. Телефон — рабочий:
 # запуск только когда впереди Falar, рабочий стол или экран погашен.
 . "$(dirname "$0")/../stand.sh"
@@ -39,13 +41,14 @@ free_phone() {
   done
 }
 start() { free_phone; sh "am start -n $ACT $*" >/dev/null; }
-TID=$(date +%s%3N); D=$(mktemp -d /tmp/falar-voice.XXXX); WAS=""
+TID=$(date +%s%3N); D=$(mktemp -d /tmp/falar-voice.XXXX); WAS=""; WAS_SP=""
 # Падения Falar за проверку — по logcat с начала прогона
 T0=$(sh "date '+%m-%d %H:%M:%S.000'")
 crashed() { sh "logcat -d -v time -t '$T0'" | grep -A3 'FATAL EXCEPTION' | grep -A1 'Process: app.falar' | grep -vE 'Process:|^--' | head -1 | cut -c1-160; }
 restore() {
   say "== возврат"
   [ -n "$WAS" ] && { m=$(mark); start --es ttsvoice "ru:$WAS"; wl "$m" '🔊 голос ru:' 20 >/dev/null; say "  голос ru возвращён: $WAS"; }
+  [ -n "$WAS_SP" ] && { m=$(mark); start --es ttsspeed "$WAS_SP"; wl "$m" '🔊 скорость pt:' 20 >/dev/null; say "  скорость возвращена: $WAS_SP"; }
   m=$(mark); start --es voicewhat "${VW:-auto}" --es silent 1; wl "$m" '🔈' 10 >/dev/null
   free_phone; sh "am force-stop $PKG"; sleep 2
   sh "rm -f $F/chats/$TID.json"; say "  тестовый разговор удалён"
@@ -81,7 +84,10 @@ turn() {   # $1 — подача (--es feedtext / --es typed), $2 — начал
   say "  $3: $(printf '%s' "$t" | cut -c1-170)"
   if [ -z "$t" ]; then res 1 "$3 реплики нет в журнале"; return; fi
   printf '%s' "$t" | grep -q 'без озвучки\|озвучка выключена' && { res 1 "$3 не звучит"; return; }
-  [ -n "$d" ] && [ "$d" -le $lim ] && res 0 "$3 звучит, первый звук через $d мс после перевода" || res 1 "$3 первый звук через ${d:-?} мс (> $lim)"
+  [ -n "$d" ] && [ "$d" -le $lim ] && { res 0 "$3 звучит, первый звук через $d мс после перевода"; return; }
+  res 1 "$3 первый звук через ${d:-?} мс (> $lim)"
+  # почему ждал: новая дорожка вывода («выход:»), пауза перебивания (🗣) или сам синтез (🔊) — строки журнала с подачи
+  since "$m" | grep -E -- 'выход:|🗣|🔊' | head -8 | cut -c1-200 | sed 's/^/    журнал: /'
 }
 say "== V2: реплики звучат, языки вперемешку"
 m=$(mark); start --es voicewhat both; wl "$m" '🔈' 10 >/dev/null
@@ -103,3 +109,20 @@ if printf '%s' "$l" | grep -q "$alt"; then
   sleep 4
   turn "--es feedtext 'Muito obrigado pela ajuda.'" 'pt2ru . Muito obrigado' "V3 новым голосом"
 else sk "V3 голоса $alt на телефоне нет ($l)"; fi
+
+say "== V5: скорость речи"
+m=$(mark); start --es ttsspeed show; l=$(wl "$m" '🔊 скорость: ' 10); say "  ${l:-журнал молчит}"
+# «ru 1,0× · pt 1,2×» → «ru:1.0,pt:1.2» — вернуть в конце (числа с точкой: запятая в --es делит языки)
+sp=$(printf '%s' "$l" | sed -n 's/.*ru \([0-9]\),\([0-9]\)× · pt \([0-9]\),\([0-9]\)×.*/ru:\1.\2,pt:\3.\4/p')
+if [ -z "$sp" ]; then res 1 "V5 у сборки нет --es ttsspeed или не тот ответ: ${l:-—}"
+else
+  WAS_SP=$sp
+  # длина пробной фразы на скорости $1 (секунды звука; пусто — не прозвучала)
+  len() { local m l; m=$(mark); start --es ttsspeed "ru:$1"; l=$(wl "$m" '🔊 скорость ru: ' 25); say "  $(printf '%s' "$l" | cut -c1-120)" >&2
+    printf '%s' "$l" | sed -n 's/.*пробная фраза \([0-9.]*\) с.*/\1/p'; }
+  d1=$(len 1.0 | tail -1); d2=$(len 2.0 | tail -1); d05=$(len 0.5 | tail -1)
+  ok2=$(awk -v a="$d2" -v b="$d1" 'BEGIN { print (a > 0 && b > 0 && a / b < 0.7) ? 1 : 0 }')
+  ok05=$(awk -v a="$d05" -v b="$d1" 'BEGIN { print (a > 0 && b > 0 && a / b > 1.5) ? 1 : 0 }')
+  [ "$ok2" = 1 ] && res 0 "V5 на 2× пробная фраза короче: ${d2} с против ${d1} с на 1×" || res 1 "V5 на 2× не короче: ${d2:-?} с против ${d1:-?} с на 1×"
+  [ "$ok05" = 1 ] && res 0 "V5 на 0,5× длиннее: ${d05} с против ${d1} с на 1×" || res 1 "V5 на 0,5× не длиннее: ${d05:-?} с против ${d1:-?} с"
+fi

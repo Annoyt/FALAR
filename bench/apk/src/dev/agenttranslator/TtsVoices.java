@@ -29,6 +29,21 @@ final class TtsVoices {
   static final Map<String, String> BEST = new HashMap<>();
   static { BEST.put("ru", "ru-ru-x-dfc-local"); BEST.put("pt", "pt-br-x-afs-local"); }
 
+  /** Скорость речи — своя у каждого языка, 0,5–2× с шагом 0,1 (владелец 10.11: «от 0.5 до 2х»). Google на 1×
+   *  говорит на 14–17 % медленнее прежнего Piper (замер 10.11), но по умолчанию 1× — темп самого движка. Ползунок:
+   *  позиция 0 — 0,5×, 5 — 1×, 15 — 2×. */
+  static final float SPEED_MIN = 0.5f, SPEED_MAX = 2f;
+  static final int SPEED_STEPS = 15;
+  /** В пределах 0,5–2×, до десятых; не число — 1×. */
+  static float speed(float x) {
+    if (Float.isNaN(x) || Float.isInfinite(x)) return 1f;
+    return Math.round(Math.max(SPEED_MIN, Math.min(SPEED_MAX, x)) * 10) / 10f;
+  }
+  static float speedAt(int pos) { return speed(SPEED_MIN + pos / 10f); }
+  static int speedPos(float x) { return Math.round((speed(x) - SPEED_MIN) * 10); }
+  /** «1,0×» — с запятой, как пишут и по-русски, и по-бразильски. */
+  static String speedLabel(float x) { return String.format(java.util.Locale.ROOT, "%.1f×", speed(x)).replace('.', ','); }
+
   /** Страна языка Falar: русский — Россия, португальский — Бразилия. */
   static String country(String lang) { return "ru".equals(lang) ? "RU" : "pt".equals(lang) ? "BR" : ""; }
 
