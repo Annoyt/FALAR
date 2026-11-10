@@ -146,7 +146,7 @@ cat > $RELNOTES <<EOF
 ${NPUSZ:+| \`Falar-npu.apk\` | $NPUSZ | обычная + распознавание на NPU: Snapdragon 888/778G и новее${MTKV:+, MediaTek Dimensity 8400}; экспериментально |}
 ${SLIMNPUSZ:+| \`Falar-slim-npu.apk\` | $SLIMNPUSZ | облегчённая + NPU |}
 
-Android 9 и новее, процессор arm64. При первом запуске приложение скачает модели (около 1,6 ГБ,
+Android 9 и новее, процессор arm64. При первом запуске приложение скачает модели (около 1,5 ГБ,
 по Wi-Fi, можно прервать и продолжить). После этого интернет не нужен.
 
 Контрольные суммы — в \`SHA256SUMS.txt\`. Что изменилось — в [bench/apk/README.md](https://github.com/$REPO/blob/$TAG/bench/apk/README.md).
