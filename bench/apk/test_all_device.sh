@@ -166,7 +166,8 @@ say; say "== итог ($L)"
 printf '%-14s %5s %5s %8s %6s\n' скрипт PASS FAIL пропуск сек
 awk '{printf "%-14s %5s %5s %8s %6s\n", $1, $2, $3, $4, $5}' "$L/summary"
 say "Falar за прогон: ${crash:+упал — $crash}${crash:-не падал}"
-bad=$(awk '$3 != 0 || $2 == "-" {print $1}' "$L/summary" | paste -sd' ' -)
+# PASS 0 — набор ничего не проверил (10.11: voices без записей Tatoeba в рабочей копии) — тоже не «прошло»
+bad=$(awk '$3 != 0 || $2 == "-" || $2 == "0" {print $1}' "$L/summary" | paste -sd' ' -)
 n=$(printf '%s\n' $SUITES | wc -l); got=$(cat "$L/summary" 2>/dev/null | wc -l)   # итога нет — не «всё прошло»
 [ "$got" -eq "$n" ] || bad="${bad:+$bad · }итог по $got наборам из $n"
 [ -z "$bad" ] && [ -z "$crash" ] && say "ВСЁ ПРОШЛО" || say "НЕ ПРОШЛО: ${bad:-—}${crash:+ · падение Falar}"

@@ -51,7 +51,7 @@ restore() {
   sh "rm -f $F/chats/$TID.json"; say "  тестовый разговор удалён"
   start; rm -rf "$D"
   c=$(crashed); [ -z "$c" ] && res 0 "V4 за проверку Falar не падал" || res 1 "V4 Falar упал: $c"
-  say "== итог: прошло $pass, не прошло $fail, пропущено $skip"
+  say; say "итог: PASS $pass, FAIL $fail, пропущено $skip"
 }
 trap restore EXIT
 # Отдельный тестовый разговор — он становится текущим (последний сохранённый), реплики проверки идут в него
