@@ -94,9 +94,11 @@ final class Licenses {
     new Part(L.k("Распознавание на NPU"), "ONNX Runtime NeuroPilot EP v0.3.0", "Microsoft", MIT,
         "https://github.com/onnxruntime/onnxruntime-ep-neuropilot", L.k("правки Falar: 16-битные активации"),
         "Copyright (c) Microsoft Corporation", "lib:libonnxruntime_providers_neuropilot").mtk(),
-    new Part(L.k("Распознавание на NPU"), "libneuron_op_capability.so (из выпуска ONNX Runtime NeuroPilot EP)", "MediaTek / Microsoft", NONE,
-        "https://github.com/onnxruntime/onnxruntime-ep-neuropilot/releases/tag/v0.3.0", "", "",
-        "lib:libneuron_op_capability").mtk(),
+    // Своя заглушка вместо закрытой библиотеки выпуска v0.3.0 (у неё лицензии нет нигде; решение владельца 10.11):
+    // шесть функций ABI дополнения по его заголовку neuron_op_capability_abi.h (MIT), окончательно решает Neuron.
+    new Part(L.k("Распознавание на NPU"), "libneuron_op_capability.so (Falar)", "Falar; ABI — Microsoft", MIT,
+        "https://github.com/onnxruntime/onnxruntime-ep-neuropilot", L.k("своя заглушка вместо закрытой библиотеки MediaTek: шесть функций ABI дополнения"),
+        "Copyright (c) Microsoft Corporation", "lib:libneuron_op_capability").mtk(),
   };
 
   /** Своё (models/manifest.json: license=project) — без строки. */

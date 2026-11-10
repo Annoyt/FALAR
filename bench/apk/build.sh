@@ -47,10 +47,14 @@ mkdir -p $OUT/assets/licenses && cp $A/licenses/*.txt $OUT/assets/licenses/
 MAIN=$(cd "$(git -C "$A" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 Q=${QNN_DIR:-$MAIN/.stand/qnn-android}
 # MTK=1 — сборка с распознаванием на NPU MediaTek (Npu, NpuAsr; ветка mtk-npu): своя сборка дополнения ORT для
-# NeuroPilot с правками для int16 (bench/npu/neuropilot-ep/build.sh) и закрытая libneuron_op_capability.so из его
-# выпуска — из MTK_EP_DIR, в репозиторий не идут. ORT — обычный 1.29 из jni (или с QNN при NPU=1): дополнение — модуль.
-M=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16}
+# NeuroPilot с правками для int16 (bench/npu/neuropilot-ep/build.sh) и своя заглушка libneuron_op_capability.so вместо
+# закрытой из его выпуска (у неё нет лицензии; решение владельца 10.11 «своя заглушка») — из MTK_EP_DIR, в репозиторий
+# не идут. ORT — обычный 1.29 из jni (или с QNN при NPU=1): дополнение — модуль.
+M=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16-stub}
 if [ -n "$MTK" ]; then
+  # Закрытая библиотека — 1,7 МБ, заглушка — 4,5 КБ: больше 64 КБ — значит, не заглушка, и в APK она не идёт
+  [ ! -s $M/libneuron_op_capability.so ] || [ "$(stat -c %s $M/libneuron_op_capability.so)" -le 65536 ] \
+    || { echo "в $M закрытая libneuron_op_capability.so ($(stat -c %s $M/libneuron_op_capability.so) байт) — в APK идёт только своя заглушка: MTK_EP_DIR=$MAIN/.stand/mtk-ep/v0.3.0-int16-stub"; exit 1; }
   [ -s $M/libonnxruntime_providers_neuropilot.so ] && [ -s $M/libneuron_op_capability.so ] \
     || { echo "MTK=1: нет дополнения NeuroPilot в $M — bench/npu/neuropilot-ep/build.sh"; exit 1; }
 fi

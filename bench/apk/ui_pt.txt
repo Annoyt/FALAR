@@ -765,3 +765,4 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 Скорость речи: русский	Velocidade da fala: russo
 Скорость речи: португальский	Velocidade da fala: português
 Скорость речи — своя у каждого языка: от вдвое медленнее до вдвое быстрее.	Velocidade da fala própria para cada idioma: da metade ao dobro.
+своя заглушка вместо закрытой библиотеки MediaTek: шесть функций ABI дополнения	substituto próprio no lugar da biblioteca fechada da MediaTek: seis funções da ABI do complemento
