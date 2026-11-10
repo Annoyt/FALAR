@@ -49,7 +49,8 @@ restore() {
   say "== возврат"
   [ -n "$WAS" ] && { m=$(mark); start --es ttsvoice "ru:$WAS"; wl "$m" '🔊 голос ru:' 20 >/dev/null; say "  голос ru возвращён: $WAS"; }
   [ -n "$WAS_SP" ] && { m=$(mark); start --es ttsspeed "$WAS_SP"; wl "$m" '🔊 скорость pt:' 20 >/dev/null; say "  скорость возвращена: $WAS_SP"; }
-  m=$(mark); start --es voicewhat "${VW:-auto}" --es silent 1; wl "$m" '🔈' 10 >/dev/null
+  m=$(mark); start --es voicewhat "${VW:-auto}" --es silent 1 ${REF:+--es refineevery $REF} ${CLOUD:+--es cloudevery $CLOUD}; wl "$m" '🔈' 10 >/dev/null
+  [ -n "$REF$CLOUD" ] && say "  разбор контекста и пересмотр в облаке — как были: ${REF:-?} и ${CLOUD:-?}"
   free_phone; sh "am force-stop $PKG"; sleep 2
   sh "rm -f $F/chats/$TID.json"; say "  тестовый разговор удалён"
   start; rm -rf "$D"
@@ -69,7 +70,12 @@ free_phone; sh "am force-stop $PKG"; sleep 1; $ADB push "$D/t.json" "$F/chats/$T
 # «Что озвучивать» человека — по последней строке выбора в журнале (вернётся в конце)
 case "$(sh "grep -E '🔈 озвучиваю|🔈 озвучка — авто' $LOG | tail -1")" in
   *"только русский"*) VW=ru;; *"только португальский"*) VW=pt;; *"оба языка"*) VW=both;; *) VW=auto;; esac
-m=$(mark); start --es listen off --es silent 0
+# Разбор контекста (уточнитель, LLM на процессоре) и облачный пересмотр — на время проверки по кнопке: после каждой
+# третьей реплики уточнитель 2–3 с занимает процессор, и синтез Google рядом с ним отдавал первый звук через 0,9–1,1 с
+# (V3 10.11: «🔁 #2 по контексту (2580 мс)» ровно под репликой #4). Замеряется озвучка, а не соседство с уточнителем.
+m=$(mark); start --es settings show; st=$(wl "$m" '🧪 настройки:' 20)
+REF=$(printf '%s' "$st" | sed -n 's/.*разбор \([0-9][0-9]*\).*/\1/p'); CLOUD=$(printf '%s' "$st" | sed -n 's/.*облако \([0-9][0-9]*\).*/\1/p')
+m=$(mark); start --es listen off --es silent 0 --es refineevery 0 --es cloudevery 0
 l=$(wl "$m" 'TTS: синтез телефона за|TTS: синтеза речи нет|синтез речи телефона не поднялся' 180); say "  ${l:-журнал молчит}"
 printf '%s' "$l" | grep -q -E ' ru [a-z]' && printf '%s' "$l" | grep -q -E ' pt [a-z]' && res 0 "V1 синтез поднят, голоса ru и pt без сети" || res 1 "V1 голосов ru и pt нет"
 ms=$(printf '%s' "$l" | sed -n 's/.*за \([0-9]*\) мс.*/\1/p'); say "  загрузка синтеза: ${ms:-?} мс"
