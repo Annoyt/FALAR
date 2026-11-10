@@ -98,5 +98,8 @@ WAS=$(printf '%s' "$l" | sed -n 's/.* ru \([^ ]*\) .*/\1/p')
 m=$(mark); start --es ttsvoice "ru:$alt"; l=$(wl "$m" '🔊 голос ru:' 20); say "  $l"
 if printf '%s' "$l" | grep -q "$alt"; then
   res 0 "V3 голос сменился на $alt"
+  # Выбранный голос сразу произносит пробную фразу (~2 с, speakOut под тем же замком озвучки): реплика, поданная
+  # раньше её конца, ждала бы её — 10.11 так вышло 656 мс «до звука». Ждём, пока пробная фраза отзвучит.
+  sleep 4
   turn "--es feedtext 'Muito obrigado pela ajuda.'" 'pt2ru . Muito obrigado' "V3 новым голосом"
 else sk "V3 голоса $alt на телефоне нет ($l)"; fi
