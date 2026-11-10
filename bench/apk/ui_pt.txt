@@ -759,3 +759,4 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 🔇 нет голоса для языка %s (%s) — «Настройки» → «Голоса»	🔇 sem voz para %s (%s) — «Configurações» → «Vozes»
 голос не скачан	voz não baixada
 нет голоса	sem voz
+Перевод произносит голос самого телефона: разборчивее и почти без задержки.	A tradução é falada pela voz do próprio celular: mais clara e quase sem atraso.
