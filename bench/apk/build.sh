@@ -47,10 +47,14 @@ mkdir -p $OUT/assets/licenses && cp $A/licenses/*.txt $OUT/assets/licenses/
 MAIN=$(cd "$(git -C "$A" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 Q=${QNN_DIR:-$MAIN/.stand/qnn-android}
 # MTK=1 — сборка с распознаванием на NPU MediaTek (Npu, NpuAsr; ветка mtk-npu): своя сборка дополнения ORT для
-# NeuroPilot с правками для int16 (bench/npu/neuropilot-ep/build.sh) и закрытая libneuron_op_capability.so из его
-# выпуска — из MTK_EP_DIR, в репозиторий не идут. ORT — обычный 1.29 из jni (или с QNN при NPU=1): дополнение — модуль.
-M=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16}
+# NeuroPilot с правками для int16 (bench/npu/neuropilot-ep/build.sh) и своя заглушка libneuron_op_capability.so вместо
+# закрытой из его выпуска (у неё нет лицензии; решение владельца 10.11 «своя заглушка») — из MTK_EP_DIR, в репозиторий
+# не идут. ORT — обычный 1.29 из jni (или с QNN при NPU=1): дополнение — модуль.
+M=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16-stub}
 if [ -n "$MTK" ]; then
+  # Закрытая библиотека — 1,7 МБ, заглушка — 4,5 КБ: больше 64 КБ — значит, не заглушка, и в APK она не идёт
+  [ ! -s $M/libneuron_op_capability.so ] || [ "$(stat -c %s $M/libneuron_op_capability.so)" -le 65536 ] \
+    || { echo "в $M закрытая libneuron_op_capability.so ($(stat -c %s $M/libneuron_op_capability.so) байт) — в APK идёт только своя заглушка: MTK_EP_DIR=$MAIN/.stand/mtk-ep/v0.3.0-int16-stub"; exit 1; }
   [ -s $M/libonnxruntime_providers_neuropilot.so ] && [ -s $M/libneuron_op_capability.so ] \
     || { echo "MTK=1: нет дополнения NeuroPilot в $M — bench/npu/neuropilot-ep/build.sh"; exit 1; }
 fi
@@ -71,7 +75,16 @@ cp $R/models/denoiser/gtcrn_simple.onnx $OUT/assets/gtcrn_simple.onnx
 # minSdk и targetSdk — только из манифеста: --min-sdk-version/--target-sdk-version у aapt2 лишь подставляют
 # значение, которого в манифесте нет, и здесь стояли прежние 28/33, ничего не меняя (проверено 03.10).
 # tools/android.jar — API 33: так собирается и под targetSdk 35, а то, чего в 33 нет, код берёт числами.
-aapt2 link -o $OUT/base.apk --manifest $A/AndroidManifest.xml -I "$AJ" --java $OUT/gen -A $OUT/assets $OUT/res.zip
+# APP_ID — пробная копия рядом с установленной: своё имя пакета, свои данные и настройки. Нужна там, где Falar стоит из
+# выпуска (подпись релизным ключом): отладочную сборку поверх телефон не примет, а удалить выпуск — стереть человеку
+# разговоры (POCO владельца, 10.11). Код и ресурсы те же (R остаётся app.falar); APP_LABEL — подпись под значком.
+MF=$A/AndroidManifest.xml
+if [ -n "$APP_ID" ]; then
+  MF=$OUT/AndroidManifest.xml
+  sed "s|android:label=\"Falar\"|android:label=\"${APP_LABEL:-Falar $APP_ID}\"|" $A/AndroidManifest.xml > $MF
+  grep -q "android:label=\"${APP_LABEL:-Falar $APP_ID}\"" $MF || { echo "APP_ID: подпись под значком не подставилась"; exit 1; }
+fi
+aapt2 link -o $OUT/base.apk --manifest $MF ${APP_ID:+--rename-manifest-package $APP_ID} -I "$AJ" --java $OUT/gen -A $OUT/assets $OUT/res.zip
 javac --release 11 -nowarn -cp "$AJ:$A/libs/onnxruntime-1.29.0-classes.jar" -d $OUT/classes $A/src/dev/agenttranslator/*.java $A/sherpa-java-api/*.java $OUT/gen/app/falar/R.java
 # Код выхода D8 не терять: раньше его вывод шёл через grep с «|| true», и когда 28.09.2026 на
 # сборке упала сама JVM (внутренняя ошибка JIT), скрипт спокойно собрал APK без половины кода —
@@ -93,6 +106,18 @@ if [ -n "$NPU" ]; then
   cp $Q/qnn/*.so $OUT/stage/lib/arm64-v8a/
 fi
 [ -z "$MTK" ] || cp $M/libonnxruntime_providers_neuropilot.so $M/libneuron_op_capability.so $OUT/stage/lib/arm64-v8a/
+# Мост sherpa-onnx без синтеза речи (с 0.38.0, tools/sherpa-jni/build-notts.sh): в нём нет eSpeak NG (GPL-3.0) и Piper —
+# озвучку делает синтез телефона (SysTts), а GPL не может лежать в одном APK с закрытыми библиотеками Qualcomm (NPU).
+# Мост — из third_party/falar-jni/notts основной копии (в git его нет), сверяется по sha256: с прежним мостом (Piper,
+# eSpeak) из bench/apk/jni сборка не выходит. Ниже — и проверка, что ни в одной .so нет eSpeak.
+JNI_NOTTS=${JNI_NOTTS:-$MAIN/third_party/falar-jni/notts/libsherpa-onnx-jni.so}
+JNI_NOTTS_SHA=2815e34a723f1b02e4a7a1621d3a4dade3c2da18d8c142c4fa4f758e15cc6bea
+[ -s "$JNI_NOTTS" ] && [ "$(sha256sum "$JNI_NOTTS" | cut -c1-64)" = "$JNI_NOTTS_SHA" ] \
+  || { echo "нет моста sherpa без синтеза речи ($JNI_NOTTS) или он не тот — bash tools/sherpa-jni/build-notts.sh"; exit 1; }
+cp "$JNI_NOTTS" $OUT/stage/lib/arm64-v8a/libsherpa-onnx-jni.so
+for f in $OUT/stage/lib/arm64-v8a/*.so; do
+  [ "$(strings -a $f | grep -i -E '(^|[^a-z])espeak' | wc -l)" = 0 ] || { echo "в $(basename $f) нашлось eSpeak — в APK его быть не должно"; exit 1; }
+done
 # Сомнительные слова (WordConf) помечаются по уверенности распознавателя, а её отдаёт только пересобранный мост JNI
 # (tools/sherpa-jni): в нём конструктор результата с восемью аргументами. С прежним приложение работает, но слов
 # не помечает — об этом предупреждение.
@@ -111,7 +136,7 @@ zipalign -f 4 $OUT/unaligned.apk $OUT/aligned.apk
 # Имя: -npu — сборка с NPU (QNN, а у выпуска ещё и NeuroPilot: release.sh собирает NPU=1 MTK=1), -mtk — только
 # NeuroPilot (стенд MediaTek).
 SUF=${SLIM:+-slim}; if [ -n "$NPU" ]; then SUF=$SUF-npu; elif [ -n "$MTK" ]; then SUF=$SUF-mtk; fi
-OUTAPK=$A/Falar$SUF.apk
+OUTAPK=$A/Falar$SUF${APP_ID:+-$APP_ID}.apk
 if [ -n "$FALAR_KEYSTORE" ]; then
   [ -f "$FALAR_KEYSTORE" ] || { echo "нет файла ключа: $FALAR_KEYSTORE"; exit 1; }
   [ -n "$FALAR_KS_PASS" ] || { echo "нужен FALAR_KS_PASS (пароль хранилища)"; exit 1; }

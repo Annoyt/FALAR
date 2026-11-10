@@ -32,6 +32,10 @@
 #      выше полосы навигации, поле и «+» — над клавиатурой; под навигацией — фон экрана; служба с
 #      микрофоном видимая (startForeground); окно снимка — между полосами; у экрана первого запуска
 #      (снимок uishot setup) под строкой состояния — её цвет.
+#   U13 «Скорость речи»: ползунки RU и PT, значения как у службы, края дорожки — 2× и 0,5× (пробная фраза на 0,5×
+#      намного длиннее), скорость, сменённая стендом, видна на ползунке.
+#   U14 «Уточнять до озвучки» (при «Точнее» и уточнителе): сегмент PT · RU · Оба показывает выбор службы и меняет
+#      его; «Быстрее» прячет строку, «Точнее» показывает снова.
 #
 # Разговоры владельца не трогаются: тестовый разговор — файлом с самым свежим временем; выученное,
 # словари, свои слова, пины и ключи облака возвращаются из снимка; разговоры, появившиеся за проверку,
@@ -113,7 +117,15 @@ has() { ui find "$@" >/dev/null; }
 cnt() { ui find "$@" --all | grep -c .; }
 xy() { at "$@" | awk '{print $5, $6}'; }
 tapxy() { front || { say "  (впереди не Falar — касание пропущено: $(focus))"; return 1; }; $ADB shell "input tap $1 $2"; sleep "${3:-1.2}"; }
-tapon() { local p; dump; p=$(xy "$@"); [ -n "$p" ] || { say "  (на экране нет: $*)"; return 1; }; tapxy $p; }
+tapon() { local p; dump; p=$(xy "$@"); [ -n "$p" ] || { say "  (на экране нет: $*)"; miss "$*"; return 1; }; tapxy $p; }
+# Промах — дерево экрана и снимок в .stand/ui-miss (только на ПК: на экране могут быть разговоры владельца), чтобы
+# видеть, что было вместо искомого (10.11: «Настройки» в панели ☰ не находились в U4/U10/U11/U13, а руками — да).
+MISS=$STAND/ui-miss/$(date +%Y%m%d-%H%M%S); NMISS=0
+miss() {
+  NMISS=$((NMISS+1)); [ $NMISS -le 12 ] || return 0; mkdir -p "$MISS"
+  cp $D/ui.xml "$MISS/$NMISS.xml" 2>/dev/null; $ADB exec-out screencap -p > "$MISS/$NMISS.png" 2>/dev/null
+  printf '%s\t%s\t%s\n' "$NMISS" "$1" "$(focus | sed 's/.*Window{[0-9a-f]* u0 //; s/}//')" >> "$MISS/index.tsv"
+}
 # «Назад» — только если открыто что-то поверх разговора: на самом экране разговора оно закрыло бы Falar.
 press() {
   dump
@@ -129,7 +141,9 @@ swipe_up() { front && $ADB shell "input swipe $((W / 2)) $((H * 7 / 10)) $((W / 
 swipe_down() { front && $ADB shell "input swipe $((W / 2)) $((H * 3 / 10)) $((W / 2)) $((H * 7 / 10)) 350"; sleep 1.2; }
 # Листать, пока не появится: сначала вниз, потом вверх до самого начала.
 seek() { local i; dump; has "$@" && return 0
-  for i in 1 2 3 4 5; do swipe_up; dump; has "$@" && return 0; done
+  # вниз — до 9 листаний: настройки растут (0.38.0 — строка «Голоса»), и «Написать разработчику» под версией
+  # перестало попадать в 5 (U10, Redmi 10.11)
+  for i in 1 2 3 4 5 6 7 8 9; do swipe_up; dump; has "$@" && return 0; done
   for i in 1 2 3 4 5 6 7 8 9 10; do swipe_down; dump; has "$@" && return 0; done; return 1; }
 ime() { sh "dumpsys input_method" | grep -q 'mInputShown=true'; }
 # Системные полосы по dumpsys window, px экрана: «низ строки состояния, верх полосы навигации, верх
@@ -187,9 +201,10 @@ restore() {
   until idle; do n=$((n+1)); [ $n -eq 1 ] && say "  телефон занят ($(focus)) — настройки верну, когда освободится"; sleep 15; done
   if [ -n "$REF" ]; then
     launch --es listen ${LST:-off} --es refineevery $REF --es cloudevery $CLOUD --es readguard $RG --es voicewhat ${VW:-auto} \
-      $([ -n "$MTQ" ] && echo "--es mtprefer $([ "$MTQ" = 1 ] && echo quality || echo speed)"); sleep 3
+      $([ -n "$MTQ" ] && echo "--es mtprefer $([ "$MTQ" = 1 ] && echo quality || echo speed)") \
+      $([ -n "$SPCH" ] && [ -n "$SP" ] && echo "--es ttsspeed $SP") ${RVK:+--es refinevoice $RVK}; sleep $([ -n "$SPCH" ] && echo 8 || echo 3)
     $ADB shell "am force-stop $PKG"; sleep 1
-    say "  настройки: разбор $REF, облако $CLOUD, чтение вслух $RG, слушание ${LST:-off}, озвучка ${VW:-auto}${MTQ:+, перевод точнее $MTQ}"
+    say "  настройки: разбор $REF, облако $CLOUD, чтение вслух $RG, слушание ${LST:-off}, озвучка ${VW:-auto}${MTQ:+, перевод точнее $MTQ}${SPCH:+, скорость $SP}"
   fi
   say "  текущим снова станет: $(sh "ls -t $F/chats/ | head -1")"
   idle && launch; rm -rf "$D"
@@ -221,6 +236,8 @@ REF=$(printf '%s' "$st" | sed -n 's/.*разбор \([0-9][0-9]*\).*/\1/p'); CLO
 RG=$(printf '%s' "$st" | sed -n 's/.*чтение вслух \([0-9]\).*/\1/p'); QUAL=$(printf '%s' "$st" | sed -n 's/.*облако точнее \([01]\).*/\1/p')
 MTQ=$(printf '%s' "$st" | sed -n 's/.*перевод точнее \([01]\).*/\1/p')   # пусто — у сборки нет «Перевод фраз: быстрее / точнее»
 VW=$(printf '%s' "$st" | sed -n 's/.*озвучка \([a-z]*\).*/\1/p')
+SP=$(printf '%s' "$st" | sed -n 's/.*скорость ru \([0-9.]*\) pt \([0-9.]*\).*/ru:\1,pt:\2/p')   # пусто — у сборки нет «Скорость речи»
+RVK=$(printf '%s' "$st" | sed -n 's/.*до озвучки \([a-z]*\).*/\1/p')   # пусто — у сборки нет «Уточнять до озвучки»
 L=$(printf '%s' "$st" | sed -n 's/.*слушаю \([a-z]*\) ·.*/\1/p'); LST=$(case "$L" in ptru) echo both;; pt|ru) echo $L;; *) echo off;; esac)
 m=$(mark); launch --es modules show
 MODS=$(wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]')
@@ -397,8 +414,9 @@ press; dump; chk '[ "$(title)" = "ТЕСТ интерфейс" ]' "U3 «наза
 say "== U4: «Настройки»"
 tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5; dump
 chk '[ "$(title)" = Настройки ]' "U4 шапка «Настройки»"
-G=$(ui texts); for i in 1 2 3; do swipe_up; dump; G="$G
-$(ui texts)"; done
+# Листать до «Приложения» (оно последнее): настройки растут — 0.38.0 добавила «Скорость речи» и «Уточнять до озвучки»
+G=$(ui texts); for i in 1 2 3 4 5 6 7 8; do swipe_up; dump; G="$G
+$(ui texts)"; printf '%s\n' "$G" | grep -qxF "Приложение" && break; done
 gr=""; for g in "Экран разговора" "Микрофон и звук" "Приложение"; do printf '%s\n' "$G" | grep -qxF "$g" || gr="$gr «$g»"; done
 # «Перевод» — всегда, если у сборки есть «Перевод фраз: быстрее / точнее», иначе — только с облаком или уточнителем
 if [ -n "$MTQ" ] || mod cloud || mod llm; then printf '%s\n' "$G" | grep -qxF "Перевод" || gr="$gr «Перевод»"; fi
@@ -572,12 +590,12 @@ tapon --desc "Меню реплики"; tapon --text "Сообщить о пер
 m=$(mark); tapon --text Telegram; u=$(url "$(wl "$m" '🔗 https://t.me/falar_tbot\?text=' 10)")
 chk '[ -n "$u" ] && fld "$u" text | head -1 | grep -qE "^#перевод · (португальский → русский|русский → португальский)$"' "U10 → Telegram: «$(fld "$u" text | head -1)»"
 tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5
-seek --text "Написать разработчику"; tapon --text "Написать разработчику"; sleep 1; dump
+seek --text "Написать разработчику" --prefix; tapon --text "Написать разработчику" --prefix; sleep 1; dump
 chk 'has --text "Что-то не работает" && has --text "Идея или пожелание" && has --text Telegram && has --text GitHub' "U10 «Написать разработчику»: ошибка или идея, Telegram или GitHub"
 tapon --text "Идея или пожелание"
 m=$(mark); tapon --text GitHub; u=$(url "$(wl "$m" '🔗 https://github.com/Annoyt/FALAR/issues/new\?template=idea.yml&' 10)")
 chk '[ -n "$u" ] && fld "$u" device | grep -q "^Falar "' "U10 идея → GitHub: шаблон идеи, «$(fld "$u" device)»"
-seek --text "Написать разработчику"; tapon --text "Написать разработчику"; sleep 1
+seek --text "Написать разработчику" --prefix; tapon --text "Написать разработчику" --prefix; sleep 1
 m=$(mark); tapon --text Telegram; u=$(url "$(wl "$m" '🔗 https://t.me/falar_tbot\?text=' 10)")
 chk '[ -n "$u" ] && fld "$u" text | head -1 | grep -q "^#ошибка · Falar "' "U10 ошибка → Telegram: «$(fld "$u" text | head -1)»"
 m=$(mark); start --es linkdry 0; l=$(wl "$m" '🧪 ссылки: открываются' 10)
@@ -612,6 +630,53 @@ if mod tts; then
   m=$(mark); start --es voicewhat ${VW:-auto} --es silent 1; wl "$m" '🔈 молчаливый режим' 10 >/dev/null
 else sk "U11 модуль «Озвучка» выключен — выбор не показывается"; fi
 
+say "== U13: «Скорость речи»"
+if mod tts && [ -n "$SP" ]; then
+  tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5
+  seek --desc "Скорость речи: португальский"; dump
+  lbl() { awk -v v="$1" 'BEGIN { printf "%.1f×", v }' | tr . ,; }               # 1.0 → «1,0×», как на экране
+  val() { ui up --desc "Скорость речи: $1" | grep -E '^[0-9],[0-9]×$' | head -1; }  # значение справа от ползунка
+  wru=$(lbl "$(printf '%s' "$SP" | sed 's/ru:\([0-9.]*\),.*/\1/')"); wpt=$(lbl "$(printf '%s' "$SP" | sed 's/.*pt:\([0-9.]*\)/\1/')")
+  chk 'has --text "Скорость речи" && has --desc "Скорость речи: русский" && has --desc "Скорость речи: португальский"' "U13 строка «Скорость речи» и два ползунка — RU и PT"
+  chk '[ "$(val русский)" = "$wru" ] && [ "$(val португальский)" = "$wpt" ]' "U13 значения — как у службы: RU $(val русский) (${wru}), PT $(val португальский) (${wpt})"
+  read x0 y0 x1 y1 cx cy _ <<< "$(at --desc "Скорость речи: русский")"
+  # Касание у края дорожки — крайнее значение: правый край — 2×, левый — 0,5×. Отпустили — служба запоминает и
+  # говорит пробную фразу; длина её звука — в журнале.
+  SPCH=1
+  m=$(mark); tapxy $((x1 - 3)) $cy; l2=$(wl "$m" '🔊 скорость ru: ' 20); dump
+  chk 'printf "%s" "$l2" | grep -q "скорость ru: 2,0×" && [ "$(val русский)" = "2,0×" ]' "U13 правый край — 2,0×: $(printf '%s' "$l2" | cut -c10-)"
+  m=$(mark); tapxy $((x0 + 3)) $cy; l05=$(wl "$m" '🔊 скорость ru: ' 25); dump
+  chk 'printf "%s" "$l05" | grep -q "скорость ru: 0,5×" && [ "$(val русский)" = "0,5×" ]' "U13 левый край — 0,5×: $(printf '%s' "$l05" | cut -c10-)"
+  a=$(printf '%s' "$l2" | sed -n 's/.*пробная фраза \([0-9.]*\) с.*/\1/p'); b=$(printf '%s' "$l05" | sed -n 's/.*пробная фраза \([0-9.]*\) с.*/\1/p')
+  chk '[ "$(awk -v a="$a" -v b="$b" "BEGIN { print (a > 0 && b > 2.5 * a) ? 1 : 0 }")" = 1 ]' "U13 на 0,5× пробная фраза намного длиннее, чем на 2×: ${b:-?} с против ${a:-?} с"
+  # Обратно — стендом, точно в прежнее значение; ползунок за ним — тоже
+  m=$(mark); start --es ttsspeed "$SP"; wl "$m" '🔊 скорость pt: ' 25 >/dev/null; SPCH=; sleep 1; dump
+  chk '[ "$(val русский)" = "$wru" ]' "U13 скорость сменили не ползунком — ползунок показывает её: RU $(val русский)"
+  press; dump
+else sk "U13 модуль «Озвучка» выключен или у сборки нет «Скорость речи»"; fi
+
+say "== U14: «Уточнять до озвучки»"
+if mod llm && [ -n "$RVK" ] && [ "$MTQ" = 1 ]; then
+  tapon --desc "Разговоры, слова, настройки"; tapon --text Настройки; sleep 1.5
+  seek --text "Уточнять до озвучки"; dump
+  # Сегмент «PT · RU · Оба» строки — ближайшие под её названием (у «Что озвучивать» те же подписи)
+  below() { local y0; y0=$(at --text "Уточнять до озвучки" | cut -d' ' -f2); [ -n "$y0" ] || return 1
+    ui find --text "$1" --all | awk -v y="$y0" '$2 > y { print $2, $0 }' | sort -n | head -1 | cut -d' ' -f2-; }
+  rvsel() { local k; for k in PT RU Оба; do [ "$(below $k | cut -d' ' -f8)" = true ] && { echo $k; return; }; done; }
+  want=$(case "$RVK" in ru) echo RU;; both) echo Оба;; *) echo PT;; esac)
+  chk 'has --text "Уточнять до озвучки" && [ -n "$(below PT)" ] && [ -n "$(below RU)" ] && [ -n "$(below Оба)" ] && [ "$(rvsel)" = "$want" ]' \
+    "U14 при «Точнее»: строка и сегмент PT · RU · Оба, выбрано как у службы («$want», на экране «$(rvsel)»)"
+  k=$([ "$want" = RU ] && echo Оба || echo RU); kl=$([ "$k" = RU ] && echo русский || echo "оба языка")
+  m=$(mark); xyk=$(below $k | awk '{print $5, $6}'); [ -n "$xyk" ] && tapxy $xyk; l=$(wl "$m" "🧠 до озвучки уточняется: $kl" 10); dump
+  chk '[ -n "$l" ] && [ "$(rvsel)" = "$k" ]' "U14 «$k» — служба: $(printf '%s' "$l" | cut -c10-)"
+  # «Быстрее» прячет строку: голос и так сразу
+  seek --text "Перевод фраз"; m=$(mark); tapon --text Быстрее; l=$(wl "$m" '🔤 перевод: быстрее' 10); dump
+  chk '[ -n "$l" ] && ! has --text "Уточнять до озвучки"' "U14 «Быстрее» прячет строку: $(printf '%s' "$l" | cut -c10- | cut -c1-80)"
+  m=$(mark); tapon --text Точнее; wl "$m" '🔤 перевод: точнее' 10 >/dev/null; dump
+  chk 'has --text "Уточнять до озвучки"' "U14 «Точнее» — строка снова видна"
+  m=$(mark); start --es refinevoice "$RVK"; wl "$m" '🧠 до озвучки уточняется' 10 >/dev/null
+  press; dump
+else sk "U14 нет уточнителя, «Уточнять до озвучки» у сборки или выбрано «Быстрее»"; fi
 
 say "== U8: «＋» — новый разговор и возврат из панели"
 m=$(mark); tapon --desc "Новый разговор"; l=$(wl "$m" '＋ новый разговор' 10); sleep 1; dump

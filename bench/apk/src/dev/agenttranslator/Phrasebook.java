@@ -156,6 +156,19 @@ public class Phrasebook {
     return 1;
   }
   // ---- кэш синтезированного звука (память + wav на диске)
+  /** Голоса, которыми озвучен кэш (движок и голоса ru, pt). Сменились — с 0.38.0 вместо Piper синтез телефона, или
+   *  человек выбрал другой голос — кэш звука выбрасывается: иначе частые фразы звучали бы прежним голосом, а звук
+   *  Piper (22 050 Гц) — ещё и с чужой частотой дорожки. */
+  public synchronized void audioVoice(String tag) {
+    File c = new File(dir, "cache"), t = new File(c, "voice.txt");
+    String was = "";
+    try { if (t.exists()) was = new String(Files.readAllBytes(t.toPath()), java.nio.charset.StandardCharsets.UTF_8).trim(); } catch (Exception ignore) {}
+    if (tag.equals(was)) return;
+    audio.clear();
+    File[] old = c.listFiles((d, n) -> n.endsWith(".wav"));
+    if (old != null) for (File f : old) f.delete();
+    try { c.mkdirs(); Files.write(t.toPath(), tag.getBytes(java.nio.charset.StandardCharsets.UTF_8)); } catch (Exception ignore) {}
+  }
   String akey(String direction, String dst) { return direction + "|" + norm(dst); }
   public float[] audio(String direction, String dst) {
     String k = akey(direction, dst); float[] a = audio.get(k); if (a != null) return a;

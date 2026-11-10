@@ -19,14 +19,17 @@ final class Npu {
   static final String MODEL_MTK = "npu/encoder-mtk.onnx", MTK_EP = "libonnxruntime_providers_neuropilot.so",
       MTK_CAP = "libneuron_op_capability.so";
   enum Chip { SNAPDRAGON, MEDIATEK }
-  /** Проверенные чипы MediaTek (Build.SOC_MODEL). На непроверенных дополнение может уронить весь процесс: Redmi Note 10
-   *  Pro (MT6891, Neuron 5, 10.11) — SIGSEGV в libonnxruntime_providers_neuropilot.so при создании сессии (вызов
-   *  функции, которой нет в старом адаптере). Попробовать на другом — стенд, --es npuany 1 (MTK_ANY). */
+  /** Проверенные чипы MediaTek (Build.SOC_MODEL): на них NPU прошёл стенд (POCO X7 Pro, MT6899: 162 фразы, WER = fp32,
+   *  4,5 раза меньше энергии на фразу). Остальные пробуются тоже — NPU в своём процессе (NpuService): его падение
+   *  приложению не страшно (Redmi Note 10 Pro, MT6891, Neuron 5, 10.11: дополнение падает при создании сессии — раньше
+   *  ронял весь Falar), причина уходит в журнал и статистику, до новой версии или прошивки — процессор. */
   static final java.util.Set<String> MTK_OK = new java.util.HashSet<>(java.util.Arrays.asList("MT6899"));
-  static volatile boolean MTK_ANY = false;
 
-  static boolean mtkVerified(String socModel) {
-    return MTK_ANY || (socModel != null && MTK_OK.contains(socModel.toUpperCase(java.util.Locale.ROOT)));
+  /** Чип проверен на стенде: MediaTek — MTK_OK, Snapdragon — поколение HTP известно (htpArch). Только для журнала:
+   *  пробуется NPU на любом. */
+  static boolean verified(Chip c, String soc) {
+    if (c == Chip.MEDIATEK) return soc != null && MTK_OK.contains(soc.toUpperCase(java.util.Locale.ROOT));
+    return c == Chip.SNAPDRAGON && !htpArch(soc).isEmpty();
   }
 
   /** Чип MediaTek: с Android 12 — Build.SOC_MANUFACTURER («Mediatek»), раньше — Build.HARDWARE / BOARD («mt6893»…). */
@@ -69,12 +72,11 @@ final class Npu {
     return c == Chip.MEDIATEK ? "mediatek" : "qualcomm";
   }
 
-  /** Почему на этом телефоне в этой сборке NPU не будет при любой модели (надпись L.k), или null. Чип проверен:
-   *  Snapdragon — поколение HTP известно (htpArch: v68 и новее — для них библиотеки QNN 2.42), MediaTek — MTK_OK. */
+  /** Почему на этом телефоне в этой сборке NPU не будет при любой модели (надпись L.k), или null. Непроверенный чип —
+   *  не причина (владелец 10.11: «если не работает — чтобы шёл процессор»): NPU пробуется в своём процессе, отказ
+   *  запоминается до новой версии Falar или прошивки (TranslatorService.startNpu). */
   static String unsupported(Chip c, String soc, File libDir) {
     if (c == null) return L.k("не Snapdragon и не MediaTek");
-    if (c == Chip.MEDIATEK && !mtkVerified(soc)) return L.k("этот чип MediaTek не проверен");
-    if (c == Chip.SNAPDRAGON && htpArch(soc).isEmpty()) return L.k("этот чип Snapdragon не проверен");
     boolean libs = c == Chip.MEDIATEK ? new File(libDir, MTK_EP).exists() && new File(libDir, MTK_CAP).exists()
         : new File(libDir, "libQnnHtp.so").exists();
     if (!libs) return L.k("в этой сборке нет библиотек NPU");

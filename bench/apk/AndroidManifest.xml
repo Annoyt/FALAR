@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.falar" android:versionCode="46" android:versionName="0.37.0">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.falar" android:versionCode="47" android:versionName="0.38.0">
   <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35"/>
   <!-- targetSdk 35: Play Protect предупреждает при установке, если он ниже версии Android телефона
        больше чем на 2 (с 33 — на Android 16). С 35 Android 15+ кладёт окно под системные полосы —
@@ -14,6 +14,9 @@
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
   <!-- Обновление из приложения: магазина нет, иначе о новой версии человек не узнает никогда. -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+  <!-- Системный синтез речи (TextToSpeech, стенд озвучки TtsBench): с Android 11 приложение видит движки синтеза
+       только через queries — без него TextToSpeech не находит Google TTS и не поднимается. -->
+  <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
   <!-- Резервная копия: в облако Google не уходит ничего — разговоры, отпечатки голосов, живой звук
        собеседников, ключи облака; на новый телефон при переносе — всё, как раньше (решение владельца
        03.10). До этого в облако ничего не уходило только потому, что модели (1,4 ГБ) лежат рядом и
@@ -45,5 +48,15 @@
       </intent-filter>
     </activity>
     <service android:name="dev.agenttranslator.TranslatorService" android:exported="false" android:foregroundServiceType="microphone"/>
+    <!-- Распознавание на NPU — в своём процессе (NpuService, владелец 10.11): падение дополнения NPU (код на C++) убивает
+         только его, приложение распознаёт процессором дальше и знает причину. -->
+    <service android:name="dev.agenttranslator.NpuService" android:exported="false" android:process=":npu"/>
+    <!-- Библиотеки NPU от производителя телефона. С targetSdk 31+ Android отдаёт приложению библиотеки из
+         /system/etc/public.libraries-<фирма>.txt, только если они названы здесь: без этого dlopen их не находит
+         («NeuronApi error: unable to open library libneuronusdk_adapter.mtk.so», POCO X7 Pro 10.11), и дополнение
+         NeuroPilot падает на пустом указателе (SIGSEGV, #00 <unknown>). libcdsprpc.so — связь с DSP Snapdragon, без неё
+         QNN HTP не поднимается. required="false": на телефонах без них Falar ставится и работает как обычно. -->
+    <uses-native-library android:name="libneuronusdk_adapter.mtk.so" android:required="false"/>
+    <uses-native-library android:name="libcdsprpc.so" android:required="false"/>
   </application>
 </manifest>

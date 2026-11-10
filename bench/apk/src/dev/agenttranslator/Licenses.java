@@ -6,13 +6,14 @@ import java.util.function.Function;
  *
  *  Лицензии чужих частей требуют показать их тому, кто получил приложение:
  *  CC BY (parakeet, OPUS-MT, Tatoeba) — автора, ссылку на лицензию и что изменено; MIT — строку авторских прав
- *  и текст; Apache-2.0 — текст; GPL-3.0 (espeak-ng: код в libsherpa-onnx-jni.so, данные произношения в модуле
- *  озвучки) — текст и где взять исходники именно этой сборки. Тексты лицензий — дословно, в assets/licenses
- *  (из bench/apk/licenses: GPL — COPYING espeak-ng, Apache — apache.org, MIT — LICENSE ONNX Runtime без строки
- *  авторских прав). LicensesTest сверяет таблицу с models/manifest.json и с библиотеками APK: у каждого файла
- *  модели и у каждой .so есть строка здесь. */
+ *  и текст; Apache-2.0 — текст. Тексты лицензий — дословно, в assets/licenses (из bench/apk/licenses: Apache —
+ *  apache.org, MIT — LICENSE ONNX Runtime без строки авторских прав). LicensesTest сверяет таблицу с
+ *  models/manifest.json и с библиотеками APK: у каждого файла модели и у каждой .so есть строка здесь.
+ *
+ *  С 0.38.0 частей под GPL нет: озвучка — синтез речи телефона (SysTts), мост sherpa-onnx собран без синтеза
+ *  (tools/sherpa-jni/build-notts.sh) — ни eSpeak NG, ни голосов Piper в APK. */
 final class Licenses {
-  static final String MIT = "MIT", APACHE = "Apache-2.0", GPL3 = "GPL-3.0-or-later", CC_BY_4 = "CC-BY-4.0",
+  static final String MIT = "MIT", APACHE = "Apache-2.0", CC_BY_4 = "CC-BY-4.0",
       CC_BY_2_FR = "CC-BY-2.0-FR", QUALCOMM = "Qualcomm AI Stack License", NONE = "none";
 
   /** Часть приложения. role и changed — надписи (L.k, переводятся при показе); files — пути models/manifest.json
@@ -34,8 +35,7 @@ final class Licenses {
     boolean in(boolean qnn, boolean withMtk) { return (!npu && !mtk) || (npu && qnn) || (mtk && withMtk); }
   }
 
-  static final String ESPEAK_SRC = "https://github.com/csukuangfj/espeak-ng/archive/ed530aa113046142eb5115cf2fc9157854d0ffe1.zip",
-      SHERPA_SRC = "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+  static final String SHERPA_SRC = "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
       FALAR_PATCH = "https://github.com/Annoyt/FALAR/tree/main/tools/sherpa-jni";
 
   static final Part[] PARTS = {
@@ -63,24 +63,15 @@ final class Licenses {
     new Part(L.k("Чтение снимков"), "RapidOCR", "RapidAI", APACHE,
         "https://github.com/RapidAI/RapidOCR", L.k("переведено в ONNX"), "",
         "ocr/rec"),
-    new Part(L.k("Озвучка"), "Piper: ru_RU-dmitri-medium, pt_BR-faber-medium", "Piper (rhasspy)", MIT,
-        "https://huggingface.co/rhasspy/piper-voices", L.k("данные для обучения голосов — CC0"), "Piper voices (rhasspy/piper-voices)",
-        "tts_"),
-    new Part(L.k("Озвучка: произношение"), "eSpeak NG", "eSpeak NG contributors", GPL3,
-        "https://github.com/espeak-ng/espeak-ng", "", "",
-        "tts_", "lib:libsherpa-onnx-jni"),
-    new Part(L.k("Озвучка: произношение"), "piper-phonemize", "Michael Hansen", MIT,
-        "https://github.com/rhasspy/piper-phonemize", "", "Copyright (c) 2023 Michael Hansen",
-        "lib:libsherpa-onnx-jni"),
     new Part(L.k("Фразы и словарь снимков"), "Tatoeba", "Tatoeba contributors", CC_BY_2_FR,
         "https://tatoeba.org", L.k("отобраны фразы и слова"), "",
         "phrasebook_tatoeba", "common_words"),
     new Part(L.k("Запуск моделей"), "ONNX Runtime", "Microsoft", MIT,
         "https://github.com/microsoft/onnxruntime", "", "Copyright (c) Microsoft Corporation",
         "lib:libonnxruntime"),
-    new Part(L.k("Распознавание, озвучка, отпечаток голоса"), "sherpa-onnx v1.13.8 (OpenFst, kaldi-native-fbank …)",
+    new Part(L.k("Распознавание и отпечаток голоса"), "sherpa-onnx v1.13.8 (OpenFst, kaldi-native-fbank …)",
         "Xiaomi Corporation, k2-fsa", APACHE,
-        SHERPA_SRC, L.k("добавлена уверенность распознавателя"), "",
+        SHERPA_SRC, L.k("добавлена уверенность распознавателя, собрано без синтеза речи"), "",
         "lib:libsherpa-onnx-jni"),
     new Part(L.k("Уточнение перевода"), "llama.cpp, ggml", "The ggml authors", MIT,
         "https://github.com/ggml-org/llama.cpp", "", "Copyright (c) 2023-2026 The ggml authors",
@@ -103,9 +94,11 @@ final class Licenses {
     new Part(L.k("Распознавание на NPU"), "ONNX Runtime NeuroPilot EP v0.3.0", "Microsoft", MIT,
         "https://github.com/onnxruntime/onnxruntime-ep-neuropilot", L.k("правки Falar: 16-битные активации"),
         "Copyright (c) Microsoft Corporation", "lib:libonnxruntime_providers_neuropilot").mtk(),
-    new Part(L.k("Распознавание на NPU"), "libneuron_op_capability.so (из выпуска ONNX Runtime NeuroPilot EP)", "MediaTek / Microsoft", NONE,
-        "https://github.com/onnxruntime/onnxruntime-ep-neuropilot/releases/tag/v0.3.0", "", "",
-        "lib:libneuron_op_capability").mtk(),
+    // Своя заглушка вместо закрытой библиотеки выпуска v0.3.0 (у неё лицензии нет нигде; решение владельца 10.11):
+    // шесть функций ABI дополнения по его заголовку neuron_op_capability_abi.h (MIT), окончательно решает Neuron.
+    new Part(L.k("Распознавание на NPU"), "libneuron_op_capability.so (Falar)", "Falar; ABI — Microsoft", MIT,
+        "https://github.com/onnxruntime/onnxruntime-ep-neuropilot", L.k("своя заглушка вместо закрытой библиотеки MediaTek: шесть функций ABI дополнения"),
+        "Copyright (c) Microsoft Corporation", "lib:libneuron_op_capability").mtk(),
   };
 
   /** Своё (models/manifest.json: license=project) — без строки. */
@@ -122,14 +115,13 @@ final class Licenses {
     switch (id) {
       case CC_BY_4: return "CC BY 4.0";
       case CC_BY_2_FR: return "CC BY 2.0 FR";
-      case GPL3: return "GNU GPL 3.0+";
       case APACHE: return "Apache 2.0";
       case NONE: return L.t("лицензия не указана");
       default: return id;
     }
   }
 
-  /** Весь текст экрана: части, ссылки на лицензии CC и исходники GPL, затем тексты MIT, Apache 2.0 и GPL 3.0.
+  /** Весь текст экрана: части, озвучка телефона, ссылки на лицензии CC и исходники моста, затем тексты MIT и Apache 2.0.
    *  asset — чтение файла из assets (в тесте — из bench/apk). */
   static String text(Function<String, String> asset) { return text(asset, false); }
 
@@ -148,17 +140,15 @@ final class Licenses {
       if (!p.changed.isEmpty()) b.append(' ').append(L.f("Изменено: %s.", L.t(p.changed)));
       b.append('\n').append(p.url);
     }
+    b.append("\n\n• ").append(L.t("Озвучка: синтез речи телефона (Android). Движок и голоса ставят производитель телефона или Google, в Falar они не входят."));
     b.append("\n\n").append(L.t("Лицензии Creative Commons:"))
         .append("\nCC BY 4.0 — https://creativecommons.org/licenses/by/4.0/")
-        .append("\nCC BY 2.0 FR — https://creativecommons.org/licenses/by/2.0/fr/")
-        .append("\nCC0 — https://creativecommons.org/publicdomain/zero/1.0/");
-    b.append("\n\n").append(L.t("Исходный код eSpeak NG, собранный в эту версию:")).append('\n').append(ESPEAK_SRC)
-        .append("\n").append(L.t("sherpa-onnx и правка Falar:")).append('\n').append(SHERPA_SRC).append('\n').append(FALAR_PATCH);
+        .append("\nCC BY 2.0 FR — https://creativecommons.org/licenses/by/2.0/fr/");
+    b.append("\n\n").append(L.t("sherpa-onnx и правка Falar:")).append('\n').append(SHERPA_SRC).append('\n').append(FALAR_PATCH);
     b.append("\n\n———— MIT License ————\n");
     for (Part p : PARTS) if (MIT.equals(p.license) && p.in(qnn, mtk)) b.append('\n').append(p.copyright).append(" — ").append(p.what);
     b.append("\n\n").append(asset.apply("licenses/MIT.txt").trim());
     b.append("\n\n———— Apache License 2.0 ————\n\n").append(asset.apply("licenses/Apache-2.0.txt").trim());
-    b.append("\n\n———— GNU General Public License v3.0 ————\n\n").append(asset.apply("licenses/GPL-3.0.txt").trim());
     if (qnn) {
       b.append("\n\n———— Qualcomm AI Stack License ————\n\n").append(asset.apply("licenses/qualcomm/AI-Stack-License.txt").trim());
       b.append("\n\n———— Qualcomm AI Runtime: NOTICE ————\n\n").append(asset.apply("licenses/qualcomm/NOTICE.txt").trim());

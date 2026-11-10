@@ -73,11 +73,12 @@ SLIM=1 bash $A/build.sh >/dev/null
 # Сборки с NPU (владелец 09.11: «сборка с и без, страница помогает выбрать»; 10.11 — «с функциями для mediatek и
 # qualcom»): те же две, но с ORT с QNN и библиотеками Qualcomm (лицензия AI Stack — только внутри приложения) и с
 # дополнением ORT для NeuroPilot (MediaTek). Библиотеки Qualcomm — bench/npu/fetch_qnn.sh, по умолчанию в
-# .stand/qnn-android основной копии проекта; дополнение — bench/npu/neuropilot-ep/build.sh, в .stand/mtk-ep/v0.3.0-int16.
+# .stand/qnn-android основной копии проекта; дополнение — bench/npu/neuropilot-ep/build.sh, в .stand/mtk-ep/v0.3.0-int16-stub
+# (рядом — своя заглушка libneuron_op_capability.so вместо закрытой).
 # NPU_BUILDS=0 — выпуск без сборок с NPU, NPU_MTK=0 — сборки с NPU только для Snapdragon (по слову владельца).
 MAIN=$(cd "$(git -C $R rev-parse --git-common-dir)/.." && pwd)
 export QNN_DIR=${QNN_DIR:-$MAIN/.stand/qnn-android}
-export MTK_EP_DIR=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16}
+export MTK_EP_DIR=${MTK_EP_DIR:-$MAIN/.stand/mtk-ep/v0.3.0-int16-stub}   # своя заглушка libneuron_op_capability.so (решение владельца 10.11)
 APKS="Falar.apk Falar-slim.apk"
 # Страница (docs/index.html, NPU_FROM) ведёт телефоны с NPU на Falar-npu.apk начиная с этой версии: выпуск
 # без сборок с NPU с такой версии сломал бы им кнопку «Скачать». По умолчанию сборки с NPU делаются ровно с NPU_FROM
@@ -146,7 +147,7 @@ cat > $RELNOTES <<EOF
 ${NPUSZ:+| \`Falar-npu.apk\` | $NPUSZ | обычная + распознавание на NPU: Snapdragon 888/778G и новее${MTKV:+, MediaTek Dimensity 8400}; экспериментально |}
 ${SLIMNPUSZ:+| \`Falar-slim-npu.apk\` | $SLIMNPUSZ | облегчённая + NPU |}
 
-Android 9 и новее, процессор arm64. При первом запуске приложение скачает модели (около 1,6 ГБ,
+Android 9 и новее, процессор arm64. При первом запуске приложение скачает модели (около 1,5 ГБ,
 по Wi-Fi, можно прервать и продолжить). После этого интернет не нужен.
 
 Контрольные суммы — в \`SHA256SUMS.txt\`. Что изменилось — в [bench/apk/README.md](https://github.com/$REPO/blob/$TAG/bench/apk/README.md).

@@ -9,6 +9,8 @@ import org.json.*;
 /** Локальный llama-server (llama.cpp, официальная Android-сборка) как подпроцесс из nativeLibraryDir; OpenAI-совместимый чат по localhost. */
 public class Llm {
   public final String nativeDir, model, logFile; Process proc; final int port = 8089; public volatile boolean ready = false;
+  /** Номер процесса сервера — для паузы на время синтеза речи (TranslatorService.pauseLlm); -1 — не нашёлся. */
+  public volatile int pid = -1;
   /** Как сервер держит веса: «mmap» — страницами файла, которые система под нагрузкой вытесняет и
    *  дочитывает при надобности; «none» — чтением в обычную память, которую можно только убить.
    *  С «none» на Redmi через 5–35 с после загрузки система каждый раз слала критический сигнал
@@ -23,7 +25,7 @@ public class Llm {
     pb.environment().put("LD_LIBRARY_PATH", nativeDir); pb.redirectErrorStream(true); pb.redirectOutput(new File(logFile));
     proc = pb.start();
     String lastErr = "";
-    for (int i = 0; i < 360; i++) { Thread.sleep(500); try { HttpURLConnection c = (HttpURLConnection) new URL("http://127.0.0.1:" + port + "/health").openConnection(); c.setConnectTimeout(300); c.setReadTimeout(1000); if (c.getResponseCode() == 200) { ready = true; return true; } } catch (IOException e) { lastErr = e.toString(); if (!proc.isAlive()) throw new IOException("llama-server завершился с кодом " + proc.exitValue() + ", см. " + logFile); } }
+    for (int i = 0; i < 360; i++) { Thread.sleep(500); try { HttpURLConnection c = (HttpURLConnection) new URL("http://127.0.0.1:" + port + "/health").openConnection(); c.setConnectTimeout(300); c.setReadTimeout(1000); if (c.getResponseCode() == 200) { pid = child(); ready = true; return true; } } catch (IOException e) { lastErr = e.toString(); if (!proc.isAlive()) throw new IOException("llama-server завершился с кодом " + proc.exitValue() + ", см. " + logFile); } }
     stop(); throw new IOException("нет ответа /health за 180 с; последняя ошибка: " + lastErr);
   }
   public String chat(String system, String user, int maxTokens) throws Exception {
@@ -46,12 +48,22 @@ public class Llm {
   /** Остановить сервер наверняка: мягко, а если через две секунды жив — жёстко. Раньше был только
    *  destroy(), и если сервер его не обрабатывал, процесс на 1,1 ГБ оставался жить. */
   public synchronized void stop() {
-    ready = false;
+    ready = false; pid = -1;
     Process p = proc; proc = null;
     if (p == null) return;
     p.destroy();
     try { if (!p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly(); }
     catch (InterruptedException e) { p.destroyForcibly(); Thread.currentThread().interrupt(); }
+  }
+  /** Свой сервер среди процессов llama-server: тот, чей родитель — это приложение (PPid в /proc/N/status). */
+  static int child() {
+    int me = android.os.Process.myPid();
+    for (int n : strays()) {
+      try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream("/proc/" + n + "/status"), StandardCharsets.UTF_8))) {
+        for (String s; (s = r.readLine()) != null; ) if (s.startsWith("PPid:")) { if (Integer.parseInt(s.substring(5).trim()) == me) return n; break; }
+      } catch (Exception ignore) {}
+    }
+    return -1;
   }
   /** Номера процессов llama-server по /proc. Процессы своего пользователя приложению видны, и если
    *  сервис убили жёстко (системой или «очисткой памяти»), onDestroy не вызывался и сервер остался

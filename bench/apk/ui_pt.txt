@@ -397,7 +397,7 @@ Pode falar · здесь появится перевод	Pode falar · a traduç
 🔉 Шумоподавление	🔉 Redução de ruído
 📚 Корпус фраз	📚 Corpus de frases
 распознавание речи, перевод pt ↔ ru и словарь — обязательно	reconhecimento de fala, tradução pt ↔ ru e dicionário — obrigatório
-перевод звучит голосом — в наушниках или из динамика; без неё — только на экране	a tradução é falada em voz — no fone ou no alto-falante; sem isso — só na tela
+перевод звучит голосом телефона без сети — в наушниках или из динамика; без неё — только на экране	a tradução é falada pela voz do celular, sem internet — no fone ou no alto-falante; sem isso — só na tela
 вывеска, меню, скрин: текст читается на телефоне, перевод — поверх фото	placa, cardápio, print: o texto é lido no telefone, a tradução aparece sobre a foto
 переводит заново с учётом разговора: род, отсылки, термины; нужен сильный телефон	traduz de novo levando em conta a conversa: gênero, referências, termos; precisa de um telefone potente
 пересмотр разговора бесплатными моделями OpenRouter, названия разговоров; нужен ключ	revisão da conversa por modelos gratuitos do OpenRouter, nomes das conversas; precisa de chave
@@ -412,6 +412,10 @@ Pode falar · здесь появится перевод	Pode falar · a traduç
 Загружаю модели · %s · ещё ≈ %d с	Carregando modelos · %s · faltam ≈ %d s
 Улучшаю в облаке · ещё ≈ %d с	Melhorando na nuvem · faltam ≈ %d s
 Улучшаю в облаке · дольше обычного · %d с	Melhorando na nuvem · mais demorado que o normal · %d s
+граф NPU	grafo da NPU
+Первый запуск версии: готовлю NPU · ещё ≈ %d с	Primeira execução da versão: preparando a NPU · faltam ≈ %d s
+Первый запуск версии: готовлю NPU · дольше обычного · %d с	Primeira execução da versão: preparando a NPU · mais demorado que o normal · %d s
+Первый запуск этой версии: готовлю распознавание на NPU — до двух минут, один раз	Primeira execução desta versão: preparando o reconhecimento na NPU — até dois minutos, só uma vez
 читаете вслух · микрофон не слушает	lendo em voz alta · o microfone não ouve
 транскрипция скрыта · касание вернёт	transcrição oculta · toque para mostrar
 улучшить нельзя: %s	não dá para melhorar: %s
@@ -704,20 +708,15 @@ Falar больше не закрывается сам, когда к нему в
 Отпечаток голоса	Impressão de voz
 Уточнение перевода	Refinamento da tradução
 Чтение снимков	Leitura de fotos
-Озвучка: произношение	Narração: pronúncia
 Фразы и словарь снимков	Frases e dicionário de fotos
 Запуск моделей	Execução de modelos
-Распознавание, озвучка, отпечаток голоса	Reconhecimento, narração, impressão de voz
 переведено в ONNX и сжато до int8 (sherpa-onnx)	convertido para ONNX e comprimido para int8 (sherpa-onnx)
 переведено в ONNX	convertido para ONNX
 переведено в ONNX (sherpa-onnx)	convertido para ONNX (sherpa-onnx)
-данные для обучения голосов — CC0	dados de treino das vozes — CC0
 отобраны фразы и слова	frases e palavras selecionadas
-добавлена уверенность распознавателя	adicionada a confiança do reconhecedor
 Чужие модели и библиотеки в Falar и их лицензии:	Modelos e bibliotecas de terceiros no Falar e suas licenças:
 Изменено: %s.	Alterado: %s.
 Лицензии Creative Commons:	Licenças Creative Commons:
-Исходный код eSpeak NG, собранный в эту версию:	Código-fonte do eSpeak NG compilado nesta versão:
 sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 Экспериментальное	Experimental
 Распознавание на NPU	Reconhecimento na NPU
@@ -730,13 +729,49 @@ sherpa-onnx и правка Falar:	sherpa-onnx e a alteração do Falar:
 квантовано для NPU (Qualcomm AI Hub, правки Falar)	quantizado para a NPU (Qualcomm AI Hub, ajustes do Falar)
 ждёт свободной памяти	aguardando memória livre
 не Snapdragon и не MediaTek	nem Snapdragon nem MediaTek
-на MediaTek: меньше расход батареи и нагрев, точнее	no MediaTek: menos gasto de bateria e calor, mais preciso
+на MediaTek: меньше расход батареи и нагрев · может не заработать — включите «Статистику для разработчика», и мы исправим это в новых версиях	no MediaTek: menos gasto de bateria e calor · pode não funcionar — ative «Estatísticas para o desenvolvedor» e corrigiremos isso nas próximas versões
+NPU не заработал	A NPU não funcionou
+На этом телефоне распознавание на NPU не получилось. Falar распознаёт процессором, как обычно, — ничего не потеряно. NPU MediaTek мы проверили не на всех телефонах; чтобы исправить это в новых версиях, нужна причина сбоя. Разрешите отправлять разработчику анонимную статистику: причина войдёт в неё, звук и тексты разговоров не уходят.	Neste telefone o reconhecimento na NPU não funcionou. O Falar reconhece no processador, como sempre — nada se perdeu. Ainda não testamos a NPU MediaTek em todos os telefones; para corrigir isso nas próximas versões, precisamos saber a causa da falha. Permita enviar estatísticas anônimas ao desenvolvedor: a causa vai junto, o áudio e os textos das conversas não são enviados.
 не справляется с моделью	não dá conta do modelo
-сбой при прошлой сборке графа	falha na última montagem do grafo
 квантовано для NPU MediaTek (правки Falar)	quantizado para a NPU MediaTek (alterações do Falar)
 правки Falar: 16-битные активации	alterações do Falar: ativações de 16 bits
 лицензия не указана	licença não indicada
-этот чип MediaTek не проверен	este chip MediaTek não foi testado
 ⚡ Распознавание на NPU	⚡ Reconhecimento na NPU
-этот чип Snapdragon не проверен	este chip Snapdragon não foi testado
 В «О приложении» — авторы и лицензии моделей и библиотек Falar.	Em «Sobre o app» — autores e licenças dos modelos e bibliotecas do Falar.
+Распознавание и отпечаток голоса	Reconhecimento e impressão de voz
+добавлена уверенность распознавателя, собрано без синтеза речи	adicionada a confiança do reconhecedor, compilado sem síntese de voz
+Озвучка: синтез речи телефона (Android). Движок и голоса ставят производитель телефона или Google, в Falar они не входят.	Narração: síntese de voz do celular (Android). O mecanismo e as vozes vêm do fabricante do celular ou do Google e não fazem parte do Falar.
+Голоса	Vozes
+синтез речи телефона не поднялся	a síntese de voz do celular não iniciou
+голоса телефона, без сети	vozes do celular, sem internet
+голос %d	voz %d
+Синтез речи телефона не поднялся — перевод виден только на экране. В настройках синтеза речи Android выберите движок, например Google, и скачайте голоса русского и португальского (Бразилия).	A síntese de voz do celular não iniciou — a tradução aparece só na tela. Nas configurações de síntese de voz do Android, escolha um mecanismo, por exemplo o Google, e baixe as vozes de russo e português (Brasil).
+Настройки синтеза	Configurações de síntese
+Русский	Russo
+Португальский	Português
+ · скачать	 · baixar
+Скачать другие голоса…	Baixar outras vozes…
+Голоса озвучки	Vozes da narração
+Не открылись настройки синтеза речи — найдите их в настройках Android: «Синтез речи»	As configurações de síntese de voz não abriram — procure nas configurações do Android: «Saída de texto para fala»
+голоса телефона	vozes do celular
+нет синтеза речи	sem síntese de voz
+скачать голоса	baixar vozes
+русский	russo
+скачать голос: %s	baixar voz: %s
+португальский	português
+🔇 нет голоса для языка %s (%s) — «Настройки» → «Голоса»	🔇 sem voz para %s (%s) — «Configurações» → «Vozes»
+голос не скачан	voz não baixada
+нет голоса	sem voz
+Перевод произносит голос самого телефона: разборчивее и почти без задержки.	A tradução é falada pela voz do próprio celular: mais clara e quase sem atraso.
+Скорость речи	Velocidade da fala
+у каждого языка своя, от 0,5× до 2×	cada idioma tem a sua, de 0,5× a 2×
+Скорость речи: русский	Velocidade da fala: russo
+Скорость речи: португальский	Velocidade da fala: português
+Скорость речи — своя у каждого языка: от вдвое медленнее до вдвое быстрее.	Velocidade da fala própria para cada idioma: da metade ao dobro.
+своя заглушка вместо закрытой библиотеки MediaTek: шесть функций ABI дополнения	substituto próprio no lugar da biblioteca fechada da MediaTek: seis funções da ABI do complemento
+Уточнять до озвучки	Refinar antes de falar
+при «Точнее» голос ждёт уточнитель до 3 с	com «Mais precisa», a voz espera o refinador até 3 s
+PT — собеседнику, RU — вам. Не успел за 3 с — звучит перевод фразы, уточнённый текст появится чуть позже.	PT — para o interlocutor, RU — para você. Se não ficar pronto em 3 s, toca a tradução da frase e o texto refinado aparece logo depois.
+При «Точнее» голос ждёт уточнитель до 3 секунд — язык выбирается в настройках.	Com «Mais precisa», a voz espera o refinador até 3 segundos — o idioma se escolhe nas configurações.
+проверяется	em verificação
+остановлен: мало памяти	parado: pouca memória

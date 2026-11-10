@@ -220,11 +220,21 @@ public class TranslatorService extends Service {
   public static class Turn { public final int n; public final String dir, asr, mt; public final long at; public volatile String refined;
     /** Реплику поправили или удалили, пока она ждала озвучки: поток озвучки её пропускает. */
     public volatile boolean dropped;
+    /** Уточнение до озвучки (RefineVoice): идёт или кончилось (live; null — не начиналось), с какого времени ждёт голос
+     *  (liveT0, мс), ответ уточнителя (liveOut; null — тот же перевод, отброшен или не успел) и записана ли реплика. */
+    volatile java.util.concurrent.CountDownLatch live; volatile long liveT0; volatile String liveOut; boolean saved;
     Turn(int n, String d, String a, String m, long at) { this.n = n; dir = d; asr = a; mt = m; this.at = at; } }
   public final List<Turn> history = Collections.synchronizedList(new ArrayList<>()); int turnNo = 0;
   /** Знаков на токен у модели уточнителя — замер при её запуске (Brief). */
   volatile double llmCpt = Brief.DEFAULT_CHARS_PER_TOKEN;
   public volatile Llm llm; public volatile boolean contextMode = false; final ExecutorService llmWorker = Executors.newSingleThreadExecutor(); volatile boolean refinePending = false, refineRunning = false;
+  /** «Уточнять до озвучки» (RefineVoice, владелец 10.11): при «Точнее» голос выбранного языка ждёт уточнитель. */
+  public volatile String refineVoice = RefineVoice.PT;
+  /** Уточнение до озвучки — своим потоком: проход разбора на llmWorker его в очереди не держит, а сам уступает ему
+   *  (refineLoop ждёт, пока liveBusy > 0). */
+  final ExecutorService liveExec = Executors.newSingleThreadExecutor(r -> new Thread(r, "refine-live"));
+  final java.util.concurrent.atomic.AtomicInteger liveBusy = new java.util.concurrent.atomic.AtomicInteger();
+  volatile boolean llmLoading = false, liveLoadSaid = false;
   /** Интервалы разбора контекста, в репликах: 0 — только по кнопке. Локальный — уточнитель 🧠,
    *  облачный — пересмотр всего разговора. Счётчики идут с последнего разбора и сбрасываются
    *  ручным нажатием; cloudBackoff удваивает облачный интервал после отказа 429 или обрыва —
@@ -299,6 +309,7 @@ public class TranslatorService extends Service {
     Telemetry.collect = Telemetry.YES.equals(getSharedPreferences("at", MODE_PRIVATE).getString("telemetry", Telemetry.ASK));
     Telemetry.catchCrashes(teleDir(), myName());
     tele.merge(Telemetry.Counters.load(prefOrNull("tele_counters"), System.currentTimeMillis()));
+    main.postDelayed(energyEvery, 60_000L);              // расход заряда за слушание — раз в минуту (energyTick)
     NotificationManager nm = getSystemService(NotificationManager.class);
     nm.createNotificationChannel(new NotificationChannel(CH, L.t("Переводчик"), NotificationManager.IMPORTANCE_LOW));
     if (toForeground()) init();
@@ -374,6 +385,10 @@ public class TranslatorService extends Service {
       }
       // Заменённое уже скачанным и сверенным — убрать до загрузки движков: они возьмут новый путь.
       store.cleanObsolete();
+      // С 0.38.0 голос — синтез телефона (SysTts): голоса Piper и данные eSpeak NG (tts_ru, tts_pt, ~150 МБ) не нужны
+      long freed = 0;
+      for (String d : new String[]{"tts_ru", "tts_pt"}) { freed += rmTree(new File(modelsDir, d)); freed += rmTree(new File(modelsDir, d + ".zip")); freed += rmTree(new File(modelsDir, d + ".zip.part")); }
+      if (freed > 0) log("🗑 голоса Piper больше не нужны (озвучка — синтез телефона): удалено " + ModelStore.mb(freed) + " МБ");
       ModelStore.State st = store.state(); Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
       if (st.upgrade > 0) log("📦 можно облегчить перевод: скачать " + ModelStore.mb(st.upgradeBytes) + " МБ — «Система» → «облегчить перевод»; до тех пор работает прежний путь");
       if (st.autoMissing > 0) log("📦 модулям не хватает " + ModelStore.mb(st.autoBytes) + " МБ: " + whatFetch(store.autos()) + " — докачается само по разрешённой сети");
@@ -392,9 +407,12 @@ public class TranslatorService extends Service {
         log("❌ моделей не видно в " + models.getAbsolutePath() + " (каталог есть: " + models.isDirectory() + ", читается: " + models.canRead() + ")"); return; }
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
       Engine.mtBeam = getSharedPreferences("at", MODE_PRIVATE).getBoolean("mt_quality", true) ? Engine.MT_BEAM_QUALITY : 1;
+      refineVoice = RefineVoice.parse(getSharedPreferences("at", MODE_PRIVATE).getString("refine_voice", RefineVoice.PT));
       Engine.withTts = mod(Modules.TTS);
+      Engine.ttsOpen = lg -> SysTts.open(this, chosenVoices(), chosenSpeeds(), lg::log);
       readSoundPrefs();
       earlyStart();
+      npuFirst();                 // первая сборка графа NPU на версии — до моделей, если после них она не уместится
       // Ход загрузки — экрану: этапы «распознавание · перевод · словарь и разговоры · озвучка»,
       // сколько каждый шёл в прошлый раз экран берёт из load_ms (владелец 01.10: «не хватает
       // индикации загрузки моделей, чтобы было понятно, что вот-вот скоро включится»). Озвучка —
@@ -454,41 +472,65 @@ public class TranslatorService extends Service {
       worker.submit(() -> loadTtsLate(rest, nStages, askedTts));
     } catch (Throwable t) { Log.e(TAG, "init", t); status(L.f(L.k("Ошибка: %s"), t)); Engine.stage = null; Engine.asrUp = null; loading = false; ttsLoading = false; busy("load", null, 0, 0); }
   }
-  /** Распознавание на NPU Snapdragon (Npu, NpuAsr; «Экспериментальное», владелец 09.11: по умолчанию включено, где
-   *  возможно). Своим потоком после загрузки всего остального: граф QNN при первом запуске собирается десятки секунд,
-   *  очередь фраз его не ждёт, до тех пор распознаёт процессор. Собранный граф — в no_backup: не уезжает ни в облачную
-   *  копию, ни на другой телефон (там другое поколение NPU). */
-  /** Первая сборка графа QNN — прирост памяти процесса до 1,6 ГБ (AI Hub 09.11, по телефонам 0,1–1,6), поэтому
-   *  только при 2 ГБ свободных, иначе — через 10 минут снова. Из сохранённого графа — 0,4–1,3 с, без проверки. */
-  static final long NPU_FIRST_BUILD_FREE = 2_000_000_000L;
+  /** Распознавание на NPU (Npu, NpuAsr; «Экспериментальное», владелец 09.11: по умолчанию включено, где возможно).
+   *  Владелец 10.11: «если не работает — чтобы процесс шёл на процессоре; если падает — иметь причину; при каждом
+   *  выпуске как минимум раз выбирать». Поэтому:
+   *  - NPU — в своём процессе (NpuService, NpuClient): падение дополнения (код на C++) убивает только его, приложение
+   *    распознаёт процессором дальше; сторож останавливает этот процесс, когда свободной памяти мало;
+   *  - на каждой версии Falar и прошивке (npuId) — заново: граф собирается заново (сохранённый — от прежней модели и
+   *    рантайма), первые фразы сверяются с процессором (NpuCheck: «две из трёх»), и только потом NPU распознаёт сам;
+   *  - отказ — с причиной (стадия и текст: ошибка ORT, сигнал и кадры падения, память) — в журнал и, по согласию, в
+   *    статистику; до новой версии или прошивки не пробуется (npu_fail), но включение переключателя пробует снова;
+   *  - память закончилась посреди работы (система или сторож закрыли NPU) — не отказ: снова при следующем запуске.
+   *  Своим потоком после загрузки всего остального: граф при первом запуске собирается десятки секунд, очередь фраз его
+   *  не ждёт. Собранный граф — в no_backup: не уезжает ни в облачную копию, ни на другой телефон. */
+  /** Первая сборка графа QNN: на её пике процесс занимает 2,65–3,13 ГБ (AI Hub 09.11, модель приложения
+   *  parakeet-encoder-npu.onnx через ONNX Runtime с QNN: S26 2,65 · S24 2,72 · 7 Gen 4 2,72 · A73 3,12), хотя после
+   *  сборки прирост — лишь 0,1–0,7 ГБ (прежний порог 2 ГБ считался от прироста). Сторож смотрит на пик: на A73 в RTL
+   *  при 3,7 ГБ свободных на миг оставалось 0,77. Поэтому — пик 3,1 и сторожевые 0,8: только при 4 ГБ свободных, иначе —
+   *  через 10 минут или до загрузки моделей при следующем запуске (npuFirst). Из сохранённого графа — 0,4–1,3 с. */
+  static final long NPU_FIRST_BUILD_FREE = 4_000_000_000L;
   /** MediaTek: первая сборка графа NeuroPilot частями — минус 1,7 ГБ свободной памяти (POCO X7 Pro 10.11; одной частью
    *  телефон уходил в перезагрузку по нехватке памяти) — поэтому только при 3 ГБ свободных. */
   static final long NPU_FIRST_BUILD_FREE_MTK = 3_000_000_000L;
+  /** Сторож процесса NPU: свободной памяти меньше — остановить (на стенде POCO и Redmi 10.11 так вовремя останавливалась
+   *  сборка, телефон цел); подъём графа дольше NPU_BUILD_MAX_MS — тоже (QNN на 7 Gen 4 — 102 с, NeuroPilot на POCO — 43 с). */
+  static final long NPU_GUARD_FREE = 800L << 20, NPU_BUILD_MAX_MS = 5 * 60_000L;
+  /** Пробный прогон дольше — граф ушёл на процессор (A52s 09.11: QNN без htp_arch — 2,35 с), NPU не включать. NPU —
+   *  14–90 мс на окно (AI Hub, 8 телефонов), MediaTek ~150 мс (POCO 10.11). */
+  static final long NPU_PROBE_MAX_MS = 600;
   volatile long npuFree = Npu.mediatek() ? NPU_FIRST_BUILD_FREE_MTK : NPU_FIRST_BUILD_FREE;
   /** Сколько фраз распознал NPU — в журнал первые три и каждая двадцатая: видно, что фразы идут через NPU и за сколько. */
   int npuPhrases;
+  /** Сверка первых фраз этой версии (npuShadow): тексты процессора и NPU; npuCheckIo — NPU в фоне, фраза не ждёт. */
+  volatile NpuCheck npuCheck;
+  final ExecutorService npuCheckIo = Executors.newSingleThreadExecutor(r -> { Thread t = new Thread(r, "npu-check"); t.setPriority(Thread.MIN_PRIORITY); return t; });
+
   void startNpu() {
-    final Engine e = eng; if (e == null || e.npu != null || "готовится".equals(e.npuState)) return;
+    final Engine e = eng; if (e == null || e.npu != null || e.npuShadow != null || "готовится".equals(e.npuState)) return;
     final File lib = new File(getApplicationInfo().nativeLibraryDir);
     final Npu.Chip chip = Npu.chip();
     String why = Npu.unavailable(chip, lib, modelsDir);
-    e.npuOn = getSharedPreferences("at", MODE_PRIVATE).getBoolean(Npu.PREF, true);
+    final SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    e.npuOn = sp.getBoolean(Npu.PREF, true);
     if (why != null) { e.npuState = why; return; }
     if (!e.npuOn) { e.npuState = L.k("выключено"); return; }
-    // Защита от повторов на телефонах, где NPU не справляется (Redmi Note 10 Pro, MT6891 / Neuron 5, 10.11: дополнение
-    // уронило всё приложение при создании сессии): «npu_fail» — граф не собрался на этой прошивке и версии Falar, больше
-    // не пробуем; «npu_try» — сборка начата и не закончилась (процесс упал или его убили) — тоже не пробуем.
-    final android.content.SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
     final String id = npuId();
-    if (id.equals(sp.getString("npu_fail", ""))) { e.npuState = L.k("не справляется с моделью"); return; }
-    String tried = sp.getString("npu_try", "");
-    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
-    if (tries >= 1) {   // одного раза хватает: нативный сбой дополнения роняет весь процесс (Redmi, 10.11)
-      e.npuState = L.k("сбой при прошлой сборке графа");
-      log("⚡ NPU: прошлая сборка графа оборвалась — до обновления приложения распознаёт процессор");
+    String failed = npuFailWhy(sp, id);
+    if (failed != null) {
+      e.npuState = L.k("не справляется с моделью");
+      log("⚡ NPU на этой версии и прошивке уже отказал (" + failed + ") — распознаёт процессор; снова попробую после обновления");
       return;
     }
-    final File ctx = new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
+    // Подъём графа начался и не кончился вместе со всем приложением: Falar закрыли или телефон перезагрузился (так было
+    // на POCO 09.11, когда граф не влез в память). Раз — могли просто закрыть: ещё попытка; дважды — отказ.
+    String tried = sp.getString("npu_try", "");
+    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
+    if (tries >= 2) { npuFailed(id, "start", "подъём графа дважды оборвался вместе с приложением (закрытие Falar или перезагрузка телефона)"); return; }
+    if (tries == 1) log("⚡ NPU: прошлый подъём графа оборвался вместе с приложением — пробую ещё раз");
+    final File ctx = npuCtx(chip);
+    // Граф — под эту версию и прошивку: сохранённый от прежней загрузился бы и молча считал бы прежней моделью.
+    if (!id.equals(sp.getString("npu_ctx", ""))) { NpuAsr.deleteCtx(ctx); sp.edit().remove("npu_ctx").remove("npu_ok").apply(); }
     if (!ctx.exists()) {
       android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
       ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
@@ -500,15 +542,258 @@ public class TranslatorService extends Service {
       }
     }
     e.npuState = L.k("готовится");
-    log(ctx.exists() ? "⚡ NPU: поднимаю сохранённый граф" : "⚡ NPU: собираю граф (первый раз — до двух минут), пока распознаёт процессор");
-    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();      // commit: запись до возможного падения
-    Thread t = new Thread(() -> {
-      e.startNpu(lib, ctx);
-      android.content.SharedPreferences.Editor ed = sp.edit().remove("npu_try");
-      if ("error".equals(e.npuState)) { ed.putString("npu_fail", id); e.npuState = L.k("не справляется с моделью"); }
-      ed.apply();
-    }, "npu");
+    final boolean checked = id.equals(sp.getString("npu_ok", ""));
+    log((ctx.exists() ? "⚡ NPU: поднимаю сохранённый граф" : "⚡ NPU: собираю граф (первый раз на этой версии — до двух минут), пока распознаёт процессор")
+        + " · " + (Npu.verified(chip, Npu.socModel()) ? "чип проверен" : "чип не проверен — пробую в отдельном процессе"));
+    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();   // commit: запись до возможного падения телефона
+    Thread t = new Thread(() -> npuUp(e, chip, lib, ctx, id, checked), "npu");
     t.setPriority(Thread.MIN_PRIORITY); t.start();
+  }
+
+  /** Сохранённый граф NPU этого чипа (в no_backup: в облачную копию не идёт, после переустановки собирается заново). */
+  File npuCtx(Npu.Chip chip) {
+    return new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
+  }
+
+  /** Сколько памяти займут движки (распознавание и перевод): размер их файлов и ~250 МБ на остальное (экран, Java,
+   *  VAD, словари). POCO X7 Pro, 10.11: файлы 1,4 ГБ, Falar с ними — 1,6 ГБ. */
+  long engineBytes() { return dirBytes(new File(modelsDir, "asr_multi")) + dirBytes(new File(modelsDir, "mt")) + (250L << 20); }
+  static long dirBytes(File d) {
+    long s = 0; File[] fs = d.listFiles();
+    if (fs != null) for (File f : fs) s += f.isDirectory() ? dirBytes(f) : f.length();
+    return s;
+  }
+
+  /** Первая сборка графа NPU на этой версии — до загрузки моделей (владелец 10.11: «1 вариант … и сообщить
+   *  пользователю, что это займёт время»). Сборке нужно ещё 1,7–2,2 ГБ сверх занятого (A16W8, POCO X7 Pro), а Falar с
+   *  моделями занимает 1,6 ГБ: на телефоне с 8 ГБ после загрузки она не помещается (сторож останавливал её на 774 МБ
+   *  свободных), до загрузки — помещается. Поэтому, если после моделей памяти не хватит, граф собирается сейчас — в
+   *  процессе NPU, который потом закрывается (память сборки — модель, компилятор — уходит вся), а после моделей NPU
+   *  поднимается уже из сохранённого графа (2 с, мало памяти; startNpu). Раз на версию и прошивку. Человеку — этап
+   *  загрузки «граф NPU» со своей подписью и временем (Screen.npuCaption) и строка состояния. Слушание уже идёт
+   *  (earlyStart): сказанное копится и переводится после загрузки. Где памяти хватает и после моделей, — как раньше:
+   *  граф собирается после загрузки, пока распознаёт процессор, без ожидания. */
+  void npuFirst() {
+    final Npu.Chip chip = Npu.chip();
+    final File lib = new File(getApplicationInfo().nativeLibraryDir);
+    if (Npu.unavailable(chip, lib, modelsDir) != null) return;
+    final SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    if (!sp.getBoolean(Npu.PREF, true)) return;
+    final String id = npuId();
+    if (npuFailWhy(sp, id) != null) return;                        // отказ на этой версии — скажет startNpu
+    String tried = sp.getString("npu_try", "");
+    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
+    if (tries >= 2) return;                                         // дважды оборвался — отказ запишет startNpu
+    final File ctx = npuCtx(chip);
+    if (!id.equals(sp.getString("npu_ctx", ""))) { NpuAsr.deleteCtx(ctx); sp.edit().remove("npu_ctx").remove("npu_ok").apply(); }
+    if (ctx.exists()) return;
+    android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+    ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mi);
+    final long eb = engineBytes();
+    if (mi.availMem - eb >= npuFree) return;                       // уместится и после моделей
+    if (mi.availMem < npuFree) {
+      log("⚡ NPU: для первой сборки графа нужно " + (npuFree / 1_000_000) + " МБ свободной памяти, сейчас " + (mi.availMem >> 20)
+          + " МБ — и это до загрузки моделей; распознаёт процессор, соберу при следующем запуске");
+      return;
+    }
+    if (tries == 1) log("⚡ NPU: прошлый подъём графа оборвался вместе с приложением — пробую ещё раз");
+    log("⚡ NPU: первый запуск этой версии — собираю граф до загрузки моделей: после них он не уместится (свободно "
+        + (mi.availMem >> 20) + " МБ, моделям нужно ≈ " + (eb >> 20) + " МБ, сборке — " + (npuFree / 1_000_000) + ")");
+    String wait = L.t("Первый запуск этой версии: готовлю распознавание на NPU — до двух минут, один раз");
+    status(wait); notify(wait);
+    busy("load", Screen.NPU_STAGE, 0, 1);
+    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();   // commit: запись до возможного падения телефона
+    long t0 = System.nanoTime();
+    NpuClient c = null;
+    try {
+      c = NpuClient.connect(this, 30_000, this::npuEnded);
+      c.guard(NPU_GUARD_FREE, NPU_BUILD_MAX_MS);
+      java.util.Map<String, String> opts = chip == Npu.Chip.MEDIATEK ? Npu.neuronOptions(lib) : Npu.qnnOptions(lib);
+      long ms = c.start(chip == Npu.Chip.MEDIATEK ? "neuron" : "qnn", new File(modelsDir, "asr_multi"), new File(modelsDir, "npu"),
+          new File(Npu.model(chip)).getName(), ctx, lib, opts);
+      long all = (System.nanoTime() - t0) / 1_000_000;
+      if (!ctx.exists()) { c.report("граф собран, но не сохранился (" + ctx.getName() + ") — после загрузки моделей его не собрать", false); return; }
+      sp.edit().remove("npu_try").remove("npu_mem").putString("npu_ctx", id).putLong("npu_build_ms", all).apply();
+      log("⚡ NPU: граф собран за " + all + " мс (" + c.how + ", сборка " + ms + " мс, свободно не меньше "
+          + (c.minFree == Long.MAX_VALUE ? "?" : (c.minFree >> 20) + " МБ") + ") — процесс сборки закрываю, загружаю модели; NPU поднимется из сохранённого графа");
+    } catch (NpuClient.Remote x) {
+      if (c != null) c.report(x.getMessage(), false); else npuFailed(id, "start", x.getMessage());
+    } catch (Throwable x) {
+      if (c == null) npuFailed(id, "start", NpuWire.why(x));       // процесс NPU не поднялся вовсе
+      else if (!c.closed()) {                                       // закрыт — уже сообщено: смерть или сторож
+        if (x instanceof android.os.DeadObjectException) { NpuClient.Exit ex = c.exit(); c.report(ex.why, ex.memory); }
+        else c.report(NpuWire.why(x), false);
+      }
+    } finally {
+      if (c != null) c.close();
+      busy("load", null, 0, 0);
+    }
+  }
+
+  /** Поднять NPU в его процессе: связь, сторож, граф, пробный прогон; потом — сверка (не проверен) или сразу в работу. */
+  void npuUp(Engine e, Npu.Chip chip, File lib, File ctx, String id, boolean checked) {
+    long t0 = System.nanoTime();
+    NpuClient c = null;
+    try {
+      c = NpuClient.connect(this, 30_000, this::npuEnded);
+      c.guard(NPU_GUARD_FREE, NPU_BUILD_MAX_MS);
+      java.util.Map<String, String> opts = chip == Npu.Chip.MEDIATEK ? Npu.neuronOptions(lib) : Npu.qnnOptions(lib);
+      long ms = c.start(chip == Npu.Chip.MEDIATEK ? "neuron" : "qnn", new File(modelsDir, "asr_multi"), new File(modelsDir, "npu"),
+          new File(Npu.model(chip)).getName(), ctx, lib, opts);
+      long probe = c.probe();
+      if (probe > NPU_PROBE_MAX_MS) {
+        c.report("пробный прогон " + probe + " мс — граф не на NPU (" + opts.getOrDefault("htp_arch", chip == Npu.Chip.MEDIATEK ? "NeuroPilot" : "поколение HTP не задано") + ")", false);
+        return;
+      }
+      getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_try").remove("npu_mem").putString("npu_ctx", id).apply();
+      String took = (System.nanoTime() - t0) / 1_000_000 + " мс (" + c.how + ", граф " + ms + " мс, пробный прогон " + probe + " мс, свободно не меньше "
+          + (c.minFree == Long.MAX_VALUE ? "?" : (c.minFree >> 20) + " МБ") + ")";
+      if (checked) {
+        c.stage = "run"; e.npu = c; e.npuState = c.how;
+        log("⚡ NPU готов за " + took + "; на этой версии уже проверен");
+      } else {
+        c.stage = "check"; npuCheck = new NpuCheck(); e.npuShadow = c; e.npuState = L.k("проверяется");
+        log("⚡ NPU поднят за " + took + " — первые фразы распознаю и процессором, и NPU и сверяю");
+      }
+    } catch (NpuClient.Remote x) {
+      if (c != null) c.report(x.getMessage(), false); else npuFailed(id, "start", x.getMessage());
+    } catch (Throwable x) {
+      if (c == null) { npuFailed(id, "start", NpuWire.why(x)); return; }   // процесс NPU не поднялся вовсе
+      if (c.closed()) return;                                               // уже сообщено: смерть или сторож
+      if (x instanceof android.os.DeadObjectException) { NpuClient.Exit ex = c.exit(); c.report(ex.why, ex.memory); }
+      else c.report(NpuWire.why(x), false);
+    }
+  }
+
+  /** Конец работы NPU (NpuClient.Listener): кто бы ни сообщил — фразы дальше распознаёт процессор. */
+  void npuEnded(NpuClient c, String stage, String why, boolean memory) {
+    Engine e = eng;
+    if (e != null) { if (e.npu == c) e.npu = null; if (e.npuShadow == c) { e.npuShadow = null; npuCheck = null; } }
+    final SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
+    final String id = npuId();
+    if (memory) {
+      if ("start".equals(stage)) {                       // граф не уместился: могла быть неудачная минута — ещё раз
+        String m = sp.getString("npu_mem", "");
+        int n = m.startsWith(id + "|") ? Integer.parseInt(m.substring(id.length() + 1)) + 1 : 1;
+        if (n >= 2) { sp.edit().remove("npu_mem").apply(); npuFailed(id, stage, why + " — второй раз на этой версии"); return; }
+        sp.edit().remove("npu_try").putString("npu_mem", id + "|" + n).apply();
+        if (e != null) e.npuState = L.k("остановлен: мало памяти");
+        log("⚡ NPU: граф не уместился — " + why + ". Распознаёт процессор; попробую при следующем запуске (второй раз — отказ до новой версии)");
+        teleNpu(stage, why);
+        return;
+      }
+      sp.edit().remove("npu_try").apply();               // посреди работы освобождали память — NPU не виноват
+      if (e != null) e.npuState = L.k("остановлен: мало памяти");
+      log("⚡ NPU остановлен: " + why + " — дальше распознаёт процессор; снова попробую при следующем запуске");
+      teleNpu(stage, why);
+      return;
+    }
+    npuFailed(id, stage, why);
+  }
+
+  /** Отказ NPU на этой версии и прошивке: запомнить с причиной, сказать в журнал и, по согласию, разработчику. */
+  void npuFailed(String id, String stage, String why) {
+    Engine e = eng;
+    try {
+      getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_try").putString("npu_fail", new JSONObject().put("id", id)
+          .put("stage", stage).put("why", why).put("at", System.currentTimeMillis()).toString()).apply();
+    } catch (JSONException ignore) { }
+    if (e != null) e.npuState = L.k("не справляется с моделью");
+    log("⚡ NPU отказал — " + npuStage(stage) + ": " + why + ". Распознаёт процессор; снова попробую в следующей версии Falar или после обновления прошивки");
+    teleNpu(stage, why);
+  }
+
+  static String npuStage(String s) {
+    switch (s) {
+      case "start": return "подъём графа";
+      case "probe": return "пробный прогон";
+      case "check": return "сверка с процессором";
+      case "run": return "распознавание фразы";
+      default: return s;
+    }
+  }
+
+  /** Причина — разработчику со статистикой (по согласию): записью сбоя вида «npu»; текстов разговора в ней нет —
+   *  только стадия и текст ошибки ORT, сигнал и кадры падения, память. Телефон и чип — в пакете (teleDevice). */
+  void teleNpu(String stage, String why) {
+    if (!Telemetry.collect || standNow()) return;
+    try {
+      File d = teleDir(); d.mkdirs();
+      long now = System.currentTimeMillis();
+      JSONObject o = new JSONObject().put("at", now / 1000).put("kind", "npu").put("what", Telemetry.cut(why, 300)).put("where", stage)
+          .put("v", myName()).put("state", Telemetry.onScreen ? Telemetry.SCREEN : Telemetry.BACKGROUND);
+      try (java.io.OutputStream out = new java.io.FileOutputStream(new File(d, "crash-" + now + ".json"))) { out.write(o.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+    } catch (Throwable ignore) { }
+  }
+
+  /** Расход заряда за слушание для статистики (Telemetry.Energy; владелец 10.11: «NPU эффективнее — собирать, сколько
+   *  мы расходуем заряда активно»): раз в минуту, пока служба жива, и при смене состояния — счётчик заряда
+   *  (BatteryManager, мкА·ч), на батарее ли, где распознаётся: NPU, процессор или не в счёте (не слушает, стенд, сверка
+   *  NPU — работают оба). Нагрев — температура батареи и уровень PowerManager. Только с согласием на статистику. */
+  final Telemetry.Energy energy = new Telemetry.Energy();
+  final Runnable energyEvery = new Runnable() {
+    @Override public void run() { energyTick(); if (running) main.postDelayed(this, 60_000L); }
+  };
+  void energyTick() {
+    if (!Telemetry.collect) return;
+    try {
+      BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
+      long uah = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
+      boolean onBattery = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS) == BatteryManager.BATTERY_STATUS_DISCHARGING;
+      Engine e = eng;
+      int where = !capturing || e == null || standNow() || e.npuShadow != null ? Telemetry.Energy.NONE
+          : e.npuServing() ? Telemetry.Energy.NPU : Telemetry.Energy.CPU;
+      energy.sample(tele, System.currentTimeMillis(), uah, onBattery, where);
+      if (where != Telemetry.Energy.NONE) {
+        Intent b = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        int t10 = b == null ? Integer.MIN_VALUE : b.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+        int th = Build.VERSION.SDK_INT >= 29 ? ((PowerManager) getSystemService(POWER_SERVICE)).getCurrentThermalStatus() : -1;
+        tele.heat(t10, th);
+      }
+    } catch (Throwable ignore) { }
+  }
+
+  /** Отказ NPU случился без согласия на статистику, а согласие дали потом — в окне «NPU не заработал»
+   *  (MainActivity.maybeAskNpuData): записать его причину сейчас, ради неё и просили (teleNpu при отказе её не писал). */
+  void teleNpuLast() {
+    try {
+      JSONObject o = new JSONObject(getSharedPreferences("at", MODE_PRIVATE).getString("npu_fail", ""));
+      if (npuId().equals(o.optString("id"))) teleNpu(o.optString("stage"), o.optString("why"));
+    } catch (JSONException ignore) { }
+  }
+
+  /** Причина отказа NPU на этой версии и прошивке (npu_fail), или null — не отказывал. Запись прежнего вида — сам id. */
+  static String npuFailWhy(SharedPreferences sp, String id) {
+    String r = sp.getString("npu_fail", "");
+    if (r.isEmpty()) return null;
+    if (r.equals(id)) return "причина не записана";
+    try { JSONObject o = new JSONObject(r); return id.equals(o.optString("id")) ? npuStage(o.optString("stage")) + ": " + o.optString("why") : null; }
+    catch (JSONException e) { return null; }
+  }
+
+  /** Сверка фразы, пока NPU не проверен: NPU распознаёт её в фоне (процессор уже распознал), тексты — в NpuCheck. */
+  void npuShadowRun(final NpuClient c, final float[] fed, final String cpu) {
+    final NpuCheck k = npuCheck;
+    if (k == null || c.closed()) return;
+    npuCheckIo.submit(() -> {
+      Engine e = eng;
+      if (c.closed() || e == null || e.npuShadow != c) return;
+      NpuAsr.Result r;
+      try { r = c.run(fed); }
+      catch (NpuClient.Remote x) { c.report("сверка: " + x.getMessage(), false); return; }
+      catch (android.os.DeadObjectException x) { return; }               // процесс умер — причину сообщит его смерть
+      catch (Throwable x) { c.report("сверка: " + NpuWire.why(x), false); return; }
+      NpuCheck.Verdict v = k.add(cpu, r == null ? null : r.text);
+      if (v == NpuCheck.Verdict.OK) {
+        if (e.npuShadow != c) return;
+        c.stage = "run"; e.npu = c; e.npuShadow = null; npuCheck = null; e.npuState = c.how;
+        getSharedPreferences("at", MODE_PRIVATE).edit().putString("npu_ok", npuId()).apply();
+        log("⚡ NPU проверен: " + k.summary() + " — дальше фразы распознаёт он");
+        energyTick();
+      } else if (v == NpuCheck.Verdict.FAIL) {
+        c.report("результат не совпал с процессором: " + k.summary(), false);
+      }
+    });
   }
   /** Прошивка и версия Falar: NPU, отказавший на них (npu_fail), до обновления одного или другого не пробуется. */
   String npuId() { return android.os.Build.FINGERPRINT + "/" + myCode(); }
@@ -518,7 +803,7 @@ public class TranslatorService extends Service {
   boolean npuWanted() {
     if (store == null || store.bytes(Modules.NPU) == 0) return false;
     SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE);
-    return sp.getBoolean(Npu.PREF, true) && !npuId().equals(sp.getString("npu_fail", ""));
+    return sp.getBoolean(Npu.PREF, true) && npuFailWhy(sp, npuId()) == null;
   }
   /** Модули для хранилища: выбранные человеком и модели NPU, если нужны (npuWanted). */
   Set<String> storeModules() {
@@ -528,7 +813,11 @@ public class TranslatorService extends Service {
   }
   /** Переключатель «Распознавание на NPU». */
   public void setNpu(boolean on) {
-    getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean(Npu.PREF, on).apply();
+    SharedPreferences np = getSharedPreferences("at", MODE_PRIVATE);
+    SharedPreferences.Editor ned = np.edit().putBoolean(Npu.PREF, on);
+    // включили сами — пробовать снова и после отказа: падение NPU приложению теперь не страшно (свой процесс)
+    if (on && npuFailWhy(np, npuId()) != null) { ned.remove("npu_fail").remove("npu_try"); log("⚡ NPU включён вручную — пробую снова на этой версии"); }
+    ned.apply();
     if (store != null) {                               // модели NPU: включили — докачать (раз за включение), выключили — не качать
       store.modules = storeModules();
       if (on) autoFetchTried = false;
@@ -536,7 +825,13 @@ public class TranslatorService extends Service {
     }
     Engine e = eng; if (e == null) return;
     e.npuOn = on; log("⚡ NPU " + (on ? "включён" : "выключен") + (e.npu == null ? "" : " · фраз на NPU " + e.npuCalls));
-    if (on && e.npu == null && !"готовится".equals(e.npuState)) startNpu();
+    if (!on) {                                         // выключили — процесс NPU закрыть: его память (граф, веса) — сразу
+      NpuClient c = e.npu != null ? e.npu : e.npuShadow;
+      e.npu = null; e.npuShadow = null; npuCheck = null;
+      if (c != null) { c.close(); e.npuState = L.k("выключено"); }
+    }
+    if (on && e.npu == null && e.npuShadow == null && !"готовится".equals(e.npuState)) startNpu();
+    energyTick();
   }
   /** Озвучка — после остального и после сказанного: фразы в очереди перевода (они встают за этой задачей —
    *  она уходит в конец очереди за ними), фраза, которую ещё говорят, и не нарезанный звук идут вперёд. Иначе
@@ -551,7 +846,11 @@ public class TranslatorService extends Service {
     }
     if (System.currentTimeMillis() - since > 100) tsv("early", "tts_after", "" + (System.currentTimeMillis() - since));
     try {
-      if (mod(Modules.TTS)) { busy("load", L.k("озвучка"), nStages - 1, nStages); eng.loadTts(); }
+      if (mod(Modules.TTS)) {
+        busy("load", L.k("озвучка"), nStages - 1, nStages); eng.loadTts(); voiceTag();
+        for (String lg : SysTts.LANGS) if (!eng.hasVoice(lg)) noVoice(lg);      // скажем сразу, а не на первой реплике
+        Listener l0 = listener; if (l0 != null) main.post(l0::onModules);
+      }
       else log("TTS не загружается: модуль «Озвучка» выключен");
     } catch (Throwable t) { Log.e(TAG, "tts", t); log("TTS: " + t); }
     finally { ttsLoading = false; }
@@ -663,8 +962,13 @@ public class TranslatorService extends Service {
     long t0 = System.nanoTime(); Engine.Asr ar; long npuBefore = en.npuCalls;
     synchronized (asrLock) { ar = en.asrFull(dir.substring(0, 2), fed, sr); }   // sherpa ресемплирует сам
     long ms = (System.nanoTime() - t0) / 1000000;
-    if (en.npuCalls > npuBefore && (++npuPhrases <= 3 || npuPhrases % 20 == 0))
+    boolean onNpu = en.npuCalls > npuBefore;
+    if (onNpu && (++npuPhrases <= 3 || npuPhrases % 20 == 0))
       log(String.format(Locale.ROOT, "⚡ фраза на NPU: %.1f с речи за %d мс (%d-я)", samples.length / (double) sr, ms, npuPhrases));
+    if (Telemetry.collect && !standNow()) tele.asr(onNpu, ms);
+    NpuClient shadow = en.npuShadow;                   // NPU не проверен на этой версии: та же фраза — ему, в фоне
+    if (shadow != null && !onNpu && sr == 16000 && en.asrMulti != null && !(en.denoiseOn && en.denoiser != null))
+      npuShadowRun(shadow, fed.clone(), ar.text);
     if (!probsTold && ar.tokens != null && ar.tokens.length > 0) {   // с прежней библиотекой JNI пометок нет — видно по журналу
       probsTold = true;
       log(ar.probs != null ? "🔎 распознаватель отдаёт уверенность в словах — сомнительные помечаются"
@@ -834,6 +1138,22 @@ public class TranslatorService extends Service {
       worker.submit(() -> processText("pt2ru", unshout(t), true, false, 0, 0, "asr"));
     }
     if (i != null && i.hasExtra("voicewhat")) setVoiceWhat(VoiceOut.parse(i.getStringExtra("voicewhat")));
+    // Стенд голосов (test_voice_device.sh): --es ttsvoice ru:имя — тот же выбор, что в «Голосах»; --es ttsvoice show — что стоит
+    if (i != null && i.hasExtra("ttsvoice")) {
+      String v = i.getStringExtra("ttsvoice"); SysTts st = sysTts();
+      if ("show".equals(v)) log("🔊 голоса: " + (st == null ? "синтеза нет" : st.describe()));
+      else if (v.contains(":")) setTtsVoice(v.substring(0, v.indexOf(':')), v.substring(v.indexOf(':') + 1));
+    }
+    // Скорость речи (test_voice_device.sh, возврат стенда): --es ttsspeed ru:1.5 или ru:1.0,pt:1.2 — тот же путь, что
+    // ползунки «Скорость речи»; --es ttsspeed show — что стоит
+    if (i != null && i.hasExtra("ttsspeed")) {
+      String v = i.getStringExtra("ttsspeed");
+      if ("show".equals(v)) log("🔊 скорость: ru " + TtsVoices.speedLabel(ttsSpeed("ru")) + " · pt " + TtsVoices.speedLabel(ttsSpeed("pt")));
+      else for (String p : v.split(",")) {
+        int k = p.indexOf(':'); if (k <= 0) continue;
+        try { setTtsSpeed(p.substring(0, k).trim(), Float.parseFloat(p.substring(k + 1).trim().replace(',', '.'))); } catch (NumberFormatException ignore) {}
+      }
+    }
     if (i != null && i.hasExtra("hold")) {
       holdMs = Math.max(0, Math.min(6000, Integer.parseInt(i.getStringExtra("hold"))));
       getSharedPreferences("at", MODE_PRIVATE).edit().putInt("hold", holdMs).apply();
@@ -1138,14 +1458,19 @@ public class TranslatorService extends Service {
     // (когда начали играть, метки времени записи и дорожки) — разбор на столе (tools/aec_eval.py,
     // tools/barge_eval.py). Слушание на время стенда выключается.
     // Стенд NPU: --es npu 1|0 — переключатель «Распознавание на NPU» (та же фраза на NPU и на процессоре);
-    // --es npufree МБ — порог свободной памяти для первой сборки графа (по умолчанию 2000).
+    // --es npufree МБ — порог свободной памяти для первой сборки графа (по умолчанию 4000, у MediaTek 3000).
     if (i != null && i.hasExtra("npufree")) { npuFree = Long.parseLong(i.getStringExtra("npufree")) * 1_000_000L; log("⚡ стенд: порог памяти для сборки графа NPU — " + i.getStringExtra("npufree") + " МБ"); }
-    // --es npuany 1 — пробовать NPU и на непроверенном чипе MediaTek (Npu.MTK_OK); может уронить приложение
-    if (i != null && i.hasExtra("npuany")) { Npu.MTK_ANY = "1".equals(i.getStringExtra("npuany")); log("⚡ стенд: NPU на любом MediaTek — " + Npu.MTK_ANY); }
-    // --es npureset 1 — забыть «не справляется» и оборванные сборки графа (npu_fail, npu_try), попробовать снова
-    if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").apply(); log("⚡ стенд: NPU — пробовать снова"); }
+    // --es npureset 1 — как новая версия: забыть отказ, оборванный подъём, проверку и сохранённый граф (npu_fail,
+    // npu_try, npu_ok, npu_ctx) — граф соберётся заново, первые фразы сверятся с процессором
+    if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").remove("npu_ok").remove("npu_ctx").remove("npu_mem").apply(); log("⚡ стенд: NPU — как на новой версии"); }
     if (i != null && i.hasExtra("npu")) setNpu("1".equals(i.getStringExtra("npu")));
     if (i != null && i.hasExtra("bargedump")) { bargeDump = Integer.parseInt(i.getStringExtra("bargedump")); log("🗣 стенд: запишу совмещение на концах " + bargeDump + " фраз"); }
+    // Стенд озвучки (TtsBench, владелец 10.11 — замена Piper с eSpeak под GPL): --es ttsbench ФАЙЛ_ФРАЗ (в каталоге
+    // приложения) [--es ttsengines piper,system]; итог — tts_bench/ (bench/tts/tts_bench_device.sh, tts_wer.py).
+    if (i != null && i.hasExtra("ttsbench")) { final File f = new File(getExternalFilesDir(null), i.getStringExtra("ttsbench"));
+      final String en = i.hasExtra("ttsengines") ? i.getStringExtra("ttsengines") : "piper,system";
+      final float rate = i.hasExtra("ttsrate") ? Float.parseFloat(i.getStringExtra("ttsrate")) : 1f;
+      new Thread(() -> { try { TtsBench.run(this, eng, f, en, rate, this::log); } catch (Throwable t) { log("🔊 стенд озвучки: ошибка — " + t); } }, "ttsbench").start(); }
     if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
       new Thread(() -> { try { aecStand(cfgs); } catch (Throwable t) { log("🔁 эхо-стенд: ошибка — " + t); } }, "aec").start(); }
     // Стенд: микрофоны (--es mictest mic_st_48,vr_mo_16_bottom,…) — какие микрофоны отдаёт Android и как на два канала
@@ -1164,7 +1489,7 @@ public class TranslatorService extends Service {
             String txt = "ru".equals(lang) ? "Русский. Это должно звучать в наушнике."
                                            : "Português. Isto deve sair no alto-falante.";
             log("🔉 " + lang + " → " + ("pt".equals(lang) ? "динамик" : "наушник"));
-            GeneratedAudio ga = eng.speak(lang, txt, chunk -> { writeOut(chunk, chunk.length, lang); return 1; });
+            SysTts.Audio ga = eng.speak(lang, txt, chunk -> { writeOut(chunk, chunk.length, lang); return 1; });
             Thread.sleep((long) (ga.getSamples().length * 1000.0 / rate) + 1500);
           }
         }
@@ -1200,7 +1525,7 @@ public class TranslatorService extends Service {
         for (String[] x : say) {
           int rate = eng.ttsSampleRate(x[0]); ensureTrack(rate);
           log("👂 " + x[0] + " → " + ("off".equals(split) ? "оба уха" : ("pt".equals(x[0]) == "pt-left".equals(split) ? "левое" : "правое")));
-          GeneratedAudio ga = eng.speak(x[0], x[1], chunk -> { writeOut(chunk, chunk.length, x[0]); return 1; });
+          SysTts.Audio ga = eng.speak(x[0], x[1], chunk -> { writeOut(chunk, chunk.length, x[0]); return 1; });
           Thread.sleep((long) (ga.getSamples().length * 1000.0 / rate) + 1200);
         }
         log("👂 проверка закончена");
@@ -1220,7 +1545,7 @@ public class TranslatorService extends Service {
         Thread.sleep(1200); double before = probeRms(1000);
         final long[] frames = {0}; final long[] firstWrite = {0};
         long t0 = System.nanoTime();
-        GeneratedAudio ga = eng.speak("ru", phrase, chunk -> {
+        SysTts.Audio ga = eng.speak("ru", phrase, chunk -> {
           if (firstWrite[0] == 0) firstWrite[0] = System.nanoTime();
           track.write(chunk, 0, chunk.length, AudioTrack.WRITE_BLOCKING);
           frames[0] += chunk.length;
@@ -1331,7 +1656,9 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("settings")) { android.content.SharedPreferences p = getSharedPreferences("at", MODE_PRIVATE);
       log("🧪 настройки: разбор " + p.getInt("refine_every", 3) + " · облако " + p.getInt("cloud_every", 0) + " · чтение вслух " + p.getInt("read_guard", 1)
           + " · слушаю " + (p.getBoolean("lpt", false) ? "pt" : "") + (p.getBoolean("lru", false) ? "ru" : "") + " · облако точнее " + (p.getBoolean("cloud_quality", true) ? 1 : 0) + " · перевод точнее " + (p.getBoolean("mt_quality", true) ? 1 : 0)
-          + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))] + " · два микрофона " + p.getString("dualmic", "auto")); }
+          + " · озвучка " + VoiceOut.KEYS[Math.max(0, Math.min(3, p.getInt("voicewhat", VoiceOut.AUTO)))] + " · два микрофона " + p.getString("dualmic", "auto")
+          + String.format(Locale.ROOT, " · скорость ru %.1f pt %.1f", TtsVoices.speed(p.getFloat("tts_speed_ru", 1f)), TtsVoices.speed(p.getFloat("tts_speed_pt", 1f)))
+          + " · до озвучки " + RefineVoice.parse(p.getString("refine_voice", RefineVoice.PT))); }
     if (i != null && i.hasExtra("refineevery")) setRefineEvery(Integer.parseInt(i.getStringExtra("refineevery")));
     if (i != null && i.hasExtra("cloudevery")) setCloudEvery(Integer.parseInt(i.getStringExtra("cloudevery")));
     if (i != null && i.hasExtra("consent")) { getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("cloud_consent", "1".equals(i.getStringExtra("consent"))).apply(); log("☁ согласие на отправку разговора: " + cloudConsent()); }
@@ -1344,6 +1671,7 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("cloudprefer")) setCloudQuality("quality".equals(i.getStringExtra("cloudprefer")));
     // Стенд: «Перевод: быстрее / точнее» без экрана — «--es mtprefer quality|speed».
     if (i != null && i.hasExtra("mtprefer")) setMtQuality(!"speed".equals(i.getStringExtra("mtprefer")));
+    if (i != null && i.hasExtra("refinevoice")) setRefineVoice(i.getStringExtra("refinevoice"));
     if (i != null && i.hasExtra("cloudroute") && cloud != null && cloud.ready) {
       boolean was = cloud.preferQuality;
       for (boolean q : new boolean[]{false, true}) {
@@ -1496,8 +1824,8 @@ public class TranslatorService extends Service {
     getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("vad", on).apply();   // START_STICKY поднимает сервис с vadMode=false
     vadReset = true;                                    // сделает поток нарезки перед следующим кадром
     if (on) listenLiveReset = true;
-    if (on && !capturing) { capturing = true; startCapture(); }
-    else if (!on) capturing = false;                       // поток сам выйдет и отпустит микрофон
+    if (on && !capturing) { capturing = true; startCapture(); energyTick(); }
+    else if (!on) { energyTick(); capturing = false; }    // поток сам выйдет и отпустит микрофон
     notify(L.t(on ? "Слушаю…" : "Микрофон выключен")); }
   /** Последняя секунда слушания (кадры до усиления) — подпор удержания: модели нужен настоящий звук комнаты перед
    *  фразой, а удержание начиналось с нажатия, без него (results/2026-10-08-asr-review.md: на корпусе без подпора
@@ -1787,6 +2115,83 @@ public class TranslatorService extends Service {
   public boolean cloudReady() { return mod(Modules.CLOUD) && cloud != null && cloud.ready; }
   /** Голос есть: модуль «Озвучка» включён и голоса подняты. */
   public boolean voice() { Engine e = eng; return mod(Modules.TTS) && e != null && e.hasTts(); }
+  /** Удалить файл или каталог целиком; сколько байт освободилось. */
+  static long rmTree(File f) {
+    if (!f.exists()) return 0;
+    long n = 0; File[] k = f.isDirectory() ? f.listFiles() : null;
+    if (k != null) for (File c : k) n += rmTree(c);
+    else n += f.length();
+    f.delete();
+    return n;
+  }
+  /** Голоса озвучки, выбранные человеком («Настройки» → «Голоса»): имя голоса синтеза телефона по языку. */
+  java.util.Map<String, String> chosenVoices() {
+    SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE); java.util.Map<String, String> m = new java.util.HashMap<>();
+    for (String l : SysTts.LANGS) { String v = sp.getString("tts_voice_" + l, null); if (v != null) m.put(l, v); }
+    return m;
+  }
+  /** Скорость речи по языку, заданная человеком («Настройки» → «Скорость речи»). */
+  java.util.Map<String, Float> chosenSpeeds() {
+    SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE); java.util.Map<String, Float> m = new java.util.HashMap<>();
+    for (String l : SysTts.LANGS) if (sp.contains("tts_speed_" + l)) m.put(l, TtsVoices.speed(sp.getFloat("tts_speed_" + l, 1f)));
+    return m;
+  }
+  /** Скорость речи языка: у поднятого синтеза — та, с которой он говорит; до загрузки — из настроек. */
+  public float ttsSpeed(String lang) {
+    SysTts s = sysTts();
+    return s != null ? s.speed(lang) : TtsVoices.speed(getSharedPreferences("at", MODE_PRIVATE).getFloat("tts_speed_" + lang, 1f));
+  }
+  /** Номер последней смены скорости: пробную фразу говорит только последняя — ползунок двигали несколько раз подряд. */
+  final java.util.concurrent.atomic.AtomicInteger speedSeq = new java.util.concurrent.atomic.AtomicInteger();
+  /** Сменить скорость речи языка («Скорость речи», 0,5–2×) и произнести пробную фразу с ней. Действует с ближайшей
+   *  фразы; озвученное раньше из кэша фраз (Phrasebook) сбрасывается — оно звучало бы с прежней скоростью. */
+  public void setTtsSpeed(String lang, float x) {
+    final float v = TtsVoices.speed(x);
+    getSharedPreferences("at", MODE_PRIVATE).edit().putFloat("tts_speed_" + lang, v).apply();
+    SysTts s0 = sysTts(); if (s0 != null) s0.setSpeed(lang, v);
+    final int my = speedSeq.incrementAndGet();
+    worker.submit(() -> {
+      if (my != speedSeq.get()) return;                  // ползунок двинули ещё раз — пробную фразу скажет последняя смена
+      SysTts s = sysTts();
+      if (s == null) { log("🔊 скорость " + lang + ": " + TtsVoices.speedLabel(v) + " — с загрузкой синтеза"); return; }
+      s.setSpeed(lang, v); voiceTag();
+      double sec = 0;
+      try { sec = speakOut(lang, sample(lang)); } catch (Throwable t) { log("🔊 " + t); }
+      log(String.format(Locale.ROOT, "🔊 скорость %s: %s (синтезу %d %%) · пробная фраза %.2f с звука", lang, TtsVoices.speedLabel(v),
+          (int) (TtsVoices.engineRate(s.engine, v) * 100), sec));
+      Listener l = listener; if (l != null) main.post(l::onModules);
+    });
+  }
+  /** Пробная фраза голоса и скорости — её произносит выбранный голос или новая скорость. */
+  static String sample(String lang) { return "ru".equals(lang) ? "Здравствуйте! Так звучит перевод." : "Olá! É assim que soa a tradução."; }
+  /** Синтез телефона, если поднят. */
+  public SysTts sysTts() { Engine e = eng; return e == null ? null : e.sys; }
+  /** Сменить голос языка и произнести им пробную фразу (выбор в «Голосах»). */
+  public void setTtsVoice(String lang, String name) {
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString("tts_voice_" + lang, name).apply();
+    worker.submit(() -> {
+      SysTts s = sysTts(); if (s == null) return;
+      synchronized (tts) { s.setVoice(lang, name); }
+      voiceTag(); log("🔊 голос " + lang + ": " + s.voiceName(lang));
+      try { speakOut(lang, sample(lang)); } catch (Throwable t) { log("🔊 " + t); }
+      Listener l = listener; if (l != null) main.post(l::onModules);
+    });
+  }
+  /** Голоса языка нет на телефоне: перевод на экране, подсказка — раз за запуск на язык. */
+  final java.util.Set<String> noVoiceSaid = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  void noVoice(String lang) {
+    if (!noVoiceSaid.add(lang)) return;
+    SysTts s = sysTts();
+    String why = s == null ? L.t("синтез речи телефона не поднялся") : s.missing.getOrDefault(lang, "");
+    hint(L.f("🔇 нет голоса для языка %s (%s) — «Настройки» → «Голоса»", "ru".equals(lang) ? L.t("русский") : L.t("португальский"), L.t(why)));
+    log("🔇 голоса " + lang + " нет: " + why + " — перевод только на экране");
+  }
+  /** Кэш озвученных фраз — под нынешние голоса: звук прежнего голоса (или Piper до 0.38) из кэша не играет. */
+  void voiceTag() {
+    SysTts s = sysTts(); Phrasebook p = pb;
+    if (p != null && s != null) p.audioVoice(s.engine + "|" + s.voiceName("ru") + "|" + s.voiceName("pt")
+        + String.format(Locale.ROOT, "|%.1f|%.1f", s.speed("ru"), s.speed("pt")));
+  }
   /** Голоса ещё грузятся (loadTtsLate): перевод не ждёт их, а встаёт в очередь озвучки. */
   boolean ttsSoon() { return ttsLoading && mod(Modules.TTS) && eng != null; }
   long totalRam() {
@@ -1848,7 +2253,7 @@ public class TranslatorService extends Service {
   void activate(String m) {
     if (eng == null) return;
     switch (m) {
-      case Modules.TTS: if (!eng.hasTts() && eng.loadTts()) log("🔊 озвучка подключена"); break;
+      case Modules.TTS: if (!eng.hasTts() && eng.loadTts()) { voiceTag(); log("🔊 озвучка подключена"); } break;
       case Modules.SPEAKER: if (spk == null || !spk.ready) { spk = new Speaker(modelsDir, true); if (spk.ready) log("🎤 отпечаток голоса подключён · голосов в разговоре: " + (chats == null ? 0 : chats.voices.size())); } break;
       case Modules.CORPUS: if (pb != null && pb.minedCount == 0 && new File(modelsDir, "phrasebook_tatoeba.tsv").exists()) pb.loadMined(new File(modelsDir, "phrasebook_tatoeba.tsv")); break;
       case Modules.DENOISE: log(vadDnLine()); break;
@@ -1923,9 +2328,11 @@ public class TranslatorService extends Service {
   /** Порог в работе. Меняется только стендом (--es llmneed <МБ>) и живёт до перезапуска: чтобы
    *  проверить разбор на телефоне, где ядро и уточнитель вместе не помещаются. */
   volatile long llmNeed = LLM_NEED;
-  final Runnable llmIdleUnload = () -> { if (!refineRunning) unloadLlm("простой " + LLM_IDLE_MS / 1000 + " с"); };
+  final Runnable llmIdleUnload = () -> { if (!refineRunning && liveBusy.get() == 0) unloadLlm("простой " + LLM_IDLE_MS / 1000 + " с"); };
   void unloadLlm(String why) {
     main.removeCallbacks(llmIdleUnload);
+    resumeLlm(true);                                   // на паузе сервер не услышал бы и просьбу завершиться
+    liveLoadSaid = false;
     Llm l = llm; llm = null;
     if (l != null) { llmWorker.submit(l::stop); log("🧠 уточнитель выгружен: " + why); tsv("llm_unload", why); }
   }
@@ -2205,6 +2612,121 @@ public class TranslatorService extends Service {
     return n + ". " + sl + (who == null || who.isEmpty() ? "" : " (" + who + ")") + ": " + src + "\n   " + tl + " draft: " + draft + "\n";
   }
   static int indexOf(Turn[] h, Turn t) { for (int i = 0; i < h.length; i++) if (h[i] == t) return i; return -1; }
+  /** Вопрос уточнителю Hy-MT о реплике: подсказка (фон, термины) — один раз для прохода и для уточнения до озвучки. */
+  static final class Prep { Turn tn; Turn[] h; String tgt, terms, tp, bg, past; }
+  static final class Fix { String out, why; long ms; }
+  /** null — реплики нет в истории; bg == null — реплика длиннее окна уточнителя. */
+  Prep prep(Turn[] h, Turn tn, String memo) {
+    int idx = indexOf(h, tn); if (idx < 0) return null;
+    Prep p = new Prep(); p.tn = tn; p.h = h; p.tgt = tn.dir.substring(3);
+    p.terms = terms(tn.dir, tn.asr); p.past = lastPastTerms; p.tp = memo.isEmpty() ? "" : memo + "\n";
+    // Бюджет из окна модели: без него длинные реплики переполняли окно, сервер отказывал,
+    // и уточнитель замолкал навсегда. Старое — в памяти разговора, свежее — в пределах бюджета.
+    int budget = Brief.budget(llmCpt, tn.asr.length(), p.terms.length(), p.tp.length());
+    if (budget < 0) return p;
+    List<String> fresh = Brief.fit(backgroundLines(h, idx), Math.min(budget, Brief.FRESH_CHARS));
+    p.bg = p.tp + String.join("\n", fresh);
+    return p;
+  }
+  /** Ответ уточнителя на подготовленный вопрос: why — почему ответ отброшен (Brief.swallowed), иначе null. */
+  Fix ask(Prep p) throws Exception {
+    Llm l = llm; if (l == null) throw new java.io.IOException("уточнитель выгружен");
+    long t = System.nanoTime();
+    String out = l.chat(null, hyPrompt(p.bg, p.tn.asr, p.tgt, p.terms), 200).trim();
+    Fix f = new Fix(); f.ms = (System.nanoTime() - t) / 1000000;
+    if (p.tgt.equals("pt")) out = TextRules.toBrazilian(out);
+    f.out = out; f.why = Brief.swallowed(out, p.tn.asr, p.tn.refined != null ? p.tn.refined : p.tn.mt, seen(p.h, p.tn, p.tp));
+    return f;
+  }
+
+  /** Уточнение до озвучки (RefineVoice, владелец 10.11): при «Точнее» реплика выбранного языка — сразу уточнителю, с
+   *  тем же фоном, что у прохода разбора; голос ждёт ответ не дольше RefineVoice.CAP_MS (liveSay). Уточнитель не
+   *  поднят — поднимается, а реплика звучит переводом фразы. Ответ ложится в реплику (applyFix), как правка прохода,
+   *  когда реплика записана (markSaved): кто из двух придёт позже, тот и кладёт. */
+  boolean startLive(Turn tn) {
+    Llm l = llm;
+    if (l == null || !l.ready) {
+      if (!liveLoadSaid) { liveLoadSaid = true; log("🧠 до озвучки: уточнитель не поднят — эта реплика звучит переводом фразы, поднимаю его"); }
+      kickLlmLoad(); return false;
+    }
+    if (!l.model.toLowerCase().contains("hy-mt")) return false;   // инструктивная модель правит пачкой, не по реплике
+    final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+    tn.liveT0 = System.currentTimeMillis(); tn.live = done;
+    liveBusy.incrementAndGet(); main.removeCallbacks(llmIdleUnload);
+    liveExec.submit(() -> {
+      try {
+        Turn[] h; synchronized (history) { h = history.toArray(new Turn[0]); }
+        Prep pp = prep(h, tn, memoBlock(topicLine()));
+        if (pp == null || pp.bg == null) log("🔁 #" + tn.n + " до озвучки: " + (pp == null ? "реплики нет в истории" : "длиннее окна уточнителя") + " — звучит перевод фразы");
+        else {
+          Fix f = ask(pp);
+          if (f.why != null) log("🔁 #" + tn.n + " до озвучки: ответ отброшен (" + f.ms + " мс) — " + f.why + ": " + f.out);
+          else if (Phrasebook.norm(f.out).equals(Phrasebook.norm(tn.mt))) log("🔁 #" + tn.n + " до озвучки: контекст не изменил перевод (" + f.ms + " мс)");
+          else { tn.liveOut = f.out; log("🔁 #" + tn.n + " до озвучки (" + f.ms + " мс, фон " + pp.bg.length() + " зн.): " + f.out); }
+        }
+      } catch (Throwable e) { log("🔁 #" + tn.n + " до озвучки: уточнитель не ответил — " + e.getMessage()); }
+      finally {
+        done.countDown();
+        markLive(tn);
+        if (liveBusy.decrementAndGet() == 0 && !refineRunning && llm != null) { main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); }
+      }
+    });
+    return true;
+  }
+  /** Что произнести: ответ уточнителя, если он успел до предела (RefineVoice.left от готового перевода), иначе mt.
+   *  wait[0] — сколько голос ждал, мс (-1 — не ждал). */
+  String liveSay(Turn tn, String mt, long[] wait) {
+    java.util.concurrent.CountDownLatch d = tn == null ? null : tn.live;
+    if (d == null) { wait[0] = -1; return mt; }
+    long t = System.currentTimeMillis();
+    try { d.await(RefineVoice.left(tn.liveT0, t), java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    wait[0] = System.currentTimeMillis() - t;
+    String o = tn.liveOut;
+    return o != null ? o : mt;
+  }
+  /** Хвост строки реплики: что вышло с уточнением до озвучки. */
+  static String liveTag(Turn tn, long w) {
+    if (w < 0 || tn == null || tn.live == null) return "";
+    if (tn.liveOut != null) return " · уточнено до озвучки, голос ждал " + w + " мс";
+    return tn.live.getCount() > 0 ? " · уточнитель не успел за " + RefineVoice.CAP_MS / 1000 + " с — звучит перевод фразы (голос ждал " + w + " мс)" : " · уточнитель оставил перевод (голос ждал " + w + " мс)";
+  }
+  /** Реплика записана в разговор: ответ уточнителя, пришедший раньше, — в неё. */
+  void markSaved(Turn tn) { String o; synchronized (tn) { tn.saved = true; o = tn.liveOut; } if (o != null) applyFix(tn, o, Chats.BY_LLM); }
+  /** Ответ уточнителя пришёл: реплика уже записана — в неё, иначе его положит markSaved. */
+  void markLive(Turn tn) { String o; synchronized (tn) { o = tn.saved ? tn.liveOut : null; } if (o != null) applyFix(tn, o, Chats.BY_LLM); }
+  /** Поднять уточнитель заранее (для уточнения до озвучки) — на llmWorker, если он не занят проходом. */
+  void kickLlmLoad() {
+    if (llmLoading || refineRunning || !mod(Modules.LLM)) return;
+    llmLoading = true;
+    llmWorker.submit(() -> {
+      try { if (ensureLlm()) { liveLoadSaid = false; main.removeCallbacks(llmIdleUnload); main.postDelayed(llmIdleUnload, LLM_IDLE_MS); } }
+      finally { llmLoading = false; }
+    });
+  }
+
+  /** Голос первым (владелец 10.11): пока синтез готовит первый звук, процесс уточнителя стоит (SIGSTOP) и продолжает с
+   *  первым куском (SIGCONT). Рядом с работающим уточнителем синтез Google отдавал первый звук через 0,9–1,1 с вместо
+   *  0,04 (test_voice V3 10.11: «🔁 #2 по контексту (2580 мс)» ровно под репликой). Только если сервер сейчас считает. */
+  final Object llmPauseLock = new Object(); int llmPausedPid = 0; long llmPausedAt = 0;
+  boolean pauseLlm() {
+    Llm l = llm;
+    if (l == null || !l.ready || l.pid <= 0 || !refineRunning && liveBusy.get() == 0) return false;
+    synchronized (llmPauseLock) {
+      if (llmPausedPid != 0) return false;
+      try { android.os.Process.sendSignal(l.pid, 19); llmPausedPid = l.pid; llmPausedAt = System.currentTimeMillis(); return true; }
+      catch (Throwable e) { return false; }
+    }
+  }
+  void resumeLlm(boolean was) {
+    if (!was) return;
+    int pid; long ms;
+    synchronized (llmPauseLock) {
+      if (llmPausedPid == 0) return;
+      pid = llmPausedPid; llmPausedPid = 0; ms = System.currentTimeMillis() - llmPausedAt;
+      try { android.os.Process.sendSignal(pid, 18); } catch (Throwable ignore) {}
+    }
+    log("🧠 уточнитель уступил голосу " + ms + " мс");
+  }
   /** Локальный проход по контексту: реплики с прошлого разбора, не больше пяти, каждая с контекстом
    *  остальных — позже сказанное уточняет раньше сказанное, а вызовов вдвое меньше, чем при
    *  разборе каждой реплики отдельно. Hy-MT — переводная модель: ей по реплике на запрос с
@@ -2228,6 +2750,8 @@ public class TranslatorService extends Service {
       // Правленное человеком не разбираем вовсе: менять его всё равно нельзя, а разбор — это
       // 10–20 секунд процессора и поднятый уточнитель.
       if (chats != null) todo.removeIf(t -> chats.humanAt(t.at));
+      // Уточнённые до озвучки (RefineVoice) — уже разобраны тем же уточнителем с тем же контекстом.
+      todo.removeIf(t -> t.live != null);
       if (todo.isEmpty()) continue;
       boolean hy = llm.model.toLowerCase().contains("hy-mt");
       String topic = topicLine(), memo = memoBlock(topic);
@@ -2238,26 +2762,18 @@ public class TranslatorService extends Service {
       if (hy) {
         int k = 0;
         for (Turn tn : todo) {
+          // Уточнение до озвучки (RefineVoice) — первым: его ждёт голос. Сервер у них один (один слот), и вопрос
+          // прохода, заданный рядом, стоял бы перед ним в очереди.
+          while (liveBusy.get() > 0) Thread.sleep(50);
           busy("refine", L.k("уточняю перевод"), k++, todo.size());
-          int idx = indexOf(h, tn); if (idx < 0) continue;
-          String tgt = tn.dir.substring(3);
-          String tm = terms(tn.dir, tn.asr), tp = memo.isEmpty() ? "" : memo + "\n";
-          if (!lastPastTerms.isEmpty()) log("📚 #" + tn.n + " термины прошлых разговоров: " + lastPastTerms);
-          // Бюджет из окна модели: без него длинные реплики переполняли окно, сервер отказывал,
-          // и уточнитель замолкал навсегда. Старое — в памяти разговора, свежее — в пределах бюджета.
-          int budget = Brief.budget(llmCpt, tn.asr.length(), tm.length(), tp.length());
-          if (budget < 0) { log("🔁 #" + tn.n + " длиннее окна уточнителя (" + tn.asr.length() + " знаков) — оставляю перевод как есть"); continue; }
-          List<String> fresh = Brief.fit(backgroundLines(h, idx), Math.min(budget, Brief.FRESH_CHARS));
-          String bg = tp + String.join("\n", fresh);
-          long t = System.nanoTime();
+          Prep pp = prep(h, tn, memo); if (pp == null) continue;
+          if (!pp.past.isEmpty()) log("📚 #" + tn.n + " термины прошлых разговоров: " + pp.past);
+          if (pp.bg == null) { log("🔁 #" + tn.n + " длиннее окна уточнителя (" + tn.asr.length() + " знаков) — оставляю перевод как есть"); continue; }
           try {
-            String out = llm.chat(null, hyPrompt(bg, tn.asr, tgt, tm), 200).trim();
-            long ms = (System.nanoTime() - t) / 1000000;
-            if (tgt.equals("pt")) out = TextRules.toBrazilian(out);
-            String why = Brief.swallowed(out, tn.asr, tn.refined != null ? tn.refined : tn.mt, seen(h, tn, tp));
-            if (why != null) { rejected++; log("🔁 #" + tn.n + " ответ отброшен (" + ms + " мс, фон " + bg.length() + " зн.) — " + why + ": " + out); }
-            else if (applyFix(tn, out, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту (" + ms + " мс, фон " + bg.length() + " зн.): " + out); }
-            else log("🔁 #" + tn.n + " контекст не изменил перевод (" + ms + " мс, фон " + bg.length() + " зн.)");
+            Fix f = ask(pp);
+            if (f.why != null) { rejected++; log("🔁 #" + tn.n + " ответ отброшен (" + f.ms + " мс, фон " + pp.bg.length() + " зн.) — " + f.why + ": " + f.out); }
+            else if (applyFix(tn, f.out, Chats.BY_LLM)) { changed++; log("🔁 #" + tn.n + " по контексту (" + f.ms + " мс, фон " + pp.bg.length() + " зн.): " + f.out); }
+            else log("🔁 #" + tn.n + " контекст не изменил перевод (" + f.ms + " мс, фон " + pp.bg.length() + " зн.)");
           } catch (Exception e) {
             // Одна неудачная реплика не обрывает проход: раньше исключение выбрасывало весь цикл,
             // метка «разобрано до» не сдвигалась, и следующий проход падал на том же месте.
@@ -2415,7 +2931,14 @@ public class TranslatorService extends Service {
   public void setMtQuality(boolean on) {
     getSharedPreferences("at", MODE_PRIVATE).edit().putBoolean("mt_quality", on).apply();
     Engine.mtBeam = on ? Engine.MT_BEAM_QUALITY : 1;
-    log("🔤 перевод: " + (on ? "точнее — перебор " + Engine.MT_BEAM_QUALITY + " вариантов" : "быстрее — первый вариант"));
+    log("🔤 перевод: " + (on ? "точнее — перебор " + Engine.MT_BEAM_QUALITY + " вариантов" + (mod(Modules.LLM) ? ", до озвучки уточняется " + RefineVoice.label(refineVoice) : "")
+        : "быстрее — первый вариант, уточнитель только фоном"));
+  }
+  /** «Уточнять до озвучки»: какой язык при «Точнее» ждёт уточнитель (RefineVoice.PT / RU / BOTH). */
+  public void setRefineVoice(String k) {
+    refineVoice = RefineVoice.parse(k);
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString("refine_voice", refineVoice).apply();
+    log("🧠 до озвучки уточняется: " + RefineVoice.label(refineVoice) + (mtQuality() ? "" : " — при «Точнее»; сейчас «Быстрее», голос сразу"));
   }
   public boolean cloudQuality() { return cloud != null && cloud.preferQuality; }
   /** «Облако: быстрее / точнее» — порядок, в котором перебираются бесплатные модели (Cloud.score). */
@@ -2694,6 +3217,7 @@ public class TranslatorService extends Service {
       for (ApplicationExitInfo x : getSystemService(ActivityManager.class).getHistoricalProcessExitReasons(getPackageName(), 0, 16)) {
         String k = Telemetry.exitKind(x.getReason());
         if (k == null || x.getTimestamp() <= since || cr.length() >= Telemetry.MAX_CRASHES) continue;
+        if (x.getProcessName() != null && x.getProcessName().endsWith(":npu")) continue;   // NPU — своей записью (teleNpu)
         String d = x.getDescription() == null ? "" : Telemetry.cut(x.getDescription(), 120);
         cr.put(new JSONObject().put("at", x.getTimestamp() / 1000).put("kind", k).put("what", d).put("pss_mb", x.getPss() / 1024)
             .put("state", Telemetry.importanceState(x.getImportance())));
@@ -3268,7 +3792,7 @@ public class TranslatorService extends Service {
       if (vc && bt) continue;
       if (!parts.containsKey(k)) {
         final List<float[]> ps = new ArrayList<>();
-        GeneratedAudio ga = eng.speak(AEC_PHRASES[k][0], AEC_PHRASES[k][1], chunk -> { ps.add(chunk.clone()); return 1; });
+        SysTts.Audio ga = eng.speak(AEC_PHRASES[k][0], AEC_PHRASES[k][1], chunk -> { ps.add(chunk.clone()); return 1; });
         parts.put(k, ps); fmt.put(k, new int[]{ga.getSampleRate(), ga.getSamples().length});
         new DenoisedAudio(ga.getSamples(), ga.getSampleRate()).save(new File(dir, k == 0 ? "aec_ref.wav" : "aec_ref" + k + ".wav").getAbsolutePath());
         log(String.format(Locale.ROOT, "🔁 эхо-стенд: фраза %d · %s · %.1f с, %d Гц", k, AEC_PHRASES[k][0], ga.getSamples().length / (double) ga.getSampleRate(), ga.getSampleRate()));
@@ -3575,17 +4099,20 @@ public class TranslatorService extends Service {
     } catch (Throwable e) { /* нет сведений — считаем динамиком */ }
     return false;
   }
-  /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). */
-  void speakOut(String tgt, String text) throws Exception {
-    if (!voice()) { hint(L.t("🔇 озвучка выключена — «Настройки» → «Модули»")); return; }
+  /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). Итог — секунды звука (0 — не
+   *  звучал). */
+  double speakOut(String tgt, String text) throws Exception {
+    if (!voice()) { hint(L.t("🔇 озвучка выключена — «Настройки» → «Модули»")); return 0; }
+    if (!eng.hasVoice(tgt)) { noVoice(tgt); return 0; }
     synchronized (tts) {
-    if (!voice()) return;
+    if (!voice()) return 0;
     int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     final boolean dup = btDuplex(); if (!dup) muteUntil = Long.MAX_VALUE;
-    double sec = 0; final long[] w0 = {0};
-    try { GeneratedAudio ga = eng.speak(tgt, text, chunk -> { if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
+    double sec = 0; final long[] w0 = {0}; final boolean[] held = {pauseLlm()};
+    try { SysTts.Audio ga = eng.speak(tgt, text, chunk -> { if (held[0]) { held[0] = false; resumeLlm(true); } if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
       sec = ga.getSamples().length / (double) rate;
-    } finally { if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec) + pausedMs; playEndMs += pausedMs; if (!dup) muteUntil = until; } }
+    } finally { if (held[0]) { held[0] = false; resumeLlm(true); } if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec) + pausedMs; playEndMs += pausedMs; if (!dup) muteUntil = until; } }
+    return sec;
     }
   }
   /** Очистка выученного. Ярус копится сам и молча, поэтому убрать его должно быть можно
@@ -3742,8 +4269,8 @@ public class TranslatorService extends Service {
 
   /** Нужен ли микрофон сейчас: включено прослушивание или идёт удержание. */
   public boolean micWanted() { return listenPt || listenRu || recording; }
-  void ensureCapture() { if (!capturing) { capturing = true; startCapture(); } }
-  void stopCapture() { capturing = false; log("🎚 микрофон отпущен"); }
+  void ensureCapture() { if (!capturing) { capturing = true; startCapture(); energyTick(); } }
+  void stopCapture() { energyTick(); capturing = false; log("🎚 микрофон отпущен"); }
   void restartCapture() { if (!micWanted()) return; capturing = false;
     try { Thread.sleep(350); } catch (InterruptedException e) {}
     capturing = true; startCapture(); }
@@ -4799,6 +5326,10 @@ public class TranslatorService extends Service {
       // Снимок не озвучивается: его читают глазами (решение владельца 28.09).
       final boolean hp = headphonesOut();
       final boolean soon = !voice() && ttsSoon();
+      // «Точнее» + выбранный язык (RefineVoice): реплика — сразу уточнителю, голос подождёт его ответ (liveSay). Только
+      // если голос и правда сейчас зазвучит: молча ждать нечего, а уточнит потом проход разбора.
+      final boolean rv = here && !silent && !kind.equals("фото") && !kind.equals(VOICE_KIND) && voice() && VoiceOut.voice(voiceWhat, fTgt, hp)
+          && RefineVoice.waits(refineVoice, mtQuality(), mod(Modules.LLM) && hasLlm(), fTgt) && startLive(turn);
       // Голосовое из мессенджера — тоже: его читают, а вслух оно уже звучало у человека в мессенджере.
       if (silent || !here || kind.equals("фото") || kind.equals(VOICE_KIND) || !voice() && !soon) { first[0] = t2; tag += silent ? " · без озвучки" : !here ? " · разговор сменился, без озвучки" : kind.equals("фото") ? " · снимок, без озвучки" : kind.equals(VOICE_KIND) ? " · голосовое, без озвучки" : " · озвучка выключена"; }
       else if (!VoiceOut.voice(voiceWhat, fTgt, hp)) { first[0] = t2; tag += " · " + VoiceOut.silentWhy(voiceWhat, fTgt, hp); }
@@ -4810,7 +5341,17 @@ public class TranslatorService extends Service {
         sayQ.add(new Object[]{dir, fTgt, mt, cacheable, turn});
         first[0] = t2; tag += soon ? " · озвучка — когда поднимутся голоса" : " · озвучка ждёт паузы";
       }
-      else { first[0] = 0; audioS = speakTurn(dir, fTgt, mt, cacheable, first); if (first[0] == 0) first[0] = System.nanoTime(); }
+      else {
+        first[0] = 0; String say = mt;
+        if (rv) {
+          // Текст — на экран сразу (читают раньше, чем слушают), голос — когда ответит уточнитель или выйдет предел
+          final Listener le = listener; final String fd = dir, fs = asr, fm = mt;
+          if (le != null) main.post(() -> le.onTurn(fd, fs, fm, false));
+          long[] lw = {-1}; say = liveSay(turn, mt, lw); tag += liveTag(turn, lw[0]);
+          if (!say.equals(mt) && le != null) { final String fr = say; main.post(() -> le.onTurn(fd, fs, fr, true)); }
+        }
+        audioS = speakTurn(dir, fTgt, say, cacheable && say.equals(mt), first); if (first[0] == 0) first[0] = System.nanoTime();
+      }
       if (here) { lastDir = dir; lastSrc = asr; lastDst = mt; lastMaskedSrc = r.maskedSrc; lastMaskedDst = r.maskedMt; lastSlots = r.slots; lastAt = at; lastDoubt = new Doubt(asr, doubt); }
       String line = String.format("#%d %s | %s\n   → %s\n   %s · %s %d · mt %d · tts→звук %d · до звука %d мс%s", turn.n, dir, asr, mt, tag,
           kind, srcMs, (t2 - t1) / 1000000, (first[0] - t2) / 1000000, srcMs + (first[0] - t1) / 1000000,
@@ -4847,8 +5388,9 @@ public class TranslatorService extends Service {
         }
         if (chats.rolled) { chats.rolled = false; log("📄 в разговоре набралось " + Chats.KEEP + " реплик — продолжаю в новом"); }
       }
-      final String fSrc = asr, fDst = mt, fDir = dir;
-      Listener lt = listener; if (lt != null) main.post(() -> lt.onTurn(fDir, fSrc, fDst, false));
+      final String fSrc = asr, fDst = turn.liveOut != null ? turn.liveOut : mt, fDir = dir;
+      Listener lt = listener; if (lt != null) main.post(() -> lt.onTurn(fDir, fSrc, fDst, turn.liveOut != null));
+      if (turn.live != null) markSaved(turn);
       if (numbered && lt != null) main.post(lt::onHistory);        // первая реплика голоса получила номер
       notify(asr + " → " + mt); scheduleRefine();
       if (whoIn != null && !whoIn.listen) enrollLater(whoIn, r.src, r.asr, chatId, at);
@@ -4879,6 +5421,7 @@ public class TranslatorService extends Service {
     synchronized (tts) {
     if (!voice()) return 0;                            // выключили, пока ждали очередь
     if (!VoiceOut.voice(voiceWhat, tgt, headphonesOut())) return 0;   // наушники подключили или выбор сменился, пока ждали
+    if (!eng.hasVoice(tgt)) { noVoice(tgt); return 0; }               // голоса языка нет на телефоне: перевод на экране
     int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     // В наушник — значит озвучка не попадает в комнату и микрофон можно не глушить:
     // собеседник продолжает говорить, пока в ухе идёт перевод. Замер протечки: −13…+0,1 дБ,
@@ -4888,11 +5431,14 @@ public class TranslatorService extends Service {
     double audioS = 0;
     final long[] w0 = {0};                 // когда отдан первый кусок — с него фраза и звучит
     float[] cached = pb.audio(dir, mt);
+    final boolean[] held = {false};          // уточнитель стоит, пока синтез готовит первый звук (pauseLlm)
     try {                                  // без finally одно исключение в синтезе делало приложение глухим навсегда
       if (cached != null) { if (first != null && first[0] == 0) first[0] = System.nanoTime(); w0[0] = System.currentTimeMillis(); phraseSounds(tgt); writeOut(cached, cached.length, tgt); audioS = cached.length / (double) rate; }
-      else { GeneratedAudio ga = eng.speak(tgt, mt, chunk -> { if (bargeStop) return 0; if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
+      else { held[0] = pauseLlm();
+        SysTts.Audio ga = eng.speak(tgt, mt, chunk -> { if (held[0]) { held[0] = false; resumeLlm(true); } if (bargeStop) return 0; if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
         audioS = ga.getSamples().length / (double) rate; if (cacheable && !bargeStop) pb.putAudio(dir, mt, ga.getSamples(), rate); }
     } finally {
+      if (held[0]) { held[0] = false; resumeLlm(true); }
       long now = System.currentTimeMillis(), until = muteAfter(w0[0] == 0 ? now : w0[0], audioS);
       boolean cut = phraseEnd();
       if (cut) { playEndMs = now; until = now; }                           // перебили: дорожка уже пуста, микрофон открыт
@@ -4936,8 +5482,11 @@ public class TranslatorService extends Service {
           Turn tn = it.length > 4 ? (Turn) it[4] : null;
           if (tn != null && tn.dropped) continue;   // реплику поправили или удалили, пока она ждала
           String say = tn != null && tn.refined != null ? tn.refined : (String) it[2];
-          double sec = speakTurn((String) it[0], (String) it[1], say, (Boolean) it[3], null);
-          if (waited > 150) log(String.format(Locale.ROOT, "🔊 озвучено после паузы %.1f с (%.1f с звука, в очереди ещё %d)", waited / 1000.0, sec, sayQ.size()));
+          // Уточнение до озвучки (RefineVoice): пауза в речи уже шла в счёт предела, ждём только остаток
+          long[] lw = {-1}; if (tn != null && tn.live != null) say = liveSay(tn, say, lw);
+          double sec = speakTurn((String) it[0], (String) it[1], say, (Boolean) it[3] && say.equals(it[2]), null);
+          if (waited > 150 || lw[0] >= 0) log(String.format(Locale.ROOT, "🔊 озвучено после паузы %.1f с (%.1f с звука, в очереди ещё %d)%s", waited / 1000.0, sec, sayQ.size(),
+              lw[0] < 0 ? "" : liveTag(tn, lw[0])));
         } catch (InterruptedException e) { return; }
         catch (Throwable t) { log("🔊 озвучить не вышло: " + t); }
       }

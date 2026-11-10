@@ -88,6 +88,40 @@ public class TelemetryTest {
     Telemetry.Counters c2 = Telemetry.Counters.load(c.save(), 0);
     eq(c2.save(), c.save(), "T7 сохранение — туда и обратно без потерь");
     eq(Telemetry.Counters.load("{не json", 77).since, 77L, "T7 испорчено — новый период");
+
+    // NPU и процессор: фразы, время, заряд за слушание (владелец 10.11)
+    Telemetry.Counters cn = new Telemetry.Counters(0);
+    cn.asr(true, 190); cn.asr(true, 210); cn.asr(false, 300);
+    JSONObject jn = cn.json(3600_000, 0);
+    eq(Arrays.asList(jn.getInt("npu"), jn.getLong("npu_ms"), jn.getInt("cpu"), jn.getLong("cpu_ms")), Arrays.asList(2, 200L, 1, 300L),
+        "N1 фразы и мс на фразу — на NPU и на процессоре");
+    Telemetry.Counters cc = new Telemetry.Counters(0); cc.asr(false, 250);
+    ok(!cc.json(3600_000, 0).has("cpu") && !cc.json(3600_000, 0).has("npu"), "N2 без NPU — без этих полей (скорость и так в rtf_ms)");
+    Telemetry.Energy en = new Telemetry.Energy();
+    Telemetry.Counters ce = new Telemetry.Counters(0);
+    en.sample(ce, 0, 3_000_000, true, Telemetry.Energy.NPU);
+    en.sample(ce, 60_000, 2_997_000, true, Telemetry.Energy.NPU);          // минута на NPU: 3 мА·ч
+    en.sample(ce, 120_000, 2_990_000, true, Telemetry.Energy.CPU);         // сменилось место — отрезок не в счёте
+    en.sample(ce, 180_000, 2_980_000, true, Telemetry.Energy.CPU);         // минута на процессоре: 10 мА·ч
+    en.sample(ce, 240_000, 2_990_000, true, Telemetry.Energy.CPU);         // заряд вырос — не в счёте
+    en.sample(ce, 300_000, 2_985_000, false, Telemetry.Energy.CPU);        // на зарядке — не в счёте
+    en.sample(ce, 360_000, 2_980_000, true, Telemetry.Energy.CPU);
+    en.sample(ce, 360_000 + Telemetry.Energy.MAX_GAP + 1, 2_900_000, true, Telemetry.Energy.CPU);   // дольше 10 мин — спал
+    en.sample(ce, 1_500_000, 2_899_000, true, Telemetry.Energy.NONE);      // проверка NPU / не слушает — не в счёте
+    en.sample(ce, 1_560_000, 2_898_000, true, Telemetry.Energy.NONE);
+    eq(Arrays.asList(ce.eNpuUah, ce.eNpuMs, ce.eCpuUah, ce.eCpuMs), Arrays.asList(3000L, 60_000L, 10_000L, 60_000L), "E1 отрезки по своим вёдрам");
+    en.sample(ce, 1_620_000, -2147483648, true, Telemetry.Energy.CPU);    // счётчика нет (MIN_VALUE)
+    en.sample(ce, 1_680_000, -2147483648, true, Telemetry.Energy.CPU);
+    eq(ce.eCpuMs, 60_000L, "E2 без счётчика заряда — ничего");
+    ce.heat(371, 1); ce.heat(Integer.MIN_VALUE, 0); ce.heat(355, 2);
+    JSONObject jb = ce.json(3600_000, 0).getJSONObject("batt");
+    eq(new TreeMap<>(jb.toMap()).toString(), "{cpu_mah=10.0, cpu_mah_h=600.0, cpu_min=1.0, npu_mah=3.0, npu_mah_h=180.0, npu_min=1.0, t_max=37.1, thermal=2}",
+        "E3 в пакете: минуты, мА·ч, мА·ч в час, нагрев");
+    ok(!new Telemetry.Counters(0).json(3600_000, 0).has("batt"), "E4 ничего не мерили — поля нет");
+    Telemetry.Counters cl = Telemetry.Counters.load(ce.save(), 0);
+    eq(cl.save(), ce.save(), "E5 переживает сохранение");
+    Telemetry.Counters tk = ce.take(5); ce.merge(tk);
+    eq(Arrays.asList(ce.eNpuUah, ce.eCpuMs, ce.tMax10, ce.thermal), Arrays.asList(3000L, 60_000L, 371, 2), "E6 забирается и возвращается");
     eq(Telemetry.Counters.load(null, 5).pt, 0, "T7 пусто — новый период");
     String before = c.save();
     Telemetry.Counters taken = c.take(2_000_000);

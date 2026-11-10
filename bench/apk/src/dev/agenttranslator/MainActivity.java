@@ -24,7 +24,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  (подсказка, размер шрифта) их сохраняет, другой текст — нет. */
   int[] bigDoubt = new int[0]; String bigDoubtFor = "";
   /** Настройки: строки и сегменты (Rows), переключатели. */
-  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segMtPrefer, segReadGuard, segMicSrc, segVoiceWhat; Switch tTranslitOther;
+  Rows rows; Rows.Seg segRefine, segCloudEvery, segPrefer, segMtPrefer, segReadGuard, segMicSrc, segVoiceWhat, segRefineVoice; Switch tTranslitOther;
+  /** «Уточнять до озвучки» — видно при «Точнее» и включённом уточнителе (внутри llmBox). */
+  LinearLayout rvBox;
   ListView histList;
   Button bPin, bWord, bBetter, bClear, bKey; View bModels;
   TextView logLast;
@@ -76,7 +78,9 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   final java.util.Map<String, Switch> modChecks = new java.util.HashMap<>();
   final java.util.Map<String, CheckBox> setupChecks = new java.util.HashMap<>();
   LinearLayout ttsBox, cloudBox, llmBox, modBox, keysBox, addBox; View bKeyHelp; Button bUnused; boolean setupSynced = false;
-  Rows.Row rowCloud, rowMods, rowLog, rowRoute; TextView modsSum;
+  Rows.Row rowCloud, rowMods, rowLog, rowRoute, rowVoices; TextView modsSum;
+  /** «Скорость речи»: ползунок и значение у русского и португальского. */
+  SeekBar sSpeedRu, sSpeedPt; TextView speedRu, speedPt;
   final java.util.Map<String, ModRow> modRows = new java.util.HashMap<>();
   ModelStore.State mst; boolean micForever, svcStarted; ScrollView bigScroll;
   TextView updLbl, updTitle; Button bUpdate, bUpdateGo; LinearLayout updCard;
@@ -95,6 +99,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
+    keepScreen(getIntent());
     UiLang.init(this);   // язык надписей — до того, как строятся экраны: они берут тексты через L
     look = new Look(this); rows = new Rows(this, look);
     // Камера занимает много памяти, и пока она открыта, система выгружает Falar; снимок потом
@@ -644,6 +649,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     segCloudEvery.sel(indexOf(new int[]{0, 5, 10, 20}, svc.cloudEvery));
     segPrefer.sel(svc.cloudQuality() ? 1 : 0);
     if (segMtPrefer != null) segMtPrefer.sel(svc.mtQuality() ? 1 : 0);
+    if (segRefineVoice != null) { segRefineVoice.sel(RefineVoice.index(svc.refineVoice)); vis(rvBox, svc.mtQuality()); }
     refreshCloudRow();
   }
 
@@ -871,6 +877,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Спросить о статистике один раз: не на экране первой настройки и не поверх «Что нового». Закрыли, не
    *  ответив, — спросим при следующем запуске. */
   void maybeAskTelemetry() {
+    if (npuAskDue()) { maybeAskNpuData(); return; }           // NPU не заработал — спросить о статистике в его окне
     if (!Telemetry.ASK.equals(prefs.getString("telemetry", Telemetry.ASK)) || screen == 4 || newsBox != null || isFinishing()) return;
     new android.app.AlertDialog.Builder(this)
         .setTitle(L.t("Помочь сделать Falar лучше?"))
@@ -880,6 +887,33 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         .setPositiveButton(L.t("отправлять"), (d, w) -> setTele(Telemetry.YES))
         .setNegativeButton(L.t("не отправлять"), (d, w) -> setTele(Telemetry.NO))
         .setNeutralButton(L.t("подробнее"), (d, w) -> aboutDialog())
+        .show();
+  }
+  /** MediaTek: NPU не заработал — попросить статистику (владелец 10.11: «для MEDIATEK делай предупреждение, что может
+   *  не получиться, но если вы нажмёте „отправлять“, мы в новых релизах исправим»). Falar сам пробует NPU на каждой
+   *  версии и прошивке; не вышло — распознаёт процессором, а причина (стадия, ошибка, сигнал и кадры падения) — в
+   *  журнале и, с согласием, в статистике. Окно — раз на версию и прошивку, где NPU отказал (npu_ask), если статистика
+   *  ещё не включена; не поверх первой настройки и «Что нового». Разрешили — причина этого отказа уходит сразу
+   *  (teleNpuLast). */
+  boolean npuAskShown;
+  boolean npuAskDue() {
+    TranslatorService s = svc;
+    if (s == null || !Npu.mediatek() || npuAskShown || Telemetry.YES.equals(prefs.getString("telemetry", Telemetry.ASK))) return false;
+    String id = s.npuId();
+    return TranslatorService.npuFailWhy(prefs, id) != null && !id.equals(prefs.getString("npu_ask", ""));
+  }
+  void maybeAskNpuData() {
+    if (!npuAskDue() || screen == 4 || newsBox != null || isFinishing()) return;
+    npuAskShown = true;
+    prefs.edit().putString("npu_ask", svc.npuId()).apply();
+    final boolean asked = !Telemetry.ASK.equals(prefs.getString("telemetry", Telemetry.ASK));
+    new android.app.AlertDialog.Builder(this)
+        .setTitle(L.t("NPU не заработал"))
+        .setMessage(L.t("На этом телефоне распознавание на NPU не получилось. Falar распознаёт процессором, как обычно, — ничего "
+            + "не потеряно. NPU MediaTek мы проверили не на всех телефонах; чтобы исправить это в новых версиях, нужна причина "
+            + "сбоя. Разрешите отправлять разработчику анонимную статистику: причина войдёт в неё, звук и тексты разговоров не уходят."))
+        .setPositiveButton(L.t("отправлять"), (d, w) -> { setTele(Telemetry.YES); TranslatorService t = svc; if (t != null) t.teleNpuLast(); })
+        .setNegativeButton(L.t("не отправлять"), (d, w) -> { if (!asked) setTele(Telemetry.NO); })
         .show();
   }
   /** «О приложении»: что это, что уходит в интернет, отказ от ответственности, связь. */
@@ -2432,6 +2466,14 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // Пауза до озвучки. Перевод готовится сразу и сразу виден на экране — ждёт только голос,
     // иначе на длинном монологе перевод начинает звучать собеседнику в лицо посреди фразы.
     ttsBox = r.part(c2);
+    // Голоса — синтез телефона (SysTts, с 0.38.0): какой голос у каждого языка, скачать недостающий
+    rowVoices = r.nav(ttsBox, app.falar.R.drawable.ic_voice, L.t("Голоса"), "", x -> voicesDialog());
+    rowVoices.sub.setVisibility(View.VISIBLE);
+    // Скорость речи — своя у каждого языка (владелец 10.11: «от 0.5 до 2х»); отпустили ползунок — пробная фраза
+    r.row(ttsBox, app.falar.R.drawable.ic_speaker, L.t("Скорость речи"), L.t("у каждого языка своя, от 0,5× до 2×"), null);
+    LinearLayout sSp = r.sub(ttsBox, true);
+    speedRu = new TextView(this); sSpeedRu = speedBar("ru", speedRu); sSp.addView(sliderRow("RU", sSpeedRu, speedRu));
+    speedPt = new TextView(this); sSpeedPt = speedBar("pt", speedPt); sSp.addView(sliderRow("PT", sSpeedPt, speedPt));
     int hold = prefs.getInt("hold", 1500);
     holdLbl = r.value(holdText(hold));
     r.row(ttsBox, app.falar.R.drawable.ic_speaker, L.t("Пауза до озвучки"), L.t("перевод виден сразу, голос ждёт тишины"), holdLbl);
@@ -2483,6 +2525,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     final int[] refVals = {0, 1, 3, 10};
     segRefine = r.seg(s6, new String[]{L.t("По кнопке"), "1", "3", "10"}, i -> { if (svc == null) return; svc.setRefineEvery(refVals[i]); refreshIntervals(); });
     r.caption(s6, L.t("реплик между разборами"));
+    // Уточнять до озвучки (RefineVoice, владелец 10.11): при «Точнее» голос выбранного языка ждёт уточнитель до 3 с.
+    // По умолчанию PT: на ваших разговорах уточнитель переводит лучше по-португальски, по-русски — так же.
+    rvBox = r.part(llmBox);
+    r.row(rvBox, app.falar.R.drawable.ic_speaker, L.t("Уточнять до озвучки"), L.t("при «Точнее» голос ждёт уточнитель до 3 с"), null);
+    LinearLayout sRv = r.sub(rvBox, true);
+    segRefineVoice = r.seg(sRv, new String[]{"PT", "RU", L.t("Оба")}, i -> { if (svc == null) return; svc.setRefineVoice(RefineVoice.KEYS[i]); refreshIntervals(); });
+    r.caption(sRv, L.t("PT — собеседнику, RU — вам. Не успел за 3 с — звучит перевод фразы, уточнённый текст появится чуть позже."));
     cloudBox = r.part(c3);
     rowCloud = r.nav(cloudBox, app.falar.R.drawable.ic_cloud, L.t("Облако"), "", x -> show(6));
 
@@ -2498,7 +2547,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       Switch swNpu = r.sw(); swNpu.setChecked(prefs.getBoolean(Npu.PREF, true));
       r.row(c5, app.falar.R.drawable.ic_spark, L.t("Распознавание на NPU"), Npu.snapdragon()
           ? L.t("быстрее на Snapdragon · Qualcomm не советует для биометрии и обучения")
-          : L.t("на MediaTek: меньше расход батареи и нагрев, точнее"), swNpu);
+          : L.t("на MediaTek: меньше расход батареи и нагрев · может не заработать — включите «Статистику для разработчика», и мы исправим это в новых версиях"), swNpu);
       swNpu.setOnCheckedChangeListener((b, on) -> { prefs.edit().putBoolean(Npu.PREF, on).apply(); if (svc != null) svc.setNpu(on); });
     }
 
@@ -2516,6 +2565,37 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
     ScrollView outer = new ScrollView(this); outer.setBackgroundColor(look.page); outer.addView(v);
     return outer;
+  }
+
+  /** Ползунок скорости речи языка: 0,5–2× с шагом 0,1 (TtsVoices.speedAt). Отпустили — служба запоминает скорость и
+   *  говорит пробную фразу; шаги без касания (TalkBack, клавиши) — через 0,7 с после последнего. Пока шаг ждёт,
+   *  ползунок помечен (tag) — refreshVoices его не трогает. */
+  SeekBar speedBar(String lang, TextView val) {
+    final SeekBar sb = new SeekBar(this); sb.setMax(TtsVoices.SPEED_STEPS);
+    float x = svc != null ? svc.ttsSpeed(lang) : TtsVoices.speed(prefs.getFloat("tts_speed_" + lang, 1f));
+    sb.setProgress(TtsVoices.speedPos(x)); val.setText(TtsVoices.speedLabel(x));
+    sb.setContentDescription("ru".equals(lang) ? L.t("Скорость речи: русский") : L.t("Скорость речи: португальский"));
+    final Runnable apply = () -> {
+      sb.setTag(null); float v = TtsVoices.speedAt(sb.getProgress());
+      if (svc != null) svc.setTtsSpeed(lang, v); else prefs.edit().putFloat("tts_speed_" + lang, v).apply();
+    };
+    sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+      boolean drag;
+      public void onProgressChanged(SeekBar b, int p, boolean user) {
+        val.setText(TtsVoices.speedLabel(TtsVoices.speedAt(p)));
+        if (user && !drag) { b.setTag(Boolean.TRUE); b.removeCallbacks(apply); b.postDelayed(apply, 700); }
+      }
+      public void onStartTrackingTouch(SeekBar b) { drag = true; b.setTag(Boolean.TRUE); b.removeCallbacks(apply); }
+      public void onStopTrackingTouch(SeekBar b) { drag = false; apply.run(); }
+    });
+    return sb;
+  }
+  /** Ползунок скорости — как у службы (её могли сменить стендом или до загрузки синтеза). */
+  void syncSpeed(SeekBar sb, TextView val, String lang) {
+    if (sb == null || svc == null || sb.getTag() != null) return;
+    float x = svc.ttsSpeed(lang); int p = TtsVoices.speedPos(x);
+    if (sb.getProgress() != p) sb.setProgress(p);
+    val.setText(TtsVoices.speedLabel(x));
   }
 
   /** Ползунок с подписью слева и значением справа. */
@@ -3219,7 +3299,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     c.uiMode = themeTest == 1 ? android.content.res.Configuration.UI_MODE_NIGHT_NO : android.content.res.Configuration.UI_MODE_NIGHT_YES;
     applyOverrideConfiguration(c);
   }
+  /** Стенд: --es keepscreen 1|0 — не гасить экран, пока Falar на виду (FLAG_KEEP_SCREEN_ON). Для проверок по отладке
+   *  через Wi-Fi: телефон не на зарядке и гаснет за минуты, а слушать Android даёт только Falar, открытому на
+   *  разблокированном экране (POCO владельца, 10.11). Настройки телефона не трогаются; ушло окно — ушёл и запрет. */
+  void keepScreen(Intent i) {
+    if (i == null || !i.hasExtra("keepscreen")) return;
+    if ("1".equals(i.getStringExtra("keepscreen"))) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  }
+
   @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
+    keepScreen(i);
     if (voiceIntent(i)) return;
     standStart = i.getAction() == null && i.getExtras() != null && !i.getExtras().isEmpty();
     if (i.hasExtra("uitheme")) {
@@ -3273,6 +3363,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     setHint(L.f("Услышано: «%s» — переведу, как загружусь", text));
   }
   @Override public void onReady() {
+    maybeAskNpuData();                                  // NPU на MediaTek отказал ещё до моделей (npuFirst) — спросить
     if (!pendingVoices.isEmpty() && svc != null && svc.eng != null) {   // голосовые ждали движков — по порядку
       for (String[] v : pendingVoices) svc.voiceMessage(new java.io.File(v[0]), v[1]);
       setHint(L.t("🎙 голосовое: распознаю…")); pendingVoices.clear();
@@ -3308,6 +3399,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  и больше ничего: ответы приложения уходили за нижний край, и снаружи это выглядело так,
    *  будто кнопки молчат — именно так «потерялся» сохранённый ключ OpenRouter. */
   @Override public void onLog(String s) {
+    if (s.startsWith("⚡ NPU отказал")) ui.post(this::maybeAskNpuData);   // MediaTek: попросить статистику, чтобы исправить
     logView.append(s + "\n\n");
     if (logLast != null) logLast.setText(s.replace('\n', ' '));   // свёрнутый журнал всё равно показывает последний ответ
     if (logScroll != null && screen == 7) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
@@ -3367,6 +3459,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     }
     vis(bBetter, Modules.better(on));
     refreshModules(); refreshBetter();
+    refreshVoices();                     // и без страницы модулей: голоса и скорость речи — в «Настройках»
   }
 
   /** Модули: переключатель, размер по манифесту, метка состояния и полоса загрузки — по размерам
@@ -3381,6 +3474,13 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       String m = e.getKey(); ModRow r = e.getValue();
       boolean on = Modules.BASE.equals(m) || svc.mod(m);
       if (!Modules.BASE.equals(m)) r.sw.setChecked(on);
+      if (Modules.TTS.equals(m)) {                     // синтез телефона: файлов нет, есть голоса
+        SysTts st = svc.sysTts(); boolean loaded = svc.eng != null && !svc.ttsLoading;
+        String[] pill = Screen.modPillTts(on, loaded, st != null, st != null && st.has("ru"), st != null && st.has("pt"));
+        rows.pill(r.pill, pill[0], pill[1]); r.size.setVisibility(View.GONE); r.barBox.setVisibility(View.GONE);
+        r.pill.setOnClickListener("wait".equals(pill[1]) || "no".equals(pill[1]) && on ? x -> voicesDialog() : null);
+        continue;
+      }
       if (Modules.DENOISE.equals(m)) {                 // модель в самом APK: качать нечего
         r.size.setText(Screen.modSize(Modules.DENOISE_BYTES)); r.size.setVisibility(View.VISIBLE);
         String[] pill = Screen.modPillApk(on); rows.pill(r.pill, pill[0], pill[1]); r.barBox.setVisibility(View.GONE);
@@ -3402,6 +3502,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       }
     }
     uiSync = false;
+    refreshVoices();
     long unused = svc.unusedBytes();
     if (bUnused != null) {
       bUnused.setEnabled(unused > 0);
@@ -3412,6 +3513,58 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       rowMods.sub.setText(L.f("включено %d из %d", n, Modules.CHOICE.size()) + (s == null || !s.checked ? "" : L.t(busy ? " · докачивается" : s.coreMissing == 0 && s.autoMissing == 0 ? " · все модели установлены" : " · не всё скачано")));
       rowMods.sub.setVisibility(View.VISIBLE);
     }
+  }
+
+  /** Подпись «Голоса»: какой голос у языка или чего не хватает. */
+  void refreshVoices() {
+    if (rowVoices == null || svc == null) return;
+    syncSpeed(sSpeedRu, speedRu, "ru"); syncSpeed(sSpeedPt, speedPt, "pt");
+    SysTts s = svc.sysTts();
+    if (s == null) { rowVoices.sub.setText(svc.eng != null && !svc.ttsLoading && svc.mod(Modules.TTS) ? L.t("синтез речи телефона не поднялся") : L.t("голоса телефона, без сети")); return; }
+    StringBuilder b = new StringBuilder();
+    for (String lang : SysTts.LANGS) {
+      if (b.length() > 0) b.append(" · ");
+      b.append("ru".equals(lang) ? "RU " : "PT ");
+      if (!s.has(lang)) { b.append(L.t(s.missing.getOrDefault(lang, "нет голоса"))); continue; }
+      java.util.List<TtsVoices.V> vs = s.choices.get(lang); int k = 0;
+      if (vs != null) for (int i = 0; i < vs.size(); i++) if (vs.get(i).name.equals(s.voiceName(lang))) k = i;
+      b.append(L.f("голос %d", k + 1));
+    }
+    rowVoices.sub.setText(b.toString());
+  }
+
+  /** «Голоса»: голоса синтеза телефона без сети для русского и португальского — выбранный сразу звучит пробной
+   *  фразой. Голоса нет — «скачать» открывает окно движка (у Google — голоса без сети). Синтеза нет вовсе —
+   *  настройки синтеза речи Android. */
+  void voicesDialog() {
+    final SysTts s = svc == null ? null : svc.sysTts();
+    if (s == null) {
+      new android.app.AlertDialog.Builder(this).setTitle(L.t("Голоса"))
+          .setMessage(L.t("Синтез речи телефона не поднялся — перевод виден только на экране. В настройках синтеза речи Android выберите движок, например Google, и скачайте голоса русского и португальского (Бразилия)."))
+          .setPositiveButton(L.t("Настройки синтеза"), (d, w) -> openTts(null)).setNegativeButton(L.t("Закрыть"), null).show();
+      return;
+    }
+    final java.util.List<String> labels = new java.util.ArrayList<>(); final java.util.List<String[]> act = new java.util.ArrayList<>();
+    for (String lang : SysTts.LANGS) {
+      String title = "ru".equals(lang) ? L.t("Русский") : L.t("Португальский");
+      java.util.List<TtsVoices.V> vs = s.choices.get(lang);
+      if (vs == null || vs.isEmpty()) { labels.add(title + " — " + L.t(s.missing.getOrDefault(lang, "нет голоса")) + L.t(" · скачать")); act.add(new String[]{"install"}); continue; }
+      for (int k = 0; k < vs.size(); k++) {
+        String n = vs.get(k).name;
+        labels.add(title + " · " + L.f("голос %d", k + 1) + (n.equals(s.voiceName(lang)) ? "  ✓" : ""));
+        act.add(new String[]{lang, n});
+      }
+    }
+    labels.add(L.t("Скачать другие голоса…")); act.add(new String[]{"install"});
+    new android.app.AlertDialog.Builder(this).setTitle(L.t("Голоса озвучки"))
+        .setItems(labels.toArray(new String[0]), (d, w) -> { String[] a = act.get(w); if ("install".equals(a[0])) openTts(s); else svc.setTtsVoice(a[0], a[1]); })
+        .setNegativeButton(L.t("Закрыть"), null).show();
+  }
+  /** Окно движка «скачать голоса» или, если его нет, настройки синтеза речи Android. */
+  void openTts(SysTts s) {
+    try { if (s != null) { startActivity(s.installIntent()); return; } } catch (Throwable ignore) {}
+    try { startActivity(new Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
+    catch (Throwable t) { setHint(L.t("Не открылись настройки синтеза речи — найдите их в настройках Android: «Синтез речи»")); }
   }
 
   /** «Удалить неиспользуемые модели» — файлы выключенных модулей. Отдельным действием с вопросом:
@@ -3600,7 +3753,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     long[] ms = loadMs; int n = loadN, k = Math.min(loadK, n - 1);
     long el = android.os.SystemClock.uptimeMillis() - loadFrom;
     stageBar.set(n, k, Screen.loadFrac(ms, n, k, el));
-    busyLbl.setText(Screen.loadCaption(loadWhat, Screen.loadLeft(ms, n, k, el)));
+    busyLbl.setText(Screen.NPU_STAGE.equals(loadWhat) ? Screen.npuCaption(el, ms[0]) : Screen.loadCaption(loadWhat, Screen.loadLeft(ms, n, k, el)));
     ui.postDelayed(this, 500);
   }};
   final Runnable cloudTick = new Runnable() { public void run() {
@@ -3618,7 +3771,12 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     // подпись с тем, сколько осталось.
     if (what != null && "load".equals(kind)) {
       busyRow.setVisibility(View.VISIBLE); chipsRow.setVisibility(View.INVISIBLE);
-      if (loadK < 0) { loadMs = Screen.loadExpect(prefs.getString("load_ms", ""), total); ui.post(loadTick); }
+      if (loadK < 0) {
+        // первая сборка графа NPU — свой этап: ждать столько, сколько шла прошлая (TranslatorService.npuFirst)
+        loadMs = Screen.NPU_STAGE.equals(what) ? new long[]{prefs.getLong("npu_build_ms", Screen.NPU_BUILD_EXPECT_MS)}
+                                               : Screen.loadExpect(prefs.getString("load_ms", ""), total);
+        ui.post(loadTick);
+      }
       if (done != loadK) { loadK = done; loadFrom = android.os.SystemClock.uptimeMillis(); }
       loadN = Math.max(1, total); loadWhat = what;
       return;

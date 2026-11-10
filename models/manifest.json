@@ -1,11 +1,11 @@
 {
   "manifest_version": 1,
-  "app": "0.37.0",
+  "app": "0.38.0",
   "own_repo": "youannoingme/falar-models",
   "device_dir": "Android/data/app.falar/files/models",
-  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, остальное — нет. module — модуль приложения (base — перевод речи, нужен всегда; tts — озвучка, ocr — чтение снимков, llm — уточнитель, speaker — отпечаток голоса, corpus — корпус фраз; npu — модели распознавания на NPU: только в сборке с NPU и только своего чипа, поле chip — qualcomm или mediatek; bench — только для стенда): файлы включённого модуля качаются при установке и докачиваются сами, выключенного — не качаются. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
+  "notes": "Пути — относительно каталога моделей приложения. tier=core обязателен для запуска, остальное — нет. module — модуль приложения (base — перевод речи, нужен всегда; tts — озвучка (с 0.38.0 — синтез речи телефона, файлов у модуля нет), ocr — чтение снимков, llm — уточнитель, speaker — отпечаток голоса, corpus — корпус фраз; npu — модели распознавания на NPU: только в сборке с NPU и только своего чипа, поле chip — qualcomm или mediatek; bench — только для стенда): файлы включённого модуля качаются при установке и докачиваются сами, выключенного — не качаются. Источник hf: https://huggingface.co/<repo>/resolve/<revision>/<file>. Каждый файл проверяется по sha256; архивы распаковываются в unpack_to и проверяются по check. repo_path — файл лежит в самом репозитории проекта, качать не надо. replaces — файлы, которые этот заменяет: пока они на месте и верны, новый не обязателен (приложение работает прежним путём), после загрузки и сверки нового они удаляются.",
   "total_core_bytes": 1414716715,
-  "total_optional_bytes": 2556836543,
+  "total_optional_bytes": 2422084961,
   "files": [
     {
       "path": "silero_vad.onnx",
@@ -400,68 +400,5 @@
       "role": "кодировщик parakeet на NPU MediaTek (NeuroPilot, проверен на MT6899), окно 832 кадра"
     }
   ],
-  "archives": [
-    {
-      "path": "tts_ru",
-      "kind": "zip",
-      "size": 67383016,
-      "sha256": "13b0747a3a7e92d4438cdb5922cae72dd8989a6ef4bda06b3a559a7ccf2143a5",
-      "tier": "optional",
-      "module": "tts",
-      "license": "CC0",
-      "source": {
-        "type": "hf",
-        "repo": "youannoingme/falar-models",
-        "file": "tts_ru.zip",
-        "revision": "main"
-      },
-      "unpack_to": ".",
-      "origin": {
-        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-dmitri-medium.tar.bz2",
-        "sha256": "c86d0803737de13d441923ff3b3f309482fab8d7af3ec85949942809eb9a3660",
-        "note": "тот же onnx и tokens.txt, что в тарболе sherpa-onnx; zip вместо tar.bz2, потому что в Android нет bzip2"
-      },
-      "check": [
-        {
-          "path": "tts_ru/ru_RU-dmitri-medium.onnx",
-          "sha256": "f98e751ed00b34b3e1b09ff8c3a7cfbd620fc24777e500e1605e10e7bbb86ea2"
-        },
-        {
-          "path": "tts_ru/tokens.txt",
-          "sha256": "2619c1a9de1bcf928162f40c583caf39368cfd6b2340c7bcad51dc634411ec36"
-        }
-      ]
-    },
-    {
-      "path": "tts_pt",
-      "kind": "zip",
-      "size": 67368566,
-      "sha256": "13e9be621ad43657a67338b9925ffc8cbd68821956fca800adbecba71fc277b2",
-      "tier": "optional",
-      "module": "tts",
-      "license": "CC0",
-      "source": {
-        "type": "hf",
-        "repo": "youannoingme/falar-models",
-        "file": "tts_pt.zip",
-        "revision": "main"
-      },
-      "unpack_to": ".",
-      "origin": {
-        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-pt_BR-faber-medium.tar.bz2",
-        "sha256": "7add3f923ad6bc25ca8a192805fd1a64d1b3893e4611c4a9719545a825039a83",
-        "note": "то же"
-      },
-      "check": [
-        {
-          "path": "tts_pt/pt_BR-faber-medium.onnx",
-          "sha256": "956b4f1733903891c4ba0973d0603b2a3d8c09c8432fb3bb5203a90a7431daca"
-        },
-        {
-          "path": "tts_pt/tokens.txt",
-          "sha256": "2619c1a9de1bcf928162f40c583caf39368cfd6b2340c7bcad51dc634411ec36"
-        }
-      ]
-    }
-  ]
+  "archives": []
 }

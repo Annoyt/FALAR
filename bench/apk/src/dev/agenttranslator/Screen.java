@@ -81,6 +81,17 @@ final class Screen {
     return left >= 1000 ? L.f("Улучшаю в облаке · ещё ≈ %d с", Math.round(left / 1000.0)) : L.f("Улучшаю в облаке · дольше обычного · %d с", ms / 1000);
   }
 
+  /** Первая сборка графа NPU на новой версии — до загрузки моделей (TranslatorService.npuFirst; владелец 10.11:
+   *  «сообщить пользователю, что это займёт время»): свой этап загрузки со своей подписью. Сколько ждать — по
+   *  прошлой сборке (npu_build_ms), нет её — минута (POCO X7 Pro: граф 43 с); дольше — «дольше обычного», как облако. */
+  static final String NPU_STAGE = L.k("граф NPU");
+  static final long NPU_BUILD_EXPECT_MS = 60_000;
+  static String npuCaption(long ms, long expect) {
+    long left = expect - ms;
+    return left >= 1000 ? L.f("Первый запуск версии: готовлю NPU · ещё ≈ %d с", Math.round(left / 1000.0))
+                        : L.f("Первый запуск версии: готовлю NPU · дольше обычного · %d с", ms / 1000);
+  }
+
   // ---- шапка разговора ----------------------------------------------------------------------
 
   /** Строка под названием разговора. Держат крупный текст — только это; спрятанная транскрипция,
@@ -183,6 +194,17 @@ final class Screen {
   /** Метка модуля, чья модель лежит в самом APK (шумоподавление): качать нечего, включён — работает
    *  сам, когда вокруг шумно. */
   static String[] modPillApk(boolean on) { return on ? new String[]{L.t("при шуме"), "ok"} : new String[]{L.t("выключен"), "no"}; }
+  /** Метка «Озвучки» (с 0.38.0 — синтез телефона, файлов нет): sys — синтез поднят, ru и pt — есть ли голос языка
+   *  без сети. Нет голоса — «скачать голос» (нажатие открывает окно движка). Пока движок не загружен (sys false до
+   *  конца загрузки) — «голоса телефона», как у работающего: судить рано. */
+  static String[] modPillTts(boolean on, boolean loaded, boolean sys, boolean ru, boolean pt) {
+    if (!on) return new String[]{L.t("выключен"), "no"};
+    if (!loaded) return new String[]{L.t("голоса телефона"), "ok"};
+    if (!sys) return new String[]{L.t("нет синтеза речи"), "no"};
+    if (ru && pt) return new String[]{L.t("голоса телефона"), "ok"};
+    if (!ru && !pt) return new String[]{L.t("скачать голоса"), "wait"};
+    return new String[]{L.f("скачать голос: %s", ru ? L.t("португальский") : L.t("русский")), "wait"};
+  }
   /** Полоса загрузки — у включённого модуля, файлов которого ещё нет на телефоне. */
   static boolean modBar(boolean on, long bytes, boolean onPhone) { return on && bytes > 0 && !onPhone; }
   static String modBarLabel(long done, long bytes) {

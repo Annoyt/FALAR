@@ -65,7 +65,10 @@ const pairs = (o) => Object.entries(o || {}).map(([k, v]) => k + ' ' + num(v)).j
 const MIC = { builtin: 'встроенный', wired: 'проводной', bt: 'гарнитура', usb: 'USB', other: 'другой' };
 const SKIP = { lang: 'не тот язык', short: 'короткие', read: 'прочитано с экрана', novoice: 'без голоса разговора', late: 'голос не успел' };
 const KNOWN = new Set(['hours', 'turns', 'empty', 'hold', 'listen', 'noise', 'denoise', 'wiener', 'music', 'mic',
-  'rtf_ms', 'load_ms', 'edits', 'edit_chars', 'edit_total', 'foreign', 'skips', 'gain_db', 'clip', 'stand']);
+  'rtf_ms', 'load_ms', 'edits', 'edit_chars', 'edit_total', 'foreign', 'skips', 'gain_db', 'clip', 'stand',
+  'npu', 'npu_ms', 'cpu', 'cpu_ms', 'batt']);
+// Уровень нагрева Android (PowerManager.THERMAL_STATUS_*): с 3 телефон сбрасывает частоты
+const THERMAL = ['нет', 'лёгкий', 'умеренный', 'сильный', 'критический', 'аварийный', 'до выключения'];
 
 /** Строка устройства: «Xiaomi Redmi Note 12 · Android 14 · 6 ГБ · SM6225 · прошивка …». */
 export function deviceLine(d) {
@@ -104,6 +107,17 @@ export function asrLines(a) {
     a.foreign !== undefined && 'чужой голос отброшен ' + a.foreign].filter(Boolean);
   if (more.length) out.push(more.join(', '));
   if (a.stand) out.push('прогоны стенда — не в счёте: ' + a.stand + ' фраз');
+  // NPU (приложение 0.38.0+): где распознавались фразы и сколько заряда ушло за слушание без зарядки — там и там
+  if (a.npu !== undefined) out.push('#NPU: фраз ' + a.npu + (a.npu_ms !== undefined ? ' по ' + num(a.npu_ms) + ' мс' : '') +
+    (a.cpu !== undefined ? ', на процессоре ' + a.cpu + (a.cpu_ms !== undefined ? ' по ' + num(a.cpu_ms) + ' мс' : '') : ''));
+  if (obj(a.batt)) {
+    const b = a.batt, part = (name, min, mah, h) => min !== undefined &&
+      name + ' ' + num(min) + ' мин — ' + num(mah) + ' мА·ч' + (h !== undefined ? ' (' + num(h) + ' мА·ч в час)' : '');
+    const parts = [part('NPU', b.npu_min, b.npu_mah, b.npu_mah_h), part('процессор', b.cpu_min, b.cpu_mah, b.cpu_mah_h),
+      b.t_max !== undefined && 'батарея до ' + num(b.t_max) + ' °C',
+      b.thermal !== undefined && 'нагрев ' + (THERMAL[b.thermal] || b.thermal)].filter(Boolean);
+    if (parts.length) out.push('заряд за слушание: ' + parts.join(', '));
+  }
   const rest = Object.entries(a).filter(([k]) => !KNOWN.has(k));
   if (rest.length) out.push('ещё: ' + rest.map(([k, v]) => k + '=' + JSON.stringify(v)).join(', '));
   return out;
@@ -113,7 +127,8 @@ const when = (t, tz = 5) => {
   const d = new Date((t + tz * 3600) * 1000), p = (n) => String(n).padStart(2, '0');
   return p(d.getUTCDate()) + '.' + p(d.getUTCMonth() + 1) + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes());
 };
-const KIND = { crash: 'сбой', native: 'сбой в библиотеке', anr: 'зависание', oom: 'нехватка памяти', killed: 'закрыто системой' };
+const KIND = { crash: 'сбой', native: 'сбой в библиотеке', anr: 'зависание', oom: 'нехватка памяти', killed: 'закрыто системой',
+  npu: 'NPU не заработал' };
 // Где было приложение (Telemetry.importanceState): посреди разговора или в фоне — разные беды.
 const STATE = { screen: 'на экране', fgs: 'служба на виду', background: 'в фоне' };
 

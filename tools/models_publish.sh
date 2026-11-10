@@ -55,7 +55,7 @@ tags: [translation, onnx, opus-mt, falar]
 
 Производные файлы офлайн-переводчика pt-BR ↔ ru Falar (бывший AgentTranslator). Не веса, а форматы:
 - \`mt/*\`: экспорт Helsinki-NLP opus-mt-tc-big-pt-zle и -zle-pt в ONNX int8 (optimum) и токенизатор — CC-BY-4.0, авторство Helsinki-NLP / OPUS-MT; с 0.23.0 приложение берёт \`encoder_kv_model.onnx\` (кодировщик вместе с K/V перекрёстного внимания из \`decoder_model.onnx\`) и \`decoder_with_past_model.onnx\`;
-- \`tts_ru.zip\`, \`tts_pt.zip\`: голоса Piper dmitri и faber из тарболов sherpa-onnx, перепакованы в zip — CC0;
+- \`tts_ru.zip\`, \`tts_pt.zip\`: голоса Piper dmitri и faber из тарболов sherpa-onnx, перепакованы в zip, — только для версий до 0.38.0 (с 0.38.0 озвучка — синтез речи телефона). Данные голосов — CC0, но обе модели дообучены от en_US-lessac, а корпус Lessac (Blizzard 2013) разрешён только для исследований; внутри — данные eSpeak NG (GPL-3.0);
 - \`phrasebook_tatoeba.tsv\`, \`common_words.txt\`: корпус фраз и частотный словарь, добытые из Tatoeba — CC-BY 2.0 FR;
 - \`phrasebook.json\`: затравка разговорника проекта;
 - \`npu/encoder-npu.onnx\`, \`npu/encoder-mtk.onnx\`: кодировщик nvidia/parakeet-tdt-0.6b-v3, квантованный для NPU Snapdragon (QDQ w8a16, Qualcomm AI Hub) и MediaTek (A16W8) — CC-BY-4.0, авторство NVIDIA; \`npu/nemo128.onnx\`: признаки NeMo из istupakov/onnx-asr — MIT, Copyright (c) 2025 Ilya Stupakov;

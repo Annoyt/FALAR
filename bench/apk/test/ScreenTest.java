@@ -68,6 +68,12 @@ public class ScreenTest {
     eq(Screen.cloudFrac(10000, 20000), 0.5f, "C3 доля по времени");
     eq(Screen.cloudFrac(50000, 20000), 0.95f, "C3 не до конца, пока ответа нет");
 
+    // N: первая сборка графа NPU на новой версии — свой этап загрузки, ход по времени прошлой сборки
+    eq(Screen.npuCaption(15000, 60000), "Первый запуск версии: готовлю NPU · ещё ≈ 45 с", "N1 сколько осталось до обычного");
+    eq(Screen.npuCaption(59500, 60000), "Первый запуск версии: готовлю NPU · дольше обычного · 59 с", "N1 меньше секунды — «дольше обычного»");
+    eq(Screen.npuCaption(95000, 43000), "Первый запуск версии: готовлю NPU · дольше обычного · 95 с", "N1 дольше прошлой сборки — сколько уже идёт");
+    eq(Screen.loadFrac(new long[]{60000}, 1, 0, 30000), 0.5f, "N2 доля — по времени прошлой сборки, этап один");
+
     // H: строка под названием разговора
     eq(Screen.hint("собеседник", false, false, "cloud", "", "ТЕСТ", null), "собеседник", "H1 обычное состояние");
     eq(Screen.hint("собеседник", true, true, "нет сети", "", "ТЕСТ", null), "читаете вслух · микрофон не слушает · улучшить нельзя: нет сети", "H2 держат текст — только это и причина серой кнопки");
@@ -149,6 +155,14 @@ public class ScreenTest {
     eq(Screen.modSize(950_000), "1 МБ", "D6 от 0,95 МБ — целыми");
     eq(String.join("|", Screen.modPillApk(true)), "при шуме|ok", "D7 шумоподавление включено — работает при шуме");
     eq(String.join("|", Screen.modPillApk(false)), "выключен|no", "D7 выключено");
+    // «Озвучка» с 0.38.0 — синтез телефона: файлов нет, есть голоса языков
+    eq(String.join("|", Screen.modPillTts(false, true, true, true, true)), "выключен|no", "D8 озвучка выключена");
+    eq(String.join("|", Screen.modPillTts(true, false, false, false, false)), "голоса телефона|ok", "D8 ещё грузится — судить рано");
+    eq(String.join("|", Screen.modPillTts(true, true, false, false, false)), "нет синтеза речи|no", "D8 синтез не поднялся");
+    eq(String.join("|", Screen.modPillTts(true, true, true, true, true)), "голоса телефона|ok", "D8 оба голоса есть");
+    eq(String.join("|", Screen.modPillTts(true, true, true, true, false)), "скачать голос: португальский|wait", "D8 нет португальского");
+    eq(String.join("|", Screen.modPillTts(true, true, true, false, true)), "скачать голос: русский|wait", "D8 нет русского");
+    eq(String.join("|", Screen.modPillTts(true, true, true, false, false)), "скачать голоса|wait", "D8 нет обоих");
     eq(String.join("|", Screen.modelsSum(false, false, false, false, 0, 0, 0, 0, 14, 0, 0)), "Проверяю файлы…|", "D7 ещё не проверено");
     eq(String.join("|", Screen.modelsSum(true, true, true, false, 0, 0, 0, 0, 14, 0, 0)), "Проверяю файлы…|dl", "D7 проверка файлов");
     eq(String.join("|", Screen.modelsSum(true, false, true, false, 120_000_000, 305_000_000, 0, 1, 14, 0, 0)), "Качаю · 120.0 из 305.0 МБ|dl", "D7 качаю");

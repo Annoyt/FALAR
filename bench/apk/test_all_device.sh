@@ -30,7 +30,7 @@ ADB=${ADB:-$R/tools/platform-tools/adb}
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity
 F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
 STATE=$STAND; mkdir -p "$STATE"
-SUITES="ui better scroll-day scroll-night busy memo hearing mic modules voices whatsnew audio learn early telemetry wordmarks gloss"
+SUITES="ui better scroll-day scroll-night busy memo hearing mic modules voices voice whatsnew audio learn early telemetry wordmarks gloss"
 FILES="models/learned.json models/phrasebook_user.json word_ru.json known_words.json models/wordlist.json models/openrouter.json"
 say() { printf '%s\n' "$*"; }
 sh() { $ADB shell "$@" < /dev/null 2>/dev/null | tr -d '\r'; }   # не из stdin: внутри «while read» adb съел бы его
@@ -78,7 +78,7 @@ snap() {
   say "  снимок: $(basename "$d") · $(cut -c10- "$d/settings") · модули [$(cat "$d/modules")]"
 }
 restore() {
-  local d f st b c j now nowmods ref cloud rg qual l lst mods m
+  local d f st b c j now nowmods ref cloud rg qual l lst mods m mtq sp rvk
   d=$(cat "$STATE/pending" 2>/dev/null); [ -n "$d" ] && [ -d "$d" ] || return 0
   say "== возврат по снимку $(basename "$d")"
   $ADB shell "am force-stop $PKG"; sleep 1
@@ -99,13 +99,15 @@ restore() {
   ref=$(field разбор < "$d/settings"); cloud=$(sed -n 's/.*облако \([0-9][0-9]*\).*/\1/p' "$d/settings"); rg=$(sed -n 's/.*чтение вслух \([0-9]\).*/\1/p' "$d/settings")
   qual=$(sed -n 's/.*облако точнее \([01]\).*/\1/p' "$d/settings"); l=$(sed -n 's/.*слушаю \([a-z]*\) ·.*/\1/p' "$d/settings")
   mtq=$(sed -n 's/.*перевод точнее \([01]\).*/\1/p' "$d/settings")
+  sp=$(sed -n 's/.*скорость ru \([0-9.]*\) pt \([0-9.]*\).*/ru:\1,pt:\2/p' "$d/settings")      # скорость речи (с 0.38.0)
+  rvk=$(sed -n 's/.*до озвучки \([a-z]*\).*/\1/p' "$d/settings")                                 # «Уточнять до озвучки»
   lst=$(case "$l" in ptru) echo both;; pt|ru) echo $l;; *) echo off;; esac); mods=$(cat "$d/modules")
   wait_idle
   m=$(mark); launch --es settings show; now=$(wl "$m" '🧪 настройки:' 20 | cut -c10-)
   m=$(mark); launch --es modules show; nowmods=$(wl "$m" '🧩 модули сейчас' 30 | grep -oE '\[[a-z,]*\]' | tr -d '[]')
   if [ "$now" != "$(cut -c10- "$d/settings")" ] || [ "$nowmods" != "$mods" ]; then
     launch --es listen $lst --es refineevery $ref --es cloudevery $cloud --es readguard $rg --es cloudprefer $([ "$qual" = 1 ] && echo quality || echo fast) \
-      $([ -n "$mtq" ] && echo "--es mtprefer $([ "$mtq" = 1 ] && echo quality || echo speed)") \
+      $([ -n "$mtq" ] && echo "--es mtprefer $([ "$mtq" = 1 ] && echo quality || echo speed)") $([ -n "$sp" ] && [ "$sp" != "$(printf '%s' "$now" | sed -n 's/.*скорость ru \([0-9.]*\) pt \([0-9.]*\).*/ru:\1,pt:\2/p')" ] && echo "--es ttsspeed $sp") ${rvk:+--es refinevoice $rvk} \
       $([ "$nowmods" != "$mods" ] && [ -n "$mods" ] && echo "--es modules '$mods'"); sleep 4
     m=$(mark); launch --es settings show; now=$(wl "$m" '🧪 настройки:' 20 | cut -c10-)
     [ "$now" = "$(cut -c10- "$d/settings")" ] && say "  настройки и модули — как были: $now" || say "  ВНИМАНИЕ: настройки после возврата «$now», а было «$(cut -c10- "$d/settings")»"
@@ -166,7 +168,8 @@ say; say "== итог ($L)"
 printf '%-14s %5s %5s %8s %6s\n' скрипт PASS FAIL пропуск сек
 awk '{printf "%-14s %5s %5s %8s %6s\n", $1, $2, $3, $4, $5}' "$L/summary"
 say "Falar за прогон: ${crash:+упал — $crash}${crash:-не падал}"
-bad=$(awk '$3 != 0 || $2 == "-" {print $1}' "$L/summary" | paste -sd' ' -)
+# PASS 0 — набор ничего не проверил (10.11: voices без записей Tatoeba в рабочей копии) — тоже не «прошло»
+bad=$(awk '$3 != 0 || $2 == "-" || $2 == "0" {print $1}' "$L/summary" | paste -sd' ' -)
 n=$(printf '%s\n' $SUITES | wc -l); got=$(cat "$L/summary" 2>/dev/null | wc -l)   # итога нет — не «всё прошло»
 [ "$got" -eq "$n" ] || bad="${bad:+$bad · }итог по $got наборам из $n"
 [ -z "$bad" ] && [ -z "$crash" ] && say "ВСЁ ПРОШЛО" || say "НЕ ПРОШЛО: ${bad:-—}${crash:+ · падение Falar}"

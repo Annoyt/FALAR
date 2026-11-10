@@ -472,6 +472,18 @@ ok(txt.includes('пропущено: не тот язык 1, голос не у�
 ok(/#сбой · нехватка памяти · в фоне · java\.lang\.OutOfMemoryError · Engine\.loadMt:412 · 0\.32\.0 · 15\.10 20:31/.test(txt), 'T3 сбой одной строкой, где было приложение');
 ok(T.packetText(T.packet({ ...PKT, asr: { ...PKT.asr, stand: 4800 } })).includes('прогоны стенда — не в счёте: 4800 фраз'), 'T3 прогоны стенда — отдельной строкой');
 ok(T.packetText(T.packet({ v: 1, app: { name: '1', code: 1 }, device: {} })).startsWith('#устройство · Falar 1 (1)\nтелефон без имени'), 'T3 пустое устройство');
+// NPU: фразы там и там, заряд за слушание, отказ с причиной (приложение 0.38.0+)
+const NPK = { ...PKT, asr: { ...PKT.asr, npu: 120, npu_ms: 192, cpu: 6, cpu_ms: 205,
+  batt: { npu_min: 70.5, npu_mah: 211.5, npu_mah_h: 180, cpu_min: 12, cpu_mah: 120, cpu_mah_h: 600, t_max: 37.1, thermal: 1 } },
+  crashes: [{ at: at(15, 20, 31), kind: 'npu', what: 'сбой в библиотеке: SIGSEGV SEGV_MAPERR · #00 ? · #01 libonnxruntime_providers_neuropilot.so',
+    where: 'start', v: '0.38.0', state: 'screen' }] };
+txt = T.packetText(T.packet(NPK));
+ok(txt.includes('#NPU: фраз 120 по 192 мс, на процессоре 6 по 205 мс'), 'T3 NPU: фразы и мс там и там');
+ok(txt.includes('заряд за слушание: NPU 70,5 мин — 211,5 мА·ч (180 мА·ч в час), процессор 12 мин — 120 мА·ч (600 мА·ч в час), батарея до 37,1 °C, нагрев лёгкий'),
+  'T3 NPU: заряд за слушание и нагрев словами');
+ok(/#сбой · NPU не заработал · на экране · сбой в библиотеке: SIGSEGV SEGV_MAPERR · #00 \? · #01 libonnxruntime_providers_neuropilot\.so · start · 0\.38\.0/.test(txt),
+  'T3 отказ NPU — с причиной и стадией');
+ok(!txt.includes('ещё: npu') && !txt.includes('ещё: batt'), 'T3 поля NPU — не в «ещё»');
 
 // приём пакета: база, топик «Телеметрия» (создаётся сам), предел в сутки
 await sdk.db.run('DELETE FROM settings WHERE key = :k', { ':k': 'topic:' + GROUP + ':data' });
