@@ -93,6 +93,18 @@ if [ -n "$NPU" ]; then
   cp $Q/qnn/*.so $OUT/stage/lib/arm64-v8a/
 fi
 [ -z "$MTK" ] || cp $M/libonnxruntime_providers_neuropilot.so $M/libneuron_op_capability.so $OUT/stage/lib/arm64-v8a/
+# Мост sherpa-onnx без синтеза речи (с 0.38.0, tools/sherpa-jni/build-notts.sh): в нём нет eSpeak NG (GPL-3.0) и Piper —
+# озвучку делает синтез телефона (SysTts), а GPL не может лежать в одном APK с закрытыми библиотеками Qualcomm (NPU).
+# Мост — из third_party/falar-jni/notts основной копии (в git его нет), сверяется по sha256: с прежним мостом (Piper,
+# eSpeak) из bench/apk/jni сборка не выходит. Ниже — и проверка, что ни в одной .so нет eSpeak.
+JNI_NOTTS=${JNI_NOTTS:-$MAIN/third_party/falar-jni/notts/libsherpa-onnx-jni.so}
+JNI_NOTTS_SHA=2815e34a723f1b02e4a7a1621d3a4dade3c2da18d8c142c4fa4f758e15cc6bea
+[ -s "$JNI_NOTTS" ] && [ "$(sha256sum "$JNI_NOTTS" | cut -c1-64)" = "$JNI_NOTTS_SHA" ] \
+  || { echo "нет моста sherpa без синтеза речи ($JNI_NOTTS) или он не тот — bash tools/sherpa-jni/build-notts.sh"; exit 1; }
+cp "$JNI_NOTTS" $OUT/stage/lib/arm64-v8a/libsherpa-onnx-jni.so
+for f in $OUT/stage/lib/arm64-v8a/*.so; do
+  [ "$(strings -a $f | grep -i -E '(^|[^a-z])espeak' | wc -l)" = 0 ] || { echo "в $(basename $f) нашлось eSpeak — в APK его быть не должно"; exit 1; }
+done
 # Сомнительные слова (WordConf) помечаются по уверенности распознавателя, а её отдаёт только пересобранный мост JNI
 # (tools/sherpa-jni): в нём конструктор результата с восемью аргументами. С прежним приложение работает, но слов
 # не помечает — об этом предупреждение.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Стенд озвучки на телефоне (TtsBench): фразы bench/tts/phrases.tsv — нынешним Piper (dmitri, faber; внутри eSpeak NG
+# Стенд озвучки на телефоне (TtsBench): фразы bench/tts/phrases.tsv — путём приложения (синтез телефона, SysTts; до 0.38.0 — Piper с eSpeak NG
 # под GPL) и системным синтезом Android (у Redmi — Google, голос без сети). По каждой фразе — время до первого звука и
 # синтез на секунду звука; WAV — на ПК, где их распознаёт parakeet (bench/tts/tts_wer.py): WER = разборчивость.
 #
@@ -16,7 +16,7 @@ if [ -z "$FALAR_STAND_LOCK" ]; then
 fi
 ADB=${ADB:-$R/tools/platform-tools/adb}; [ -x "$ADB" ] || ADB=$(cd "$R/../.." && pwd)/tools/platform-tools/adb
 PKG=app.falar; ACT=$PKG/dev.agenttranslator.MainActivity; F=/sdcard/Android/data/$PKG/files; LOG=$F/at.log
-APK=${1:-$A/Falar.apk}; ENGINES=${ENGINES:-piper,system}
+APK=${1:-$A/Falar.apk}; ENGINES=${ENGINES:-app,system}
 MAIN=$(cd "$(git -C "$R" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 OUT=$MAIN/.stand/tts/run-$(date +%Y%m%d-%H%M%S); mkdir -p $OUT
 say() { echo "$(date +%T) $*"; }

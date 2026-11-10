@@ -61,7 +61,9 @@ public class Engine {
   }
   static final int LAYERS = 6, HEADS = 16, HEAD_DIM = 64;
   final File m; final Log log;
-  public OfflineRecognizer asrPt, asrMulti; public OnlineRecognizer asrRu; public OfflineTts ttsRu, ttsPt; public Vad vad;
+  public OfflineRecognizer asrPt, asrMulti; public OnlineRecognizer asrRu; public Vad vad;
+  /** Голос перевода — синтез телефона (SysTts, с 0.38.0 вместо Piper); null — не поднят или модуль «Озвучка» выключен. */
+  public volatile SysTts sys;
   public OfflineSpeechDenoiser denoiser; public volatile boolean denoiseOn = false;
   /** Распознавание на NPU Snapdragon (Npu, NpuAsr): поднимается в фоне после загрузки (startNpu); пока его нет,
    *  он выключен или фраза длиннее окна 8,3 с — sherpa на процессоре, как раньше. npuState — что с ним, словами. */
@@ -181,27 +183,32 @@ public class Engine {
   /** Поднимать ли голоса при создании движка: модуль «Озвучка» (Modules.TTS). Статическое поле,
    *  как mtVariant: сервис ставит его до конструктора. */
   public static volatile boolean withTts = true;
+  /** Как поднять синтез телефона: ему нужен Context, а у движка его нет — сервис ставит фабрику до конструктора. */
+  public interface TtsOpen { SysTts open(Log log) throws Exception; }
+  public static volatile TtsOpen ttsOpen;
 
-  /** Голоса — отдельно от остального: модуль «Озвучка» включают и выключают на ходу. Нет файлов —
-   *  не ошибка запуска, а приложение без голоса: перевод виден на экране. */
+  /** Голоса — отдельно от остального: модуль «Озвучка» включают и выключают на ходу. Синтеза или голоса нет —
+   *  не ошибка запуска, а приложение без голоса (или без голоса одного языка): перевод виден на экране. */
   public synchronized boolean loadTts() {
-    if (ttsRu != null && ttsPt != null) return true;
-    File ru = new File(m, "tts_ru"), pt = new File(m, "tts_pt");
-    if (!new File(ru, "ru_RU-dmitri-medium.onnx").isFile() || !new File(pt, "pt_BR-faber-medium.onnx").isFile()) {
-      log.log("TTS: файлов голоса нет — перевод только на экране"); return false;
-    }
-    long t = System.nanoTime(), r2 = rssMb();
-    ttsRu = tts(ru, "ru_RU-dmitri-medium.onnx"); ttsPt = tts(pt, "pt_BR-faber-medium.onnx");
-    loadTtsMs = (System.nanoTime() - t) / 1000000; log.log("TTS загружен за " + loadTtsMs + " мс · +" + (rssMb() - r2) + " МБ резидентно");
-    return true;
+    if (sys != null) return sys.any();
+    TtsOpen o = ttsOpen;
+    if (o == null) { log.log("TTS: синтеза речи нет — перевод только на экране"); return false; }
+    long t = System.nanoTime();
+    try { sys = o.open(log); } catch (Throwable e) { log.log("TTS: " + e); sys = null; }
+    loadTtsMs = (System.nanoTime() - t) / 1000000;
+    if (sys == null) return false;
+    log.log("TTS: синтез телефона за " + loadTtsMs + " мс · " + sys.describe());
+    return sys.any();
   }
-  /** Отдать голоса: модуль выключили. Звать, когда очередь озвучки остановлена. */
+  /** Отдать синтез: модуль выключили. Звать, когда очередь озвучки остановлена. */
   public synchronized void releaseTts() {
-    try { if (ttsRu != null) ttsRu.release(); } catch (Throwable ignore) {}
-    try { if (ttsPt != null) ttsPt.release(); } catch (Throwable ignore) {}
-    ttsRu = ttsPt = null;
+    SysTts s = sys; sys = null;
+    if (s != null) s.close();
   }
-  public boolean hasTts() { return ttsRu != null && ttsPt != null; }
+  /** Есть голос хотя бы одного языка. */
+  public boolean hasTts() { SysTts s = sys; return s != null && s.any(); }
+  /** Есть голос этого языка (ru, pt). */
+  public boolean hasVoice(String lang) { SysTts s = sys; return s != null && s.has(lang); }
   static String p(File d, String n) { return new File(d, n).getAbsolutePath(); }
 
   /** Отдать модели. Без этого нативная память (распознавание, синтез, VAD, шесть сессий перевода —
@@ -218,11 +225,10 @@ public class Engine {
     try { if (asrPt != null) asrPt.release(); } catch (Throwable ignore) {}
     try { if (asrMulti != null) asrMulti.release(); } catch (Throwable ignore) {}
     try { if (asrRu != null) asrRu.release(); } catch (Throwable ignore) {}
-    try { if (ttsRu != null) ttsRu.release(); } catch (Throwable ignore) {}
-    try { if (ttsPt != null) ttsPt.release(); } catch (Throwable ignore) {}
+    try { SysTts t = sys; sys = null; if (t != null) t.close(); } catch (Throwable ignore) {}
     try { if (vad != null) vad.release(); } catch (Throwable ignore) {}
     try { if (denoiser != null) denoiser.release(); } catch (Throwable ignore) {}
-    asrPt = asrMulti = null; asrRu = null; ttsRu = ttsPt = null; vad = null; denoiser = null;
+    asrPt = asrMulti = null; asrRu = null; vad = null; denoiser = null;
     for (OrtSession[] ss : mt.values()) for (OrtSession s : ss) try { s.close(); } catch (Throwable ignore) {}
     mt.clear(); tok.clear();
   }
@@ -230,10 +236,6 @@ public class Engine {
     OfflineTransducerModelConfig tr = OfflineTransducerModelConfig.builder().setEncoder(p(d, "encoder.int8.onnx")).setDecoder(p(d, "decoder.int8.onnx")).setJoiner(p(d, "joiner.int8.onnx")).build();
     OfflineModelConfig mc = OfflineModelConfig.builder().setTransducer(tr).setTokens(p(d, "tokens.txt")).setNumThreads(threads).setModelType("nemo_transducer").setDebug(false).build();
     return new OfflineRecognizer(OfflineRecognizerConfig.builder().setFeatureConfig(FeatureConfig.builder().setSampleRate(16000).setFeatureDim(80).build()).setOfflineModelConfig(mc).setDecodingMethod("greedy_search").build());
-  }
-  static OfflineTts tts(File d, String model) {
-    OfflineTtsVitsModelConfig v = OfflineTtsVitsModelConfig.builder().setModel(p(d, model)).setTokens(p(d, "tokens.txt")).setDataDir(p(d, "espeak-ng-data")).build();
-    return new OfflineTts(OfflineTtsConfig.builder().setModel(OfflineTtsModelConfig.builder().setVits(v).setNumThreads(4).setDebug(false).build()).build());
   }
 
   /** Потоковый шумодав для нарезки (DenoiseGate): очищенный звук получает только детектор речи,
@@ -658,11 +660,13 @@ public class Engine {
     }
   }
 
-  /** Португальские числа — словами (Numbers): Piper читает «R$» не как «reais», «8:30» — как восемьсот тридцать,
-   *  «2 pessoas» — «dois» вместо «duas»; и голос, и транскрипция на экране говорят одно и то же. */
-  public GeneratedAudio speak(String lang, String text, OfflineTtsCallback cb) {
+  /** Португальские числа — словами (Numbers): Piper читал «R$» не как «reais», «8:30» — как восемьсот тридцать,
+   *  «2 pessoas» — «dois» вместо «duas»; и голос, и транскрипция на экране говорят одно и то же. Синтез телефона
+   *  числа читает сам, но слова на экране и в голосе так и остаются одинаковыми. Голоса языка нет — пустой звук. */
+  public SysTts.Audio speak(String lang, String text, SysTts.Chunk cb) {
     if (lang.equals("pt")) text = Numbers.ptWords(text);
-    return (lang.equals("ru") ? ttsRu : ttsPt).generateWithCallback(text, 0, 1.0f, cb);
+    SysTts s = sys;
+    return s == null ? new SysTts.Audio(new float[0], 24000, 0) : s.speak(lang, text, cb);
   }
-  public int ttsSampleRate(String lang) { return (lang.equals("ru") ? ttsRu : ttsPt).getSampleRate(); }
+  public int ttsSampleRate(String lang) { SysTts s = sys; return s == null ? 24000 : s.rate(lang); }
 }

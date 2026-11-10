@@ -34,7 +34,7 @@ $ADB wait-for-device
 # Список собираем здесь: приложение чужие пути читать не может, а свой files/ — может.
 say "каталоги (создаёт приложение):"
 LIST=$(mktemp)
-for d in asr_multi mt/pt2ru mt/ru2pt tts_ru tts_pt speaker denoiser llm; do
+for d in asr_multi mt/pt2ru mt/ru2pt speaker denoiser llm; do
   [ -d "$M/$d" ] || continue
   echo "models/$d" >> "$LIST"
   (cd "$M/$d" && find . -type d -not -name . | sed "s|^\./|models/$d/|") >> "$LIST"
@@ -60,8 +60,7 @@ for d in pt2ru ru2pt; do
   push_file "$M/mt/$d/${d}_source_pieces.tsv" "mt/$d/${d}_source_pieces.tsv" req "свой токенизатор: пьесы из source.spm"
   push_file "$M/mt/$d/${d}_vocab.json"        "mt/$d/${d}_vocab.json"        req "vocab.json модели Marian"
 done
-push_dir  "$M/tts_ru" "tts_ru" req "sherpa-onnx vits-piper-ru_RU-dmitri-medium (onnx + tokens.txt + espeak-ng-data)"
-push_dir  "$M/tts_pt" "tts_pt" req "sherpa-onnx vits-piper-pt_BR-faber-medium"
+# Голоса Piper (tts_ru, tts_pt) с 0.38.0 не нужны: озвучка — синтез речи телефона (SysTts), приложение их удаляет.
 push_file "$R/bench/apk/phrasebook_seed.json" "phrasebook.json" req "лежит в репозитории"
 
 say "необязательное:"

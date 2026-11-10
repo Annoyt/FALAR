@@ -96,10 +96,12 @@ javac --release 11 -nowarn -cp "$J:$AJ" -d "$OUT" \
   $A/src/dev/agenttranslator/VoiceMsg.java $A/test/VoiceMsgTest.java \
   $A/src/dev/agenttranslator/MicPair.java $A/test/MicPairTest.java \
   $A/src/dev/agenttranslator/WordConf.java $A/test/WordConfTest.java \
-  $A/src/dev/agenttranslator/Licenses.java $A/test/LicensesTest.java
+  $A/src/dev/agenttranslator/Licenses.java $A/test/LicensesTest.java \
+  $A/src/dev/agenttranslator/TtsVoices.java $A/test/TtsVoicesTest.java
 fail=0
 java -cp "$OUT:$J" dev.agenttranslator.ModelStoreTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.LicensesTest "$R" "$A/jni/arm64-v8a" || fail=1
+java -cp "$OUT:$J" dev.agenttranslator.TtsVoicesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.HeardTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.UpdatesTest || fail=1
 java -cp "$OUT:$J" dev.agenttranslator.BriefTest || fail=1

@@ -374,6 +374,10 @@ public class TranslatorService extends Service {
       }
       // Заменённое уже скачанным и сверенным — убрать до загрузки движков: они возьмут новый путь.
       store.cleanObsolete();
+      // С 0.38.0 голос — синтез телефона (SysTts): голоса Piper и данные eSpeak NG (tts_ru, tts_pt, ~150 МБ) не нужны
+      long freed = 0;
+      for (String d : new String[]{"tts_ru", "tts_pt"}) { freed += rmTree(new File(modelsDir, d)); freed += rmTree(new File(modelsDir, d + ".zip")); freed += rmTree(new File(modelsDir, d + ".zip.part")); }
+      if (freed > 0) log("🗑 голоса Piper больше не нужны (озвучка — синтез телефона): удалено " + ModelStore.mb(freed) + " МБ");
       ModelStore.State st = store.state(); Listener l = listener; if (l != null) main.post(() -> l.onModels(st));
       if (st.upgrade > 0) log("📦 можно облегчить перевод: скачать " + ModelStore.mb(st.upgradeBytes) + " МБ — «Система» → «облегчить перевод»; до тех пор работает прежний путь");
       if (st.autoMissing > 0) log("📦 модулям не хватает " + ModelStore.mb(st.autoBytes) + " МБ: " + whatFetch(store.autos()) + " — докачается само по разрешённой сети");
@@ -393,6 +397,7 @@ public class TranslatorService extends Service {
       Engine.mtVariant = getSharedPreferences("at", MODE_PRIVATE).getString("mt_variant", "");
       Engine.mtBeam = getSharedPreferences("at", MODE_PRIVATE).getBoolean("mt_quality", true) ? Engine.MT_BEAM_QUALITY : 1;
       Engine.withTts = mod(Modules.TTS);
+      Engine.ttsOpen = lg -> SysTts.open(this, chosenVoices(), lg::log);
       readSoundPrefs();
       earlyStart();
       // Ход загрузки — экрану: этапы «распознавание · перевод · словарь и разговоры · озвучка»,
@@ -551,7 +556,11 @@ public class TranslatorService extends Service {
     }
     if (System.currentTimeMillis() - since > 100) tsv("early", "tts_after", "" + (System.currentTimeMillis() - since));
     try {
-      if (mod(Modules.TTS)) { busy("load", L.k("озвучка"), nStages - 1, nStages); eng.loadTts(); }
+      if (mod(Modules.TTS)) {
+        busy("load", L.k("озвучка"), nStages - 1, nStages); eng.loadTts(); voiceTag();
+        for (String lg : SysTts.LANGS) if (!eng.hasVoice(lg)) noVoice(lg);      // скажем сразу, а не на первой реплике
+        Listener l0 = listener; if (l0 != null) main.post(l0::onModules);
+      }
       else log("TTS не загружается: модуль «Озвучка» выключен");
     } catch (Throwable t) { Log.e(TAG, "tts", t); log("TTS: " + t); }
     finally { ttsLoading = false; }
@@ -1170,7 +1179,7 @@ public class TranslatorService extends Service {
             String txt = "ru".equals(lang) ? "Русский. Это должно звучать в наушнике."
                                            : "Português. Isto deve sair no alto-falante.";
             log("🔉 " + lang + " → " + ("pt".equals(lang) ? "динамик" : "наушник"));
-            GeneratedAudio ga = eng.speak(lang, txt, chunk -> { writeOut(chunk, chunk.length, lang); return 1; });
+            SysTts.Audio ga = eng.speak(lang, txt, chunk -> { writeOut(chunk, chunk.length, lang); return 1; });
             Thread.sleep((long) (ga.getSamples().length * 1000.0 / rate) + 1500);
           }
         }
@@ -1206,7 +1215,7 @@ public class TranslatorService extends Service {
         for (String[] x : say) {
           int rate = eng.ttsSampleRate(x[0]); ensureTrack(rate);
           log("👂 " + x[0] + " → " + ("off".equals(split) ? "оба уха" : ("pt".equals(x[0]) == "pt-left".equals(split) ? "левое" : "правое")));
-          GeneratedAudio ga = eng.speak(x[0], x[1], chunk -> { writeOut(chunk, chunk.length, x[0]); return 1; });
+          SysTts.Audio ga = eng.speak(x[0], x[1], chunk -> { writeOut(chunk, chunk.length, x[0]); return 1; });
           Thread.sleep((long) (ga.getSamples().length * 1000.0 / rate) + 1200);
         }
         log("👂 проверка закончена");
@@ -1226,7 +1235,7 @@ public class TranslatorService extends Service {
         Thread.sleep(1200); double before = probeRms(1000);
         final long[] frames = {0}; final long[] firstWrite = {0};
         long t0 = System.nanoTime();
-        GeneratedAudio ga = eng.speak("ru", phrase, chunk -> {
+        SysTts.Audio ga = eng.speak("ru", phrase, chunk -> {
           if (firstWrite[0] == 0) firstWrite[0] = System.nanoTime();
           track.write(chunk, 0, chunk.length, AudioTrack.WRITE_BLOCKING);
           frames[0] += chunk.length;
@@ -1793,6 +1802,48 @@ public class TranslatorService extends Service {
   public boolean cloudReady() { return mod(Modules.CLOUD) && cloud != null && cloud.ready; }
   /** Голос есть: модуль «Озвучка» включён и голоса подняты. */
   public boolean voice() { Engine e = eng; return mod(Modules.TTS) && e != null && e.hasTts(); }
+  /** Удалить файл или каталог целиком; сколько байт освободилось. */
+  static long rmTree(File f) {
+    if (!f.exists()) return 0;
+    long n = 0; File[] k = f.isDirectory() ? f.listFiles() : null;
+    if (k != null) for (File c : k) n += rmTree(c);
+    else n += f.length();
+    f.delete();
+    return n;
+  }
+  /** Голоса озвучки, выбранные человеком («Настройки» → «Голоса»): имя голоса синтеза телефона по языку. */
+  java.util.Map<String, String> chosenVoices() {
+    SharedPreferences sp = getSharedPreferences("at", MODE_PRIVATE); java.util.Map<String, String> m = new java.util.HashMap<>();
+    for (String l : SysTts.LANGS) { String v = sp.getString("tts_voice_" + l, null); if (v != null) m.put(l, v); }
+    return m;
+  }
+  /** Синтез телефона, если поднят. */
+  public SysTts sysTts() { Engine e = eng; return e == null ? null : e.sys; }
+  /** Сменить голос языка и произнести им пробную фразу (выбор в «Голосах»). */
+  public void setTtsVoice(String lang, String name) {
+    getSharedPreferences("at", MODE_PRIVATE).edit().putString("tts_voice_" + lang, name).apply();
+    worker.submit(() -> {
+      SysTts s = sysTts(); if (s == null) return;
+      synchronized (tts) { s.setVoice(lang, name); }
+      voiceTag(); log("🔊 голос " + lang + ": " + s.voiceName(lang));
+      try { speakOut(lang, "ru".equals(lang) ? "Здравствуйте! Так звучит перевод." : "Olá! É assim que soa a tradução."); } catch (Throwable t) { log("🔊 " + t); }
+      Listener l = listener; if (l != null) main.post(l::onModules);
+    });
+  }
+  /** Голоса языка нет на телефоне: перевод на экране, подсказка — раз за запуск на язык. */
+  final java.util.Set<String> noVoiceSaid = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  void noVoice(String lang) {
+    if (!noVoiceSaid.add(lang)) return;
+    SysTts s = sysTts();
+    String why = s == null ? L.t("синтез речи телефона не поднялся") : s.missing.getOrDefault(lang, "");
+    hint(L.f("🔇 нет голоса для языка %s (%s) — «Настройки» → «Голоса»", "ru".equals(lang) ? L.t("русский") : L.t("португальский"), L.t(why)));
+    log("🔇 голоса " + lang + " нет: " + why + " — перевод только на экране");
+  }
+  /** Кэш озвученных фраз — под нынешние голоса: звук прежнего голоса (или Piper до 0.38) из кэша не играет. */
+  void voiceTag() {
+    SysTts s = sysTts(); Phrasebook p = pb;
+    if (p != null && s != null) p.audioVoice(s.engine + "|" + s.voiceName("ru") + "|" + s.voiceName("pt"));
+  }
   /** Голоса ещё грузятся (loadTtsLate): перевод не ждёт их, а встаёт в очередь озвучки. */
   boolean ttsSoon() { return ttsLoading && mod(Modules.TTS) && eng != null; }
   long totalRam() {
@@ -1854,7 +1905,7 @@ public class TranslatorService extends Service {
   void activate(String m) {
     if (eng == null) return;
     switch (m) {
-      case Modules.TTS: if (!eng.hasTts() && eng.loadTts()) log("🔊 озвучка подключена"); break;
+      case Modules.TTS: if (!eng.hasTts() && eng.loadTts()) { voiceTag(); log("🔊 озвучка подключена"); } break;
       case Modules.SPEAKER: if (spk == null || !spk.ready) { spk = new Speaker(modelsDir, true); if (spk.ready) log("🎤 отпечаток голоса подключён · голосов в разговоре: " + (chats == null ? 0 : chats.voices.size())); } break;
       case Modules.CORPUS: if (pb != null && pb.minedCount == 0 && new File(modelsDir, "phrasebook_tatoeba.tsv").exists()) pb.loadMined(new File(modelsDir, "phrasebook_tatoeba.tsv")); break;
       case Modules.DENOISE: log(vadDnLine()); break;
@@ -3274,7 +3325,7 @@ public class TranslatorService extends Service {
       if (vc && bt) continue;
       if (!parts.containsKey(k)) {
         final List<float[]> ps = new ArrayList<>();
-        GeneratedAudio ga = eng.speak(AEC_PHRASES[k][0], AEC_PHRASES[k][1], chunk -> { ps.add(chunk.clone()); return 1; });
+        SysTts.Audio ga = eng.speak(AEC_PHRASES[k][0], AEC_PHRASES[k][1], chunk -> { ps.add(chunk.clone()); return 1; });
         parts.put(k, ps); fmt.put(k, new int[]{ga.getSampleRate(), ga.getSamples().length});
         new DenoisedAudio(ga.getSamples(), ga.getSampleRate()).save(new File(dir, k == 0 ? "aec_ref.wav" : "aec_ref" + k + ".wav").getAbsolutePath());
         log(String.format(Locale.ROOT, "🔁 эхо-стенд: фраза %d · %s · %.1f с, %d Гц", k, AEC_PHRASES[k][0], ga.getSamples().length / (double) ga.getSampleRate(), ga.getSampleRate()));
@@ -3584,12 +3635,13 @@ public class TranslatorService extends Service {
   /** Произнести готовый текст (для «Улучшить»: перевод уже есть, нужен только звук). */
   void speakOut(String tgt, String text) throws Exception {
     if (!voice()) { hint(L.t("🔇 озвучка выключена — «Настройки» → «Модули»")); return; }
+    if (!eng.hasVoice(tgt)) { noVoice(tgt); return; }
     synchronized (tts) {
     if (!voice()) return;
     int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     final boolean dup = btDuplex(); if (!dup) muteUntil = Long.MAX_VALUE;
     double sec = 0; final long[] w0 = {0};
-    try { GeneratedAudio ga = eng.speak(tgt, text, chunk -> { if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
+    try { SysTts.Audio ga = eng.speak(tgt, text, chunk -> { if (bargeStop) return 0; if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
       sec = ga.getSamples().length / (double) rate;
     } finally { if (!phraseEnd()) { long until = muteAfter(w0[0] == 0 ? System.currentTimeMillis() : w0[0], sec) + pausedMs; playEndMs += pausedMs; if (!dup) muteUntil = until; } }
     }
@@ -4885,6 +4937,7 @@ public class TranslatorService extends Service {
     synchronized (tts) {
     if (!voice()) return 0;                            // выключили, пока ждали очередь
     if (!VoiceOut.voice(voiceWhat, tgt, headphonesOut())) return 0;   // наушники подключили или выбор сменился, пока ждали
+    if (!eng.hasVoice(tgt)) { noVoice(tgt); return 0; }               // голоса языка нет на телефоне: перевод на экране
     int rate = eng.ttsSampleRate(tgt); phraseBegin(rate);
     // В наушник — значит озвучка не попадает в комнату и микрофон можно не глушить:
     // собеседник продолжает говорить, пока в ухе идёт перевод. Замер протечки: −13…+0,1 дБ,
@@ -4896,7 +4949,7 @@ public class TranslatorService extends Service {
     float[] cached = pb.audio(dir, mt);
     try {                                  // без finally одно исключение в синтезе делало приложение глухим навсегда
       if (cached != null) { if (first != null && first[0] == 0) first[0] = System.nanoTime(); w0[0] = System.currentTimeMillis(); phraseSounds(tgt); writeOut(cached, cached.length, tgt); audioS = cached.length / (double) rate; }
-      else { GeneratedAudio ga = eng.speak(tgt, mt, chunk -> { if (bargeStop) return 0; if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
+      else { SysTts.Audio ga = eng.speak(tgt, mt, chunk -> { if (bargeStop) return 0; if (first != null && first[0] == 0) first[0] = System.nanoTime(); if (w0[0] == 0) { w0[0] = System.currentTimeMillis(); phraseSounds(tgt); } writeOut(chunk, chunk.length, tgt); return bargeStop ? 0 : 1; });
         audioS = ga.getSamples().length / (double) rate; if (cacheable && !bargeStop) pb.putAudio(dir, mt, ga.getSamples(), rate); }
     } finally {
       long now = System.currentTimeMillis(), until = muteAfter(w0[0] == 0 ? now : w0[0], audioS);

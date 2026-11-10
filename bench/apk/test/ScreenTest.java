@@ -149,6 +149,14 @@ public class ScreenTest {
     eq(Screen.modSize(950_000), "1 МБ", "D6 от 0,95 МБ — целыми");
     eq(String.join("|", Screen.modPillApk(true)), "при шуме|ok", "D7 шумоподавление включено — работает при шуме");
     eq(String.join("|", Screen.modPillApk(false)), "выключен|no", "D7 выключено");
+    // «Озвучка» с 0.38.0 — синтез телефона: файлов нет, есть голоса языков
+    eq(String.join("|", Screen.modPillTts(false, true, true, true, true)), "выключен|no", "D8 озвучка выключена");
+    eq(String.join("|", Screen.modPillTts(true, false, false, false, false)), "голоса телефона|ok", "D8 ещё грузится — судить рано");
+    eq(String.join("|", Screen.modPillTts(true, true, false, false, false)), "нет синтеза речи|no", "D8 синтез не поднялся");
+    eq(String.join("|", Screen.modPillTts(true, true, true, true, true)), "голоса телефона|ok", "D8 оба голоса есть");
+    eq(String.join("|", Screen.modPillTts(true, true, true, true, false)), "скачать голос: португальский|wait", "D8 нет португальского");
+    eq(String.join("|", Screen.modPillTts(true, true, true, false, true)), "скачать голос: русский|wait", "D8 нет русского");
+    eq(String.join("|", Screen.modPillTts(true, true, true, false, false)), "скачать голоса|wait", "D8 нет обоих");
     eq(String.join("|", Screen.modelsSum(false, false, false, false, 0, 0, 0, 0, 14, 0, 0)), "Проверяю файлы…|", "D7 ещё не проверено");
     eq(String.join("|", Screen.modelsSum(true, true, true, false, 0, 0, 0, 0, 14, 0, 0)), "Проверяю файлы…|dl", "D7 проверка файлов");
     eq(String.join("|", Screen.modelsSum(true, false, true, false, 120_000_000, 305_000_000, 0, 1, 14, 0, 0)), "Качаю · 120.0 из 305.0 МБ|dl", "D7 качаю");

@@ -6,7 +6,6 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
 import com.k2fsa.sherpa.onnx.DenoisedAudio;
-import com.k2fsa.sherpa.onnx.GeneratedAudio;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -23,12 +22,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-/** Стенд озвучки (владелец 10.11: «проверяй озвучки» — замена Piper с eSpeak NG под GPL, пока его нет в одном APK с
- *  библиотеками Qualcomm). Те же фразы — нынешним Piper (Engine.speak: dmitri, faber) и системным синтезом Android
- *  (TextToSpeech: голос языка без сети, лучшего качества). По каждой фразе: время до первого звука, всё время синтеза,
+/** Стенд озвучки (владелец 10.11: «проверяй озвучки» — замена Piper с eSpeak NG под GPL; до 0.38.0 здесь был и
+ *  Piper — results/2026-11-10-tts-system.md). Те же фразы — путём приложения (Engine.speak, SysTts) и напрямую
+ *  системным синтезом Android (TextToSpeech: голос языка без сети, лучшего качества или каждый). По каждой фразе: время до первого звука, всё время синтеза,
  *  длина звука; звук — в WAV: разборчивость считает ПК (bench/tts/tts_wer.py — parakeet по синтезу, WER против текста).
  *
- *  Только стенд: --es ttsbench ФАЙЛ (в каталоге приложения: «язык<TAB>текст» в строке) [--es ttsengines piper,system]
+ *  Только стенд: --es ttsbench ФАЙЛ (в каталоге приложения: «язык<TAB>текст» в строке) [--es ttsengines app,system]
  *  [--es ttsrate 1.15]. Движок system-all — каждый голос языка без сети, а не только первый лучший (выбор голоса).
  *  Итог — tts_bench/results.tsv и WAV там же; голоса системы — tts_bench/voices.tsv. */
 final class TtsBench {
@@ -60,7 +59,7 @@ final class TtsBench {
       out.println("engine\tvoice\tlang\tn\tchars\tfirst_ms\ttotal_ms\taudio_ms\trate\tfile\ttext");
       for (String e : engines.split(",")) {
         e = e.trim();
-        if (e.equals("piper")) piper(eng, ps, dir, out, log);
+        if (e.equals("app")) app(eng, ps, dir, out, log);
         else if (e.equals("system")) system(ctx, ps, dir, out, false, rate, log);
         else if (e.equals("system-all")) system(ctx, ps, dir, out, true, rate, log);
         else log.accept("🔊 стенд озвучки: не знаю движка " + e);
@@ -70,28 +69,32 @@ final class TtsBench {
     log.accept("🔊 стенд озвучки: готово — " + dir);
   }
 
-  static void piper(Engine eng, List<Phrase> ps, File dir, PrintWriter out, Consumer<String> log) {
-    if (eng == null || !eng.hasTts()) { log.accept("🔊 Piper: голоса не загружены"); return; }
-    for (String lang : new String[]{"ru", "pt"}) {
-      List<Phrase> mine = new ArrayList<>(); for (Phrase p : ps) if (p.lang.equals(lang)) mine.add(p);
-      if (mine.isEmpty()) continue;
-      String voice = lang.equals("ru") ? "piper dmitri" : "piper faber";
-      eng.speak(lang, mine.get(0).text, c -> 1);                      // прогрев
-      List<long[]> stat = new ArrayList<>();
-      for (int k = 0; k < mine.size(); k++) {
-        Phrase p = mine.get(k);
+  /** Путь приложения: Engine.speak — синтез телефона (SysTts) с выбранными голосами, срезом тихого хвоста и той же
+   *  частотой, что у дорожки. Языки вперемешку (ru, pt, ru…), как в разговоре: видно, стоит ли смена голоса между
+   *  фразами времени. Первые две фразы (по одной на язык) — прогрев. */
+  static void app(Engine eng, List<Phrase> ps, File dir, PrintWriter out, Consumer<String> log) {
+    if (eng == null || !eng.hasTts()) { log.accept("🔊 приложение: озвучки нет"); return; }
+    List<Phrase> ru = new ArrayList<>(), pt = new ArrayList<>();
+    for (Phrase p : ps) (p.lang.equals("ru") ? ru : pt).add(p);
+    eng.speak("ru", "Да.", c -> 1); eng.speak("pt", "Sim.", c -> 1);
+    java.util.Map<String, List<long[]>> stat = new java.util.HashMap<>();
+    for (int k = 0; k < Math.max(ru.size(), pt.size()); k++) {
+      for (List<Phrase> l : java.util.Arrays.asList(ru, pt)) {
+        if (k >= l.size()) continue;
+        Phrase p = l.get(k);
         long t0 = System.nanoTime(); final long[] first = {0};
-        GeneratedAudio ga = eng.speak(lang, p.text, c -> { if (first[0] == 0) first[0] = System.nanoTime(); return 1; });
+        SysTts.Audio a = eng.speak(p.lang, p.text, c -> { if (first[0] == 0) first[0] = System.nanoTime(); return 1; });
         long t1 = System.nanoTime();
-        int rate = ga.getSampleRate(); long audioMs = ga.getSamples().length * 1000L / rate;
-        String name = String.format(Locale.ROOT, "piper_%s_%02d.wav", lang, k);
-        new DenoisedAudio(ga.getSamples(), rate).save(new File(dir, name).getAbsolutePath());
-        long fm = (first[0] - t0) / 1_000_000, tm = (t1 - t0) / 1_000_000;
-        out.println("piper\t" + voice + "\t" + lang + "\t" + k + "\t" + p.text.length() + "\t" + fm + "\t" + tm + "\t" + audioMs + "\t" + rate + "\t" + name + "\t" + p.text);
-        stat.add(new long[]{fm, tm, audioMs});
+        int rate = a.getSampleRate(); long audioMs = a.getSamples().length * 1000L / rate;
+        String name = String.format(Locale.ROOT, "app_%s_%02d.wav", p.lang, k);
+        new DenoisedAudio(a.getSamples(), rate).save(new File(dir, name).getAbsolutePath());
+        long fm = first[0] == 0 ? -1 : (first[0] - t0) / 1_000_000, tm = (t1 - t0) / 1_000_000;
+        String voice = eng.sys == null ? "?" : eng.sys.engine + ":" + eng.sys.voiceName(p.lang);
+        out.println("app\t" + voice + "\t" + p.lang + "\t" + k + "\t" + p.text.length() + "\t" + fm + "\t" + tm + "\t" + audioMs + "\t" + rate + "\t" + name + "\t" + p.text);
+        stat.computeIfAbsent(p.lang, x -> new ArrayList<>()).add(new long[]{fm, tm, audioMs});
       }
-      log.accept("🔊 " + voice + ": " + summary(stat));
     }
+    for (String lang : new String[]{"ru", "pt"}) if (stat.containsKey(lang)) log.accept("🔊 приложение " + lang + ": " + summary(stat.get(lang)));
   }
 
   /** Системный синтез: голос языка без сети (лучший по качеству, потом по задержке); звук — через synthesizeToFile,
