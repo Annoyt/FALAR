@@ -129,7 +129,9 @@ swipe_up() { front && $ADB shell "input swipe $((W / 2)) $((H * 7 / 10)) $((W / 
 swipe_down() { front && $ADB shell "input swipe $((W / 2)) $((H * 3 / 10)) $((W / 2)) $((H * 7 / 10)) 350"; sleep 1.2; }
 # Листать, пока не появится: сначала вниз, потом вверх до самого начала.
 seek() { local i; dump; has "$@" && return 0
-  for i in 1 2 3 4 5; do swipe_up; dump; has "$@" && return 0; done
+  # вниз — до 9 листаний: настройки растут (0.38.0 — строка «Голоса»), и «Написать разработчику» под версией
+  # перестало попадать в 5 (U10, Redmi 10.11)
+  for i in 1 2 3 4 5 6 7 8 9; do swipe_up; dump; has "$@" && return 0; done
   for i in 1 2 3 4 5 6 7 8 9 10; do swipe_down; dump; has "$@" && return 0; done; return 1; }
 ime() { sh "dumpsys input_method" | grep -q 'mInputShown=true'; }
 # Системные полосы по dumpsys window, px экрана: «низ строки состояния, верх полосы навигации, верх
