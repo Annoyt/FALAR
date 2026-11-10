@@ -95,6 +95,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
+    keepScreen(getIntent());
     UiLang.init(this);   // язык надписей — до того, как строятся экраны: они берут тексты через L
     look = new Look(this); rows = new Rows(this, look);
     // Камера занимает много памяти, и пока она открыта, система выгружает Falar; снимок потом
@@ -3219,7 +3220,17 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     c.uiMode = themeTest == 1 ? android.content.res.Configuration.UI_MODE_NIGHT_NO : android.content.res.Configuration.UI_MODE_NIGHT_YES;
     applyOverrideConfiguration(c);
   }
+  /** Стенд: --es keepscreen 1|0 — не гасить экран, пока Falar на виду (FLAG_KEEP_SCREEN_ON). Для проверок по отладке
+   *  через Wi-Fi: телефон не на зарядке и гаснет за минуты, а слушать Android даёт только Falar, открытому на
+   *  разблокированном экране (POCO владельца, 10.11). Настройки телефона не трогаются; ушло окно — ушёл и запрет. */
+  void keepScreen(Intent i) {
+    if (i == null || !i.hasExtra("keepscreen")) return;
+    if ("1".equals(i.getStringExtra("keepscreen"))) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  }
+
   @Override protected void onNewIntent(Intent i) { super.onNewIntent(i);
+    keepScreen(i);
     if (voiceIntent(i)) return;
     standStart = i.getAction() == null && i.getExtras() != null && !i.getExtras().isEmpty();
     if (i.hasExtra("uitheme")) {

@@ -48,5 +48,12 @@
     <!-- Распознавание на NPU — в своём процессе (NpuService, владелец 10.11): падение дополнения NPU (код на C++) убивает
          только его, приложение распознаёт процессором дальше и знает причину. -->
     <service android:name="dev.agenttranslator.NpuService" android:exported="false" android:process=":npu"/>
+    <!-- Библиотеки NPU от производителя телефона. С targetSdk 31+ Android отдаёт приложению библиотеки из
+         /system/etc/public.libraries-<фирма>.txt, только если они названы здесь: без этого dlopen их не находит
+         («NeuronApi error: unable to open library libneuronusdk_adapter.mtk.so», POCO X7 Pro 10.11), и дополнение
+         NeuroPilot падает на пустом указателе (SIGSEGV, #00 <unknown>). libcdsprpc.so — связь с DSP Snapdragon, без неё
+         QNN HTP не поднимается. required="false": на телефонах без них Falar ставится и работает как обычно. -->
+    <uses-native-library android:name="libneuronusdk_adapter.mtk.so" android:required="false"/>
+    <uses-native-library android:name="libcdsprpc.so" android:required="false"/>
   </application>
 </manifest>
