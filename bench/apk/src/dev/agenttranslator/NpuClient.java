@@ -59,7 +59,7 @@ final class NpuClient implements AutoCloseable {
 
   /** Поднять процесс NPU и узнать его pid. BIND_ALLOW_OOM_MANAGEMENT: при нехватке памяти система закрывает сначала
    *  его, а не приложение (и он не «спящий» — не замораживается, как фоновые). */
-  static NpuClient connect(Context c, long waitMs) throws Exception {
+  static NpuClient connect(Context c, long waitMs, Listener listener) throws Exception {
     final CountDownLatch l = new CountDownLatch(1);
     final IBinder[] got = {null};
     ServiceConnection conn = new ServiceConnection() {
@@ -85,6 +85,7 @@ final class NpuClient implements AutoCloseable {
       throw e;
     } finally { in.recycle(); out.recycle(); }
     NpuClient nc = new NpuClient(c, conn, b, pid);
+    nc.listener = listener;                              // до linkToDeath: смерть сразу после связи тоже с причиной
     b.linkToDeath(nc.dr, 0);
     return nc;
   }

@@ -502,11 +502,12 @@ public class TranslatorService extends Service {
       log("⚡ NPU на этой версии и прошивке уже отказал (" + failed + ") — распознаёт процессор; снова попробую после обновления");
       return;
     }
-    if (sp.getString("npu_try", "").startsWith(id + "|")) {
-      // подъём графа начался и не кончился вместе со всем приложением: телефон перезагрузился или Falar закрыли
-      npuFailed(id, "start", "подъём графа оборвался вместе с приложением (перезагрузка телефона или закрытие Falar)");
-      return;
-    }
+    // Подъём графа начался и не кончился вместе со всем приложением: Falar закрыли или телефон перезагрузился (так было
+    // на POCO 09.11, когда граф не влез в память). Раз — могли просто закрыть: ещё попытка; дважды — отказ.
+    String tried = sp.getString("npu_try", "");
+    int tries = tried.startsWith(id + "|") ? Integer.parseInt(tried.substring(id.length() + 1)) : 0;
+    if (tries >= 2) { npuFailed(id, "start", "подъём графа дважды оборвался вместе с приложением (закрытие Falar или перезагрузка телефона)"); return; }
+    if (tries == 1) log("⚡ NPU: прошлый подъём графа оборвался вместе с приложением — пробую ещё раз");
     final File ctx = new File(getNoBackupFilesDir(), chip == Npu.Chip.MEDIATEK ? "npu/encoder-mtk-ctx.onnx" : "npu/encoder-ctx.onnx");
     // Граф — под эту версию и прошивку: сохранённый от прежней загрузился бы и молча считал бы прежней моделью.
     if (!id.equals(sp.getString("npu_ctx", ""))) { NpuAsr.deleteCtx(ctx); sp.edit().remove("npu_ctx").remove("npu_ok").apply(); }
@@ -524,7 +525,7 @@ public class TranslatorService extends Service {
     final boolean checked = id.equals(sp.getString("npu_ok", ""));
     log((ctx.exists() ? "⚡ NPU: поднимаю сохранённый граф" : "⚡ NPU: собираю граф (первый раз на этой версии — до двух минут), пока распознаёт процессор")
         + " · " + (Npu.verified(chip, Npu.socModel()) ? "чип проверен" : "чип не проверен — пробую в отдельном процессе"));
-    sp.edit().putString("npu_try", id + "|1").commit();      // commit: запись до возможного падения всего телефона
+    sp.edit().putString("npu_try", id + "|" + (tries + 1)).commit();   // commit: запись до возможного падения телефона
     Thread t = new Thread(() -> npuUp(e, chip, lib, ctx, id, checked), "npu");
     t.setPriority(Thread.MIN_PRIORITY); t.start();
   }
@@ -534,8 +535,7 @@ public class TranslatorService extends Service {
     long t0 = System.nanoTime();
     NpuClient c = null;
     try {
-      c = NpuClient.connect(this, 30_000);
-      c.listener = this::npuEnded;
+      c = NpuClient.connect(this, 30_000, this::npuEnded);
       c.guard(NPU_GUARD_FREE, NPU_BUILD_MAX_MS);
       java.util.Map<String, String> opts = chip == Npu.Chip.MEDIATEK ? Npu.neuronOptions(lib) : Npu.qnnOptions(lib);
       long ms = c.start(chip == Npu.Chip.MEDIATEK ? "neuron" : "qnn", new File(modelsDir, "asr_multi"), new File(modelsDir, "npu"),
