@@ -877,6 +877,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
   /** Спросить о статистике один раз: не на экране первой настройки и не поверх «Что нового». Закрыли, не
    *  ответив, — спросим при следующем запуске. */
   void maybeAskTelemetry() {
+    if (npuAskDue()) { maybeAskNpuData(); return; }           // NPU не заработал — спросить о статистике в его окне
     if (!Telemetry.ASK.equals(prefs.getString("telemetry", Telemetry.ASK)) || screen == 4 || newsBox != null || isFinishing()) return;
     new android.app.AlertDialog.Builder(this)
         .setTitle(L.t("Помочь сделать Falar лучше?"))
@@ -886,6 +887,33 @@ public class MainActivity extends Activity implements TranslatorService.Listener
         .setPositiveButton(L.t("отправлять"), (d, w) -> setTele(Telemetry.YES))
         .setNegativeButton(L.t("не отправлять"), (d, w) -> setTele(Telemetry.NO))
         .setNeutralButton(L.t("подробнее"), (d, w) -> aboutDialog())
+        .show();
+  }
+  /** MediaTek: NPU не заработал — попросить статистику (владелец 10.11: «для MEDIATEK делай предупреждение, что может
+   *  не получиться, но если вы нажмёте „отправлять“, мы в новых релизах исправим»). Falar сам пробует NPU на каждой
+   *  версии и прошивке; не вышло — распознаёт процессором, а причина (стадия, ошибка, сигнал и кадры падения) — в
+   *  журнале и, с согласием, в статистике. Окно — раз на версию и прошивку, где NPU отказал (npu_ask), если статистика
+   *  ещё не включена; не поверх первой настройки и «Что нового». Разрешили — причина этого отказа уходит сразу
+   *  (teleNpuLast). */
+  boolean npuAskShown;
+  boolean npuAskDue() {
+    TranslatorService s = svc;
+    if (s == null || !Npu.mediatek() || npuAskShown || Telemetry.YES.equals(prefs.getString("telemetry", Telemetry.ASK))) return false;
+    String id = s.npuId();
+    return TranslatorService.npuFailWhy(prefs, id) != null && !id.equals(prefs.getString("npu_ask", ""));
+  }
+  void maybeAskNpuData() {
+    if (!npuAskDue() || screen == 4 || newsBox != null || isFinishing()) return;
+    npuAskShown = true;
+    prefs.edit().putString("npu_ask", svc.npuId()).apply();
+    final boolean asked = !Telemetry.ASK.equals(prefs.getString("telemetry", Telemetry.ASK));
+    new android.app.AlertDialog.Builder(this)
+        .setTitle(L.t("NPU не заработал"))
+        .setMessage(L.t("На этом телефоне распознавание на NPU не получилось. Falar распознаёт процессором, как обычно, — ничего "
+            + "не потеряно. NPU MediaTek мы проверили не на всех телефонах; чтобы исправить это в новых версиях, нужна причина "
+            + "сбоя. Разрешите отправлять разработчику анонимную статистику: причина войдёт в неё, звук и тексты разговоров не уходят."))
+        .setPositiveButton(L.t("отправлять"), (d, w) -> { setTele(Telemetry.YES); TranslatorService t = svc; if (t != null) t.teleNpuLast(); })
+        .setNegativeButton(L.t("не отправлять"), (d, w) -> { if (!asked) setTele(Telemetry.NO); })
         .show();
   }
   /** «О приложении»: что это, что уходит в интернет, отказ от ответственности, связь. */
@@ -2519,7 +2547,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
       Switch swNpu = r.sw(); swNpu.setChecked(prefs.getBoolean(Npu.PREF, true));
       r.row(c5, app.falar.R.drawable.ic_spark, L.t("Распознавание на NPU"), Npu.snapdragon()
           ? L.t("быстрее на Snapdragon · Qualcomm не советует для биометрии и обучения")
-          : L.t("на MediaTek: меньше расход батареи и нагрев, точнее"), swNpu);
+          : L.t("на MediaTek: меньше расход батареи и нагрев · может не заработать — включите «Статистику для разработчика», и мы исправим это в новых версиях"), swNpu);
       swNpu.setOnCheckedChangeListener((b, on) -> { prefs.edit().putBoolean(Npu.PREF, on).apply(); if (svc != null) svc.setNpu(on); });
     }
 
@@ -3335,6 +3363,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
     setHint(L.f("Услышано: «%s» — переведу, как загружусь", text));
   }
   @Override public void onReady() {
+    maybeAskNpuData();                                  // NPU на MediaTek отказал ещё до моделей (npuFirst) — спросить
     if (!pendingVoices.isEmpty() && svc != null && svc.eng != null) {   // голосовые ждали движков — по порядку
       for (String[] v : pendingVoices) svc.voiceMessage(new java.io.File(v[0]), v[1]);
       setHint(L.t("🎙 голосовое: распознаю…")); pendingVoices.clear();
@@ -3370,6 +3399,7 @@ public class MainActivity extends Activity implements TranslatorService.Listener
    *  и больше ничего: ответы приложения уходили за нижний край, и снаружи это выглядело так,
    *  будто кнопки молчат — именно так «потерялся» сохранённый ключ OpenRouter. */
   @Override public void onLog(String s) {
+    if (s.startsWith("⚡ NPU отказал")) ui.post(this::maybeAskNpuData);   // MediaTek: попросить статистику, чтобы исправить
     logView.append(s + "\n\n");
     if (logLast != null) logLast.setText(s.replace('\n', ' '));   // свёрнутый журнал всё равно показывает последний ответ
     if (logScroll != null && screen == 7) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
