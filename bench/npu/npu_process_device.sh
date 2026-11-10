@@ -19,6 +19,11 @@
 # «NeuronApi error: unable to open library», «uses_libraries=» пусто): с targetSdk 31+ библиотеки производителя нужно
 # назвать в манифесте (<uses-native-library>), а дополнение NeuroPilot ошибку не проверяет. С объявлением граф собирается.
 # Падение на Redmi могло быть тем же — с объявлением там ещё не проверено.
+# POCO, 10.11 18:03, с объявлением и сборкой до моделей (npuFirst), копия app.falar.npu: граф собран до моделей за 43 с
+# (свободно не меньше 1,7 ГБ); после моделей NPU из сохранённого графа за 3,6 с (пробный прогон 173 мс); сверка «2 из 2,
+# сходство 100 %» → NPU; фразы 2,6–3,2 с речи — 188–237 мс; перезапуск — «уже проверен», сразу NPU (169–330 мс);
+# 12 фраз Tatoeba распознаны верно (разница — знаки и «ё»). Процесс NPU — 0,95 ГБ PSS; после моделей свободно не меньше
+# 1,0 ГБ при сторожевых 0,8 ГБ.
 #
 #   [PKG=…] [LOCK=…] bash bench/npu/npu_process_device.sh SERIAL [APK] [MODEL]
 #     APK   — по умолчанию bench/apk/Falar-mtk.apk; «-» — не ставить
@@ -156,14 +161,16 @@ case "$res" in
   *поднят*|*готов*) [ -n "$npup" ] && say "   ✓ процесс NPU работает (pid $npup, $(sh "dumpsys meminfo $npup" | awk '/TOTAL PSS/{print int($3/1024)" МБ PSS"; exit}'))" || say "   ✗ NPU поднят, а процесса нет";;
 esac
 
-# подача: n фраз pt и ru вперемешку (Tatoeba, лицензия указана), паузы 1,8 с; на телефон — в files/ приложения
+# подача: n фраз pt и ru вперемешку (Tatoeba, лицензия указана), паузы 1,8 с; на телефон — в files/ приложения.
+# Слушание — включить (--es listen both): у новой копии «Слушать PT/RU» не нажаты, и нарезка подачу не забирает —
+# очередь полна, подача стоит (POCO 10.11: «▷ подаю …» и больше ничего 5 минут).
 feed() {   # feed ИМЯ N ПРОПУСК → путь на телефоне
   python3 - "$W/bench/air/corpus" "$OUT/$1.wav" "$2" "$3" <<'PY'
 import csv, os, struct, sys, wave
 corp, out, n, skip = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-lic = {r[0]: r[-1] for r in csv.reader(open(os.path.join(corp, "LICENSES.tsv"), encoding="utf-8"), delimiter="\t") if r}
 pick = {}
-for lang in ("pt", "ru"):
+for lang in ("pt", "ru"):                                   # LICENSES.tsv — у каждого языка свой: id, номер, лицензия
+    lic = {r[0]: r[-1] for r in csv.reader(open(os.path.join(corp, lang, "LICENSES.tsv"), encoding="utf-8"), delimiter="\t") if r}
     fs = []
     for f in sorted(os.listdir(os.path.join(corp, lang))):
         if not f.endswith(".wav") or lic.get(f[:-4], "не указана") == "не указана": continue
@@ -188,7 +195,7 @@ heard() { since $1 | grep -c "⚡ фраза на NPU" || true; }
 
 if echo "$res" | grep -q -E "поднят|готов"; then
   say "2. подача 8 фраз — сверка с процессором, потом NPU"
-  wav=$(feed npu-feed1 8 0); m=$(( $(lines) + 1 )); open "--es feedonly 1 --es feedwav $wav"
+  wav=$(feed npu-feed1 8 0); m=$(( $(lines) + 1 )); open "--es feedonly 1 --es listen both --es feedwav $wav"
   r=$(wait_log $m "⚡ NPU( проверен| отказал| остановлен)" 180)
   wait_log $m "▷ подача закончена" 120 > /dev/null
   since $m | grep "⚡" | cut -c1-300 | sed 's/^/   журнал: /'
@@ -209,10 +216,10 @@ case "$res" in
   *отказал*) echo "$r2" | grep -q "уже отказал" && say "   ✓ отказ помнится до новой версии" || say "   ✗ после перезапуска: ${r2:-ничего}";;
   *поднят*|*готов*)
     echo "$r2" | grep -q "уже проверен" && say "   ✓ поднят из сохранённого графа, уже проверен" || say "   ✗ после перезапуска: ${r2:-ничего}"
-    wav=$(feed npu-feed2 4 4); m=$(( $(lines) + 1 )); open "--es feedonly 1 --es feedwav $wav"
+    wav=$(feed npu-feed2 4 4); m=$(( $(lines) + 1 )); open "--es feedonly 1 --es listen both --es feedwav $wav"
     wait_log $m "▷ подача закончена" 120 > /dev/null
     n=$(heard $m); [ "$n" -gt 0 ] && say "   ✓ после перезапуска фразы сразу на NPU ($n)" || say "   ✗ после перезапуска на NPU ни одной фразы"
     since $m | grep "⚡" | cut -c1-300 | sed 's/^/   журнал: /';;
 esac
-open "--es feedonly 0 --es keepscreen 0"
+open "--es feedonly 0 --es keepscreen 0${FRESH:+ --es listen off}"
 say "журнал — $LOG"
