@@ -146,6 +146,12 @@ if ! printf ',%s,' "$MODS" | grep -q ',llm,'; then sk "V6 V7 модуль «Ут
 else
   say "== V6: уточнение до озвучки («Точнее» + PT)"
   m=$(mark); start --es mtprefer quality --es refinevoice pt --es llmprobe 1; l=$(wl "$m" '🧠 проба уточнителя:' 120); say "  ${l:-журнал молчит}"
+  # Памяти не хватило (Redmi: ядро и уточнитель вместе едва помещаются, results/2026-09-28-memory.md) — порог для
+  # проверки снижается до перезапуска, как в test_busy / test_memo
+  if ! printf '%s' "$l" | grep -q ': поднят' && since "$m" | grep -q '🧠 разбор отложен: свободно'; then
+    say "  $(since "$m" | grep -m1 '🧠 разбор отложен' | cut -c1-150)"; say "  порог снижен для проверки: --es llmneed 900 (до перезапуска)"
+    m=$(mark); start --es llmneed 900 --es llmprobe 1; l=$(wl "$m" '🧠 проба уточнителя:' 120); say "  ${l:-журнал молчит}"
+  fi
   if ! printf '%s' "$l" | grep -q ': поднят'; then sk "V6 V7 уточнитель не поднялся (${l:-—})"
   else
     # ru → pt: голос ждёт уточнитель. Строка реплики пишется после озвучки — в ней итог ожидания.
