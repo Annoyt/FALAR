@@ -44,6 +44,18 @@ final class TtsVoices {
   /** «1,0×» — с запятой, как пишут и по-русски, и по-бразильски. */
   static String speedLabel(float x) { return String.format(java.util.Locale.ROOT, "%.1f×", speed(x)).replace('.', ','); }
 
+  static final String GOOGLE = "com.google.android.tts";
+  /** Скорость речи → значение для TextToSpeech.setSpeechRate. Google быстрее 1× говорит как просили (1,5 → 1,49, 2 →
+   *  1,99, 3 → 2,97), а медленнее 1× замедляет слабее: на деле 1 − 0,62·(1 − r), и не медленнее, чем при r = 0,2
+   *  (0,504×). Замер на Redmi 10.11, все 8 голосов без сети одинаково: 0,5 → 0,69, 0,25 → 0,54, 0,1–0,2 → 0,504
+   *  (.stand/tts/rate-curve-*). Поэтому медленное для Google пересчитывается: 0,5× → 0,2, 0,7× → 0,52, 0,8× → 0,68. У
+   *  других движков замеров нет — как просили (так в документации Android: 0,5 — вдвое медленнее). Android передаёт
+   *  движку целые проценты, отбрасывая дробь, — значение берётся чуть выше нужного процента. */
+  static float engineRate(String engine, float x) {
+    float t = speed(x), r = t >= 1f || !GOOGLE.equals(engine) ? t : Math.max(0.2f, (t - 0.38f) / 0.62f);
+    return (Math.round(r * 100) + 0.5f) / 100f;
+  }
+
   /** Страна языка Falar: русский — Россия, португальский — Бразилия. */
   static String country(String lang) { return "ru".equals(lang) ? "RU" : "pt".equals(lang) ? "BR" : ""; }
 

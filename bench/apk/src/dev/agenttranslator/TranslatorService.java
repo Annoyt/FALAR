@@ -1861,7 +1861,8 @@ public class TranslatorService extends Service {
       s.setSpeed(lang, v); voiceTag();
       double sec = 0;
       try { sec = speakOut(lang, sample(lang)); } catch (Throwable t) { log("🔊 " + t); }
-      log(String.format(Locale.ROOT, "🔊 скорость %s: %s · пробная фраза %.2f с звука", lang, TtsVoices.speedLabel(v), sec));
+      log(String.format(Locale.ROOT, "🔊 скорость %s: %s (синтезу %d %%) · пробная фраза %.2f с звука", lang, TtsVoices.speedLabel(v),
+          (int) (TtsVoices.engineRate(s.engine, v) * 100), sec));
       Listener l = listener; if (l != null) main.post(l::onModules);
     });
   }

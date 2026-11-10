@@ -190,7 +190,7 @@ final class SysTts {
     List<float[]> parts = new ArrayList<>(); int n = 0; boolean stop = false;
     try {
       if (!v.getName().equals(set.get(lang))) { tts.setVoice(v); set.put(lang, v.getName()); }
-      tts.setSpeechRate(speed(lang));
+      tts.setSpeechRate(TtsVoices.engineRate(engine, speed(lang)));   // медленное у Google — пересчётом (TtsVoices)
       if (tts.synthesizeToFile(text, new Bundle(), out, j.id) != TextToSpeech.SUCCESS) { log.log("🔊 синтез не принял фразу"); return new Audio(new float[0], want, 0); }
       TtsVoices.TrimTail trim = new TtsVoices.TrimTail(0.003f, want * 60 / 1000);
       TtsVoices.Resampler rs = null;

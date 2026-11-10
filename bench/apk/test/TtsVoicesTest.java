@@ -11,7 +11,9 @@ import java.util.List;
  *  T3 — звук движка в float: 16 бит, 8 бит, float, два канала;
  *  T4 — передискретизация кусками = целиком, длина по частотам;
  *  T5 — тихий хвост фразы срезается до keep, тишина в середине остаётся;
- *  T6 — скорость речи: 0,5–2× с шагом 0,1, позиция ползунка туда и обратно, надпись «1,0×».
+ *  T6 — скорость речи: 0,5–2× с шагом 0,1, позиция ползунка туда и обратно, надпись «1,0×»;
+ *  T7 — значение для движка: у Google медленное пересчитано по замеру (на деле — та скорость, что выбрана), быстрое и
+ *       у других движков — как есть; проценты, которые Android передаст движку, — те, что надо.
  *  Запуск: bash bench/apk/test.sh. */
 public class TtsVoicesTest {
   static int fails = 0, checks = 0;
@@ -100,6 +102,19 @@ public class TtsVoicesTest {
     ok(TtsVoices.speedPos(9f) == TtsVoices.SPEED_STEPS && TtsVoices.speedPos(0f) == 0, "T6 чужое значение в настройках — край ползунка");
     ok("1,0×".equals(TtsVoices.speedLabel(1f)) && "0,5×".equals(TtsVoices.speedLabel(0.5f)) && "2,0×".equals(TtsVoices.speedLabel(2f))
         && "1,3×".equals(TtsVoices.speedLabel(1.3f)), "T6 надпись: " + TtsVoices.speedLabel(1f) + " " + TtsVoices.speedLabel(1.3f));
+
+    // Android: (int) (rate * 100) — проценты движку; Google медленнее 1× на деле 1 − 0,62·(1 − p/100), не ниже p = 20
+    java.util.function.IntUnaryOperator pctG = q -> (int) (TtsVoices.engineRate(TtsVoices.GOOGLE, q / 10f) * 100);
+    ok(pctG.applyAsInt(10) == 100 && pctG.applyAsInt(20) == 200 && pctG.applyAsInt(15) == 150, "T7 Google 1×, 1,5×, 2× — как есть");
+    ok(pctG.applyAsInt(5) == 20 && pctG.applyAsInt(7) == 52 && pctG.applyAsInt(8) == 68 && pctG.applyAsInt(9) == 84,
+        "T7 Google медленнее 1× — пересчёт: " + pctG.applyAsInt(5) + " " + pctG.applyAsInt(7) + " " + pctG.applyAsInt(8) + " " + pctG.applyAsInt(9));
+    double worst = 0;
+    for (int q = 5; q <= 10; q++) { int pc = pctG.applyAsInt(q); double eff = 1 - 0.62 * (1 - Math.max(20, pc) / 100.0); worst = Math.max(worst, Math.abs(eff - q / 10.0)); }
+    ok(worst < 0.01, "T7 по замеру Google скажет ту скорость, что выбрана: ошибка до " + worst);
+    ok((int) (TtsVoices.engineRate("com.samsung.SMT", 0.5f) * 100) == 50 && (int) (TtsVoices.engineRate("", 0.7f) * 100) == 70,
+        "T7 другой движок — как просили (по документации Android)");
+    ok((int) (TtsVoices.engineRate(TtsVoices.GOOGLE, 1.3f) * 100) == 130 && (int) (TtsVoices.engineRate(TtsVoices.GOOGLE, 0.6f) * 100) == 35,
+        "T7 проценты без потери на отбрасывании дроби: 1,3× → 130, 0,6× → 35 (0,3548 — ближе к 35)");
 
     System.out.println(fails == 0 ? "TtsVoices: " + checks + " проверок, все прошли" : "TtsVoices: провалов " + fails + " из " + checks);
     System.exit(fails == 0 ? 0 : 1);
