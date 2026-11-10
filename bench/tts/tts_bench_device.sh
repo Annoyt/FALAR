@@ -5,6 +5,7 @@
 #
 #   bash bench/tts/tts_bench_device.sh [APK]          # APK по умолчанию — bench/apk/Falar.apk этой копии; NOINSTALL=1
 #   ENGINES=system bash bench/tts/tts_bench_device.sh # только один движок
+#   ENGINES=system-all RATE=1.15 NOINSTALL=1 bash …    # все голоса системы без сети, темп 1,15 (выбор голоса)
 #
 # Нужны включённый экран и Falar или лаунчер впереди; модели приложения на месте (озвучка включена).
 . "$(dirname "$0")/../stand.sh"
@@ -38,7 +39,7 @@ $ADB push $R/bench/tts/phrases.tsv $F/tts_phrases.tsv >/dev/null
 m=$(count $LOG); sh "am start -n $ACT --es listen off" >/dev/null
 wl $m "🧩 модули:|TTS загружен" 240 >/dev/null && say "приложение загрузилось" || say "журнал не показал загрузку за 4 минуты — пробую всё равно"
 sleep 3; m=$(count $LOG)
-sh "am start -n $ACT --es ttsbench tts_phrases.tsv --es ttsengines $ENGINES" >/dev/null
+sh "am start -n $ACT --es ttsbench tts_phrases.tsv --es ttsengines $ENGINES ${RATE:+--es ttsrate $RATE}" >/dev/null
 wl $m "🔊 стенд озвучки: (готово|ошибка)" 900 >/dev/null || say "стенд не закончил за 15 минут"
 sh "tail -n +$((m+1)) $LOG" | grep '🔊' | sed 's/^/  журнал: /'
 $ADB pull $F/tts_bench $OUT/ >/dev/null && say "WAV и таблица: $OUT/tts_bench ($(ls $OUT/tts_bench/*.wav 2>/dev/null | wc -l) WAV)"
