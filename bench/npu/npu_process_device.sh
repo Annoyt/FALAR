@@ -29,7 +29,9 @@
 #     NPUFREE — порог свободной памяти (МБ) для первой сборки графа; по умолчанию — как у приложения (MediaTek 3000):
 #             сборке A16W8 нужно 1,7–2,2 ГБ сверх занятого (стенд 10.11), сторож останавливает её при 800 МБ. POCO 10.11:
 #             начатая при 2,3 ГБ свободных (NPUFREE=1500) остановлена сторожем на 774 МБ — Falar жив, NPU «остановлен:
-#             мало памяти», после перезапуска ждёт 3 ГБ.
+#             мало памяти», после перезапуска ждёт 3 ГБ. Этот POCO — 7,5 ГБ ОЗУ: копия Falar с моделями занимает 1,6 ГБ,
+#             свободно и после закрытия приложений 2,1–2,7 ГБ — первая сборка в приложении не помещается (стенд под adb, без
+#             Falar, начинал с 3,4–3,9 ГБ и собирал).
 set -e
 S=$1; [ -n "$S" ] || { echo "нужен SERIAL"; exit 2; }
 P=/home/not_me/antigravity-workspace/agentstuff/agenttranslator; ST=$P/.stand
@@ -114,7 +116,24 @@ sh "am force-stop $PKG"; sleep 1; m0=$(( $(lines) + 1 ))
 open "--es feedonly 1 --es npureset 1${NPUFREE:+ --es npufree $NPUFREE}"; sleep 4
 pid0=$(sh "pidof $PKG")
 say "1. как новая версия: npureset; приложение pid $pid0; свободно $(sh "grep MemAvailable /proc/meminfo" | awk '{print int($2/1024)}') МБ"
-res=$(wait_log $m0 "⚡ NPU( отказал| поднят| готов| остановлен|: граф не уместился)" 300)
+res=$(wait_log $m0 "⚡ NPU( отказал| поднят| готов| остановлен|: граф не уместился|: для первой сборки графа нужно)" 300)
+# Мало памяти для первой сборки — Falar ждёт сам (попробует через 10 минут). Стенд просит освободить память, ждёт её и
+# зовёт сборку сразу (--es npu 1 — переключатель «Распознавание на NPU»: включён и не поднят — поднять).
+if echo "$res" | grep -q "для первой сборки графа нужно"; then
+  need=$(echo "$res" | grep -oE "нужно [0-9]+" | grep -oE "[0-9]+")
+  say "   свободно мало: $(echo "$res" | grep -oE "сейчас [0-9]+ МБ") при нужных $need МБ — закройте на телефоне недавние приложения, кроме $PKG; жду до 15 мин…"
+  for _ in $(seq 180); do
+    free=$(sh "grep MemAvailable /proc/meminfo" | awk '{print int($2/976.5625)}')   # кБ → МБ по 10^6 байт, как порог в журнале Falar
+    [ -n "$(sh "pidof $PKG")" ] || free=$(( free - 1300 ))     # копию закрыли вместе со всеми: поднимется — займёт ~1,3 ГБ
+    [ "$free" -ge $(( need + 100 )) ] && break; sleep 5
+  done
+  say "   свободно $free МБ (за вычетом самого Falar, если его закрыли)"
+  [ "$free" -ge $(( need + 100 )) ] || { say "   ✗ памяти так и не стало — дальше не иду"; exit 1; }
+  wait_unlock; m0=$(( $(lines) + 1 ))
+  if [ -n "$(sh "pidof $PKG")" ]; then open "--es feedonly 1 --es npu 1"
+  else open "--es feedonly 1 --es npureset 1${NPUFREE:+ --es npufree $NPUFREE}"; sleep 4; pid0=$(sh "pidof $PKG"); say "   Falar закрыли — открыт заново (pid $pid0)"; fi
+  res=$(wait_log $m0 "⚡ NPU( отказал| поднят| готов| остановлен|: граф не уместился|: для первой сборки графа нужно)" 300)
+fi
 since $m0 | grep "⚡" | cut -c1-400 | sed 's/^/   журнал: /'
 pid1=$(sh "pidof $PKG"); npup=$(sh "pidof $PKG:npu")
 [ -n "$res" ] || say "   ✗ за 5 минут NPU не сказал, чем кончилось"
