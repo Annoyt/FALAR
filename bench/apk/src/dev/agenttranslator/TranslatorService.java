@@ -1146,6 +1146,11 @@ public class TranslatorService extends Service {
     if (i != null && i.hasExtra("npureset")) { getSharedPreferences("at", MODE_PRIVATE).edit().remove("npu_fail").remove("npu_try").apply(); log("⚡ стенд: NPU — пробовать снова"); }
     if (i != null && i.hasExtra("npu")) setNpu("1".equals(i.getStringExtra("npu")));
     if (i != null && i.hasExtra("bargedump")) { bargeDump = Integer.parseInt(i.getStringExtra("bargedump")); log("🗣 стенд: запишу совмещение на концах " + bargeDump + " фраз"); }
+    // Стенд озвучки (TtsBench, владелец 10.11 — замена Piper с eSpeak под GPL): --es ttsbench ФАЙЛ_ФРАЗ (в каталоге
+    // приложения) [--es ttsengines piper,system]; итог — tts_bench/ (bench/tts/tts_bench_device.sh, tts_wer.py).
+    if (i != null && i.hasExtra("ttsbench")) { final File f = new File(getExternalFilesDir(null), i.getStringExtra("ttsbench"));
+      final String en = i.hasExtra("ttsengines") ? i.getStringExtra("ttsengines") : "piper,system";
+      new Thread(() -> { try { TtsBench.run(this, eng, f, en, this::log); } catch (Throwable t) { log("🔊 стенд озвучки: ошибка — " + t); } }, "ttsbench").start(); }
     if (i != null && i.hasExtra("aectest")) { final String cfgs = i.getStringExtra("aectest");
       new Thread(() -> { try { aecStand(cfgs); } catch (Throwable t) { log("🔁 эхо-стенд: ошибка — " + t); } }, "aec").start(); }
     // Стенд: микрофоны (--es mictest mic_st_48,vr_mo_16_bottom,…) — какие микрофоны отдаёт Android и как на два канала

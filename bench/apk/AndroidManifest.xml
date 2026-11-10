@@ -14,6 +14,9 @@
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
   <!-- Обновление из приложения: магазина нет, иначе о новой версии человек не узнает никогда. -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+  <!-- Системный синтез речи (TextToSpeech, стенд озвучки TtsBench): с Android 11 приложение видит движки синтеза
+       только через queries — без него TextToSpeech не находит Google TTS и не поднимается. -->
+  <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
   <!-- Резервная копия: в облако Google не уходит ничего — разговоры, отпечатки голосов, живой звук
        собеседников, ключи облака; на новый телефон при переносе — всё, как раньше (решение владельца
        03.10). До этого в облако ничего не уходило только потому, что модели (1,4 ГБ) лежат рядом и
